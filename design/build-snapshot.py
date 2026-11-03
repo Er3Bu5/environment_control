@@ -208,8 +208,11 @@ sub(r'const ACTIVITY = \{.*?\n\};\n', f'const ACTIVITY = {js(ACTIVITY)};\n')
 sub(r'const EXTRA_SENSORS = \[.*?\n\];\n', 'const EXTRA_SENSORS = [];\n')
 sub(r'const LIGHTS = \{.*?\n\};\n', f'const LIGHTS = {js(lights)};\n')
 sub(r'const ALL_ON_OFF = \[.*?\n\];\n', f'const ALL_ON_OFF = {js(onoff)};\n')
-# Platforms are known from the device list. Areas aren't in the snapshot, so they're left unknown rather than guessed.
-REGISTRY = {"entities": {d["entity"]: {"entity_id": d["entity"], "platform": d["integration"], "area_id": None} for d in devices if "entity" in d}, "areas": {}}
+# Platforms are known from the device list, and areas are what HA reported for each entity.
+AREAS = json.load(open(f"{root}/ha-snap/areas.json"))
+area_id = lambda name: re.sub(r"[^a-z0-9]+", "_", name.lower()) if name else None
+REGISTRY = {"entities": {d["entity"]: {"entity_id": d["entity"], "platform": d["integration"], "area_id": area_id(AREAS.get(d["entity"]))} for d in devices if "entity" in d},
+            "areas": {area_id(n): {"area_id": area_id(n), "name": n} for n in set(AREAS.values()) if n}}
 seed = {"config": {"revision": 1, "zones": zones, "devices": devices}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY}
 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed, ACTIVITY]), re.I):
     sys.exit("network identifier in the snapshot")

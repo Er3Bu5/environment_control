@@ -10,3 +10,11 @@ out = {s["entity_id"]: {"state": s["state"], "unit": s["attributes"].get("unit_o
        for s in states if keep.search(s["entity_id"]) and not drop.search(s["entity_id"])}
 json.dump(out, open(sys.argv[1], "w"), indent=0)
 print(len(states), "states,", len(out), "kept")
+
+# Read-only: POST /api/template only renders text. Areas aren't in /api/states, and the host's confirmation shows them.
+template = ("{% set ns = namespace(out={}) %}{% for e in states.switch | list + states.light | list + states.fan | list + states.humidifier | list %}"
+            "{% set ns.out = dict(ns.out, **{e.entity_id: area_name(e.entity_id)}) %}{% endfor %}{{ ns.out | tojson }}")
+req = urllib.request.Request(os.environ["HA_URL"].rstrip("/") + "/api/template", data=json.dumps({"template": template}).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
+areas = json.loads(urllib.request.urlopen(req, timeout=30).read())
+json.dump(areas, open(sys.argv[1].replace("states.json", "areas.json"), "w"), indent=0)
+print(len(areas), "areas read")
