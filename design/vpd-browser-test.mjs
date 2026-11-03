@@ -397,6 +397,72 @@ await sleep(REPORT);
 await evp(`(parent.postMessage({v:1,type:"call_service",domain:"switch",service:"turn_on",service_data:{entity_id:"switch.plug_7"}},"*"),new Promise(r=>setTimeout(r,200)))`);
 check("Controls: a message type the host doesn't know is dropped", (await haCalls()).at(-1)[1] === "switch.heater_mains" && (await onHA(`fakeHA.states["switch.plug_7"].state`)) === "off");
 await tap('[data-devrow="heater"] .sw'); await sleep(REPORT);
+
+// ---------- Confirmation: a device becomes controllable only once a person says yes, in a dialog the frame can't reach
+/* Page scripts can't see into the host's closed shadow root, but the test can, through DevTools, and clicks it as a person would. */
+await rawSend("DOM.enable");
+async function hostDialog() {
+  const doc = await rawSend("DOM.getDocument", { depth: -1, pierce: true }), out = { open: false, buttons: {} };
+  const walk = (n) => {
+    const a = n.attributes || [];
+    if (n.nodeName === "DIALOG") { out.open = a.includes("open"); out.node = n.nodeId; }
+    if (n.nodeName === "BUTTON" && a.includes("data-host")) out.buttons[a[a.indexOf("data-host") + 1]] = { id: n.nodeId, disabled: a.includes("disabled") };
+    if (n.nodeName === "IFRAME") return;
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c);
+  };
+  walk(doc.result.root);
+  if (out.node) out.text = (await rawSend("DOM.getOuterHTML", { nodeId: out.node })).result.outerHTML.replace(/<style>.*?<\/style>/s, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return out;
+}
+async function hostClick(which) {
+  const d = await hostDialog(), b = d.buttons[which];
+  const q = (await rawSend("DOM.getBoxModel", { nodeId: b.id })).result.model.content, x = (q[0] + q[4]) / 2, y = (q[1] + q[5]) / 2;
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await rawSend("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+  await sleep(150);
+}
+const spareMapped = () => ev(`devices.find(d=>d.id==="spare-plug").zones.join()`);
+const addSpare = async () => {
+  await ev(`ui.review=null;ui.guard=null;renderModal();ui.screen="setup";openMap("garden");ui.mapw.roles.plug="Heater";ui.mapw.step=2;render()`); await sleep(40);
+  await ev(`document.querySelector('[data-mdevice="spare-plug"]').click()`); await sleep(40);
+  for (let i = 0; i < 2; i++) { await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50); }
+  await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(60);
+  await ev(`document.querySelector("[data-rapply]").click()`); await sleep(200);
+};
+await phone(390, 844); await addSpare();
+let dlg = await hostDialog();
+check("Confirm: adding a controllable device opens HA's own dialog, outside the panel", dlg.open && dlg.text.startsWith("Allow Environment Control to control these?") && dlg.text.includes("switch.spare_plug") && dlg.text.includes("Spare Plug. tuya_local") && dlg.text.includes("Can be switched on and off"), dlg.text);
+check("Confirm: an entity with no area is flagged", dlg.text.includes("Has no area in Home Assistant"), dlg.text);
+check("Confirm: it waits, saving nothing, while the review shows it's working", (await ev(`!!ui.review && ui.review.busy`)) === true && (await spareMapped()) === "", await spareMapped());
+await shot("confirm-host-phone");
+check("Confirm: Allow starts off, so a tap aimed elsewhere can't land on it", dlg.buttons.allow.disabled === true, dlg.buttons);
+await hostClick("allow");
+check("Confirm: a tap in that first second does nothing", (await hostDialog()).open === true && (await spareMapped()) === "");
+await hostClick("cancel");
+check("Confirm: Cancel saves nothing and keeps the review open with why", (await hostDialog()).open === false && (await spareMapped()) === "" && ((await ev(`ui.review ? ui.review.errors : null`)) || []).some((e) => e.includes("Not allowed")), await ev(`ui.review ? ui.review.errors : null`));
+check("Confirm: and nothing reached storage", (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="spare-plug").zones.length`)) === 0);
+const refused = await evp(`ask("device",{id:"spare-plug",action:"turn_on"}).then(r=>r.ok)`);
+check("Confirm: the host still won't control it", refused === false);
+await ev(`document.querySelector("[data-rapply]").click()`); await sleep(1200);
+await hostClick("allow"); await sleep(200);
+check("Confirm: Allow, after a second, saves it", (await hostDialog()).open === false && (await spareMapped()) === "garden" && (await ev(`ui.review`)) === null, [await spareMapped(), await ev(`ui.review ? ui.review.errors : null`)]);
+await evp(`ask("device",{id:"spare-plug",action:"turn_on"})`); await sleep(REPORT);
+check("Confirm: and now the host controls it", (await onHA(`fakeHA.states["switch.spare_plug"].state`)) === "on");
+await evp(`ask("device",{id:"spare-plug",action:"turn_off"})`); await sleep(REPORT);
+const r1 = await evp(`saveConfig(()=>{devices.find(d=>d.id==="spare-plug").type="Heater"}).then(r=>r.ok)`); await sleep(100);
+check("Confirm: changing only a device's role doesn't ask again", r1 === true && (await hostDialog()).open === false);
+const r2 = await evp(`saveConfig(()=>{devices.find(d=>d.id==="spare-plug").zones=[]}).then(r=>r.ok)`); await sleep(100);
+check("Confirm: removing a device never asks", r2 === true && (await hostDialog()).open === false && (await spareMapped()) === "");
+/* What a compromised frame could try: slip the reservoir pump into a zone under a harmless name. */
+const sneaky = evp(`saveConfig(()=>{devices.push({id:"heater-2",name:"Heater 2",type:"Heater",icon:"thermo",ctl:"switch",zones:["garden"],entity:"switch.reservoir_pump"})}).then(r=>r.ok)`);
+await sleep(300); dlg = await hostDialog();
+check("Confirm: the dialog names the real entity, not the name the frame gave it", dlg.open && dlg.text.includes("switch.reservoir_pump") && dlg.text.includes("Reservoir Pump") && !dlg.text.includes("Heater 2"), dlg.text);
+check("Confirm: and flags that it's in another area", dlg.text.includes("In the Reservoir area in Home Assistant, not Garden"), dlg.text);
+await key("Escape", 27); await sleep(150);
+check("Confirm: Escape is a no", (await sneaky) === false && (await hostDialog()).open === false && (await onHA(`JSON.parse(fakeHA.disk).devices.some(d=>d.entity==="switch.reservoir_pump")`)) === false);
+const unknown = await evp(`saveConfig(()=>{devices.push({id:"lock",name:"Lock",ctl:"switch",zones:["garden"],entity:"lock.front_door"})}).then(r=>[r.ok,r.error])`);
+check("Confirm: an entity the panel can't control is refused without asking", unknown[0] === false && unknown[1].includes("isn't something this panel can control") && (await hostDialog()).open === false, unknown);
+/* The plug's question was answered only to get past it here, so it goes back to unanswered for the tests after. */
+await ev(`ui.review=null;ui.mapw=null;renderModal();devices.find(d=>d.id==="plug").type=null;ui.screen="zone";ui.zone="garden";render()`); await sleep(40);
 await tap("#main .notice.fix");
 check("Controls: an unidentified plug's notice lands on its question", (await ev(`ui.screen==="setup" && !!document.querySelector("#task-plug")`)) === true && (await ev(`(()=>{const r=document.querySelector("#task-plug").getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()`)) === true);
 await ev(`document.querySelector('[data-role="plug"][data-val="Other"]').click()`); await sleep(50); await goTab("Garden");

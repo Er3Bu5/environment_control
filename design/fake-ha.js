@@ -8,6 +8,7 @@ class FakeHA {
     this.states = JSON.parse(JSON.stringify(seed.states));
     this.config = JSON.parse(JSON.stringify(seed.config));
     this.failsafes = seed.failsafes || {};
+    this.registry = seed.registry || { entities: {}, areas: {} };
     this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500 };
     this.calls = [];
     this.saves = [];
@@ -37,6 +38,8 @@ class FakeHA {
       states: this.states,
       user: { is_admin: true },
       themes: { darkMode: this.darkMode },
+      entities: this.registry.entities,
+      areas: this.registry.areas,
       callService: (domain, service, data) => this.callService(domain, service, data),
       connection: this.connection,
     };

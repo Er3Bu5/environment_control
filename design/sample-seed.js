@@ -38,6 +38,7 @@ const SEED = (() => {
     { id: "lp-red", name: "Red lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.garden_lights_red" },
     { id: "lc-tent", name: "Tent light controller", type: "Light", icon: "sun", ctl: "dimmer", ...esphome, zones: ["veg", "nursery"], entity: "light.tent_light_controller" },
     { id: "lp-tent", name: "Tent lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["veg", "nursery"], entity: "switch.tent_lights" },
+    { id: "spare-plug", name: "Spare plug", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: [], entity: "switch.spare_plug" },
     { id: "b-left", name: "Environment left", type: "Sensor board", ...esphome, zones: ["garden"], state: "Online" },
     { id: "b-veg", name: "Veg environment", type: "Sensor board", ...esphome, link: "unknown", source: "unknown", zones: ["veg"], state: "Online" },
     { id: "pulse", name: "Air monitor", type: "Sensor", integration: "pulselabs", family: "Pulse", link: "wifi", source: "detected", path: "Cloud", hub: "", zones: ["veg"], state: "Stale, 9 min old", stale: true },
@@ -62,7 +63,15 @@ const SEED = (() => {
     "switch.garden_lights_red": sw("off", "Garden Lights Red"),
     "light.tent_light_controller": dim("off", null, "Tent Light Controller"),
     "switch.tent_lights": sw("off", "Tent Lights"),
+    "switch.spare_plug": sw("off", "Spare Plug"),
+    "switch.reservoir_pump": sw("off", "Reservoir Pump"),
   };
+  /* HA's own entity and area registries, which the host reads to show what a device really is. */
+  const area = { "humidifier.garden_dehumidifier": "garden", "humidifier.auxiliary_dehumidifier": "garden", "switch.air_conditioner": "garden", "switch.heater_mains": "garden", "switch.garden_intake_fan": "garden",
+    "switch.air_conditioner_exhaust_fan": "garden", "switch.veg_oscillating_fans": "veg", "light.garden_light_controller_overhead": "garden", "switch.garden_lights_1": "garden", "switch.garden_lights_2": "garden",
+    "light.garden_light_controller_under_canopy": "garden", "switch.garden_lights_red": "garden", "light.tent_light_controller": "veg", "switch.tent_lights": "veg", "switch.reservoir_pump": "reservoir" };
+  const entities = Object.fromEntries(Object.keys(states).map((e) => [e, { entity_id: e, platform: e.startsWith("light.") ? "esphome" : "tuya_local", area_id: area[e] || null }]));
+  const areas = Object.fromEntries(["Garden", "Veg", "Nursery", "Reservoir"].map((n) => [n.toLowerCase(), { area_id: n.toLowerCase(), name: n }]));
   /* What each failsafe holds a device to at the mock's time: fans always on, and light plugs on their schedule. */
   const failsafes = {
     "switch.veg_oscillating_fans": { want: "on", kind: "failsafe", by: "Veg fans auto on" },
@@ -70,5 +79,5 @@ const SEED = (() => {
     "switch.garden_lights_2": { want: "on", kind: "watchdog", by: "Garden lights recovery" },
     "switch.tent_lights": { want: "off", kind: "watchdog", by: "Tent lights recovery" },
   };
-  return { config: { revision: 1, zones, devices }, states, failsafes };
+  return { config: { revision: 1, zones, devices }, states, failsafes, registry: { entities, areas } };
 })();

@@ -11,6 +11,17 @@
   const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
   const isId = (v) => typeof v === "string" && /^[a-z0-9_-]{1,64}$/.test(v);
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
+  /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
+  const ARM_MS = 1000;
+  const CAN = { switch: "Can be switched on and off", fan: "Can be switched on and off", light: "Can be switched on and off and dimmed", humidifier: "Can be switched on and off, and its mode and target humidity set" };
+  const DIALOG_CSS = `dialog{max-width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;border:0;border-radius:16px;padding:20px;font:15px/1.45 Roboto,system-ui,sans-serif;background:#FFFFFF;color:#212121;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+    dialog.dark{background:#1C1C1C;color:#E1E1E1}dialog::backdrop{background:rgba(0,0,0,.55)}
+    h2{margin:0 0 6px;font-size:19px;font-weight:500;outline:none}p{margin:0 0 12px;opacity:.8;font-size:14px}
+    ul{list-style:none;margin:0 0 16px;padding:0;max-height:50dvh;overflow:auto}li{padding:10px 0;border-top:1px solid rgba(128,128,128,.3);display:flex;flex-direction:column;gap:2px}
+    code{font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}span{font-size:13px;opacity:.8}strong{font-size:13px;font-weight:500;color:#D32F2F}dialog.dark strong{color:#EF9A9A}
+    .row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid rgba(128,128,128,.5);background:none;color:inherit;cursor:pointer}
+    button.allow{background:#03A9F4;border-color:#03A9F4;color:#FFFFFF}button:disabled{opacity:.45;cursor:default}`;
 
   class EnvironmentControlPanel extends HTMLElement {
     constructor() {
@@ -133,13 +144,84 @@
       const refuse = (why) => this.reply(m.req, false, why);
       if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
       if (JSON.stringify(m.config).length > 512 * 1024) return refuse("That setup is too large to save.");
+      const config = { zones: m.config.zones, devices: m.config.devices };
+      /* A mapping decides what a button moves, so a device becomes controllable only once a person says yes here, outside the frame. */
+      const added = this.newlyControlled(config);
+      if (typeof added === "string") return refuse(added);
+      if (added.length) {
+        if (this.asking) return refuse("Home Assistant is already asking you about another change.");
+        if (!(await this.confirm(added, config))) return refuse("Not allowed, so nothing was saved.");
+      }
       try {
-        this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config/save", revision: m.base, config: { zones: m.config.zones, devices: m.config.devices } });
+        this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config/save", revision: m.base, config });
       } catch (err) {
         return refuse(String((err && err.message) || err));
       }
       this.post({ type: "result", req: m.req, ok: true, ...this.stored() });
       this.forward();
+    }
+
+    /* Entities this save would make controllable that aren't now. Removing one, or changing only its role, adds nothing. */
+    newlyControlled(config) {
+      if (!Array.isArray(config.devices) || !Array.isArray(config.zones)) return "That isn't a setup this panel can save.";
+      const now = this.mapped(), out = [];
+      for (const d of config.devices) {
+        if (!d || typeof d.entity !== "string" || !Array.isArray(d.zones) || !d.zones.length || now.has(d.entity) || out.some((x) => x.entity === d.entity)) continue;
+        if (!ENTITY.test(d.entity)) return "That isn't something this panel can control.";
+        if (!this._hass.states[d.entity]) return `Home Assistant has no ${d.entity}.`;
+        out.push({ entity: d.entity, zones: d.zones });
+      }
+      return out;
+    }
+    /* Everything shown comes from Home Assistant's own state and registries, never from the frame, and is set as text. */
+    describe(item, config) {
+      const st = this._hass.states[item.entity], reg = (this._hass.entities || {})[item.entity] || {}, areas = this._hass.areas || {};
+      const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
+      const zones = item.zones.map((id) => (config.zones.find((z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
+      const domain = item.entity.split(".")[0], a = st.attributes || {};
+      const can = domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
+      const flag = !area ? "Has no area in Home Assistant" : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not ${zones.join(" or ")}`;
+      return { name: String(a.friendly_name || item.entity), facts: [reg.platform, area].filter(Boolean).map(String).join(", "), can, flag, zones };
+    }
+    confirm(items, config) {
+      this.asking = true;
+      return new Promise((resolve) => {
+        const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
+        const rows = items.map((it) => ({ it, ...this.describe(it, config) }));
+        const zones = [...new Set(rows.flatMap((r) => r.zones))];
+        const dlg = make("dialog", undefined, this.theme());
+        dlg.setAttribute("aria-labelledby", "ec-confirm-title");
+        const style = make("style", DIALOG_CSS), title = make("h2", "Allow Environment Control to control these?");
+        title.id = "ec-confirm-title"; title.tabIndex = -1;
+        const sub = make("p", `Asked for by the panel${zones.length ? `, for ${zones.join(" and ")}` : ""}. Allow only what you meant to add: once allowed, the panel can switch it from now on.`);
+        const list = make("ul");
+        for (const r of rows) {
+          const li = make("li");
+          li.append(make("code", r.it.entity), make("span", r.facts ? `${r.name}. ${r.facts}` : r.name), make("span", r.can));
+          if (r.flag) li.append(make("strong", r.flag));
+          list.append(li);
+        }
+        const cancel = make("button", "Cancel"), allow = make("button", `Allow ${rows.length} device${rows.length > 1 ? "s" : ""}`, "allow");
+        cancel.dataset.host = "cancel"; allow.dataset.host = "allow";
+        const row = make("div", undefined, "row"); row.append(cancel, allow);
+        dlg.append(style, title, sub, list, row);
+        let timer;
+        const arm = () => { allow.disabled = true; clearTimeout(timer); timer = setTimeout(() => { allow.disabled = false; }, ARM_MS); };
+        const seen = () => { if (document.visibilityState === "visible") arm(); };
+        const finish = (yes) => {
+          clearTimeout(timer);
+          document.removeEventListener("visibilitychange", seen); window.removeEventListener("focus", arm);
+          dlg.close(); dlg.remove(); this.asking = false; resolve(yes);
+        };
+        allow.addEventListener("click", (e) => { if (e.isTrusted && !allow.disabled) finish(true); });
+        cancel.addEventListener("click", () => finish(false));
+        dlg.addEventListener("cancel", (e) => { e.preventDefault(); finish(false); });
+        document.addEventListener("visibilitychange", seen); window.addEventListener("focus", arm);
+        this.shadow.append(dlg);
+        dlg.showModal();
+        title.focus();
+        arm();
+      });
     }
   }
   if (!customElements.get("environment-control-panel")) customElements.define("environment-control-panel", EnvironmentControlPanel);
