@@ -1248,10 +1248,10 @@ await reset(); await goTab("Garden");
 check("Limits: the zone page lists them with the other thresholds", same(await limitTables(), ["Lightlx2,000", "Lightlx200"]), await limitTables());
 await ev(`document.querySelector('[data-vpd="garden"]').click()`); await sleep(50); await period2("day");
 check("Limits: Day holds the minimum, in lux, in one column, with no Target", (await limitBox()) === "2000" && (await limitCell()) === "Min" && (await ev(`[...document.querySelector('[data-vrow="light"]').children].filter(e=>!e.classList.contains("vnote")).map(e=>e.textContent).join("")`)) === "Light lxMin" && (await ev(`document.querySelector("#vin-light-0").closest("label").getBoundingClientRect().width<document.querySelector("#vin-temperature-0").closest("label").getBoundingClientRect().width*1.2`)) === true);
-{ const n = await lightNote(); check("Limits: Day says why only a minimum, beside the box", n.text.includes("only a minimum") && n.same && n.right && n.inside && n.described, n); }
+{ const n = await lightNote(); check("Limits: Day says what falling below the minimum means, beside the box", n.text === "Below this light level, lights are considered off or malfunctioning." && n.same && n.right && n.inside && n.described, n); }
 await shot("limits-note-day");
 await period2("night");
-{ const n = await lightNote(); check("Limits: Night says why only a maximum, beside the box", n.text.includes("only a maximum") && n.same && n.left && n.inside && n.described, n); }
+{ const n = await lightNote(); check("Limits: Night says what rising above the maximum means, beside the box", n.text === "Above this light level, lights are considered on or malfunctioning." && n.same && n.left && n.inside && n.described, n); }
 await shot("limits-note-night");
 check("Limits: Night holds the maximum, under the other Max boxes", (await limitBox()) === "200" && (await limitCell()) === "Max" && (await ev(`Math.abs(document.querySelector("#vin-light-0").getBoundingClientRect().left-document.querySelector("#vin-temperature-4").getBoundingClientRect().left)<1`)) === true);
 await period2("day");
