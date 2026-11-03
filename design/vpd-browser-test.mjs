@@ -134,6 +134,7 @@ if (process.env.SMOKE) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
+  check("Red lights: Garden's come from its helpers, and Veg and Nursery don't use them", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none"]));
   check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false]));
   for (const id of ["veg", "nursery"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
@@ -1241,7 +1242,7 @@ await schedOpen("veg");
 check("Sched: across midnight the length is right", (await ev(`document.querySelector("#s-len").textContent`)) === "18h 00m of light, 6h 00m of dark", await ev(`document.querySelector("#s-len").textContent`));
 check("Sched: shared helpers are named", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
 check("Sched: the helpers it reads are listed by entity", same(await ev(`[...document.querySelectorAll("#s-times .trow")].map(r=>r.textContent)`), ["Lights oninput_datetime.veg_day_time", "Lights offinput_datetime.veg_night_time"]), await ev(`[...document.querySelectorAll("#s-times .trow")].map(r=>r.textContent)`));
-check("Emerson: only where it's set up", (await ev(`!document.querySelector("#s-emerson")`)) === true);
+check("Emerson: a zone without it says it's not used, with nothing to set", (await ev(`document.querySelector("#s-emerson").textContent`)).includes("Not used in Veg.") && (await ev(`!document.querySelector("#sin-morning")`)) === true);
 await setBox("day", "15:00"); await clickIt("[data-dreview]");
 check("Review: names the zone that moves with it", (await schedModal()).includes("Veg and Nursery") && (await schedModal()).includes("Nursery uses the same helpers"), await schedModal());
 await clickIt("[data-rapply]"); await sleep(ACK);
@@ -1427,9 +1428,10 @@ check("Picker: a problem on the other period is still caught", (await fixText())
 await clickIt(".fixlink");
 check("Picker: and its Fix opens Night on that box", (await ev(`ui.mapw.lp`)) === "night" && (await active()) === "map-l-bands-night-vpd-min");
 await pick("map-l-bands-night-vpd-min", "input_number.nursery_night_vpd_min_threshold");
+await clickIt('[data-mem="helper"]');
 await pick("map-l-morning", "input_number.emerson_effect_morning_extension");
-check("Picker: part of the Emerson effect is flagged", (await fixText()).includes("Emerson effect: pick all three helpers, or none"), await fixText());
-await pick("map-l-morning", "");
+check("Picker: red lights from helpers need all three", (await fixText()).includes("Red lights: pick all three helpers."), await fixText());
+await clickIt('[data-mem="none"]');
 check("Picker: with every problem fixed, Next is on", (await mapNextOff()) === false, await fixText());
 await ev(`ui.mapw.step=4;render()`); await sleep(40);
 await clickIt('[data-mstep="next"]');
@@ -1452,6 +1454,7 @@ check("Picker: changing only which helper holds lights on is a change to review"
 await clickIt('[data-mstep="next"]');
 check("Picker: and the review names both helpers", /Lights on helper.*input_datetime\.veg_day_time \(16:00\).*input_datetime\.reservoir_refill_time \(09:00\)/.test(await modalText()), await modalText());
 await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
+await clickIt('[data-mem="helper"]');
 for (const [k, e] of [["morning", "morning_extension"], ["daylight", "daylight_time"], ["evening", "evening_extension"]]) await pick(`map-l-${k}`, `input_number.emerson_effect_${e}`);
 await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]'); await clickIt("[data-rapply]"); await sleep(400);
 check("Picker: a helper another zone already links isn't asked about again", (await hostDialog()).open === false);
@@ -1505,6 +1508,48 @@ await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep
 await sleep(1100); await hostClick("allow"); await sleep(400);
 const vegBack = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg")`);
 check("No target: relinking asks again, then reads the helper, with the rest midway", vegBack.helpers.bands.day.temperature.target === "input_number.veg_day_temperature_target" && vegBack.bands.day.temperature[2] === Number(vegTarget) && vegBack.bands.night.temperature[2] !== null, [vegBack.helpers.bands.day.temperature, vegBack.bands.day.temperature, vegBack.bands.night.temperature]);
+await reset();
+
+// ---------- Red lights: from a helper, set here, detected, or not used
+await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+const emModes = () => ev(`[...document.querySelectorAll("[data-mem]")].map(b=>b.dataset.mem)`);
+check("Red lights: four sources, like day and night", JSON.stringify(await emModes()) === JSON.stringify(["none", "helper", "fixed", "detected"]) && (await ev(`document.querySelector('[data-mem="none"]').getAttribute("aria-pressed")`)) === "true", await emModes());
+await clickIt('[data-mem="fixed"]');
+check("Red lights: Set here asks for the three extensions and holds Next until they're filled", (await ev(`document.querySelectorAll("[data-memfixed]").length`)) === 3 && (await mapNextOff()) === true && (await fixText()).includes("Morning extension has to be a whole number of minutes from 0 to 59"), await fixText());
+await pick("map-em-morning", "10"); await pick("map-em-daylight", "20"); await pick("map-em-evening", "70");
+check("Red lights: one past the limit is flagged", (await fixText()).includes("Evening extension has to be a whole number of minutes from 0 to 59"), await fixText());
+await pick("map-em-evening", "15");
+check("Red lights: with all three fine, Next is on", (await mapNextOff()) === false, await fixText());
+await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
+check("Red lights: the review lists the source and each extension", /Red lights[^]*Not used[^]*Set here/.test(await modalText()) && /Morning extension[^]*Not set[^]*10 min/.test(await modalText()), await modalText());
+await clickIt("[data-rapply]"); await sleep(400);
+const emFixedDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery")`);
+check("Red lights: Set here is stored, with no helper linked and nothing asked", emFixedDisk.emersonMode === "fixed" && JSON.stringify(emFixedDisk.emerson) === JSON.stringify({ morning: 10, daylight: 20, evening: 15 }) && emFixedDisk.helpers.morning === undefined && (await hostDialog()).open === false, emFixedDisk);
+await reset(); await ev(`openSched("nursery");render()`); await sleep(40);
+const emCard = await ev(`document.querySelector("#s-emerson").textContent`);
+check("Red lights: Day and night edits them and works out the windows", (await ev(`!!document.querySelector("#sin-morning")`)) === true && emCard.includes("Red lights 15:50 - 16:20 and 09:40 - 10:15") && emCard.includes("Stored in Environment Control"), emCard);
+const emCalls = (await helperCalls()).length;
+await ev(`(()=>{const i=document.querySelector("#sin-morning");i.value="12";i.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40);
+await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(400);
+check("Red lights: and saves them here, writing to no helper", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").emerson.morning`)) === 12 && (await helperCalls()).length === emCalls);
+await reset(); await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+await clickIt('[data-mem="detected"]');
+const redOffered = await ev(`[...document.querySelectorAll("#map-red [data-mred]")].map(b=>b.dataset.mred)`);
+check("Red lights: Detected lists on and off switches to follow, and needs one", redOffered.includes("switch.lights_red") && (await mapNextOff()) === true && (await fixText()).includes("Pick at least one red light switch"), [redOffered, await fixText()]);
+await clickIt('[data-mred="switch.lights_red"]');
+await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
+check("Red lights: the review names the switch", /Red lights[^]*Set here[^]*Detected/.test(await modalText()) && (await modalText()).includes("switch.lights_red"), await modalText());
+await clickIt("[data-rapply]"); await sleep(400);
+const emDetDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery")`);
+check("Red lights: Detected stores the switch and drops the extensions", emDetDisk.emersonMode === "detected" && JSON.stringify(emDetDisk.redLights) === JSON.stringify(["switch.lights_red"]) && emDetDisk.emerson === undefined, emDetDisk);
+await reset(); await ev(`openSched("nursery");render()`); await sleep(40);
+const detCard = await ev(`document.querySelector("#s-emerson").textContent`);
+check("Red lights: Day and night shows what it follows, with nothing to set", detCard.includes("Detected") && detCard.includes("switch.lights_red") && (await ev(`!!document.querySelector("#sin-morning")`)) === false, detCard);
+await reset(); await ev(`ui.screen="setup";openMap("garden");ui.mapw.step=3;render()`); await sleep(150);
+check("Red lights: Garden is still on its helpers", (await ev(`document.querySelector('[data-mem="helper"]').getAttribute("aria-pressed")`)) === "true" && (await ev(`document.querySelector("#map-l-morning").value`)) === "input_number.emerson_effect_morning_extension");
+const emBad = await evp(`saveConfig(()=>{const z=zoneById("nursery");z.emersonMode="fixed";z.emerson={morning:90,daylight:10,evening:5}}).then(r=>[r.ok,r.error])`);
+const redBad = await evp(`saveConfig(()=>{zoneById("nursery").redLights=["lock.front_door"]}).then(r=>[r.ok,r.error])`);
+check("Red lights: the backend refuses an extension past 59 minutes and a switch that isn't on or off", emBad[0] === false && emBad[1].includes("outside 0 to 59") && redBad[0] === false && redBad[1].includes("isn't an on or off entity"), [emBad, redBad]);
 await reset();
 
 // Removing a zone. Last, because it takes the fixture's zones with it, so nothing here can call reset().

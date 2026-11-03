@@ -939,7 +939,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || "", offHelper: linkOf(z, "night") || "", links: linksOf(z), lp: "day", target: hasTarget(z.bands), fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || "", offHelper: linkOf(z, "night") || "", links: linksOf(z), lp: "day", target: hasTarget(z.bands), em: emersonModeOf(z), emFixed: Object.fromEntries(EMERSON_KEYS.map((k) => [k, z.emerson ? String(z.emerson[k]) : ""])), red: Object.fromEntries((z.redLights || []).map((e) => [e, true])), rq: "", fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
@@ -995,21 +995,28 @@ function onOffCatalog() {
   for (const x of ALL_ON_OFF) if (!out.some((y) => y[0] === x[0])) out.push(x);
   return out;
 }
-function lightRows(m, z) {
-  const lit = isDay(z, NOW), q = (m.lq || "").trim().toLowerCase();
-  const near = (LIGHTS[z.id] || []).map(([e, n]) => [e, n, lit ? "On" : "Off"]), nearIds = near.map((x) => x[0]);
-  const row = ([e, n, st]) => { const on = !!m.lights[e]; return `<div class="pickwrap"><button class="pickrow" data-mlight="${e}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(n)}</strong><span class="dev-sub">${esc(e)}</span></span><span class="pill plain">${esc(st)}</span></button></div>`; };
+function switchRows(m, z, picked, query, attr, suggest = true) {
+  const lit = isDay(z, NOW), q = (query || "").trim().toLowerCase();
+  const near = (suggest ? LIGHTS[z.id] || [] : []).map(([e, n]) => [e, n, lit ? "On" : "Off"]), nearIds = near.map((x) => x[0]);
+  const row = ([e, n, st]) => { const on = !!picked[e]; return `<div class="pickwrap"><button class="pickrow" data-${attr}="${e}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(n)}</strong><span class="dev-sub">${esc(e)}</span></span><span class="pill plain">${esc(st)}</span></button></div>`; };
   const hit = (x) => !q || (x[0] + " " + x[1]).toLowerCase().includes(q);
   const others = onOffCatalog().filter((x) => !nearIds.includes(x[0]));
   /* With nothing suggested, as for a zone just added, everything is listed rather than an empty search. */
-  const shownNear = near.filter(hit), shownRest = others.filter((x) => (q || !near.length ? hit(x) : m.lights[x[0]]));
+  const shownNear = near.filter(hit), shownRest = others.filter((x) => (q || !near.length ? hit(x) : picked[x[0]]));
   if (!shownNear.length && !shownRest.length) return `<p class="small muted">${q ? "Nothing matches that search." : "Home Assistant has no light switches to follow."}</p>`;
   return shownNear.map(row).join("") + (shownRest.length ? `<p class="small muted">${near.length ? "Everything else in Home Assistant" : "Everything in Home Assistant"}</p>${shownRest.map(row).join("")}` : "");
 }
+const lightRows = (m, z) => switchRows(m, z, m.lights, m.lq, "mlight");
+/* A zone's own light switches say nothing about which are red, so every on and off switch is listed. */
+const redRows = (m, z) => switchRows(m, z, m.red, m.rq, "mred", false);
 /* Settings a zone can link to a helper, by the name the host knows each one by. Every link is picked by hand: nothing is
    guessed from a helper's name. */
 const EMERSON_KEYS = ["morning", "daylight", "evening"];
 const EMERSON_NAME = { morning: "Morning extension", daylight: "Daylight time", evening: "Evening extension" };
+/* Red lights have a source of their own, as day and night do. HA's red light automation reads its own helpers, so any source
+   works whichever way this zone detects day. */
+const EM_MODES = { none: "Not used", helper: "From a helper", fixed: "Set here", detected: "Detected" };
+const emersonModeOf = (z) => z.emersonMode || (["morning", "daylight", "evening"].every((k) => (z.helpers || {})[k]) ? "helper" : z.emerson ? "fixed" : "none");
 const limitNames = (p) => [...Object.keys(VNAME).flatMap((k) => ["min", "target", "max"].map((s) => `bands.${p}.${k}.${s}`)), `light.${LIGHT_LIMIT[p][0]}`];
 const linkNames = () => [...EMERSON_KEYS, ...limitNames("day"), ...limitNames("night")];
 const linkKind = (n) => (n.startsWith("bands.") ? n.split(".")[2] : n.startsWith("light.") ? "light" : "emerson");
@@ -1055,7 +1062,7 @@ function linkSelect(m, key, label, opts = {}) {
 }
 /* Links that count as things stand: Emerson unless day is detected, limits only while the zone uses its helpers. */
 const isTargetLink = (n) => n.endsWith(".target");
-const linksInUse = (m) => linkNames().filter((n) => m.links[n] && (linkKind(n) === "emerson" ? m.period !== "detected" : m.band === "helpers" && (m.target || !isTargetLink(n))));
+const linksInUse = (m) => linkNames().filter((n) => m.links[n] && (linkKind(n) === "emerson" ? m.em === "helper" : m.band === "helpers" && (m.target || !isTargetLink(n))));
 function linkIssues(m) {
   const out = [], add = (text, target) => out.push({ text, step: 3, target });
   if (m.period === "helper") {
@@ -1063,10 +1070,12 @@ function linkIssues(m) {
     else if (m.onHelper === m.offHelper) add("Lights on and lights off need two different helpers.", "map-offHelper");
     for (const k of ["onHelper", "offHelper"]) if (helperCatalog && m[k] && !helperFound(m[k])) add(`${m[k]} isn't a time helper in Home Assistant. Pick another.`, `map-${k}`);
   }
-  if (m.period !== "detected") {
-    const gap = EMERSON_KEYS.find((k) => !m.links[k]);
-    if (gap && EMERSON_KEYS.some((k) => m.links[k])) add("Emerson effect: pick all three helpers, or none.", linkTarget(gap));
+  if (m.em === "helper") { const gap = EMERSON_KEYS.find((k) => !m.links[k]); if (gap) add("Red lights: pick all three helpers.", linkTarget(gap)); }
+  else if (m.em === "fixed") for (const k of EMERSON_KEYS) {
+    const [lo, hi, step] = SCHED_RANGE[k], n = m.emFixed[k] === "" ? NaN : Number(m.emFixed[k]);
+    if (!Number.isFinite(n) || n < lo || n > hi || n % step) { add(`${EMERSON_NAME[k]} has to be a whole number of minutes from ${lo} to ${hi}.`, `map-em-${k}`); break; }
   }
+  else if (m.em === "detected" && !Object.keys(m.red).length) add("Pick at least one red light switch, so this zone can follow them.", "map-rq");
   if (m.band === "helpers" && !linksInUse(m).some((n) => linkKind(n) !== "emerson")) add("Link at least one limit to a helper, or choose Set here with the VPD chart.", linkTarget("bands.day.temperature.min"));
   const seen = {};
   for (const n of linksInUse(m)) {
@@ -1110,7 +1119,10 @@ function renderMap() {
     };
     body = `<div><p class="muted">How does this zone know when it's day or night?</p><div class="seg" role="group" aria-label="Day and night source">${[["helper", "From a helper"], ["fixed", "Set here"], ["detected", "Detected"]].map(([k, l]) => `<button data-mperiod="${k}" aria-pressed="${m.period === k}">${l}</button>`).join("")}</div></div>
       ${perBody[m.period]}
-      ${m.period === "detected" ? "" : `<div><p class="muted">Red lights either side of the day (Emerson effect)</p><div class="fields links">${EMERSON_KEYS.map((k) => linkSelect(m, k, EMERSON_NAME[k], { none: "Not used" })).join("")}</div><p class="small muted">Pick all three helpers, or none. Day and night works out the red light windows from them.</p></div>`}
+      <div><p class="muted">Red lights either side of the day (Emerson effect)</p><div class="seg" id="map-em" tabindex="-1" role="group" aria-label="Red lights source">${Object.entries(EM_MODES).map(([k, l]) => `<button data-mem="${k}" aria-pressed="${m.em === k}">${l}</button>`).join("")}</div></div>
+      ${m.em === "helper" ? `<div class="fields links">${EMERSON_KEYS.map((k) => linkSelect(m, k, EMERSON_NAME[k], { none: "Pick a helper" })).join("")}</div><p class="small muted">Day and night works out the red light windows from them, and changes there write to them.</p>` : ""}
+      ${m.em === "fixed" ? `<div class="fields">${EMERSON_KEYS.map((k) => `<label class="field" for="map-em-${k}">${EMERSON_NAME[k]} (min)<input id="map-em-${k}" data-memfixed="${k}" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${esc(m.emFixed[k])}"></label>`).join("")}</div><p class="small muted">Stored in Environment Control and changed on Day and night.</p>` : ""}
+      ${m.em === "detected" ? `<label class="field" for="map-rq">Search Home Assistant<input id="map-rq" type="search" value="${esc(m.rq)}" placeholder="Red light plug or switch"></label><div class="picklist" id="map-red">${redRows(m, z)}</div><p class="small muted">The red lights are followed as they switch, so there are no extensions to set. Your automations still switch them.</p>` : ""}
       <div><p class="muted">Where do this zone's limits come from?</p><div class="seg" role="group" aria-label="Limits"><button data-mband="helpers" aria-pressed="${m.band === "helpers"}">My helpers</button><button data-mband="here" aria-pressed="${m.band === "here"}">Set here with the VPD chart</button></div></div>
       <p class="small muted">${m.band === "helpers" ? "Pick the helper behind each limit. Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>
       <div><p class="muted">Does this zone aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-mtarget="on" aria-pressed="${m.target}">Aim for a target</button><button data-mtarget="off" aria-pressed="${!m.target}">No target</button></div></div>
@@ -1155,9 +1167,9 @@ function saveMap(m) {
   }
   z.linked = m.band === "helpers";
   z.periodMode = m.period; z.lights = m.period === "detected" ? Object.keys(m.lights) : []; z.rule = m.rule;
-  const h = (z.helpers = { ...(z.helpers || {}) }), hadEmerson = EMERSON_KEYS.some((k) => h[k]), bands = {}, light = {};
+  const h = (z.helpers = { ...(z.helpers || {}) }), bands = {}, light = {};
   if (m.period === "helper") { h.day = m.onHelper; h.night = m.offHelper; }
-  for (const k of EMERSON_KEYS) if (m.links[k]) h[k] = m.links[k]; else delete h[k];
+  for (const k of EMERSON_KEYS) if (m.em === "helper" && m.links[k]) h[k] = m.links[k]; else delete h[k];
   for (const n of linkNames()) {
     const e = m.links[n], [a, p, k, s] = n.split(".");
     if (e && a === "bands" && (m.target || s !== "target")) ((bands[p] ||= {})[k] ||= {})[s] = e;
@@ -1167,8 +1179,11 @@ function saveMap(m) {
   if (Object.keys(light).length) h.light = light; else delete h.light;
   /* Values a new link reads take what the helper holds now, so nothing shows the old number until HA next reports. */
   const now = (e) => (helperFound(e) || {}).state;
-  if (EMERSON_KEYS.every((k) => h[k])) { z.emerson = z.emerson || {}; for (const k of EMERSON_KEYS) z.emerson[k] = Number.isFinite(Number(now(h[k]))) ? Number(now(h[k])) : z.emerson[k] || 0; }
-  else if (hadEmerson) delete z.emerson;
+  z.emersonMode = m.em;
+  if (m.em === "helper") { z.emerson = z.emerson || {}; for (const k of EMERSON_KEYS) z.emerson[k] = Number.isFinite(Number(now(h[k]))) ? Number(now(h[k])) : z.emerson[k] || 0; }
+  else if (m.em === "fixed") z.emerson = Object.fromEntries(EMERSON_KEYS.map((k) => [k, Number(m.emFixed[k])]));
+  else delete z.emerson;
+  z.redLights = m.em === "detected" ? Object.keys(m.red) : [];
   if (m.target !== hasTarget(z.bands)) setTarget(z.bands, m.target);
   if (z.linked) for (const n of linkNames()) {
     const v = Number(now(m.links[n])), [a, p, k, s] = n.split(".");
@@ -1693,7 +1708,11 @@ function renderSched() {
   const helpers = onHelpers(z) ? tracked([["Lights on", schedEntity(z, "day")], ["Lights off", schedEntity(z, "night")]]) : "";
   const times = timesHere(z) ? `<div class="fields">${time("day")}${time("night")}</div><div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div>${helpers}<p class="small muted">${esc(where)}</p>${edit(`Change how ${esc(z.name)} knows day and night &rsaquo;`, "fixlink")}`
     : `${detected}${edit("Edit schedule", "btn")}`;
-  const emerson = z.emerson ? `<section class="card" id="s-emerson"><div><h2>Emerson effect</h2><p class="muted small">Red lights either side of the white lights.</p></div><div class="fields">${box("morning", "Morning extension")}${box("daylight", "Daylight time")}${box("evening", "Evening extension")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div><p class="small muted">Your automations still switch the red lights. This only sets the numbers they read.</p></section>` : "";
+  const em = emersonModeOf(z), emHead = `<div><h2>Emerson effect</h2><p class="muted small">Red lights either side of the white lights.</p></div>`, emEdit = edit(`Change how ${esc(z.name)} sets its red lights &rsaquo;`, "fixlink");
+  const reds = (z.redLights || []).map((e) => onOffCatalog().find((x) => x[0] === e) || [e, e, "Not in Home Assistant"]);
+  const emOther = em === "detected" ? `<section class="card" id="s-emerson">${emHead}<p class="muted">Detected: ${esc(z.name)} follows its red lights as they switch, so there are no extensions to set.</p>${tracked(reds.map(([e, n, st]) => [n, e, `${st} now`]))}${emEdit}</section>`
+    : em === "none" ? `<section class="card" id="s-emerson">${emHead}<p class="muted">Not used in ${esc(z.name)}.</p>${emEdit}</section>` : "";
+  const emerson = !z.emerson || em === "none" || em === "detected" ? emOther : `<section class="card" id="s-emerson">${emHead}<div class="fields">${box("morning", "Morning extension")}${box("daylight", "Daylight time")}${box("evening", "Evening extension")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div><p class="small muted">Your automations still switch the red lights. This only sets the numbers they read.</p>${em === "helper" ? tracked(EMERSON_KEYS.map((k) => [EMERSON_NAME[k], linkOf(z, k)])) : `<p class="small muted">Stored in Environment Control.</p>`}${emEdit}</section>`;
   return `<div class="wrap"><div class="sched-title"><h1>Day and night: ${esc(z.name)}</h1></div>
     <section class="card" id="s-times"><div><h2>Schedule</h2><p class="muted small">When this zone's day starts and ends.</p></div>${times}</section>
     ${emerson}
@@ -2057,7 +2076,11 @@ function mapDraft(m) {
   if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
   const linkWas = (e, none) => (e ? helperText(e) : none);
   if (m.period === "helper") for (const [k, label, key] of [["day", "Lights on helper", "onHelper"], ["night", "Lights off helper", "offHelper"]]) add(label, linkWas(onHelpers(z) && linkOf(z, k), "None"), linkWas(m[key], "None"));
-  if (m.period !== "detected") for (const k of EMERSON_KEYS) add(linkLabel(k), linkWas(linkOf(z, k), "Not used"), linkWas(m.links[k], "Not used"));
+  const emWas = emersonModeOf(z);
+  add("Red lights", EM_MODES[emWas], EM_MODES[m.em]);
+  if (m.em === "helper") for (const k of EMERSON_KEYS) add(linkLabel(k), linkWas(emWas === "helper" && linkOf(z, k), "None"), linkWas(m.links[k], "None"));
+  if (m.em === "fixed") for (const k of EMERSON_KEYS) add(EMERSON_NAME[k], emWas === "fixed" ? `${z.emerson[k]} min` : "Not set", `${m.emFixed[k]} min`);
+  if (m.em === "detected") add("Red light switches", names(emWas === "detected" ? z.redLights || [] : []), names(Object.keys(m.red)));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
   add("Target", yes(hasTarget(z.bands), "Aim for a target", "No target"), yes(m.target, "Aim for a target", "No target"));
   if (m.band === "helpers") for (const n of linkNames()) if (linkKind(n) !== "emerson" && (m.target || !isTargetLink(n))) add(linkLabel(n), linkWas(linkAtName(z, n), "Set here"), linkWas(m.links[n], "Set here"));
@@ -2263,6 +2286,8 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-mband]"))) { m.band = el.dataset.mband; render(); return; }
     if ((el = q("[data-mperiod]"))) { m.period = el.dataset.mperiod; render(); return; }
     if ((el = q("[data-mrule]"))) { m.rule = el.dataset.mrule; render(); return; }
+    if ((el = q("[data-mem]"))) { m.em = el.dataset.mem; render(); return; }
+    if ((el = q("[data-mred]"))) { const e2 = el.dataset.mred; if (m.red[e2]) delete m.red[e2]; else m.red[e2] = true; render(); return; }
     if ((el = q("[data-mlight]"))) { const e2 = el.dataset.mlight; if (m.lights[e2]) delete m.lights[e2]; else m.lights[e2] = true; render(); return; }
     if ((el = q("[data-mstep]"))) {
       const leaveMap = () => { ui.mapw = null; if (m.backToSched) openSched(m.id); render(); window.scrollTo(0, 0); };
@@ -2372,8 +2397,10 @@ document.addEventListener("change", (e) => {
       render();
     }
     if (t.mcombine) m.combine[t.mcombine] = e.target.value;
-    if (t.msched) { const was = mapIssues(m).length; m[t.msched] = e.target.value; if (mapIssues(m).length !== was || t.msched.endsWith("Helper")) { render(); refocus(e.target.id); } }
+    const said = () => mapIssues(m).map((i) => i.text).join("|");
+    if (t.msched) { const was = said(); m[t.msched] = e.target.value; if (said() !== was || t.msched.endsWith("Helper")) { render(); refocus(e.target.id); } }
     /* Redrawn so issues and the other pickers follow, with focus put back on this one for keyboard use. */
+    if (t.memfixed) { const was = said(); m.emFixed[t.memfixed] = e.target.value.trim(); if (said() !== was) { render(); refocus(e.target.id); } }
     if (t.mlink) { const id = e.target.id; if (e.target.value) m.links[t.mlink] = e.target.value; else delete m.links[t.mlink]; render(); refocus(id); }
     return;
   }
@@ -2399,6 +2426,7 @@ document.addEventListener("pointercancel", endDrag);
 document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
+  if (e.target.id === "map-rq" && ui.mapw) { ui.mapw.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.mapw, zoneById(ui.mapw.id)); }
   if (e.target.id === "map-lq" && ui.mapw) { ui.mapw.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.mapw, zoneById(ui.mapw.id)); }
 });
 let resizeTimer;
