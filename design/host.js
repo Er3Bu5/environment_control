@@ -21,7 +21,7 @@
   const helperLinks = (z) => SETTINGS.map((n) => linkAt(z, n)).filter((e) => typeof e === "string" && HELPER.test(e));
   /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
   const ARM_MS = 1000;
-  const CAN = { switch: "Can be switched on and off", fan: "Can be switched on and off", light: "Can be switched on and off and dimmed", humidifier: "Can be switched on and off, and its mode and target humidity set" };
+  const CAN = { switch: "Can be switched on and off.", fan: "Can be switched on and off.", light: "Can be switched on and off and dimmed.", humidifier: "Can be switched on and off, and its mode and target humidity set." };
   const DIALOG_CSS = `dialog{max-width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;border:0;border-radius:16px;padding:20px;font:15px/1.45 Roboto,system-ui,sans-serif;background:#FFFFFF;color:#212121;box-shadow:0 12px 40px rgba(0,0,0,.35)}
     dialog.dark{background:#1C1C1C;color:#E1E1E1}dialog::backdrop{background:rgba(0,0,0,.55)}
     h2{margin:0 0 6px;font-size:19px;font-weight:500;outline:none}p{margin:0 0 12px;opacity:.8;font-size:14px}
@@ -260,9 +260,12 @@
       const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
       const zones = item.zones.map((id) => (config.zones.find((z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
       const domain = item.entity.split(".")[0], a = st.attributes || {};
-      const can = item.helper ? "Its value can be changed" : domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
-      const flag = item.helper ? "" : !area ? "Has no area in Home Assistant" : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not ${zones.join(" or ")}`;
-      return { name: String(a.friendly_name || item.entity), facts: [reg.platform, area].filter(Boolean).map(String).join(", "), can, flag, zones };
+      const can = item.helper ? "Its value can be changed." : domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
+      /* Zone names are the user's own and can be a single letter, so each is named as an area or zone, and every line ends in
+         a full stop, so a short name never reads as text cut off. */
+      const flag = item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
+      const facts = [reg.platform, area].filter(Boolean).map(String).join(", ");
+      return { name: String(a.friendly_name || item.entity), facts: facts ? `${facts}.` : "", can, flag, zones };
     }
     confirm(items, config) {
       this.asking = true;
@@ -274,10 +277,10 @@
         dlg.setAttribute("aria-labelledby", "ec-confirm-title");
         const style = make("style", DIALOG_CSS), title = make("h2", "Allow Environment Control to control these?");
         title.id = "ec-confirm-title"; title.tabIndex = -1;
-        const sub = make("p", `Asked for by the panel${zones.length ? `, for ${zones.join(" and ")}` : ""}. Allow only what you meant to add: once allowed, the panel can switch it from now on.`);
+        const sub = make("p", `Asked for by the panel${zones.length ? `, for the ${zones.join(" and ")} zone${zones.length > 1 ? "s" : ""}` : ""}. Allow only what you meant to add: once allowed, the panel can switch it from now on.`);
         const item = (r) => {
           const li = make("li");
-          li.append(make("code", r.it.entity), make("span", r.facts ? `${r.name}. ${r.facts}` : r.name), make("span", r.can));
+          li.append(make("code", r.it.entity), make("span", r.facts ? `${r.name}. ${r.facts}` : `${r.name}.`), make("span", r.can));
           if (r.flag) li.append(make("strong", r.flag));
           return li;
         };
@@ -285,7 +288,7 @@
         const devices = rows.filter((r) => !r.it.helper), helpers = rows.filter((r) => r.it.helper), list = make("ul");
         devices.forEach((r) => list.append(item(r)));
         const fold = make("details"), hlist = make("ul");
-        fold.append(make("summary", `${helpers.length} helper${helpers.length > 1 ? "s" : ""}: values can be changed`), hlist);
+        fold.append(make("summary", `${helpers.length} helper${helpers.length > 1 ? "s" : ""}: values can be changed.`), hlist);
         helpers.forEach((r) => hlist.append(item(r)));
         const count = (n, word) => (n ? `${n} ${word}${n > 1 ? "s" : ""}` : "");
         const cancel = make("button", "Cancel"), allow = make("button", `Allow ${[count(devices.length, "device"), count(helpers.length, "helper")].filter(Boolean).join(" and ")}`, "allow");

@@ -426,7 +426,11 @@ async function hostDialog() {
     for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c);
   };
   walk(doc.result.root);
-  if (out.node) out.text = (await rawSend("DOM.getOuterHTML", { nodeId: out.node })).result.outerHTML.replace(/<style>.*?<\/style>/s, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (out.node) {
+    const html = (await rawSend("DOM.getOuterHTML", { nodeId: out.node })).result.outerHTML.replace(/<style>.*?<\/style>/s, "");
+    out.text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    out.lines = [...html.matchAll(/<(p|span|strong|summary)\b[^>]*>([^<]*)<\/\1>/g)].map((x) => x[2].trim());
+  }
   return out;
 }
 async function hostClick(which) {
@@ -446,7 +450,8 @@ const addSpare = async () => {
 await phone(390, 844); await addSpare();
 let dlg = await hostDialog();
 check("Confirm: adding a controllable device opens HA's own dialog, outside the panel", dlg.open && dlg.text.startsWith("Allow Environment Control to control these?") && dlg.text.includes("switch.spare_plug") && dlg.text.includes("Spare Plug. tuya_local") && dlg.text.includes("Can be switched on and off"), dlg.text);
-check("Confirm: an entity with no area is flagged", dlg.text.includes("Has no area in Home Assistant"), dlg.text);
+check("Confirm: an entity with no area is flagged", dlg.text.includes("Has no area in Home Assistant."), dlg.text);
+check("Confirm: every sentence in the dialog ends in a full stop, so a short zone name can't read as cut off", dlg.lines.length > 3 && dlg.lines.every((l) => l.endsWith(".")), dlg.lines);
 check("Confirm: it waits, saving nothing, while the review shows it's working", (await ev(`!!ui.review && ui.review.busy`)) === true && (await spareMapped()) === "", await spareMapped());
 await shot("confirm-host-phone");
 check("Confirm: Allow starts off, so a tap aimed elsewhere can't land on it", dlg.buttons.allow.disabled === true, dlg.buttons);
@@ -471,7 +476,7 @@ check("Confirm: removing a device never asks", r2 === true && (await hostDialog(
 const sneaky = evp(`saveConfig(()=>{devices.push({id:"heater-2",name:"Heater 2",type:"Heater",icon:"thermo",ctl:"switch",zones:["garden"],entity:"switch.reservoir_pump"})}).then(r=>r.ok)`);
 await sleep(300); dlg = await hostDialog();
 check("Confirm: the dialog names the real entity, not the name the frame gave it", dlg.open && dlg.text.includes("switch.reservoir_pump") && dlg.text.includes("Reservoir Pump") && !dlg.text.includes("Heater 2"), dlg.text);
-check("Confirm: and flags that it's in another area", dlg.text.includes("In the Reservoir area in Home Assistant, not Garden"), dlg.text);
+check("Confirm: and flags that it's in another area", dlg.text.includes("In the Reservoir area in Home Assistant, not in the Garden area.") && dlg.text.includes("for the Garden zone."), dlg.text);
 await key("Escape", 27); await sleep(150);
 check("Confirm: Escape is a no", (await sneaky) === false && (await hostDialog()).open === false && (await onHA(`JSON.parse(fakeHA.disk).devices.some(d=>d.entity==="switch.reservoir_pump")`)) === false);
 const linking = evp(`saveConfig(()=>{const z=zoneById("veg");z.helpers.bands.day.vpd.min="input_number.spare_vpd_threshold"}).then(r=>r.ok)`);
