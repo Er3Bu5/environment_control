@@ -484,7 +484,10 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 await phone(390, 844); await reset();
 const L = { rows: (id) => `ui.leafw.rows["${id}"]` };
 const openL = async (zone = "garden") => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openCalibration("${zone}");render();window.scrollTo(0,0)`); await sleep(50); };
-const ACK = 620, GIVE_UP = 1620;
+const ACK = 900, GIVE_UP = 1620;
+/* A board's offset lives in the fake HA now, so resets and silent boards are set there. */
+const boardSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,Number(v).toFixed(1)))`); await sleep(60); };
+const boardSilent = (entity, on) => onHA(`fakeHA.knobs.ignore.${on ? "add" : "delete"}("${entity}")`);
 const leafSave = (wait = ACK) => ev(`(document.querySelector("[data-dreview]").click(),document.querySelector("[data-rapply]")?.click())`).then(() => sleep(wait));
 const sends = () => ev(`leafSends.map(x=>x.entity_id+"="+x.value)`);
 const board = (id) => ev(`zones.flatMap(z=>z.sensors).find(s=>s.id==="${id}").leafLive`);
@@ -558,7 +561,7 @@ check("Board: then it stays on the page and says so", (await ev(`!!ui.leafw && !
 check("Board: the zone reading follows", Math.abs((await ev(`zones[0].now.vpd`)) - (await ev(`combine(methodOf(zones[0],"vpd"),envOf(zones[0]).map(s=>calcVpd(s.t,s.h,leafOf(s))))`))) < 1e-9);
 await openL(); await leafSave(40);
 check("Board: with nothing changed there's nothing to review", (await sends()).length === 1 && (await ev(`document.querySelector("#draftbar").hidden && document.querySelector("#modal").hidden`)) === true, await sends());
-await ev(`zones[0].sensors.find(s=>s.id==="g-right").leafStuck=true`);
+await boardSilent("number.environment_right_leaf_temperature_offset", true);
 await openL(); await tap("#lin-g-right"); await type("2"); await key("Enter", 13);
 await tap("#lin-g-left"); await type("1"); await key("Enter", 13);
 await leafSave(GIVE_UP);
@@ -568,10 +571,22 @@ check("Board: the one that answered is kept", (await board("g-left")) === -1, aw
 check("Board: your typed value survives to try again", (await ev(`document.querySelector("#lin-g-right").value`)) === "2.0" && (await ev(`document.querySelector("[data-dreview]").disabled`)) === false);
 check("Board: the review stays open and says what failed", (await ev(`document.querySelector("#modal").textContent`)).includes("Some changes were not applied") && (await ev(`document.querySelector("#modal").textContent`)).includes("not confirmed. The board still reports leaf 1.0"), await ev(`document.querySelector("#modal").textContent`));
 check("Board: and lists only what's left", (await ev(`document.querySelectorAll("#review-items .review-row").length`)) === 1 && (await ev(`document.querySelector("[data-rapply]").textContent`)) === "Apply 1 change", await ev(`document.querySelector("#modal").textContent`));
-await ev(`zones[0].sensors.find(s=>s.id==="g-right").leafStuck=false;leafSends.length=0`);
+await boardSilent("number.environment_right_leaf_temperature_offset", false); await ev(`leafSends.length=0`);
 await ev(`document.querySelector("[data-rapply]").click()`); await sleep(ACK);
 check("Board: Save tries again, sending only what's still different", same(await sends(), ["number.environment_right_leaf_temperature_offset=-2"]) && (await board("g-right")) === -2, await sends());
-await ev(`zones[0].sensors.find(s=>s.id==="g-right").leafLive=-1;leafSends.length=0;render()`);
+await boardSet([["number.environment_right_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0;render()`);
+/* The calibration write path. The frame names a sensor, never an entity, and the host checks the entity's own limits. */
+const setCalls = () => onHA(`fakeHA.calls.filter(c=>c.service==="set_value").map(c=>c.data.entity_id+"="+c.data.value)`);
+const calBefore = (await setCalls()).length;
+const calTries = await evp(`Promise.all([ask("calibrate",{sensor:"nope",value:-1}),ask("calibrate",{sensor:"g-left",value:-7}),ask("calibrate",{sensor:"g-left",value:-1.25}),ask("calibrate",{sensor:"g-under",value:-1}),ask("calibrate",{sensor:"g-left",value:"-1"})]).then(r=>r.map(x=>x.ok))`);
+check("Calibrate: the host refuses an unknown sensor, a value past the board's limits or off its step, a sensor with no board setting and a non-number", JSON.stringify(calTries) === JSON.stringify([false, false, false, false, false]) && (await setCalls()).length === calBefore, calTries);
+await evp(`ask("calibrate",{sensor:"g-left",value:-1.5,entity_id:"number.environment_right_leaf_temperature_offset"})`); await sleep(ACK);
+check("Calibrate: it writes that sensor's own setting, whatever entity the frame names", JSON.stringify((await setCalls()).slice(calBefore)) === JSON.stringify(["number.environment_left_leaf_temperature_offset=-1.5"]) && (await board("g-left")) === -1.5, await setCalls());
+await onHA(`fakeHA.offline("number.environment_left_leaf_temperature_offset",true)`); await sleep(60);
+check("Calibrate: an offline board is refused by the host too", (await evp(`ask("calibrate",{sensor:"g-left",value:-1}).then(r=>r.ok)`)) === false);
+await onHA(`fakeHA.offline("number.environment_left_leaf_temperature_offset",false)`);
+await boardSet([["number.environment_left_leaf_temperature_offset", -1]]);
+check("Calibrate: a value set on the board from elsewhere shows here", (await board("g-left")) === -1);
 await ev(`zones[2].sensors[0].t=null;zones[2].sensors[0].h=null`); await openL("nursery");
 check("Board: an offline board can't be edited and says why", (await ev(`document.querySelector("#lin-n-env").disabled && document.querySelector('[data-ldir="n-env:1"]').disabled && document.querySelector("#ls-n-env").textContent.includes("offline")`)) === true);
 await leafSave(40);
@@ -618,11 +633,11 @@ await sleep(ACK);
 await setupNow(); await ev(`document.querySelector('[data-vpd="garden"]').click()`); await sleep(50);
 const afterNext = await ev(`(()=>{const v=ui.vpdw,b=v&&v.bands.day;return v?{leaf:v.leaf,want:zoneLeaf(zones[0]),agrees:Math.abs(b.vpd[2]-calcVpd(b.temperature[2],b.humidity[2],v.leaf))<0.03}:null})()`);
 check("Order: the chart opens at the new offset", !!afterNext && afterNext.leaf === -1.2 && afterNext.want === -1.2, afterNext);
-await ev(`zones[0].sensors.find(s=>s.id==="g-left").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-right").leafStuck=true;leafSends.length=0`);
+await boardSet([["number.environment_left_leaf_temperature_offset", -1]]); await boardSilent("number.environment_right_leaf_temperature_offset", true); await ev(`leafSends.length=0`);
 await calibrate(); await tap("#lin-g-right"); await type("2"); await key("Enter", 13);
 await leafSave(GIVE_UP);
 check("Order: an unconfirmed board stays on screen as not confirmed", (await ev(`!!ui.leafw`)) === true && (await ev(`document.querySelector("#ls-g-right").textContent`)).includes("Not confirmed"));
-await ev(`zones[0].sensors.find(s=>s.id==="g-right").leafStuck=false;leafSends.length=0;ui.leafw=null;render()`);
+await boardSilent("number.environment_right_leaf_temperature_offset", false); await ev(`leafSends.length=0;ui.leafw=null;render()`);
 
 // Left and right can differ, and the chart can only draw one
 const basisZone = await ev(`zones[0].now.vpd`);
@@ -692,7 +707,7 @@ check("Finish: its temperature, humidity and VPD still agree", fin.agrees, fin);
 check("Finish: it can be saved", fin.saveOn, fin);
 check("Finish: and it says the Target moved", (await ev(`document.querySelector("#toast").textContent`)).includes("Target moved"), await ev(`document.querySelector("#toast").textContent`));
 await ev(`(document.querySelector("[data-vexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
-await ev(`zones[2].sensors[0].leafLive=-1;leafSends.length=0`);
+await boardSet([["number.nursery_environment_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
 
 // Mapping decides whether a sensor has an offset on the device
 await ev(`ui.vpdw=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
@@ -894,7 +909,7 @@ await phone(390, 844); await reset(); await goTab("Garden"); await shot("control
 await ev(`window.scrollTo(0,520)`); await shot("controls-phone-2");
 await sleep(60); await shot("zone-phone");
 await openL(); await sleep(60); await shot("leaf-phone");
-await ev(`zones[0].sensors.find(s=>s.id==="g-right").leafStuck=true`); await tap("#lin-g-right"); await type("1.5"); await key("Enter", 13); await leafSave(GIVE_UP);
+await boardSilent("number.environment_right_leaf_temperature_offset", true); await tap("#lin-g-right"); await type("1.5"); await key("Enter", 13); await leafSave(GIVE_UP);
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await shot("leaf-phone-dark"); await send("Emulation.setEmulatedMedia", { features: [] });
 await reset();
 
@@ -907,7 +922,7 @@ const barText = () => ev(`document.querySelector("#draftbar").textContent`);
 const reviewBtn = () => ev(`document.querySelector("[data-dreview]").disabled`);
 const clickIt = async (sel) => { await ev(`document.querySelector(${JSON.stringify(sel)}).click()`); await sleep(50); };
 const openT = async (id) => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openVpd("${id}");render();window.scrollTo(0,0)`); await sleep(50); };
-await ev(`leafSends.length=0;zones[0].sensors.forEach(s=>{delete s.leafStuck});zones[0].sensors.find(s=>s.id==="g-left").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-right").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-under").leaf=-0.5;zones[0].leafBasis=undefined`);
+await boardSilent("number.environment_right_leaf_temperature_offset", false); await boardSet([["number.environment_left_leaf_temperature_offset", -1], ["number.environment_right_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0;zones[0].sensors.find(s=>s.id==="g-under").leaf=-0.5;zones[0].leafBasis=undefined`);
 await openL();
 check("Confirm: no bar until something changes", (await barOn()) === false);
 await tap("#lin-g-left"); await type("1.6"); await key("Enter", 13); await sleep(80);
@@ -940,7 +955,7 @@ check("Confirm: it can't be closed mid send", (await modalOpen()) === true);
 await sleep(ACK);
 check("Confirm: it closes once the boards report", (await modalOpen()) === false && (await board("g-left")) === -1.6 && (await board("g-right")) === -2, [await modalOpen(), await board("g-right"), await modalText(), await sends()]);
 check("Confirm: only then is the draft gone", (await barOn()) === false);
-await ev(`zones[0].sensors.find(s=>s.id==="g-left").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-right").leafLive=-1;leafSends.length=0`);
+await boardSet([["number.environment_left_leaf_temperature_offset", -1], ["number.environment_right_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
 await openL(); await tap("#lin-g-left"); await type("1.6"); await key("Enter", 13); await sleep(80);
 await clickIt("[data-ddiscard]");
 check("Confirm: Discard goes back to what's saved", (await barOn()) === false && (await ev(`document.querySelector("#lin-g-left").value`)) === "1.0" && (await sends()).length === 0, await ev(`document.querySelector("#lin-g-left").value`));

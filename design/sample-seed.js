@@ -64,6 +64,8 @@ const SEED = (() => {
     "light.tent_light_controller": dim("off", null, "Tent Light Controller"),
     "switch.tent_lights": sw("off", "Tent Lights"),
     "switch.spare_plug": sw("off", "Spare Plug"),
+    ...Object.fromEntries(["environment_left", "environment_right", "veg_environment", "nursery_environment"].map((b) => [`number.${b}_leaf_temperature_offset`,
+      { state: "-1.0", attributes: { friendly_name: `${b.replace(/_/g, " ")} leaf temperature offset`, min: -5, max: 2, step: 0.1, unit_of_measurement: "°C" } }])),
     "switch.reservoir_pump": sw("off", "Reservoir Pump"),
   };
   /* HA's own entity and area registries, which the host reads to show what a device really is. */

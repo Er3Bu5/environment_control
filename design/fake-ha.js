@@ -9,7 +9,7 @@ class FakeHA {
     this.config = JSON.parse(JSON.stringify(seed.config));
     this.failsafes = seed.failsafes || {};
     this.registry = seed.registry || { entities: {}, areas: {} };
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500 };
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set() };
     this.calls = [];
     this.saves = [];
     this.panels = new Set();
@@ -92,6 +92,7 @@ class FakeHA {
       case "humidifier.set_mode": return [s.state, { mode: data.mode }];
       case "humidifier.set_humidity": return [s.state, { humidity: data.humidity }];
       case "input_datetime.set_datetime": return [String(data.time).length === 5 ? `${data.time}:00` : String(data.time), {}];
+      case "number.set_value": return [Number(data.value).toFixed(1), {}];
       default: return service === "turn_on" ? ["on", {}] : service === "turn_off" ? ["off", {}] : [String(data.value), {}];
     }
   }
@@ -101,7 +102,7 @@ class FakeHA {
     this.validate(domain, service, data);
     const entity = data.entity_id, s = this.states[entity];
     if (s.state === "unavailable") { const e = new Error(`${entity} is unavailable`); e.code = "home_assistant_error"; throw e; }
-    const call = { domain, service, data: { ...data }, dropped: this.knobs.dropAll || this.knobs.dropNext };
+    const call = { domain, service, data: { ...data }, dropped: this.knobs.dropAll || this.knobs.dropNext || this.knobs.ignore.has(entity) };
     this.calls.push(call); this.knobs.dropNext = false;
     for (const fn of this.listeners) fn(call);
     /* HA accepts a call a Tuya plug then ignores, so a dropped command still returns success. */
@@ -125,6 +126,7 @@ class FakeHA {
     if (!ok) this.fail("Config isn't zones and devices");
     const ids = new Set(c.zones.map((z) => z.id));
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
+    for (const z of c.zones) for (const x of z.sensors || []) if (x.leafEntity !== undefined && !/^number\.[a-z0-9_]+$/.test(x.leafEntity)) this.fail(`${x.id} has a leaf temperature offset that isn't a number entity`);
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || d.zones.some((z) => !ids.has(z))) this.fail(`${d.id} is in a zone that doesn't exist`);
       if (d.entity !== undefined && !/^(switch|light|fan|humidifier)\.[a-z0-9_]+$/.test(d.entity)) this.fail(`${d.id} has an entity this panel can't control`);

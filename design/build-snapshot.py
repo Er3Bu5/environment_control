@@ -137,6 +137,11 @@ def ha_state(entity):
         sys.exit("the snapshot predates humidifier limits: run ha-snap/states.py again")
     return {"state": S[entity]["state"], "attributes": attrs}
 STATES = {d["entity"]: ha_state(d["entity"]) for d in devices if "entity" in d}
+for z in zones:
+    for x in z["sensors"]:
+        e = x.get("leafEntity")
+        if e:
+            STATES[e] = {"state": S[e]["state"], "attributes": {"friendly_name": S[e]["name"] or e, **S[e]["attrs"], "unit_of_measurement": S[e]["unit"]}}
 # What each failsafe holds a device to at the snapshot's time: the fans always on, the light plugs on their schedule.
 def schedule(z):
     zone = next(x for x in zones if x["id"] == z)

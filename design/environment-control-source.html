@@ -666,8 +666,29 @@ async function sendControl(d, action, value) {
     redrawDevice(d);
   }, CTL_GIVE_UP_MS);
 }
+/* A board's offset is whatever HA last reported for its setting. */
+function sensorsFromStates() {
+  for (const z of zones) for (const x of z.sensors) {
+    const st = x.leafEntity && haStates[x.leafEntity];
+    if (!st) continue;
+    x.leafDown = st.state === "unavailable" || st.state === "unknown";
+    const v = Number(st.state);
+    if (!x.leafDown && Number.isFinite(v) && v !== x.leafLive) { x.leafLive = v; delete x.vpd; }
+  }
+}
+const stateWaiters = new Set();
+function untilState(check, ms) {
+  if (check()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const w = { check, resolve };
+    w.timer = setTimeout(() => { stateWaiters.delete(w); resolve(false); }, ms);
+    stateWaiters.add(w);
+  });
+}
 function statesChanged(states) {
   Object.assign(haStates, states);
+  sensorsFromStates();
+  for (const w of [...stateWaiters]) if (w.check()) { clearTimeout(w.timer); stateWaiters.delete(w); w.resolve(true); }
   for (const d of devices) {
     if (!d.entity || !(d.entity in states)) continue;
     deviceFromState(d);
@@ -1321,8 +1342,8 @@ const stepped = (v) => Math.round(v * 20) / 20;
 
 /* The boards' offset range. */
 const LEAF_MAX = { below: 5, above: 2 };
-/* Stands in for the board reporting back. The mock's boards answer after LEAF_ACK_MS, or never if leafStuck is set. */
-const LEAF_ACK_MS = 500, LEAF_GIVE_UP_MS = 1500;
+/* How long a board gets to report a new offset before the row says it wasn't confirmed. */
+const LEAF_GIVE_UP_MS = 1500;
 const leafSends = [];
 function leafRows(z) {
   const rows = {};
@@ -1335,7 +1356,7 @@ function openCalibration(id) {
   ui.screen = "setup";
 }
 const lValue = (r) => (r.mag === 0 ? 0 : r.mag * r.dir);
-const boardOffline = (s) => hasLeafEntity(s) && (s.t === null || s.t === undefined);
+const boardOffline = (s) => hasLeafEntity(s) && (s.t === null || s.t === undefined || !!s.leafDown);
 const previewVpd = (s, o) => (s.vpd !== undefined && o === leafOf(s) ? s.vpd : calcVpd(s.t, s.h, o));
 function lPreview(s, r) {
   const o = lValue(r);
@@ -1479,21 +1500,23 @@ async function saveLeaf(l, done) {
   if (!sends.length) { finish(); return; }
   l.sending = true;
   render();
-  for (const s of sends) {
-    leafSends.push({ entity_id: s.leafEntity, value: lValue(l.rows[s.id]) });
-    const answers = !s.leafStuck;
-    setTimeout(() => {
-      if (answers) { s.leafLive = lValue(l.rows[s.id]); delete s.vpd; }
-      l.rows[s.id].status = answers ? "" : "stuck";
-    }, answers ? LEAF_ACK_MS : LEAF_GIVE_UP_MS);
-  }
-  setTimeout(finish, sends.some((s) => s.leafStuck) ? LEAF_GIVE_UP_MS + 20 : LEAF_ACK_MS + 20);
+  /* The host writes each board's own setting. It counts once the board reports the new value, and not before. */
+  await Promise.all(sends.map(async (s) => {
+    const value = lValue(l.rows[s.id]);
+    leafSends.push({ entity_id: s.leafEntity, value });
+    const r = await ask("calibrate", { sensor: s.id, value });
+    const landed = r.ok && (await untilState(() => zoneById(l.id) && envOf(zoneById(l.id)).some((x) => x.id === s.id && x.leafLive === value), LEAF_GIVE_UP_MS));
+    l.rows[s.id].status = landed ? "" : "stuck";
+  }));
+  finish();
 }
 
 /* Day and night. Where a zone is linked to helpers these change on the helper, so whatever reads it follows straight away. */
 const SCHED_NAME = { day: "Lights on", night: "Lights off", morning: "Morning extension", daylight: "Daylight time", evening: "Evening extension" };
 const SCHED_RANGE = { morning: [0, 59, 1, "min"], daylight: [0, 59, 1, "min"], evening: [0, 59, 1, "min"] };
 const schedSends = [];
+/* The mock's helpers answer after this, until helper writes go through the host. */
+const SCHED_ACK_MS = 500;
 const dayLength = (on, off) => span(((off - on) % 1440 + 1440) % 1440);
 const timesHere = (z) => z.periodMode !== "detected";
 const onHelpers = (z) => (z.periodMode || "helper") === "helper";
@@ -1609,7 +1632,7 @@ async function saveSched(s, done) {
   render();
   for (const k of sends) schedSends.push({ entity_id: schedEntity(z, k), value: s.vals[k] });
   const answers = !z.helperStuck;
-  setTimeout(() => { if (answers) for (const k of sends) schedCommit(z, k, s.vals[k]); finish(); }, answers ? LEAF_ACK_MS : LEAF_GIVE_UP_MS);
+  setTimeout(() => { if (answers) for (const k of sends) schedCommit(z, k, s.vals[k]); finish(); }, answers ? SCHED_ACK_MS : LEAF_GIVE_UP_MS);
 }
 function schedDraft(s) {
   const z = zoneById(s.id), was = schedValues(z), v = s.vals, [items, add] = changeList(), others = sharesHelpers(z);
@@ -2216,6 +2239,7 @@ function adoptConfig(c) {
   devices = clone(c.devices);
   configRevision = c.revision;
   devices.forEach(deviceFromState);
+  sensorsFromStates();
   if (ui.zone && !zoneById(ui.zone)) ui.zone = zones.length ? zones[0].id : null;
 }
 function withConfig(c, change) {

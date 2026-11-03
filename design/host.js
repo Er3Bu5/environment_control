@@ -66,6 +66,7 @@
     mapped() {
       const out = new Set();
       for (const d of this.config.devices) if (d.entity && d.zones.length) out.add(d.entity);
+      for (const z of this.config.zones) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
       return out;
     }
     pick(st) {
@@ -109,6 +110,7 @@
       if (m.type === "ready") this.init();
       else if (m.type === "device") this.device(m);
       else if (m.type === "save") this.save(m);
+      else if (m.type === "calibrate") this.calibrate(m);
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 
@@ -132,6 +134,27 @@
       if (!call) return refuse("That value isn't one this device takes.");
       try {
         await this._hass.callService(...call);
+        this.reply(m.req, true);
+      } catch (err) {
+        refuse(String((err && err.message) || err));
+      }
+    }
+
+    /* The calibration write: the frame names a sensor and a value, never an entity. The entity is that sensor's own, from this
+       element's config, and the value has to sit inside the entity's own limits and step. */
+    async calibrate(m) {
+      const refuse = (why) => this.reply(m.req, false, why);
+      if (!isId(m.sensor) || !isNum(m.value)) return refuse("Not a sensor or value this panel knows.");
+      const sensor = this.config.zones.flatMap((z) => z.sensors || []).find((x) => x && x.id === m.sensor);
+      if (!sensor || typeof sensor.leafEntity !== "string" || sensor.leafUnused || !/^number\.[a-z0-9_]{1,200}$/.test(sensor.leafEntity)) return refuse("That sensor has no leaf temperature offset on its board.");
+      const st = this._hass.states[sensor.leafEntity];
+      if (!st) return refuse(`Home Assistant has no ${sensor.leafEntity}.`);
+      if (st.state === "unavailable") return refuse("The board is offline.");
+      const a = st.attributes || {}, steps = (m.value - a.min) / a.step;
+      if (a.unit_of_measurement !== "°C") return refuse("That setting isn't in °C, so it isn't a leaf temperature offset.");
+      if (!(m.value >= a.min && m.value <= a.max) || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max} °C, in steps of ${a.step}.`);
+      try {
+        await this._hass.callService("number", "set_value", { entity_id: sensor.leafEntity, value: m.value });
         this.reply(m.req, true);
       } catch (err) {
         refuse(String((err && err.message) || err));
