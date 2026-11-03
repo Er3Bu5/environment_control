@@ -138,9 +138,9 @@ if (process.env.SMOKE) {
   await go(`ui.leafw=null;ui.screen="setup";render()`);
   check("Setup: Sensor Calibration sits before Targets in every zone", (await ev(`["garden","veg","nursery"].every(z=>document.querySelector('[data-calw="'+z+'"]').nextElementSibling.dataset.vpd===z)`)) === true);
   for (const z of ["veg", "nursery"]) { await go(`document.querySelector('[data-calw="${z}"]').click()`); await clean(`${z} calibration`); await go(`(document.querySelector("[data-lexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); }
-  await go(`document.querySelector("[data-addzone]").click()`); await go(`ui.wiz.name="Flower 2";render()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector("[data-rapply]").click()`); await clean("New zone map");
+  await go(`document.querySelector("[data-addzone]").click()`); await go(`ui.wiz.name="Flower 2";render()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector("[data-rapply]").click()`); await clean("New zone guide");
   for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "Overview with a new zone"], [`ui.screen="zone";ui.zone="flower_2";render()`, "New zone page"]]) { await go(e); await clean(name); }
-  await go(`ui.mapw=null;ui.wiz=null;ui.review=null;ui.guard=null;renderModal();ui.screen="setup";render()`);
+  await go(`ui.mapw=null;ui.wiz=null;ui.guide=null;ui.review=null;ui.guard=null;renderModal();ui.screen="setup";render()`);
   await go(`document.querySelector('[data-rmzone="flower_2"]').click()`); await clean("Setup behind the dialog");
   check("Remove: real data, dialog names the new zone", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Remove Flower 2?");
   await go(`document.querySelector("[data-gdiscard]").click()`);
@@ -745,7 +745,7 @@ const wizNext = () => cClick(`[data-wiz="next"]`), nextOff = () => ev(`document.
 const zoneCount = await ev(`zones.length`);
 await cClick("[data-addzone]");
 check("Zone: Add zone opens Placement on its name", (await ev(`ui.wiz.step===1 && !ui.wiz.id && document.querySelector("#main h1").textContent==="Add a zone" && !!document.querySelector("#wiz-name")`)) === true);
-check("Zone: the name comes first in the steps", same(await ev(`[...document.querySelectorAll(".steps li")].map(e=>e.textContent)`), ["1. Zone", "2. Units", "3. Sensors"]));
+check("Zone: a new zone is just its name, size and units", same(await ev(`[...document.querySelectorAll(".steps li")].map(e=>e.textContent)`), ["1. Zone", "2. Units"]));
 check("Zone: no Next without a name", (await nextOff()) === true && (await ev(`document.querySelector("#wiz-name-fix").textContent`)).includes("Name this zone"));
 await tap("#wiz-name-fix");
 check("Zone: the link lands on the box", (await active()) === "wiz-name", await active());
@@ -762,19 +762,27 @@ check("Zone: Cancel asks, and a name can't run as code in that either", (await e
 await cClick("[data-gdiscard]");
 check("Zone: Cancel creates nothing", (await ev(`zones.length`)) === zoneCount && (await ev(`!ui.wiz`)) === true);
 await cClick("[data-addzone]"); await tap("#wiz-name"); await type(`Flower <img src=x onerror="window.pwned=1"> 2`);
-await wizNext(); await wizNext();
-check("Zone: Back keeps the name", await ev(`(()=>{document.querySelector('[data-wiz="back"]').click();document.querySelector('[data-wiz="back"]').click();return document.querySelector("#wiz-name").value.startsWith("Flower <img")})()`));
-await sleep(40); await wizNext(); await wizNext();
-check("Zone: with nothing to place it says what's next", (await ev(`document.querySelector('[data-wiz="next"]').textContent`)) === "Review and apply" && (await ev(`document.querySelector("#main").textContent`)).includes("No sensors to place yet"));
+await wizNext();
+check("Zone: Back keeps the name", await ev(`(()=>{document.querySelector('[data-wiz="back"]').click();return document.querySelector("#wiz-name").value.startsWith("Flower <img")})()`));
+await sleep(40); await wizNext();
+check("Zone: units are the last step before it's created", (await ev(`document.querySelector('[data-wiz="next"]').textContent`)) === "Review and apply" && !(await ev(`document.querySelector("#main").textContent`)).includes("No sensors to place yet"));
 check("Zone: nothing is created before saving", (await ev(`zones.length`)) === zoneCount);
-await shot("addzone-sensors-phone");
+await shot("addzone-units-phone");
 await wizNext();
 check("Zone: the review lists the new zone", (await ev(`document.querySelector("#modal").textContent`)).includes("New zone") && (await ev(`document.querySelector("#modal").textContent`)).includes("Size"), await ev(`document.querySelector("#modal").textContent`));
 check("Zone: a name can't run as code in the review", (await ev(`!document.querySelector("#modal img") && !window.pwned`)) === true);
-await cClick("[data-rapply]");
+await cClick("[data-rapply]"); await sleep(60);
 const newId = await ev(`zones.at(-1).id`);
-check("Zone: saving creates it and opens Map devices", (await ev(`zones.length`)) === zoneCount + 1 && (await ev(`!!ui.mapw && ui.mapw.id===zones.at(-1).id`)) === true);
+const guideRows = () => ev(`[...document.querySelectorAll("#main .task")].map(t=>t.id+(t.getAttribute("aria-current")?"*":"")+":"+[...t.querySelectorAll(".pill")].map(p=>p.textContent).join("/"))`);
+check("Zone: saving creates it and opens its setup, one step at a time", (await ev(`zones.length`)) === zoneCount + 1 && (await ev(`ui.screen==="setup" && !!ui.guide && ui.guide.id===zones.at(-1).id && document.querySelector("#main h1").textContent.startsWith("Set up Flower <img")`)) === true);
+check("Zone: devices come next, and the steps that need sensors say so", same(await guideRows(), ["g-devices*:", "g-place:Needs sensors from Devices", "g-schedule:", "g-calibrate:Needs sensors from Devices", "g-targets:"]), await guideRows());
+check("Zone: it's saved straight away, before any of those", (await onHA(`JSON.parse(fakeHA.disk).zones.some(z=>z.id==="${newId}")`)) === true);
 check("Zone: it's in the tabs", (await ev(`[...document.querySelectorAll("#tabs button")].some(b=>b.textContent.startsWith("Flower <img"))`)) === true);
+await shot("newzone-guide-phone");
+await cClick('[data-glater="schedule"]'); await sleep(120);
+check("Zone: a step can wait, and that's saved too", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${newId}").setup.schedule`)) === "later" && (await guideRows())[2] === "g-schedule:Later", await guideRows());
+await cClick("[data-gfinish]");
+check("Zone: Finish for now lands on the zone, which says what's left", (await ev(`ui.screen==="zone" && ui.zone==="${newId}" && !ui.guide`)) === true && (await ev(`document.querySelector("#main [data-guide]").textContent`)).includes("Devices, Placement, Day and night, Sensor Calibration, Targets"), await ev(`document.querySelector("#main [data-guide]")?.textContent`));
 const newScreens = [];
 for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overview"], [`ui.screen="zone";ui.zone="${newId}";render()`, "zone"], [`ui.screen="devices";render()`, "devices"], [`ui.screen="setup";render()`, "setup"], [`openVpd("${newId}");render()`, "targets"], [`ui.vpdw=null;render()`, "setup again"]]) {
   await ev(e); await sleep(60);
@@ -782,26 +790,34 @@ for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overvie
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
 check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img, #tabs img")`)) === true);
-check("Zone: it has no Sensor Calibration until it has sensors", same(await setupButtons(newId), ["Map devices", "Placement", "Day and night", "Targets", "Remove zone"]), await setupButtons(newId));
+check("Zone: Setup offers to continue, and has no Sensor Calibration until it has sensors", same(await setupButtons(newId), ["Continue setup", "Map devices", "Placement", "Day and night", "Targets", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
 await ev(`ui.screen="overview";render()`); await sleep(40);
 check("Zone: an empty zone isn't reported as a problem", !(await ev(`document.querySelector("#main .notice")?.textContent || ""`)).includes("Flower"), await ev(`document.querySelector("#main .notice")?.textContent`));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40); await shot("newzone-phone");
-await ev(`document.querySelector('#controls [data-mapw]').click()`); await sleep(40);
-await ev(`ui.mapw.thenPlace=true;document.querySelector('[data-msensor="x-spare"]').click()`); await sleep(40);
+await cClick("#main [data-guide]");
+check("Zone: Continue setup goes back to the guide", (await ev(`ui.screen==="setup" && ui.guide.id==="${newId}"`)) === true);
+await cClick("#g-devices [data-mapw]");
+await ev(`document.querySelector('[data-msensor="x-spare"]').click()`); await sleep(40);
 await ev(`Object.assign(ui.mapw.choice["x-spare"],{temperature:"a",humidity:"a",vpd:"a",light:"a"});render()`); await sleep(40);
 for (let i = 0; i < 3; i++) { await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50); }
 check("Zone: mapping can finish for a new zone", (await ev(`!document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`document.querySelector("#main").textContent.slice(0,300)`));
 await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(60);
-await ev(`document.querySelector("[data-rapply]")?.click()`); await sleep(60);
-check("Zone: Map devices brings you back to place the sensors", (await ev(`!!ui.wiz && ui.wiz.step===3 && ui.wiz.pick==="x-spare" && !ui.mapw`)) === true);
+await ev(`document.querySelector("[data-rapply]")?.click()`); await sleep(200);
+check("Zone: Map devices goes back to the guide, done, with Placement next", same(await guideRows(), ["g-devices:Done", "g-place*:", "g-schedule:Later", "g-calibrate:", "g-targets:"]) && (await ev(`!ui.mapw`)) === true, await guideRows());
+await cClick("#g-place [data-wizard]");
+check("Zone: Place sensors opens on the sensors step", (await ev(`!!ui.wiz && ui.wiz.step===3 && ui.wiz.pick==="x-spare"`)) === true);
 await ev(`document.querySelector('[data-spot="0,0"]').dispatchEvent(new MouseEvent("click",{bubbles:true}))`); await sleep(40);
-await wizNext(); await cClick("[data-rapply]");
-check("Zone: placing it finishes on the new zone", (await ev(`ui.screen==="zone" && ui.zone==="${newId}" && zoneById("${newId}").sensors[0].pos.join()==="0,0"`)) === true);
+await wizNext(); await cClick("[data-rapply]"); await sleep(200);
+check("Zone: placing goes back to the guide too", (await ev(`ui.screen==="setup" && !!ui.guide && zoneById("${newId}").sensors[0].pos.join()==="0,0"`)) === true && (await guideRows())[1] === "g-place:Done", await guideRows());
 check("Zone: its reading now shows", (await ev(`zoneById("${newId}").now.temperature`)) === 22);
-await ev(`ui.wiz=null;ui.screen="setup";render()`); await sleep(40);
-check("Zone: Sensor Calibration appears once it has sensors", same(await setupButtons(newId), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons(newId));
+await cClick("#g-targets [data-vpd]"); await cClick("[data-vexit]"); await sleep(200);
+check("Zone: going through Targets counts it as done", (await guideRows())[4] === "g-targets:Done", await guideRows());
+await cClick("[data-gfinish]"); await sleep(40);
+check("Zone: what's left still shows on its page", (await ev(`document.querySelector("#main [data-guide]").textContent`)).includes("Day and night, Sensor Calibration"), await ev(`document.querySelector("#main [data-guide]")?.textContent`));
+await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
+check("Zone: Sensor Calibration appears once it has sensors", same(await setupButtons(newId), ["Continue setup", "Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons(newId));
 await ev(`document.querySelector('[data-wizard="veg"]').click()`); await sleep(40);
 check("Zone: an existing zone's Placement can rename it", (await ev(`document.querySelector("#wiz-name").value`)) === "Veg" && (await nextOff()) === false);
 await tap("#wiz-name"); await type("Veg north"); await wizNext(); await wizNext(); await wizNext(); await cClick("[data-rapply]");
@@ -1306,8 +1322,8 @@ await ev(`ui.review=null;ui.guard=null;renderModal();ui.mapw=null;ui.wiz=null;re
 
 await setupNow(); await cClick("[data-addzone]"); await ev(`ui.wiz.name="Garden";render()`); await sleep(30);
 check("Remove: its name is free again", !(await ev(`document.querySelector('[data-wiz="next"]').disabled`)));
-for (let i = 0; i < 3; i++) await cClick('[data-wiz="next"]');
-await cClick("[data-rapply]"); await sleep(80); await ev(`ui.mapw=null;render()`);
+for (let i = 0; i < 2; i++) await cClick('[data-wiz="next"]');
+await cClick("[data-rapply]"); await sleep(80); await ev(`ui.guide=null;render()`);
 check("Remove: a new zone of that name starts clean", (await ev(`(()=>{const z=zoneById("garden");return !!z && !z.sensors.length && !ACTIVITY.garden.length && devices.every(d=>!d.zones.includes("garden"))})()`)) === true);
 check("Remove: and its page renders", noJunk(await see("zone", "garden")));
 await setupNow(); await askRemove("garden");
@@ -1316,8 +1332,8 @@ check("Remove: an empty zone's dialog leaves out what it doesn't have", !emptyAs
 await cClick("[data-gkeep]");
 
 await cClick("[data-addzone]"); await ev(`ui.wiz.name='Bad <img src=x onerror="window.pwned=1"> zone';render()`); await sleep(30);
-for (let i = 0; i < 3; i++) await cClick('[data-wiz="next"]');
-await cClick("[data-rapply]"); await sleep(80); await ev(`ui.mapw=null;render()`); await setupNow();
+for (let i = 0; i < 2; i++) await cClick('[data-wiz="next"]');
+await cClick("[data-rapply]"); await sleep(80); await ev(`ui.guide=null;render()`); await setupNow();
 await askRemove(await ev(`zones.at(-1).id`)); await sleep(60);
 check("Remove: a zone name can't run as code in the dialog", !(await ev(`window.pwned`)) && (await ev(`!document.querySelector("#modal img")`)) === true);
 await confirmRemove();
@@ -1334,8 +1350,8 @@ await shot("remove-empty-overview");
 await cClick("[data-addzone]");
 check("Remove: Add a zone from Overview opens Placement on Setup", (await ev(`ui.screen==="setup" && !!ui.wiz && !ui.wiz.id && !!document.querySelector("#wiz-name")`)) === true);
 await ev(`ui.wiz.name="Fresh start";render()`); await sleep(30);
-for (let i = 0; i < 3; i++) await cClick('[data-wiz="next"]');
-await cClick("[data-rapply]"); await sleep(80); await ev(`ui.mapw=null;render()`);
+for (let i = 0; i < 2; i++) await cClick('[data-wiz="next"]');
+await cClick("[data-rapply]"); await sleep(80); await ev(`ui.guide=null;render()`);
 check("Remove: and the first zone is back on Overview", (await see("overview")).includes("Fresh start"));
 
 // ---------- Storage: setup is written by the backend, and survives restarts, power cuts and updates

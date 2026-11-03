@@ -691,8 +691,10 @@ function activityList(z) {
 function renderZone() {
   const z = zoneById(ui.zone);
   const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
+  const left = setupLeft(z);
+  const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Still to set up: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
   return `<div class="wrap"><div><h1>${esc(z.name)}</h1><p class="muted small">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units</p></div>
-    ${periodBlock(z)}
+    ${unfinished}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <div class="split">
       ${controlsCard(z)}
@@ -1419,8 +1421,9 @@ function lCommitActive() {
   if (a && a.dataset && a.dataset.lin) { lCommit(a); a.blur(); }
 }
 function leaveLeaf() {
-  const { screen, zone } = ui.leafw.back;
+  const { screen, zone } = ui.leafw.back, id = ui.leafw.id;
   ui.leafw = null; ui.screen = screen; ui.zone = zone;
+  guideReturn(id, "calibrate");
   render(); window.scrollTo(0, 0);
 }
 function lFollowChart(z) {
@@ -1552,8 +1555,9 @@ function sCommitActive() {
   if (a && a.dataset && a.dataset.sin) { sCommit(a); a.blur(); }
 }
 function leaveSched() {
-  const { screen, zone } = ui.sched.back;
+  const { screen, zone } = ui.sched.back, id = ui.sched.id;
   ui.sched = null; ui.screen = screen; ui.zone = zone;
+  guideReturn(id, "schedule");
   render(); window.scrollTo(0, 0);
 }
 function schedCommit(z, k, val) {
@@ -1602,16 +1606,54 @@ function schedDraft(s) {
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
 }
 
+/* A new zone is set up a step at a time, and every step can wait. What's left shows on Setup and on the zone's page until it's done. */
+const SETUP_STEPS = [
+  ["devices", "Devices", "Pick its sensors and devices from Home Assistant.", (z) => `<button class="btn" data-mapw="${z.id}">Map devices</button>`, () => ""],
+  ["place", "Placement", "Put its sensors on the map, at their height.", (z) => `<button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button>`, (z) => (z.sensors.length ? "" : "Needs sensors from Devices")],
+  ["schedule", "Day and night", "When its lights come on and go off.", (z) => `<button class="btn" data-schedw="${z.id}">Day and night</button>`, () => ""],
+  ["calibrate", "Sensor Calibration", "Each sensor's leaf temperature offset.", (z) => `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>`, (z) => (envOf(z).length ? "" : "Needs sensors from Devices")],
+  ["targets", "Targets", "The limits its readings are judged against.", (z) => `<button class="btn" data-vpd="${z.id}">Targets</button>`, () => ""],
+];
+const setupLeft = (z) => (z && z.setup ? SETUP_STEPS.filter(([k]) => z.setup[k] !== "done") : []);
+function renderGuide() {
+  const z = zoneById(ui.guide.id);
+  const next = (SETUP_STEPS.find(([k, , , , needs]) => z.setup[k] === "todo" && !needs(z)) || [])[0];
+  const rows = SETUP_STEPS.map(([k, title, text, open, needs], i) => {
+    const state = z.setup[k], blocked = needs(z);
+    const pill = state === "done" ? '<span class="pill ok">Done</span>' : state === "later" ? '<span class="pill plain">Later</span>' : blocked ? `<span class="pill dead">${esc(blocked)}</span>` : "";
+    const button = blocked ? "" : open(z).replace('class="btn"', `class="btn${k === next ? " primary" : ""}"`);
+    const later = state === "todo" ? `<button class="btn" data-glater="${k}">Later</button>` : "";
+    return `<div class="task" id="g-${k}"${k === next ? ' aria-current="step"' : ""}><div><strong>${i + 1}. ${title}</strong><p class="small muted">${text}</p></div><div class="row">${pill}${button}${later}</div></div>`;
+  }).join("");
+  return `<div class="wrap"><div><h1>Set up ${esc(z.name)}</h1><p class="muted small">${esc(z.name)} is saved. Each step can wait: anything left shows on Setup and on its page until it's done.</p></div>
+    <section class="card"><div>${rows}</div><div class="row"><button class="btn" data-gfinish>${setupLeft(z).length ? "Finish for now" : "Done"}</button></div></section></div>`;
+}
+async function markSetup(id, step, state) {
+  const z = zoneById(id);
+  if (!z || !z.setup || z.setup[step] === state || (state === "later" && z.setup[step] === "done")) return;
+  const r = await saveConfig(() => { zoneById(id).setup[step] = state; });
+  if (!r.ok) toast(`Not saved. ${r.error}`);
+  render();
+}
+/* A step opened from the guide goes back to it when you leave, and counts as done once you've been through it. */
+function guideReturn(id, step) {
+  if (!ui.guide || ui.guide.id !== id) return false;
+  ui.screen = "setup";
+  markSetup(id, step, "done");
+  return true;
+}
+
 function renderSetup() {
   if (ui.leafw) return renderCalibration();
   if (ui.sched) return renderSched();
   if (ui.mapw) return renderMap();
   if (ui.vpdw) return renderVpd();
   if (ui.wiz) return renderWizard();
+  if (ui.guide && zoneById(ui.guide.id)) return renderGuide();
   const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">ESPHome doesn't say whether a board is wired or on WiFi. How is this one connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("") +
     devices.filter((d) => inAZone(d) && !d.type).map((d) => `<div class="task" id="task-${d.id}"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant only sees a smart plug. What is plugged into it?</p></div><div class="row"><button class="btn" data-role="${d.id}" data-val="Heater">Heater</button><button class="btn" data-role="${d.id}" data-val="Fan">Fan</button><button class="btn" data-role="${d.id}" data-val="Light">Light</button><button class="btn" data-role="${d.id}" data-val="Other">Other</button></div></div>`).join("") +
     zones.filter((z) => z.sensors.some((s) => !s.pos)).map((z) => { const n = z.sensors.filter((s) => !s.pos).length; return `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${n} sensor${n > 1 ? "s" : ""} still need${n > 1 ? "" : "s"} placing on the map.</p></div><div class="row"><button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button></div></div>`; }).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-wizard="${z.id}">Placement</button><button class="btn" data-schedw="${z.id}">Day and night</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-wizard="${z.id}">Placement</button><button class="btn" data-schedw="${z.id}">Day and night</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Day and night only to the helpers it's linked to.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
     <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn" data-addzone>Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
@@ -1657,7 +1699,8 @@ function createZone(w) {
   const base = slug(w.name.trim()).replace(/^_+|_+$/g, "") || "zone";
   let id = base;
   for (let n = 2; zoneById(id); n++) id = `${base}_${n}`;
-  const z = { id, name: w.name.trim(), dayAt: 6 * 60, nightAt: 18 * 60, periodMode: "fixed", now: { temperature: null, humidity: null, vpd: null, light: null }, bands: stageBands("veg"), linked: false, lightLimits: { dayMin: 1000, nightMax: 200 }, layout: wizLayout(w), sensors: [] };
+  const z = { id, name: w.name.trim(), dayAt: 6 * 60, nightAt: 18 * 60, periodMode: "fixed", now: { temperature: null, humidity: null, vpd: null, light: null }, bands: stageBands("veg"), linked: false, lightLimits: { dayMin: 1000, nightMax: 200 }, layout: wizLayout(w), sensors: [],
+    setup: Object.fromEntries(SETUP_STEPS.map(([k]) => [k, "todo"])) };
   zones.push(z); ACTIVITY[id] = []; LIGHTS[id] = [];
   return z;
 }
@@ -1690,7 +1733,8 @@ async function removeZone(id) {
 }
 function renderWizard() {
   const w = ui.wiz, lost = stranded(w), nameIssue = zoneNameIssue(w), called = w.name.trim();
-  const steps = `<ol class="steps">${["Zone", "Units", "Sensors"].map((n, i) => `<li${w.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
+  const names = w.id ? ["Zone", "Units", "Sensors"] : ["Zone", "Units"], last = names.length;
+  const steps = `<ol class="steps">${names.map((n, i) => `<li${w.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
   let body = "";
   if (w.step === 1) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}"></label></div>
     <p class="muted">Measure the inside of the zone.</p><div class="fields">
@@ -1729,7 +1773,7 @@ function renderWizard() {
   const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.sensors.length ? "Finish" : "Map devices";
   const fix = w.step === 1 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
   return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `Placement: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
-    <div class="row"><button class="btn" data-wiz="back">${w.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${w.step === 3 ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
+    <div class="row"><button class="btn" data-wiz="back">${w.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${w.step === last ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
 }
 /* Updates in place, so typing a name keeps the phone keyboard open. */
 function wizNameSync(input) {
@@ -1776,7 +1820,9 @@ async function saveVpd(v) {
   });
   if (!r.ok) return [`Not saved. ${r.error}`];
   toast(linked ? "Ideal zone saved. Your helpers weren't changed." : "Targets saved.");
-  ui.vpdw = null; ui.screen = "zone"; ui.zone = v.id; render();
+  ui.vpdw = null;
+  if (!guideReturn(v.id, "targets")) { ui.screen = "zone"; ui.zone = v.id; }
+  render();
   return [];
 }
 function mapDraft(m) {
@@ -1806,6 +1852,7 @@ async function finishMap(m, said) {
   if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
   if (ui.mapw === m) ui.mapw = null;
   toast(said);
+  if (guideReturn(m.id, "devices")) { render(); window.scrollTo(0, 0); return []; }
   const z = zoneById(m.id);
   if (m.thenPlace && z && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
   render(); window.scrollTo(0, 0);
@@ -1827,6 +1874,8 @@ async function saveWizard(w, said) {
   if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
   const z = zoneById(r.value);
   ui.wiz = null; ui.zone = z.id; ui.picked = null;
+  if (!w.id) { ui.guide = { id: z.id }; ui.screen = "setup"; toast(`${z.name} created.`); render(); window.scrollTo(0, 0); return []; }
+  if (guideReturn(z.id, "place")) { toast(said); render(); window.scrollTo(0, 0); return []; }
   if (!z.sensors.length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
   ui.screen = "zone"; toast(said); render();
   return [];
@@ -1937,9 +1986,12 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
-    guarded(() => { ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    guarded(() => { ui.guide = null; ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
     return;
   }
+  if ((el = q("[data-guide]"))) { const id = el.dataset.guide; guarded(() => { Object.assign(ui, { guide: { id }, screen: "setup", wiz: null, mapw: null, vpdw: null, leafw: null, sched: null }); render(); window.scrollTo(0, 0); }); return; }
+  if ((el = q("[data-glater]"))) { markSetup(ui.guide.id, el.dataset.glater, "later"); return; }
+  if (q("[data-gfinish]")) { const id = ui.guide.id; ui.guide = null; ui.screen = "zone"; ui.zone = id; render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-metric]"))) { ui.metric = el.dataset.metric; render(); return; }
   if ((el = q("[data-range]"))) { ui.range = Number(el.dataset.range); render(); return; }
   if ((el = q("[data-level]"))) { ui.level = el.dataset.level; render(); return; }
@@ -1953,7 +2005,7 @@ document.addEventListener("click", (e) => {
     render(); window.scrollTo(0, 0); return;
   }
   if ((el = q("[data-mapw]"))) { const id = el.dataset.mapw; guarded(() => { openMap(id); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []); return; }
-  if (q("[data-addzone]")) { ui.screen = "setup"; openNewZone(); render(); window.scrollTo(0, 0); return; }
+  if (q("[data-addzone]")) { ui.screen = "setup"; ui.guide = null; openNewZone(); render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-rmzone]"))) { askRemoveZone(el.dataset.rmzone); return; }
   if ((el = q("[data-calw]"))) {
     if (ui.vpdw) vCommitActive();
@@ -2005,7 +2057,7 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-vedit]"))) { v.edit = el.dataset.vedit; v.sel = null; render(); return; }
     if ((el = q("[data-vstage]"))) { applyStage(v, el.dataset.vstage); render(); return; }
     if ((el = q("[data-vnudge]"))) { placeHandle(b, v.edit, v.sel, b[v.edit][v.sel] + Number(el.dataset.vnudge) * VSNAP[v.edit]); render(); return; }
-    if (q("[data-vexit]")) { guarded(() => { ui.vpdw = null; render(); }); return; }
+    if (q("[data-vexit]")) { guarded(() => { const id = ui.vpdw.id; ui.vpdw = null; guideReturn(id, "targets"); render(); }); return; }
     return;
   }
   const w = ui.wiz; if (!w) return;
@@ -2023,7 +2075,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-wiz]"))) {
     if (el.dataset.wiz === "back") { if (w.step === 1) guarded(() => { ui.wiz = null; render(); }); else { w.step--; render(); } return; }
     if (w.step === 1) { w.step = 2; render(); return; }
-    if (w.step === 2) { w.step = 3; const first = stranded(w)[0] || w.sensors[0]; w.pick = first ? first.id : null; render(); return; }
+    if (w.step === 2 && w.id) { w.step = 3; const first = stranded(w)[0] || w.sensors[0]; w.pick = first ? first.id : null; render(); return; }
     if (wizDraft(w).items.length) openReview(); else saveWizard(w, "Nothing changed.");
   }
 });
