@@ -330,7 +330,7 @@ const M = {
   vpd: { label: "VPD", short: "VPD", unit: "kPa", dp: 2, icon: "gauge", c: "--vpd" },
   light: { label: "Light", short: "Light", unit: "lx", dp: 0, icon: "sun", c: "--sun" },
 };
-const LEVELS = { above: "Above canopy", in: "In canopy", under: "Under canopy", substrate: "Substrate" };
+const LEVELS = { above: "Above canopy", in: "In canopy", under: "Under canopy" };
 const LEVEL_COLOR = { above: "var(--above)", in: "var(--in)", under: "var(--under)" };
 const ICON = {
   thermo: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0Zm-3 7a3 3 0 0 1-1-5.8V5a1 1 0 0 1 2 0v9.2A3 3 0 0 1 12 20Z",
@@ -354,9 +354,6 @@ const zones = [
       { id: "g-left", name: "Environment left", short: "Env left", kind: "env", pos: [0.5, 0], level: "in", t: 26.6, h: 64.2, link: "Ethernet", leafEntity: "number.environment_left_leaf_temperature_offset", leafLive: -1 },
       { id: "g-right", name: "Environment right", short: "Env right", kind: "env", pos: [0.5, 3], level: "above", t: 27.0, h: 62.6, link: "Ethernet", leafEntity: "number.environment_right_leaf_temperature_offset", leafLive: -1 },
       { id: "g-under", name: "Environment under", short: "Env under", kind: "env", pos: [1.5, 1.5], level: "under", t: 24.9, h: 71.0, link: "Ethernet", leaf: -0.5 },
-      { id: "g-s1", name: "Soil 1", short: "Soil 1", kind: "soil", pos: [0, 1], level: "substrate", vwc: 58.2, ec: 3.4, link: "Ethernet", fsEntity: "number.soil_1_full_saturation", fcEntity: "number.soil_1_field_capacity", fsLive: 90, fcLive: 72, rateS: 1, sampleCeil: 92.6 },
-      { id: "g-s2", name: "Soil 2", short: "Soil 2", kind: "soil", pos: [2, 1], level: "substrate", vwc: null, ec: null, link: "Ethernet", fsEntity: "number.soil_2_full_saturation", fcEntity: "number.soil_2_field_capacity", fsLive: 90, fcLive: 72, rateS: 10, sampleCeil: 91.2 },
-      { id: "g-s3", name: "Soil 3", short: "Soil 3", kind: "soil", pos: [1, 2], level: "substrate", vwc: 61.0, ec: 3.1, link: "Ethernet", fsEntity: "number.soil_3_full_saturation", fcEntity: "number.soil_3_field_capacity", fsLive: 90, fcLive: 72, rateS: 10, sampleCeil: 92.0 },
     ] },
   { id: "veg", name: "Veg", dayAt: 16 * 60, nightAt: 10 * 60, now: { temperature: 20.4, humidity: 72.1, vpd: 0.59, light: 0 }, bands: bandsB(), linked: true, lightLimits: { dayMin: 800, nightMax: 200 },
     layout: { w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2 },
@@ -383,7 +380,6 @@ const devices = [
   { id: "lc-tent", name: "Tent light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["veg", "nursery"], on: false, state: "Off", brightness: null },
   { id: "lp-tent", name: "Tent lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["veg", "nursery"], on: false, state: "Off" },
   { id: "b-left", name: "Environment left", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], state: "Online" },
-  { id: "b-soil", name: "Soil bus", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "unknown", source: "unknown", path: "Local", hub: "", zones: ["garden"], state: "Online" },
   { id: "b-veg", name: "Veg environment", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "unknown", source: "unknown", path: "Local", hub: "", zones: ["veg"], state: "Online" },
   { id: "pulse", name: "Air monitor", type: "Sensor", integration: "pulselabs", family: "Pulse", link: "wifi", source: "detected", path: "Cloud", hub: "", zones: ["veg"], state: "Stale, 9 min old", stale: true },
   { id: "door", name: "Door contact", type: "Sensor", integration: "hue", family: "Hue", link: "zigbee", source: "detected", path: "Local", hub: "Hue Bridge", zones: ["garden"], state: "Online" },
@@ -394,7 +390,7 @@ const ACTIVITY = {
   garden: [
     ["14:12", "device", "Air conditioner turned on", "You, Home Assistant app"],
     ["13:40", "device", "Dehumidifier changed to Normal mode", "You, Home Assistant app"],
-    ["13:05", "sensor", "Soil 2 stopped reporting", "Sensor"],
+    ["13:05", "sensor", "Environment under stopped reporting, back at 13:07", "Sensor"],
     ["11:22", "climate", "Humidity back in ideal zone at 66.8%", "Reading"],
     ["10:58", "climate", "Humidity above ideal zone at 67.4%", "Reading"],
     ["08:00", "device", "Heater turned off", "Automation"],
@@ -432,8 +428,7 @@ const leafPhrase = (x) => `l${leafWords(x).slice(1)}`;
 const sensorValue = (z, s, k) => (s.t === null || s.t === undefined ? null : k === "temperature" ? s.t : k === "humidity" ? s.h : (s.vpd ?? calcVpd(s.t, s.h, leafOf(s))));
 /* A zone's reading is the mean of its live sensors. A dead sensor, or one left out by choice, never counts. */
 const METHODS = { mean: "Average", median: "Median", highest: "Highest", lowest: "Lowest" };
-const classOfMetric = (k) => (["moisture", "ec", "soiltemp"].includes(k) ? "soil" : "env");
-const methodOf = (z, k) => (z.combine && z.combine[classOfMetric(k)]) || "mean";
+const methodOf = (z) => (z.combine && z.combine.env) || "mean";
 function combine(method, xs) {
   if (!xs.length) return null;
   if (method === "highest") return Math.max(...xs);
@@ -590,23 +585,18 @@ function baseMap(L, g) {
 }
 function mark(s, g, text, opts) {
   const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0);
-  if (s.kind === "soil") {
-    const dead = text === "No data", col = dead ? "var(--dead)" : "var(--primary)";
-    const side = g.R + 6;
-    return `<g ${opts.attrs}><rect x="${x - side}" y="${y - side}" width="${side * 2}" height="${side * 2}" rx="8" fill="var(--card)" stroke="${opts.selected ? "var(--fg)" : col}" stroke-width="${opts.selected ? 3 : 2}"${dead ? ' stroke-dasharray="5 4"' : ""}/><circle cx="${x}" cy="${y}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${col}" style="font-size:${dead ? 12 : 14}px">${esc(text)}</text></g>`;
-  }
   const sel = opts.selected ? ` stroke="var(--fg)" stroke-width="2"` : "";
   return `<g ${opts.attrs}><rect x="${x - 52}" y="${y - 14}" width="104" height="28" rx="6" fill="${LEVEL_COLOR[s.level]}"${sel}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="#FFFFFF">${esc(text)}</text></g>`;
 }
-const reading = (s) => s.kind === "env" ? (s.t === null ? "No data" : `${s.t.toFixed(1)}° ${Math.round(s.h)}%`) : s.vwc === null ? "No data" : `${s.vwc.toFixed(1)}%`;
+const reading = (s) => (s.t === null ? "No data" : `${s.t.toFixed(1)}° ${Math.round(s.h)}%`);
 function drawMarks(sensors, g, textFor, attrsFor, picked) {
   const seen = {}, placed = sensors.filter((s) => s.pos);
-  return [...placed.filter((s) => s.kind === "soil"), ...placed.filter((s) => s.kind === "env")].map((s) => {
-    const k = s.pos.join(","); seen[k] = (seen[k] || 0) + (s.kind === "env" ? 1 : 0);
-    return mark(s, g, textFor(s), { attrs: attrsFor(s), selected: picked === s.id, offset: s.kind === "env" ? (seen[k] - 1) * 32 : 0 });
+  return placed.map((s) => {
+    const k = s.pos.join(","); seen[k] = (seen[k] || 0) + 1;
+    return mark(s, g, textFor(s), { attrs: attrsFor(s), selected: picked === s.id, offset: (seen[k] - 1) * 32 });
   }).join("");
 }
-const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="border:2px solid var(--primary);border-radius:2px"></i>Unit with soil probe</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span></div>`;
+const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span></div>`;
 function mapHtml(z) {
   const g = geom(z.layout), shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level);
   const attrsFor = (s) => `role="button" tabindex="0" data-sensor="${s.id}" aria-label="${esc(s.name)}, ${LEVELS[s.level]}, ${esc(reading(s))}"`;
@@ -616,7 +606,7 @@ const posText = (p, L) => Number.isInteger(p[0]) ? `Unit ${p[0] * L.cols + p[1] 
 function sensorDetail(z) {
   const s = z.sensors.find((x) => x.id === ui.picked);
   if (!s) return `<div class="detail muted">Tap a sensor to see where it is and how it reports.</div>`;
-  const r = s.kind === "env" ? (s.t === null ? "No data. Left out of averages." : `${s.t.toFixed(1)} °C, ${s.h.toFixed(1)} % RH${s.avg === false ? ". Not counted in the zone average" : ""}`) : s.vwc === null ? "No data. Left out of averages." : `${s.vwc.toFixed(1)} % VWC, ${s.ec.toFixed(1)} mS/cm`;
+  const r = s.t === null ? "No data. Left out of averages." : `${s.t.toFixed(1)} °C, ${s.h.toFixed(1)} % RH${s.avg === false ? ". Excluded from average" : ""}`;
   return `<div class="detail"><strong>${esc(s.name)}</strong><span>${esc(posText(s.pos, z.layout))}. ${LEVELS[s.level]}.</span><span>${esc(r)}</span><span class="muted">${esc(s.link)}, reported 8 seconds ago</span>${s.kind === "env" ? `<button class="fixlink" data-calw="${z.id}" data-ljump="lr-${s.id}">${esc(leafWords(leafOf(s)))} &rsaquo;</button>` : ""}</div>`;
 }
 
@@ -808,7 +798,7 @@ function controlsCard(z) {
 
 /* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-const METRIC_NAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture", ec: "EC", soiltemp: "Temperature", leaf: "Leaf temperature offset", fullsat: "Full saturation", fieldcap: "Field capacity" };
+const METRIC_NAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", leaf: "Leaf temperature offset" };
 const EXTRA_SENSORS = [
   { id: "x-pulse", name: "Air monitor", short: "Air monitor", kind: "env", level: "above", t: 21.4, h: 69.0, link: "WiFi", area: "Veg", family: "Pulse" },
   { id: "x-spare", name: "Spare sensor", short: "Spare", kind: "env", level: "in", t: 22.0, h: 60.0, link: "Not known yet", area: "", family: "ESPHome" },
@@ -821,27 +811,20 @@ function catalog() {
 }
 /* Everything a device reports, tagged with what kind of reading it is, the way device classes would tag it. */
 function deviceEntities(s) {
-  const n = s.slug || slug(s.name), sub = s.slug ? `${s.slug}_substrate` : n;
+  const n = s.slug || slug(s.name);
   const lux = s.lux === undefined ? "41,200 lx" : `${Math.round(s.lux).toLocaleString("en-NZ")} lx`;
-  if (s.kind === "env") return [
+  return [
     [`sensor.${n}_air_temp`, `${s.t.toFixed(1)} °C`, "temperature"], [`sensor.${n}_humidity`, `${s.h.toFixed(1)} %`, "humidity"],
     [`sensor.${n}_vpd`, `${(s.vpd ?? calcVpd(s.t, s.h, leafOf(s))).toFixed(2)} kPa`, "vpd"], [`sensor.${n}_light`, lux, "illuminance"],
     ...(s.leafEntity ? [[s.leafEntity, `${s.leafLive.toFixed(1)} °C`, "leaf"]] : []),
   ];
-  const raw = s.vwc === null ? "No data" : `${(s.raw ?? s.vwc * (s.fsLive || 90) / 100).toFixed(1)} %`, norm = s.vwc === null ? "No data" : `${s.vwc.toFixed(1)} %`, ec = s.ec === null ? "No data" : `${s.ec.toFixed(1)} mS/cm`;
-  return [
-    [`sensor.${n}_substrate_humidity`, raw, "moisture"], [`sensor.${sub}_normalised_vwc`, norm, "moisture"],
-    [`sensor.${sub}_pore_water_ec`, ec, "conductivity"], [`sensor.${sub}_bulk_ec`, s.bulk === undefined ? ec : `${s.bulk.toFixed(1)} mS/cm`, "conductivity"],
-    [`sensor.${n}_substrate_temperature`, `${(s.soilT ?? 22.4).toFixed(1)} °C`, "temperature"],
-    ...(s.fsEntity ? [[s.fsEntity, `${s.fsLive.toFixed(1)} %`, "fullsat"], [s.fcEntity, `${s.fcLive.toFixed(1)} %`, "fieldcap"]] : []),
-  ];
 }
-/* A sensor's class decides which readings it is asked for, and each slot takes one kind of entity from the device. So a soil probe mapped as environment still offers its temperature. */
-const SENSOR_CLASS = { env: "Environment", soil: "Soil" };
-const CLASS_SLOTS = { env: ["temperature", "humidity", "vpd", "light", "leaf"], soil: ["moisture", "ec", "soiltemp", "fullsat", "fieldcap"] };
-const SLOT_TAKES = { temperature: "temperature", soiltemp: "temperature", humidity: "humidity", vpd: "vpd", light: "illuminance", leaf: "leaf", moisture: "moisture", ec: "conductivity", fullsat: "fullsat", fieldcap: "fieldcap" };
-const SLOT_REQUIRED = { env: ["temperature", "humidity"], soil: ["moisture"] };
-const SLOT_NONE = { leaf: "None, kept in Environment Control", fullsat: "None, can't be calibrated here", fieldcap: "None, can't be calibrated here" };
+/* A sensor's class decides which readings it is asked for, and each slot takes one kind of entity from the device. Soil comes back as a second class with irrigation (tag soil-probes-mock), which is when the class box appears. */
+const SENSOR_CLASS = { env: "Environment" };
+const CLASS_SLOTS = { env: ["temperature", "humidity", "vpd", "light", "leaf"] };
+const SLOT_TAKES = { temperature: "temperature", humidity: "humidity", vpd: "vpd", light: "illuminance", leaf: "leaf" };
+const SLOT_REQUIRED = { env: ["temperature", "humidity"] };
+const SLOT_NONE = { leaf: "None, kept in Environment Control" };
 const slotsOf = (s, cls) => Object.fromEntries(CLASS_SLOTS[cls].map((k) => [k, deviceEntities(s).filter((e) => e[2] === SLOT_TAKES[k]).map(([e, v]) => [e, v])]));
 const classOf = (m, s) => m.cls[s.id] || s.kind;
 /* One candidate is taken, none means not used, and several wait for an answer. */
@@ -862,7 +845,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z, "temperature"), soil: methodOf(z, "moisture") } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
@@ -886,7 +869,7 @@ function sensorRow(m, z, s) {
   const cls = classOf(m, s), ch = m.choice[s.id] || {};
   const classBox = `<label class="ent"><span>Class</span><select data-mclass="${s.id}" aria-label="${esc(s.name)} class">${Object.entries(SENSOR_CLASS).map(([k, l]) => `<option value="${k}"${cls === k ? " selected" : ""}>${l}${k === s.kind ? " (detected)" : ""}</option>`).join("")}</select></label>`;
   const slotBox = ([k, opts]) => `<label class="ent"><span>${METRIC_NAME[k]}</span><select data-mmetric="${s.id}:${k}" aria-label="${esc(s.name)} ${METRIC_NAME[k]}">${opts.length > 1 ? `<option value=""${ch[k] ? "" : " selected"}>Pick one</option>` : ""}${opts.map(([e, v]) => `<option value="${e}"${ch[k] === e ? " selected" : ""}>${esc(e)} (${esc(v)})</option>`).join("")}<option value="none"${ch[k] === "none" ? " selected" : ""}>${opts.length ? "Not used" : SLOT_NONE[k] || "None found"}</option></select></label>`;
-  const detail = !on ? "" : `<div class="ents">${classBox}${Object.entries(slotsOf(s, cls)).map(slotBox).join("")}<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? " checked" : ""}> Exclude from average</label></div>`;
+  const detail = !on ? "" : `<div class="ents">${Object.keys(SENSOR_CLASS).length > 1 ? classBox : ""}${Object.entries(slotsOf(s, cls)).map(slotBox).join("")}<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? " checked" : ""}> Exclude from average</label></div>`;
   return `<div class="pickwrap" id="ms-${s.id}"><button class="pickrow" data-msensor="${s.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(s.name)}</strong><span class="dev-sub">${esc(s.family)}, ${esc(s.link)}. ${esc(metricsLine(s))}</span></span>${pill}</button>${detail}</div>`;
 }
 function deviceMapRow(m, z, d) {
@@ -923,7 +906,7 @@ function lightRows(m, z) {
 function mapIssues(m) {
   const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
   for (const s of chosen) for (const n of needsChoice(m, s)) out.push({ text: `${s.name}: pick which ${n} entity to use.`, step: 1, target: `ms-${s.id}` });
-  for (const s of chosen) { const miss = missingRequired(m, s); if (miss.length) out.push({ text: `${s.name}: ${classOf(m, s) === "env" ? "an environment" : "a soil"} sensor needs ${miss.map((k) => METRIC_NAME[k].toLowerCase()).join(" and ")}. Pick ${miss.length > 1 ? "them" : "it"}, or change its class.`, step: 1, target: `ms-${s.id}` }); }
+  for (const s of chosen) { const miss = missingRequired(m, s); if (miss.length) out.push({ text: `${s.name}: an ${SENSOR_CLASS[classOf(m, s)].toLowerCase()} sensor needs ${miss.map((k) => METRIC_NAME[k].toLowerCase()).join(" and ")}. Pick ${miss.length > 1 ? "them" : "it"}, or change its class.`, step: 1, target: `ms-${s.id}` }); }
   for (const d of devices) if (m.pickD[d.id] && !m.roles[d.id]) out.push({ text: `${d.name}: say what it is.`, step: 2, target: `md-${d.id}` });
   if (!chosen.some((s) => classOf(m, s) === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
   if (m.period === "detected" && !Object.keys(m.lights).length) out.push({ text: "Pick at least one light switch, so this zone can detect day and night.", step: 3, target: "map-lq" });
@@ -970,12 +953,11 @@ function renderMap() {
 }
 function saveMap(m) {
   const z = zoneById(m.id), cat = catalog();
-  const levelFor = (cls, s) => (cls === "soil" ? "substrate" : s.kind === "env" ? s.level : "in");
   z.sensors = cat.filter((s) => m.pickS[s.id]).map((s) => {
     const had = z.sensors.find((x) => x.id === s.id), cls = classOf(m, s);
-    /* A sensor that changes class has to be placed again: soil goes in a unit, environment can sit in an aisle. */
-    if (had && had.kind !== cls) Object.assign(had, { kind: cls, pos: null, level: levelFor(cls, had) });
-    return had || { ...s, kind: cls, pos: null, level: levelFor(cls, s) };
+    /* A sensor that changes class has to be placed again, because where it may sit depends on its class. */
+    if (had && had.kind !== cls) Object.assign(had, { kind: cls, pos: null });
+    return had || { ...s, kind: cls, pos: null };
   });
   for (const s of z.sensors) s.avg = m.avg[s.id] !== false;
   for (const s of z.sensors) if (s.leafEntity) {
@@ -1184,7 +1166,7 @@ function vSync() {
   draftSync();
 }
 const vTouch = () => window.matchMedia("(pointer: coarse)").matches;
-const typedBox = (el) => !!(el && el.dataset && (el.dataset.vin || el.dataset.lin || el.dataset.cin || el.dataset.wbox || (el.dataset.sin && el.type === "text")));
+const typedBox = (el) => !!(el && el.dataset && (el.dataset.vin || el.dataset.lin || el.dataset.wbox || (el.dataset.sin && el.type === "text")));
 /* Tallest height seen at this width, so a shrink can be told from a rotation. */
 let vFull = { w: 0, h: 0 };
 function vViewHeight() {
@@ -1335,18 +1317,10 @@ function lBasisHtml(l, z) {
   const btn = (id, label) => `<button data-lbasis="${id}" aria-pressed="${on === id}"${l.sending ? " disabled" : ""}>${esc(label)}</button>`;
   return `<div class="lbasis" id="l-basis"><strong>VPD chart uses</strong><div class="seg" role="group" aria-label="Which offset the VPD chart uses">${btn("", "Average")}${used.map((s) => btn(s.id, s.short)).join("")}</div><div class="dev-sub" id="l-basis-note">${esc(lBasisNote(l, z))}</div></div>`;
 }
-const soilOf = (z) => z.sensors.filter((s) => s.kind === "soil");
-const soilBusy = (run) => !!run && (run.step > 2 || run.fsRun.stage !== "ready");
-function soilRow(x, locked) {
-  const run = soilRuns[x.id], busy = soilBusy(run);
-  const why = !x.fsEntity ? "This probe has no calibration settings of its own." : x.vwc === null ? "Not reporting, so it can't be calibrated right now." : "";
-  const where = busy ? (run.fcRun.stage === "draining" ? "Waiting for field capacity." : "Calibration started.") : "";
-  return `<div class="task"><div><strong>${esc(x.name)}</strong><p class="small muted">${x.fsEntity ? `Full saturation ${x.fsLive.toFixed(1)}%, field capacity ${x.fcLive.toFixed(1)}%. Reports every ${x.rateS} s.` : ""} ${why} ${where}</p></div><div class="row"><button class="btn" data-cprobe="${x.id}"${why || locked ? " disabled" : ""}>${busy ? "Continue" : "Calibrate"}</button></div></div>`;
-}
 function renderCalibration() {
-  const l = ui.leafw, z = zoneById(l.id), envs = envOf(z), soils = soilOf(z), issues = lProblems(l, z);
+  const l = ui.leafw, z = zoneById(l.id), envs = envOf(z), issues = lProblems(l, z);
   const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1></div>`, back = `<button class="btn" data-lexit${l.sending ? " disabled" : ""}>Back</button>`;
-  if (!envs.length && !soils.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no sensors yet.</p><div class="row">${back}<button class="btn" data-mapw="${z.id}">Map devices</button></div></section></div>`;
+  if (!envs.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no sensors yet.</p><div class="row">${back}<button class="btn" data-mapw="${z.id}">Map devices</button></div></section></div>`;
   const note = envs.some(hasLeafEntity) ? `<p class="small muted">Offsets are changed on the board itself. Its VPD, and anything reading it like your alerts, follow straight away.</p>` : "";
   const leaf = !envs.length ? "" : `<section class="card" id="cal-leaf"><div><h2>Leaf temperature offset</h2><p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p></div>
     <div class="now" id="l-zone">${lZoneHtml(l, z)}</div>
@@ -1354,11 +1328,7 @@ function renderCalibration() {
     <div class="vissues" id="l-issues" data-html="${esc(lIssueHtml(issues))}">${lIssueHtml(issues)}</div>
     ${lBasisHtml(l, z)}${note}
     </section>`;
-  /* Reached from the chart only to change an offset, and a flood doesn't belong in the middle of that. */
-  const soil = !soils.length || ui.vpdw ? "" : `<section class="card" id="cal-soil"><div><h2>Soil probes</h2><p class="muted small">Works out each probe's full saturation and field capacity from its own readings.</p></div>
-    <div>${soils.map((x) => soilRow(x, l.sending)).join("")}</div>
-    <p class="small muted">Calibrate one at a time, because each needs its own unit flooded. This never runs a pump. You water by hand, so turn off any automatic irrigation for this unit first.</p></section>`;
-  return `<div class="wrap">${head}${leaf}${soil}<div class="row">${back}</div></div>`;
+  return `<div class="wrap">${head}${leaf}<div class="row">${back}</div></div>`;
 }
 /* Updates what changed in place, so moving from one box to the next keeps the phone keyboard open. */
 function lSync() {
@@ -1427,7 +1397,7 @@ function saveLeaf(l, done) {
     const stuck = sends.filter((s) => l.rows[s.id].status === "stuck"), moved = lFollowChart(z);
     if (ui.leafw !== l) { done(); return; }
     if (stuck.length) { render(); done(stuck.map((s) => `${s.name}: not confirmed. The board still reports ${leafPhrase(s.leafLive)}.`)); return; }
-    /* Stays here unless the chart sent you, because the soil probes are on this page too. */
+    /* Stays here unless the chart sent you, so the result can be read where it was set. */
     if (ui.vpdw) leaveLeaf(); else render();
     done();
     const said = sends.length ? "Leaf temperature offsets saved on the boards in this mock." : "Leaf temperature offsets saved in this mock.";
@@ -1568,178 +1538,7 @@ function schedDraft(s) {
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
 }
 
-/* Soil calibration. Both values live on the probe as raw %, on the same scale as its reading. */
-const SOIL_TRUST = { count: 5, se: 0.1 }, SOIL_SHELF_S = 10, SOIL_GAP_S = 20, SOIL_HOLD_MIN = 30;
-const soilRuns = {}, soilSends = [];
-const rawOf = (s) => s.raw ?? s.vwc * s.fsLive / 100;
-const cProbe = (c) => zoneById(c.id).sensors.find((s) => s.id === c.probe);
-const pstdev = (xs) => { const m = mean(xs); return Math.sqrt(mean(xs.map((x) => (x - m) ** 2))); };
-const steps1 = (xs) => xs.slice(1).map((x, i) => x - xs[i]);
-/* Sample flood at the probe's report rate: climbing, a noisy hover at the ceiling, then a flat drainage shelf below it. */
-function soilCurve(s) {
-  if (s.trace) return s.trace;
-  const pts = [], top = s.sampleCeil, r = (v) => Math.round(v * 10) / 10;
-  for (let t = 0; t <= 170; t += s.rateS) {
-    const v = t < 60 ? 72 + (top - 72.3) * (t / 60) ** 2 : t < 73 ? top + 0.25 * Math.sin(t * 2.3) : t < 110 ? top - 1.1 : top - 1.1 - (t - 110) * 0.02;
-    pts.push([t, r(v)]);
-  }
-  return pts;
-}
-/* The same reading as ha_history.py --plateau. The ceiling is the mean over the noisy hover, never a flat stretch: a flat stretch is drainage. */
-function soilCeiling(pts) {
-  if (pts.length < 8) return null;
-  const vals = pts.map((p) => p[1]), noise = pstdev(steps1(vals)) / Math.SQRT2, top = Math.max(...vals);
-  const seed = steps1(vals.filter((v) => v >= top - 0.5)), ceilNoise = seed.length > 1 ? pstdev(seed) / Math.SQRT2 : noise;
-  const tol = Math.max(0.5, 3 * ceilNoise), band = vals.filter((v) => v >= top - tol), m = mean(band);
-  const se = band.length > 1 ? pstdev(band) / Math.sqrt(band.length) : null;
-  const gaps = pts.slice(1).filter((p, i) => p[0] - pts[i][0] > SOIL_GAP_S).length;
-  const runs = [];
-  let cur = [pts[0]];
-  for (const p of pts.slice(1)) {
-    if (Math.abs(p[1] - cur[0][1]) <= Math.max(0.1, noise)) cur.push(p);
-    else { runs.push(cur); cur = [p]; }
-  }
-  runs.push(cur);
-  const shelves = runs.filter((run) => run.at(-1)[0] - run[0][0] >= SOIL_SHELF_S && mean(run.map((p) => p[1])) < top - tol)
-    .sort((a, b) => (b.at(-1)[0] - b[0][0]) - (a.at(-1)[0] - a[0][0]));
-  const shelf = shelves[0] ? { level: mean(shelves[0].map((p) => p[1])), from: shelves[0][0][0], to: shelves[0].at(-1)[0] } : null;
-  return { value: Math.round(m * 10) / 10, mean: m, count: band.length, se, gaps, shelf, trusted: band.length >= SOIL_TRUST.count && se !== null && se < SOIL_TRUST.se };
-}
-function soilChart(pts, res) {
-  /* Zoomed to the top: the whole climb would squash the gap between the ceiling and the flat stretch, which is what this chart is for. */
-  const W = 640, H = 200, L = 44, R = 12, T = 12, B = 26, lo = Math.floor(res.mean - 5), shown = pts.filter((p) => p[1] >= lo);
-  const t0 = shown[0][0], t1 = shown.at(-1)[0], hi = Math.ceil(Math.max(...shown.map((p) => p[1]))) + 1;
-  const X = (t) => L + ((t - t0) / (t1 - t0 || 1)) * (W - L - R), Y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
-  const shelf = res.shelf ? `<rect x="${X(res.shelf.from)}" y="${T}" width="${X(res.shelf.to) - X(res.shelf.from)}" height="${H - T - B}" fill="var(--warn)" opacity="0.14"/>` : "";
-  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Flood reading with the ceiling marked at ${res.value}%">${shelf}
-    <line x1="${L}" x2="${W - R}" y1="${Y(res.mean)}" y2="${Y(res.mean)}" stroke="var(--ok)" stroke-width="1" stroke-dasharray="5 4"/>
-    <polyline fill="none" stroke="var(--primary)" stroke-width="2" points="${shown.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ")}"/>
-    <text x="${L - 6}" y="${Y(hi) + 10}" text-anchor="end">${hi}%</text><text x="${L - 6}" y="${Y(lo)}" text-anchor="end">${lo}%</text><text x="${L}" y="${H - 8}">0 s</text><text x="${W - R}" y="${H - 8}" text-anchor="end">${t1 - t0} s</text></svg></div>`;
-}
-function openSoil(id, probe) {
-  ui.soilw = soilRuns[probe] || (soilRuns[probe] = { id, step: 2, probe, fsRun: { stage: "ready" }, fcRun: { stage: "ready" }, vals: null, status: { fs: "", fc: "" }, sending: false });
-}
-function leaveSoil() {
-  ui.soilw = null;
-  render(); window.scrollTo(0, 0);
-}
-function cToCheck(c) {
-  const s = cProbe(c), fs = c.fsRun.result, fc = c.fcRun;
-  c.vals = { fs: fs ? fs.value : s.fsLive, fc: fc.stage === "done" ? fc.value : s.fcLive };
-  c.status = { fs: "", fc: "" };
-  c.step = 4;
-}
-function cProblems(c) {
-  const { fs, fc } = c.vals, out = [];
-  if (fs < 50 || fs > 100) out.push({ id: "fs", text: "Full saturation has to be between 50 and 100%. Under 50 usually means a dropped digit." });
-  if (fc < 0 || fc > 100) out.push({ id: "fc", text: "Field capacity has to be between 0 and 100%." });
-  else if (fc >= fs) out.push({ id: "fc", text: "Field capacity has to be below full saturation." });
-  return out;
-}
-const cSends = (c, s) => [["fs", s.fsEntity, s.fsLive], ["fc", s.fcEntity, s.fcLive]].filter(([k, , live]) => c.vals[k] !== live);
-const cIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" data-cfix="${i.id}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
-function cPreview(c, s, k) {
-  if (k === "fc") return "Doesn't change VWC. Anything worked out from it, like a reference line on a chart, follows.";
-  return s.vwc === null ? "No data from this probe right now." : `Normalised VWC ${s.vwc.toFixed(1)}% now, ${(rawOf(s) / c.vals.fs * 100).toFixed(1)}% with this value.`;
-}
-function cRow(c, s, k, name, live, entity) {
-  const status = c.status[k] === "sending" ? "Sending to the probe..." : c.status[k] === "stuck" ? `Not confirmed. The probe still reports ${live.toFixed(1)}%.` : "";
-  return `<div class="lrow" id="cr-${k}"><div class="lrow-top"><strong>${name}</strong><span class="pill plain">Now ${live.toFixed(1)}%</span></div>
-    <div class="lfield"><label class="lcell"><input id="cin-${k}" data-cin="${k}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${c.vals[k].toFixed(1)}" aria-label="${name}" aria-invalid="false"${c.sending ? " disabled" : ""}><span>%</span></label></div>
-    <div class="dev-sub" id="cp-${k}">${esc(cPreview(c, s, k))}</div><div class="dev-sub lid">On the probe: ${esc(entity)}</div><div class="lstatus" role="status">${esc(status)}</div></div>`;
-}
-function renderSoil() {
-  const c = ui.soilw, z = zoneById(c.id), s = cProbe(c);
-  const steps = `<ol class="steps">${["Full saturation", "Field capacity", "Check"].map((n, i) => `<li${c.step === i + 2 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
-  const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1><p class="muted small">${esc(s.name)}</p></div>`;
-  const nav = (next) => `<div class="row"><button class="btn" data-cexit${c.sending ? " disabled" : ""}>Cancel</button>${c.step > 2 ? `<button class="btn" data-cback${c.sending ? " disabled" : ""}>Back</button>` : ""}${next}</div>`;
-  let body = "";
-  if (c.step === 2) {
-    const run = c.fsRun, res = run.result, skip = `<button class="btn" data-cskipfs>Skip, keep ${s.fsLive.toFixed(1)}%</button>`;
-    const slow = s.rateS > 2 ? `<div class="notice">${esc(s.name)} reports every ${s.rateS} s. The ceiling can last under 15 s, so you may only catch 1 or 2 readings. For a good result set the probe to report every second first. This panel can't change that for you.</div>` : "";
-    const how = `<ol class="small muted cal-how"><li>Turn off any automatic irrigation for this unit.</li><li>Keep the probe connected the whole time. A gap can hide the peak.</li><li>Tap Start, then flood the unit until water runs freely from the bottom. Past about 5 L into wet medium only leaches EC.</li><li>Tap Finished once the reading has started to fall.</li></ol>`;
-    if (run.stage === "ready") body = `<p class="muted">Full saturation is the most ${esc(s.name)}'s unit can hold.</p>${slow}${how}${nav(`${skip}<button class="btn primary" data-cstart>Start</button>`)}`;
-    if (run.stage === "recording") body = `<div class="now"><strong>Recording ${esc(s.name)}</strong><span class="small muted">Flood the unit now</span></div>${how}${nav(`<button class="btn primary" data-cfinish>Finished</button>`)}`;
-    if (run.stage === "done") {
-      const flags = !res ? `<div class="notice">Not enough readings to work anything out.</div>` : [
-        !res.trusted ? `<div class="notice">Too few readings close to the peak to trust this. It can read a point or more low. Run it again with the probe reporting every second, or check the value yourself on the last step.</div>` : "",
-        res.gaps ? `<div class="notice">The probe went quiet for over ${SOIL_GAP_S} s during this, and the peak may have been in that gap.</div>` : "",
-        res.shelf ? `<p class="small muted">Flat at ${res.shelf.level.toFixed(1)}% for ${res.shelf.to - res.shelf.from} s, shaded on the chart. That's water draining, so it isn't used.</p>` : "",
-      ].join("");
-      const replay = s.traceNote ? `<p class="small muted">${esc(s.traceNote)}</p>` : "";
-      body = `${replay}${res ? `<div class="now"><strong>Full saturation ${res.value.toFixed(1)}%</strong><span class="small muted">${res.trusted ? `Average of ${res.count} ${res.count === 1 ? "reading" : "readings"} at the ceiling, within ${res.se.toFixed(2)} points` : "Rough figure"}</span></div>${soilChart(run.pts, res)}` : ""}${flags}${nav(`<button class="btn" data-cagain>Run again</button><button class="btn primary" data-cnextfs${res ? "" : " disabled"}>Next</button>`)}`;
-    }
-  }
-  if (c.step === 3) {
-    const run = c.fcRun, skip = `<button class="btn" data-cskipfc>Skip, keep ${s.fcLive.toFixed(1)}%</button>`;
-    const about = `<p class="muted">Field capacity is what the unit holds once it has finished draining, so this one does wait for a flat line: within 0.1 points for ${SOIL_HOLD_MIN} minutes with no water added.</p>`;
-    if (run.stage === "ready") body = `${about}${nav(`${skip}<button class="btn primary" data-cdrain>Start waiting</button>`)}`;
-    if (run.stage === "draining") body = `${about}<div class="now"><strong>Draining</strong><span class="small muted">Still falling. You can leave this screen, and it picks up where it was.</span></div>${nav(`${skip}<button class="btn" data-cjump>Mock: jump ahead 40 minutes</button>`)}`;
-    if (run.stage === "done") body = `<div class="now"><strong>Field capacity ${run.value.toFixed(1)}%</strong><span class="small muted">Held for ${run.held} minutes</span></div>${nav(`<button class="btn primary" data-cnextfc>Next</button>`)}`;
-  }
-  if (c.step === 4) {
-    const issues = cProblems(c), nothing = !cSends(c, s).length;
-    const back = s.rateS < 5 ? `<p class="small muted">${esc(s.name)} is reporting every ${s.rateS} s. Set it back to 10 s when you're done, because that rate writes far more to your database.</p>` : "";
-    body = `<p class="muted">Check these before they go to ${esc(s.name)}.</p><div class="lrows">${cRow(c, s, "fs", "Full saturation", s.fsLive, s.fsEntity)}${cRow(c, s, "fc", "Field capacity", s.fcLive, s.fcEntity)}</div>
-      <div class="vissues" id="c-issues" data-html="${esc(cIssueHtml(issues))}">${cIssueHtml(issues)}</div>
-      <p class="small muted">Applying changes these on the probe. Normalised VWC, and anything reading it like an irrigation controller, follows straight away. Raw readings aren't touched.</p>${back}
-      ${nav(`<button class="btn primary" data-csave${issues.length || nothing || c.sending ? " disabled" : ""}>Review and apply</button>`)}`;
-  }
-  return `<div class="wrap">${head}<section class="card">${steps}${body}</section></div>`;
-}
-/* Updates in place, so the phone keyboard stays open. */
-function cSync() {
-  const c = ui.soilw, s = cProbe(c), issues = cProblems(c), active = document.activeElement;
-  for (const k of ["fs", "fc"]) {
-    const input = $(`#cin-${k}`);
-    if (input !== active) input.value = c.vals[k].toFixed(1);
-    input.setAttribute("aria-invalid", String(issues.some((i) => i.id === k)));
-    $(`#cp-${k}`).textContent = cPreview(c, s, k);
-  }
-  const box = $("#c-issues"), html = cIssueHtml(issues);
-  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
-  $("[data-csave]").disabled = issues.length > 0 || !cSends(c, s).length || c.sending;
-}
-function cCommit(input) {
-  const c = ui.soilw;
-  if (!c || !c.vals) return;
-  const typed = input.value.trim().replace(",", "."), n = typed === "" ? NaN : Number(typed);
-  if (Number.isFinite(n)) c.vals[input.dataset.cin] = Number(n.toFixed(1));
-  input.value = c.vals[input.dataset.cin].toFixed(1);
-  cSync();
-}
-function cCommitActive() {
-  const a = document.activeElement;
-  if (a && a.dataset && a.dataset.cin) { cCommit(a); a.blur(); }
-}
-/* Same rule as a leaf temperature offset: a value only counts once the probe reports it. */
-function saveSoil(c, done) {
-  const s = cProbe(c), sends = cSends(c, s), stuck = !!s.calStuck;
-  c.sending = true;
-  c.status = { fs: "", fc: "" };
-  for (const [k] of sends) c.status[k] = "sending";
-  render();
-  for (const [k, entity_id] of sends) soilSends.push({ entity_id, value: c.vals[k] });
-  setTimeout(() => {
-    for (const [k] of sends) {
-      c.status[k] = stuck ? "stuck" : "";
-      if (stuck) continue;
-      if (k === "fc") { s.fcLive = c.vals.fc; continue; }
-      if (s.vwc !== null) s.vwc = Number((rawOf(s) / c.vals.fs * 100).toFixed(1));
-      s.fsLive = c.vals.fs;
-    }
-    c.sending = false;
-    if (!stuck) delete soilRuns[c.probe];
-    if (ui.soilw !== c) { done(); return; }
-    if (stuck) { render(); done(sends.map(([k, , live]) => `${SOIL_VALUE[k]}: not confirmed. The probe still reports ${live.toFixed(1)}%.`)); return; }
-    leaveSoil();
-    done();
-    toast("Calibration saved on the probe in this mock.");
-  }, stuck ? LEAF_GIVE_UP_MS : LEAF_ACK_MS);
-}
-
 function renderSetup() {
-  if (ui.soilw) return renderSoil();
   if (ui.leafw) return renderCalibration();
   if (ui.sched) return renderSched();
   if (ui.mapw) return renderMap();
@@ -1763,7 +1562,7 @@ function suggestGrid(n, w, d) {
   return best;
 }
 const wizLayout = (w) => ({ w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols });
-/* Soil probes go in a unit. Environment sensors go on a unit or in the aisle between two rows. */
+/* Environment sensors go on a unit or in the aisle between two rows. */
 function allowed(s, L, r, c) {
   if (r < 0 || c < 0 || r > L.rows - 1 || c > L.cols - 1) return false;
   return s.kind === "env" && !Number.isInteger(r) ? true : planted(L, r, c);
@@ -1802,16 +1601,16 @@ function createZone(w) {
 function removeRows(z) {
   const ctl = devices.filter((d) => d.ctl && d.zones.includes(z.id)), alone = ctl.filter((d) => d.zones.length === 1), shared = ctl.filter((d) => d.zones.length > 1);
   const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
-  const offsets = z.sensors.filter((s) => s.kind === "env" && !hasLeafEntity(s) && s.leaf !== undefined), runs = Object.values(soilRuns).filter((r) => r.id === z.id && soilBusy(r));
+  const offsets = z.sensors.filter((s) => s.kind === "env" && !hasLeafEntity(s) && s.leaf !== undefined);
   const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
-    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Soil calibration", runs.length && `${runs.map((r) => cProbe(r).name).join(", ")} part way through`]].filter(([, text]) => text);
+    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
   ui.guard = { action: () => removeZone(id), title: `Remove ${z.name}?`, text: "This removes the zone from Environment Control and can't be undone. Nothing in Home Assistant changes.",
-    rows: removeRows(z), note: "Its sensors and devices can be mapped to another zone. Anything set on a board or probe stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
+    rows: removeRows(z), note: "Its sensors and devices can be mapped to another zone. Anything set on a board stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
   renderModal();
 }
 function removeZone(id) {
@@ -1819,7 +1618,6 @@ function removeZone(id) {
   zones.splice(zones.indexOf(z), 1);
   for (const s of mapped) if (!catalog().some((x) => x.id === s.id)) EXTRA_SENSORS.push({ ...s, pos: null, avg: true, leaf: undefined, leafUnused: false });
   for (const d of devices) d.zones = d.zones.filter((x) => x !== id);
-  for (const r of Object.values(soilRuns)) if (r.id === id) delete soilRuns[r.probe];
   delete ACTIVITY[id]; delete LIGHTS[id];
   if (ui.zone === id) ui.zone = zones.length ? zones[0].id : null;
   render();
@@ -1854,11 +1652,10 @@ function renderWizard() {
         spots += `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${x}" cy="${y}" r="20" fill="transparent"/><path d="M${x - 7} ${y}h14M${x} ${y - 7}v14" stroke="var(--primary)" stroke-width="2"/></g>`;
       }
     }
-    const attrsFor = (s) => s.kind === "soil" && sel && sel.kind === "env" ? 'pointer-events="none"' : `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
+    const attrsFor = (s) => `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
     const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${lost.includes(s) ? '<span class="pill high">Needs placing</span>' : `<span class="small muted">${esc(posText(s.pos, L))}</span>`}</button>`).join("");
-    const prompt = !sel ? "Pick a sensor." : sel.kind === "soil" ? `Tap the unit ${esc(sel.name)} is in.` : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
-    const height = !sel ? "" : sel.kind === "soil" ? `<span class="small muted">Always at substrate height</span>` :
-      `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
+    const prompt = !sel ? "Pick a sensor." : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
+    const height = !sel ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
     body = !w.sensors.length ? `<div class="notice"><strong>No sensors to place yet</strong><span>Apply this, then Map devices picks ${esc(called)}'s sensors from Home Assistant and brings you back here to place them.</span></div>
       <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(L, g)}</svg></div>` : `<div class="sensor-list">${list}</div><div class="now"><strong>${prompt}</strong></div>
       <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, (s) => s.short, attrsFor, w.pick)}</svg></div>
@@ -1916,13 +1713,6 @@ function saveVpd(v) {
   }
   ui.vpdw = null; ui.screen = "zone"; ui.zone = z.id; render();
 }
-const SOIL_VALUE = { fs: "Full saturation", fc: "Field capacity" };
-function soilDraft(c) {
-  const s = cProbe(c), z = zoneById(c.id), sends = c.step === 4 && c.vals ? cSends(c, s) : [];
-  const items = sends.map(([k, , live]) => ({ label: `${s.name} ${SOIL_VALUE[k].toLowerCase()}`, before: `${live.toFixed(1)}%`, after: `${c.vals[k].toFixed(1)}%` }));
-  const vwc = sends.some(([k]) => k === "fs") ? `${cPreview(c, s, "fs")} ` : "";
-  return { zone: z.name, items, skipped: [], bar: false, busy: !!c.sending, blocked: "", note: `${vwc}This changes on the probe, and anything reading normalised VWC, like an irrigation controller, follows straight away.`, apply: (done) => saveSoil(c, done) };
-}
 function mapDraft(m) {
   const z = zoneById(m.id), [items, add] = changeList(), yes = (on, a, b) => (on ? a : b), names = (list) => [...list].sort().join(", ") || "None";
   for (const s of catalog()) {
@@ -1942,7 +1732,7 @@ function mapDraft(m) {
   add("Day and night", zonePeriod(z), periodSummary(m.period, z, fixed ? m.fixedOn : hhmm(z.dayAt), fixed ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule));
   if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
-  for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z, c === "soil" ? "moisture" : "temperature")], METHODS[m.combine[c]]);
+  for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
   return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved in this mock."); done(); } };
 }
 function finishMap(m, said) {
@@ -1969,9 +1759,8 @@ function saveWizard(w, said) {
   if (!z.sensors.length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return; }
   ui.screen = "zone"; toast(said); render();
 }
-/* The soil wizard's work is kept in its run, so a tab can leave it without losing anything. */
 const openDrafts = () => [ui.leafw && leafDraft(ui.leafw), ui.sched && schedDraft(ui.sched), ui.mapw && mapDraft(ui.mapw), ui.vpdw && vpdDraft(ui.vpdw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
-const topDraft = () => (ui.soilw ? soilDraft(ui.soilw) : ui.leafw ? leafDraft(ui.leafw) : ui.sched ? schedDraft(ui.sched) : ui.mapw ? mapDraft(ui.mapw) : ui.vpdw ? vpdDraft(ui.vpdw) : ui.wiz ? wizDraft(ui.wiz) : null);
+const topDraft = () => (ui.leafw ? leafDraft(ui.leafw) : ui.sched ? schedDraft(ui.sched) : ui.mapw ? mapDraft(ui.mapw) : ui.vpdw ? vpdDraft(ui.vpdw) : ui.wiz ? wizDraft(ui.wiz) : null);
 const draftCount = (d) => d.items.length + d.skipped.length;
 /* Updates in place: a tap that blurs a box syncs here, and replacing the button under it would lose the click. */
 function draftSync() {
@@ -2059,7 +1848,6 @@ document.addEventListener("click", (e) => {
   let el;
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();
-  if (ui.soilw && q("button")) cCommitActive();
   if (ui.sched && q("button")) sCommitActive();
   /* iOS can leave a box focused when a button is tapped, so its change event never comes. Commit it before acting on the button. */
   if (ui.vpdw && q("button")) vCommitActive();
@@ -2076,7 +1864,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
-    guarded(() => { ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.soilw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    guarded(() => { ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
     return;
   }
   if ((el = q("[data-metric]"))) { ui.metric = el.dataset.metric; render(); return; }
@@ -2094,31 +1882,6 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-mapw]"))) { const id = el.dataset.mapw; guarded(() => { openMap(id); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []); return; }
   if (q("[data-addzone]")) { ui.screen = "setup"; openNewZone(); render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-rmzone]"))) { askRemoveZone(el.dataset.rmzone); return; }
-  const c = ui.soilw;
-  if (c) {
-    const step = (n) => { c.step = n; render(); window.scrollTo(0, 0); };
-    if (q(".lcell")) { vReveal(); return; }
-    if ((el = q("[data-cfix]"))) { jumpTo(`cin-${el.dataset.cfix}`); return; }
-    if (q("[data-cstart]")) { c.fsRun = { stage: "recording" }; render(); return; }
-    if (q("[data-cfinish]")) { const pts = soilCurve(cProbe(c)); c.fsRun = { stage: "done", pts, result: soilCeiling(pts) }; render(); window.scrollTo(0, 0); return; }
-    if (q("[data-cagain]")) { c.fsRun = { stage: "ready" }; render(); return; }
-    if (q("[data-cskipfs]")) { c.fsRun = { stage: "ready" }; step(3); return; }
-    if (q("[data-cnextfs]")) { if (c.fcRun.stage === "ready") c.fcRun = { stage: "draining" }; step(3); return; }
-    if (q("[data-cdrain]")) { c.fcRun = { stage: "draining" }; render(); return; }
-    if (q("[data-cjump]")) { c.fcRun = { stage: "done", value: cProbe(c).sampleFc ?? Number((cProbe(c).sampleCeil - 14.2).toFixed(1)), held: SOIL_HOLD_MIN + 2 }; render(); return; }
-    if (q("[data-cskipfc]")) { c.fcRun = { stage: "ready" }; cToCheck(c); render(); window.scrollTo(0, 0); return; }
-    if (q("[data-cnextfc]")) { cToCheck(c); render(); window.scrollTo(0, 0); return; }
-    if (q("[data-cback]")) { step(c.step - 1); return; }
-    if (q("[data-cexit]")) {
-      const quit = () => { delete soilRuns[c.probe]; leaveSoil(); };
-      /* A flood can't be run again on a whim, so its readings get the same question as a typed value. */
-      if (c.fsRun.stage !== "ready" || c.fcRun.stage !== "ready") guarded(quit, [], "Discard this calibration?", `The readings taken for ${cProbe(c).name} so far go with it.`);
-      else quit();
-      return;
-    }
-    if (q("[data-csave]")) { if (!cProblems(c).length) openReview(); return; }
-    return;
-  }
   if ((el = q("[data-calw]"))) {
     if (ui.vpdw) vCommitActive();
     openCalibration(el.dataset.calw); render();
@@ -2135,7 +1898,6 @@ document.addEventListener("click", (e) => {
   const l = ui.leafw;
   if (l) {
     if (q(".lcell")) { vReveal(); return; }
-    if ((el = q("[data-cprobe]"))) { openSoil(l.id, el.dataset.cprobe); render(); window.scrollTo(0, 0); return; }
     if ((el = q("[data-lfix]"))) { jumpTo(`lin-${el.dataset.lfix}`); return; }
     if ((el = q("[data-lbasis]"))) { l.basis = el.dataset.lbasis; lSync(); return; }
     if ((el = q("[data-ldir]"))) { const [id, dir] = el.dataset.ldir.split(":"); l.rows[id].dir = Number(dir); lSync(); return; }
@@ -2182,8 +1944,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-spot]"))) {
     const s = w.sensors.find((x) => x.id === w.pick); if (!s) return;
     s.pos = el.dataset.spot.split(",").map(Number);
-    /* Stay on an environment sensor, because its height is the next thing to set. */
-    if (s.kind === "soil") { const next = stranded(w)[0]; if (next) w.pick = next.id; }
+    /* Stay on the sensor, because its height is the next thing to set. */
     render(); return;
   }
   if ((el = q("[data-wiz]"))) {
@@ -2206,11 +1967,6 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.target.value = ui.sched.vals[e.target.dataset.sin]; e.target.blur(); }
     return;
   }
-  if (ui.soilw && e.target.dataset && e.target.dataset.cin) {
-    if (e.key === "Enter") { cCommit(e.target); e.target.blur(); }
-    if (e.key === "Escape") { e.target.value = ui.soilw.vals[e.target.dataset.cin].toFixed(1); e.target.blur(); }
-    return;
-  }
   if (ui.leafw && e.target.dataset && e.target.dataset.lin) {
     if (e.key === "Enter") { lCommit(e.target); e.target.blur(); }
     if (e.key === "Escape") { e.target.value = ui.leafw.rows[e.target.dataset.lin].mag.toFixed(1); e.target.blur(); }
@@ -2231,8 +1987,7 @@ document.addEventListener("focusin", (e) => {
   if (ui.wiz && e.target.dataset && e.target.dataset.wbox) boxFocused(e.target, () => {});
   if (ui.leafw && e.target.dataset && e.target.dataset.lin) boxFocused(e.target, () => {});
   if (ui.sched && typedBox(e.target)) boxFocused(e.target, () => {});
-  if (ui.soilw && e.target.dataset && e.target.dataset.cin) boxFocused(e.target, () => {});
-  else if (ui.vpdw && e.target.dataset && e.target.dataset.vin) vSelect(e.target);
+  if (ui.vpdw && e.target.dataset && e.target.dataset.vin) vSelect(e.target);
 });
 /* Dropping the keyboard room shortens the page, so doing it on finger down would slide the tapped button away before the tap ends. */
 let pressing = false;
@@ -2245,7 +2000,6 @@ document.addEventListener("focusout", (e) => {
 document.addEventListener("change", (e) => {
   if (e.target.dataset.vin) { vCommit(e.target); return; }
   if (e.target.dataset.lin) { lCommit(e.target); return; }
-  if (e.target.dataset.cin) { cCommit(e.target); return; }
   if (e.target.dataset.sin) { sCommit(e.target); return; }
   const m = ui.mapw;
   if (m) {

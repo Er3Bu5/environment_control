@@ -120,13 +120,8 @@ if (process.env.SMOKE) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
-  for (const id of ["g-s1", "g-s2", "g-s3"]) {
-    const r = await ev(`(()=>{const s=zones[0].sensors.find(x=>x.id==="${id}"),r=soilCeiling(soilCurve(s));return {value:r&&r.value,count:r&&r.count,trusted:r&&r.trusted,shelf:r&&r.shelf&&r.shelf.level,fs:s.fsLive}})()`);
-    console.log("SOIL", id, JSON.stringify(r));
-    check(`${id}: the replayed rise gives a figure`, r.value !== null, r);
-  }
-  await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration"); await go(`document.querySelector('[data-cprobe="g-s1"]').click()`); await go(`document.querySelector("[data-cstart]").click()`); await go(`document.querySelector("[data-cfinish]").click()`); await clean("Soil result"); await shot("real-soil");
-  await go(`ui.soilw=null;ui.leafw=null;ui.screen="setup";render()`);
+  await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
+  await go(`ui.leafw=null;ui.screen="setup";render()`);
   check("Setup: Sensor Calibration sits before Targets in every zone", (await ev(`["garden","veg","nursery"].every(z=>document.querySelector('[data-calw="'+z+'"]').nextElementSibling.dataset.vpd===z)`)) === true);
   for (const z of ["veg", "nursery"]) { await go(`document.querySelector('[data-calw="${z}"]').click()`); await clean(`${z} calibration`); await go(`(document.querySelector("[data-lexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); }
   await go(`document.querySelector("[data-addzone]").click()`); await go(`ui.wiz.name="Flower 2";render()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector('[data-wiz="next"]').click()`); await go(`document.querySelector("[data-rapply]").click()`); await clean("New zone map");
@@ -320,7 +315,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 }
 // ---------- Controls
 const goTab = async (name) => { await ev(`[...document.querySelectorAll("#tabs button")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
-const reset = () => ev(`ui.review=null;ui.guard=null;renderModal();ui.soilw=null;ui.leafw=null;ui.sched=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
+const reset = () => ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.sched=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
 const groupNames = () => ev(`[...document.querySelectorAll("[data-cgroup] .dev-name span:first-child")].map(e=>e.textContent)`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 await phone(390, 844); await reset(); await goTab("Garden");
@@ -372,7 +367,7 @@ const board = (id) => ev(`zones.flatMap(z=>z.sensors).find(s=>s.id==="${id}").le
 const row = (id) => ev(`ui.leafw.rows["${id}"]`);
 const saved = (id) => ev(`leafOf(zones.flatMap(z=>z.sensors).find(s=>s.id==="${id}"))`);
 await openL();
-check("Leaf: every environment sensor listed, soil left out", same(await ev(`[...document.querySelectorAll(".lrow-top strong")].map(e=>e.textContent)`), ["Environment left", "Environment right", "Environment under"]), await ev(`[...document.querySelectorAll(".lrow-top strong")].map(e=>e.textContent)`));
+check("Leaf: every environment sensor listed", same(await ev(`[...document.querySelectorAll(".lrow-top strong")].map(e=>e.textContent)`), ["Environment left", "Environment right", "Environment under"]), await ev(`[...document.querySelectorAll(".lrow-top strong")].map(e=>e.textContent)`));
 check("Leaf: a board shows where its offset comes from", (await ev(`document.querySelector("#lr-g-left").textContent`)).includes("number.environment_left_leaf_temperature_offset"));
 check("Leaf: a board's offset is a box on the same screen as the rest", (await ev(`["g-left","g-right","g-under"].every(i=>!!document.querySelector("#lin-"+i))`)) === true);
 check("Leaf: there is one place for an offset, no source choice", (await ev(`!document.querySelector("[data-lsource]") && !document.querySelector("#main").textContent.includes("Set here")`)) === true);
@@ -476,14 +471,14 @@ check("Leaf: leaving by a tab drops the screen and saves nothing", (await ev(`!u
 await ev(`document.activeElement&&document.activeElement.blur()`);
 
 // Sensor Calibration comes before Targets and holds the leaf temperature offset
-const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.soilw=null;ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
+const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
 const setupButtons = (zone) => ev(`[...document.querySelector('[data-mapw="${zone}"]').parentElement.children].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
 await setupNow();
 check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons("garden"));
-check("Order: and it's there for zones with no soil probes", same(await setupButtons("veg"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]) && same(await setupButtons("nursery"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons("veg"));
+check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]) && same(await setupButtons("nursery"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons("veg"));
 await calibrate();
-check("Order: one page, leaf temperature offset first, then soil", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset", "Soil probes"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
+check("Order: one page, leaf temperature offset only, no soil until irrigation", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
 check("Order: the page is called Sensor Calibration", (await ev(`document.querySelector("#main h1").textContent`)) === "Sensor Calibration: Garden");
 await calibrate("veg");
 check("Order: a zone with no probes shows only the offsets", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset"]));
@@ -621,32 +616,25 @@ const mChange = async (sel, v) => { await ev(`(()=>{const e=document.querySelect
 const slotNames = (id) => ev(`[...document.querySelectorAll("#ms-${id} .ent > span")].map(e=>e.textContent)`);
 const combineSel = () => ev(`[...document.querySelectorAll("[data-mcombine]")].map(e=>e.dataset.mcombine)`);
 await mOpen("garden");
-check("Map: each sensor says its class, detected from the device", (await ev(`document.querySelector('[data-mclass="g-left"]').value==="env" && document.querySelector('[data-mclass="g-s1"]').value==="soil" && document.querySelector('[data-mclass="g-s1"]').selectedOptions[0].textContent==="Soil (detected)"`)) === true);
-check("Map: an environment sensor is asked for temperature, humidity, VPD, light and leaf temperature offset", same(await slotNames("g-left"), ["Class", "Temperature", "Humidity", "VPD", "Light", "Leaf temperature offset"]), await slotNames("g-left"));
-check("Map: a soil sensor is asked for moisture, EC, temperature, full saturation and field capacity", same(await slotNames("g-s1"), ["Class", "Moisture", "EC", "Temperature", "Full saturation", "Field capacity"]), await slotNames("g-s1"));
-check("Map: every sensor is in the average until excluded", (await ev(`[...document.querySelectorAll("[data-mavg]")].every(e=>!e.checked) && document.querySelectorAll("[data-mavg]").length===6 && document.querySelector('#ms-g-left .inavg').textContent.trim()==="Exclude from average"`)) === true);
-check("Map: one combine choice per class, for each class with two or more", same(await combineSel(), ["env", "soil"]), await combineSel());
-await mChange('[data-mavg="g-right"]', true); await mChange('[data-mavg="g-under"]', true);
-check("Map: one environment sensor left counted hides its combine choice", same(await combineSel(), ["soil"]), await combineSel());
-await mChange('[data-mavg="g-s2"]', true); await mChange('[data-mavg="g-s3"]', true);
-check("Map: and with one soil probe left there's nothing to combine", (await ev(`document.querySelectorAll(".combine").length`)) === 0);
-await mChange('[data-mavg="g-right"]', false); await mChange('[data-mavg="g-under"]', false); await mChange('[data-mavg="g-s2"]', false); await mChange('[data-mavg="g-s3"]', false);
-check("Map: unticking brings them back", same(await combineSel(), ["env", "soil"]), await combineSel());
-check("Map: the combine box counts each class", (await ev(`document.querySelector(".combine").textContent`)).includes("Environment, 3 sensors") && (await ev(`document.querySelector(".combine").textContent`)).includes("Soil, 3 sensors"));
-await mChange('[data-mclass="g-s1"]', "env");
-check("Map: a probe changed to environment offers its own temperature", (await ev(`[...document.querySelector('[data-mmetric="g-s1:temperature"]').options].some(o=>o.value==="sensor.soil_1_substrate_temperature")`)) === true, await slotNames("g-s1"));
-check("Map: and says what it hasn't got", (await ev(`document.querySelector('[data-mmetric="g-s1:humidity"]').selectedOptions[0].textContent`)) === "None found");
-check("Map: an environment sensor with no humidity stops Next", (await ev(`mapIssues(ui.mapw).some(i=>i.text==="Soil 1: an environment sensor needs humidity. Pick it, or change its class.") && document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`mapIssues(ui.mapw).map(i=>i.text)`));
-check("Map: the review lists a class change", (await ev(`mapDraft(ui.mapw).items.some(i=>i.label==="Soil 1 class"&&i.before==="Soil"&&i.after==="Environment")`)) === true);
-await mChange('[data-mclass="g-s1"]', "soil");
-check("Map: changing it back restores its picks and clears the problem", (await ev(`mapIssues(ui.mapw).filter(i=>i.step===1).length===0 && ui.mapw.choice["g-s1"].moisture==="sensor.soil_1_normalised_vwc"`)) === true, await ev(`[mapIssues(ui.mapw).map(i=>i.text),ui.mapw.choice["g-s1"]]`));
+check("Map: with only the Environment class, no class box is shown", (await ev(`document.querySelectorAll("[data-mclass]").length`)) === 0);
+check("Map: an environment sensor is asked for temperature, humidity, VPD, light and leaf temperature offset", same(await slotNames("g-left"), ["Temperature", "Humidity", "VPD", "Light", "Leaf temperature offset"]), await slotNames("g-left"));
+check("Map: no soil probes offered until irrigation", (await ev(`catalog().every(s=>s.kind==="env") && !/soil/i.test(document.querySelector("#main").textContent)`)) === true);
+check("Map: every sensor is in the average until excluded", (await ev(`[...document.querySelectorAll("[data-mavg]")].every(e=>!e.checked) && document.querySelectorAll("[data-mavg]").length===3 && document.querySelector('#ms-g-left .inavg').textContent.trim()==="Exclude from average"`)) === true);
+check("Map: one combine choice for the environment sensors", same(await combineSel(), ["env"]), await combineSel());
+await mChange('[data-mavg="g-right"]', true);
+check("Map: two still counted keeps the choice", same(await combineSel(), ["env"]) && (await ev(`document.querySelector(".combine").textContent`)).includes("Environment, 2 sensors"));
+await mChange('[data-mavg="g-under"]', true);
+check("Map: one left counted hides it", (await ev(`document.querySelectorAll(".combine").length`)) === 0);
+await mChange('[data-mavg="g-under"]', false);
 await ev(`document.querySelector('[data-msensor="x-pulse"]').click()`); await sleep(40);
 check("Map: a sensor with no offset entity keeps it in Environment Control", (await ev(`[...document.querySelector('[data-mmetric="x-pulse:leaf"]').options].map(o=>o.textContent).join("|")`)) === "None, kept in Environment Control");
+await mChange('[data-mmetric="x-pulse:humidity"]', "none");
+check("Map: an environment sensor with no humidity stops Next", (await ev(`mapIssues(ui.mapw).some(i=>i.text==="Air monitor: an environment sensor needs humidity. Pick it, or change its class.") && document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`mapIssues(ui.mapw).map(i=>i.text)`));
 await ev(`document.querySelector('[data-msensor="x-pulse"]').click()`); await sleep(40);
-await mChange('[data-mavg="g-right"]', true); await mChange("#map-c-env", "median");
+await mChange("#map-c-env", "median");
 check("Map: the review lists exclusion and method", (await ev(`(()=>{const it=mapDraft(ui.mapw).items;return it.some(i=>i.label==="Environment right average"&&i.after==="Excluded")&&it.some(i=>i.label==="Environment sensors combine by"&&i.before==="Average"&&i.after==="Median")})()`)) === true, await ev(`mapDraft(ui.mapw).items`));
 await ev(`saveMap(ui.mapw);ui.mapw=null;render()`);
-check("Map: saved, the zone combines by the class method", (await ev(`methodOf(zones[0],"humidity")==="median" && methodOf(zones[0],"light")==="median" && methodOf(zones[0],"moisture")==="mean"`)) === true);
+check("Map: saved, the zone combines by the environment method", (await ev(`methodOf(zones[0])==="median"`)) === true);
 check("Map: and the excluded sensor is out of the reading", (await ev(`zones[0].sensors.find(s=>s.id==="g-right").avg===false && Math.abs(zoneAverage(zones[0],"humidity")-combine("median",envOf(zones[0]).filter(s=>s.id!=="g-right").map(s=>s.h)))<1e-9`)) === true);
 await ev(`zones[0].sensors.find(s=>s.id==="g-right").avg=true;zones[0].combine=undefined;ui.screen="overview";render()`); await sleep(40);
 // ---------- Tiles: tracks in one row line up
@@ -690,115 +678,8 @@ await ev(`zones[1].sensors.forEach((s,i)=>{s.avg=window.__keep[i]});render()`);
 await shot("overview-light-graph");
 await phone(800, 1200); await sleep(60); await shot("overview-light-graph-foldable"); await phone(390, 844);
 
-// ---------- Soil calibration
-await phone(390, 844);
-const setupOnly = async () => { await ev(`ui.sched=null;ui.soilw=null;ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
+const setupOnly = async () => { await ev(`ui.sched=null;ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
 const cClick = async (sel) => { await ev(`document.querySelector('${sel}').click()`); await sleep(50); };
-const soil = (id) => ev(`zones[0].sensors.find(s=>s.id==="${id}")`);
-const toSoil = async (id) => { await setupOnly(); await cClick('[data-calw="garden"]'); await cClick(`[data-cprobe="${id}"]`); };
-await setupOnly();
-await cClick('[data-calw="garden"]');
-check("Soil: probes are listed on Sensor Calibration, and it says it never runs a pump", (await ev(`!ui.soilw && !!document.querySelector('[data-cprobe="g-s1"]') && document.querySelector("#main").textContent.includes("never runs a pump")`)) === true);
-check("Soil: a probe that isn't reporting can't be picked", (await ev(`document.querySelector('[data-cprobe="g-s2"]').disabled && document.querySelector("#main").textContent.includes("Not reporting")`)) === true);
-await cClick('[data-cprobe="g-s1"]');
-check("Soil: the wizard starts at full saturation", same(await ev(`[...document.querySelectorAll(".steps li")].map(e=>e.textContent)`), ["1. Full saturation", "2. Field capacity", "3. Check"]) && (await ev(`document.querySelector('.steps [aria-current]').textContent`)) === "1. Full saturation");
-check("Soil: the flood steps say to turn irrigation off", (await ev(`document.querySelector("#main").textContent`)).includes("Turn off any automatic irrigation"));
-check("Soil: a 1 s probe gets no rate warning", !(await ev(`document.querySelector("#main").textContent`)).includes("reports every"));
-await cClick("[data-cstart]");
-check("Soil: Start records", (await ev(`ui.soilw.fsRun.stage`)) === "recording");
-await cClick("[data-cfinish]");
-const ceil = await ev(`ui.soilw.fsRun.result`);
-check("Soil: full saturation is the ceiling", ceil.value === 92.6 && ceil.trusted === true, ceil);
-check("Soil: not the flat stretch below it", ceil.shelf && Math.abs(ceil.shelf.level - 91.5) < 0.05 && (await ev(`document.querySelector("#main").textContent`)).includes("isn't used"), ceil);
-check("Soil: the chart draws it", (await ev(`!!document.querySelector("#main .chart svg polyline")`)) === true);
-await cClick("[data-cnextfs]");
-check("Soil: field capacity starts waiting by itself after a flood", (await ev(`ui.soilw.step===3 && ui.soilw.fcRun.stage==="draining"`)) === true);
-await goTab("Overview"); await setupOnly(); await cClick('[data-calw="garden"]');
-check("Soil: leaving marks the probe as in progress", (await ev(`document.querySelector('[data-cprobe="g-s1"]').textContent`)) === "Continue" && (await ev(`document.querySelector("#cal-soil").textContent`)).includes("Waiting for field capacity"));
-check("Soil: other probes aren't touched by it", (await ev(`document.querySelector('[data-cprobe="g-s3"]').textContent`)) === "Calibrate");
-await cClick('[data-cprobe="g-s1"]');
-check("Soil: coming back picks up where it was", (await ev(`ui.soilw.step===3 && ui.soilw.fcRun.stage==="draining"`)) === true);
-await cClick("[data-cjump]");
-check("Soil: field capacity is read once it holds", (await ev(`ui.soilw.fcRun.value`)) === 78.4, await ev(`ui.soilw.fcRun`));
-await cClick("[data-cnextfc]");
-const beforeSave = await soil("g-s1");
-check("Soil: Check holds both results in boxes", (await ev(`document.querySelector("#cin-fs").value`)) === "92.6" && (await ev(`document.querySelector("#cin-fc").value`)) === "78.4");
-check("Soil: it previews what happens to normalised VWC", (await ev(`document.querySelector("#cp-fs").textContent`)).includes("56.6%"), await ev(`document.querySelector("#cp-fs").textContent`));
-check("Soil: it warns about what reads normalised VWC", (await ev(`document.querySelector("#main").textContent`)).includes("irrigation controller"));
-check("Soil: it reminds you to put the report rate back", (await ev(`document.querySelector("#main").textContent`)).includes("back to 10 s"));
-check("Soil: nothing has gone to the probe yet", (await ev(`soilSends.length`)) === 0 && beforeSave.fsLive === 90);
-await tap("#cin-fs"); await type("9.2"); await key("Enter", 13);
-check("Soil: a dropped digit is refused", (await ev(`document.querySelector("[data-csave]").disabled`)) === true && (await ev(`document.querySelector("#c-issues").textContent`)).includes("dropped digit"), await ev(`document.querySelector("#c-issues").textContent`));
-await tap("#c-issues .notice");
-check("Soil: Fix lands on the box", (await active()) === "cin-fs", await active());
-await type("92,6"); await key("Enter", 13);
-await tap("#cin-fc"); await type("95"); await key("Enter", 13);
-check("Soil: field capacity can't reach full saturation", (await ev(`document.querySelector("#c-issues").textContent`)).includes("below full saturation"), await ev(`document.querySelector("#c-issues").textContent`));
-await tap("#cin-fc"); await type(""); await ev(`document.activeElement.value=""`); await key("Enter", 13);
-check("Soil: blank keeps the old value", (await ev(`ui.soilw.vals.fc`)) === 95);
-await tap("#cin-fc"); await type("78.4"); await tap("#cin-fs");
-check("Soil: moving between boxes keeps focus", (await active()) === "cin-fs", await active());
-await key("Escape", 27);
-await cClick("[data-csave]"); await cClick("[data-rapply]");
-check("Soil: Save sends both to the probe", same(await ev(`soilSends.map(x=>x.entity_id+"="+x.value)`), ["number.soil_1_full_saturation=92.6", "number.soil_1_field_capacity=78.4"]), await ev(`soilSends`));
-check("Soil: not saved until the probe reports it", (await soil("g-s1")).fsLive === 90 && (await ev(`document.querySelector("#main").textContent`)).includes("Sending to the probe"));
-check("Soil: everything locks while waiting", (await ev(`document.querySelector("#cin-fs").disabled && document.querySelector("[data-csave]").disabled && document.querySelector("[data-cexit]").disabled`)) === true);
-await sleep(ACK);
-const afterSave = await soil("g-s1");
-check("Soil: the probe's report is what's stored", afterSave.fsLive === 92.6 && afterSave.fcLive === 78.4, afterSave);
-check("Soil: normalised VWC follows and raw doesn't", afterSave.vwc === 56.6 && Math.abs(afterSave.vwc * afterSave.fsLive - beforeSave.vwc * beforeSave.fsLive) < 5, afterSave);
-check("Soil: then it closes back to Sensor Calibration and says so", (await ev(`!ui.soilw && !soilRuns["g-s1"] && !!document.querySelector("#cal-soil")`)) === true && (await ev(`document.querySelector("#toast").textContent`)).includes("on the probe"));
-await ev(`soilSends.length=0`);
-await toSoil("g-s3");
-check("Soil: a slow probe is warned before flooding", (await ev(`document.querySelector("#main").textContent`)).includes("reports every 10 s"));
-await cClick("[data-cstart]"); await cClick("[data-cfinish]");
-check("Soil: too few readings near the peak says so", (await ev(`ui.soilw.fsRun.result.trusted`)) === false && (await ev(`document.querySelector("#main").textContent`)).includes("Too few readings close to the peak"), await ev(`ui.soilw.fsRun.result`));
-check("Soil: and a rough figure isn't dressed up as exact", (await ev(`document.querySelector("#main").textContent`)).includes("Rough figure") && !(await ev(`document.querySelector("#main").textContent`)).includes("within 0."));
-await cClick("[data-cagain]");
-check("Soil: Run again starts over", (await ev(`ui.soilw.fsRun.stage`)) === "ready");
-await cClick("[data-cskipfs]");
-check("Soil: skipping a flood doesn't start the wait", (await ev(`ui.soilw.step===3 && ui.soilw.fcRun.stage==="ready"`)) === true);
-await cClick("[data-cskipfc]");
-check("Soil: skipping both leaves nothing to save", (await ev(`ui.soilw.step===4 && document.querySelector("[data-csave]").disabled`)) === true);
-await tap("#cin-fc"); await type("74"); await key("Enter", 13);
-await ev(`zones[0].sensors.find(s=>s.id==="g-s3").calStuck=true`);
-await cClick("[data-csave]"); await cClick("[data-rapply]"); await sleep(GIVE_UP);
-check("Soil: only the changed value is sent", same(await ev(`soilSends.map(x=>x.entity_id+"="+x.value)`), ["number.soil_3_field_capacity=74"]), await ev(`soilSends`));
-check("Soil: no reply is never shown as saved", (await soil("g-s3")).fcLive === 72 && (await ev(`document.querySelector("#main").textContent`)).includes("Not confirmed. The probe still reports 72.0%"));
-check("Soil: the typed value stays to try again", (await ev(`document.querySelector("#cin-fc").value`)) === "74.0" && (await ev(`document.querySelector("[data-csave]").disabled`)) === false);
-check("Soil: the review says what wasn't confirmed", (await ev(`document.querySelector("#modal").textContent`)).includes("Field capacity: not confirmed. The probe still reports 72.0%"), await ev(`document.querySelector("#modal").textContent`));
-await ev(`zones[0].sensors.find(s=>s.id==="g-s3").calStuck=false`);
-await cClick("[data-rback]");
-await cClick("[data-cexit]"); await ev(`document.querySelector("[data-gdiscard]")?.click()`); await sleep(30);
-check("Soil: Cancel drops the run and changes nothing", (await ev(`!ui.soilw && !soilRuns["g-s3"] && !!document.querySelector("#cal-soil")`)) === true && (await soil("g-s3")).fcLive === 72);
-for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390, 844, "phone", KEYBOARD.portrait], [320, 640, "small phone", KEYBOARD.portrait], [844, 390, "landscape", KEYBOARD.landscape]]) {
-  await phone(w, h); await toSoil("g-s3"); await cClick("[data-cskipfs]"); await cClick("[data-cskipfc]"); await sleep(60);
-  const hidden = [];
-  for (const id of ["cin-fs", "cin-fc"]) {
-    await tap(`#${id}`); await sleep(420);
-    const r = await ev(`(()=>{const e=document.querySelector("#${id}").getBoundingClientRect(),bar=document.querySelector(".topbar"),head=getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0;return {top:e.top,bottom:e.bottom,head,h:innerHeight,active:document.activeElement.id}})()`);
-    const line = r.h * (1 - kb);
-    if (r.active !== id || r.top < r.head - 1 || r.bottom > line) hidden.push([id, Math.round(r.top), Math.round(r.bottom), "limit " + Math.round(line), r.active]);
-    await key("Escape", 27); await sleep(40);
-  }
-  check(`Soil ${name} ${w}x${h}: every box stays above the keyboard and below the header`, hidden.length === 0, hidden);
-  await cClick("[data-cexit]"); await ev(`document.querySelector("[data-gdiscard]")?.click()`); await sleep(30);
-}
-for (const [w, h] of [[390, 844], [320, 640]]) {
-  await phone(w, h); await setupOnly(); await cClick('[data-calw="garden"]');
-  const wide = [];
-  const look = async (n) => { if (!(await ev(`document.documentElement.scrollWidth<=innerWidth`))) wide.push(n); };
-  await look("probe"); await cClick('[data-cprobe="g-s3"]'); await look("flood"); await cClick("[data-cstart]"); await look("recording"); await cClick("[data-cfinish]"); await look("result");
-  if (w === 390) await shot("soil-result-slow");
-  await cClick("[data-cagain]"); await cClick("[data-cskipfs]"); await look("drain"); await cClick("[data-cskipfc]"); await look("check");
-  check(`Soil ${w}px: no step scrolls sideways`, wide.length === 0, wide);
-  if (w === 390) await shot("soil-check-phone");
-  await cClick("[data-cexit]"); await ev(`document.querySelector("[data-gdiscard]")?.click()`); await sleep(30);
-}
-await phone(390, 844); await toSoil("g-s1"); await cClick("[data-cstart]"); await cClick("[data-cfinish]"); await shot("soil-result-phone");
-await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await shot("soil-result-dark"); await send("Emulation.setEmulatedMedia", { features: [] });
-await cClick("[data-cexit]"); await ev(`document.querySelector("[data-gdiscard]")?.click()`); await sleep(30);
-await ev(`Object.assign(zones[0].sensors.find(s=>s.id==="g-s1"),{fsLive:90,fcLive:72,vwc:58.2});soilSends.length=0;ui.soilw=null;render()`);
 
 // ---------- Adding and naming a zone
 await phone(390, 844); await setupOnly();
@@ -885,7 +766,7 @@ const barOn = () => ev(`!document.querySelector("#draftbar").hidden`);
 const barText = () => ev(`document.querySelector("#draftbar").textContent`);
 const reviewBtn = () => ev(`document.querySelector("[data-dreview]").disabled`);
 const clickIt = async (sel) => { await ev(`document.querySelector(${JSON.stringify(sel)}).click()`); await sleep(50); };
-const openT = async (id) => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.soilw=null;ui.leafw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openVpd("${id}");render();window.scrollTo(0,0)`); await sleep(50); };
+const openT = async (id) => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openVpd("${id}");render();window.scrollTo(0,0)`); await sleep(50); };
 await ev(`leafSends.length=0;zones[0].sensors.forEach(s=>{delete s.leafStuck});zones[0].sensors.find(s=>s.id==="g-left").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-right").leafLive=-1;zones[0].sensors.find(s=>s.id==="g-under").leaf=-0.5;zones[0].leafBasis=undefined`);
 await openL();
 check("Confirm: no bar until something changes", (await barOn()) === false);
@@ -1015,21 +896,6 @@ await clickIt('[data-mstep="back"]');
 check("Map: Cancel asks once something changed", (await modalText()).includes("Discard unsaved changes?"), await modalText());
 await clickIt("[data-gdiscard]");
 check("Map: discarding keeps what was saved", (await ev(`!ui.mapw`)) === true && (await ev(`zones[1].linked`)) === wasLinked);
-
-await toSoil("g-s3"); await cClick("[data-cstart]"); await cClick("[data-cfinish]");
-await cClick("[data-cexit]");
-check("Soil: Cancel with readings asks", (await modalText()).includes("Discard this calibration?") && (await ev(`!!ui.soilw`)) === true, await modalText());
-await cClick("[data-gkeep]");
-check("Soil: Keep editing keeps the result", (await ev(`ui.soilw.fsRun.stage`)) === "done");
-await goTab("Overview"); await sleep(60);
-check("Soil: a tab keeps the run, so it doesn't ask", (await modalOpen()) === false && (await ev(`!!soilRuns["g-s3"]`)) === true);
-await ev(`delete soilRuns["g-s3"]`);
-await toSoil("g-s3"); await cClick("[data-cskipfs]"); await cClick("[data-cskipfc]"); await sleep(40);
-await ev(`ui.soilw.vals.fc=ui.soilw.vals.fc-2;render()`); await sleep(40);
-await cClick("[data-csave]");
-check("Soil: the review shows before and after", (await modalText()).includes("Soil 3 field capacity") && (await ev(`document.querySelectorAll("#review-items .review-row").length`)) === 1, await modalText());
-check("Soil: nothing's sent yet", (await ev(`ui.soilw.sending`)) === false);
-await cClick("[data-rback]"); await cClick("[data-cexit]"); await ev(`delete soilRuns["g-s3"]`);
 
 for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small phone"], [844, 390, "landscape"]]) {
   await phone(w, h); await openL(); await tap("#lin-g-left"); await type("1.6"); await key("Enter", 13); await sleep(100);
@@ -1328,14 +1194,14 @@ check("Remove: every zone has the button, last in its row", (await ev(`zones.eve
 const toRow = () => ev(`document.querySelector('[data-rmzone="garden"]').scrollIntoView({block:"center"})`);
 await toRow(); await shot("remove-setup-phone");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await setupNow(); await toRow(); await shot("remove-setup-desktop"); await phone(390, 844); await setupNow();
-await ev(`soilRuns["g-s1"]={id:"garden",step:2,probe:"g-s1",fsRun:{stage:"recording"},fcRun:{stage:"ready"},vals:null,status:{fs:"",fc:""},sending:false}`);
+
 await askRemove("garden");
 const askText = await dialog();
 check("Remove: it asks first, named after the zone", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Remove Garden?", askText);
 check("Remove: the dialog says it can't be undone and that HA doesn't change", askText.includes("can't be undone") && askText.includes("Nothing in Home Assistant changes"), askText);
 check("Remove: it names what goes", ["Placement", "Sensors", "Devices", "Targets", "Day and night"].every((w) => askText.includes(w)), askText);
 check("Remove: shared hardware is shown staying in its other zones", /\d+ stay in Veg and Nursery/.test(askText), askText);
-check("Remove: a soil run part way through is named", /Soil calibration.*part way through/.test(askText), askText);
+
 check("Remove: focus lands on the title, not the red button", (await ev(`document.activeElement.id`)) === "dlg-title", await ev(`document.activeElement.outerHTML.slice(0,60)`));
 check("Remove: the page behind is locked", (await ev(`document.querySelector("#main").inert`)) === true);
 check("Remove: nothing goes before confirming", same(await zoneIds(), startZones), await zoneIds());
@@ -1358,7 +1224,7 @@ const beforeHeater = await ev(`devices.find(d=>d.id==="heater").zones`);
 await ev(`ui.zone="garden"`); await askRemove("garden"); await confirmRemove(); await sleep(60);
 check("Remove: the zone goes", !(await zoneIds()).includes("garden"), await zoneIds());
 check("Remove: its tab goes", !(await ev(`[...document.querySelectorAll("[data-go=zone]")].some(b=>b.dataset.zone==="garden")`)));
-check("Remove: its activity, lights and soil runs go", (await ev(`ACTIVITY.garden===undefined && LIGHTS.garden===undefined && !soilRuns["g-s1"]`)) === true);
+check("Remove: its activity and lights go", (await ev(`ACTIVITY.garden===undefined && LIGHTS.garden===undefined`)) === true);
 check("Remove: no device still points at it", (await ev(`devices.every(d=>!d.zones.includes("garden"))`)) === true);
 check("Remove: shared hardware stays in its other zones", same(await ev(`devices.find(d=>d.id==="heater").zones`), beforeHeater.filter((z) => z !== "garden")), await ev(`devices.find(d=>d.id==="heater").zones`));
 check("Remove: the open zone moves to one that exists", (await ev(`!!zoneById(ui.zone)`)) === true, await ev(`ui.zone`));

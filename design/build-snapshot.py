@@ -76,28 +76,12 @@ def env(sid, name, short, slug, pos, level):
             "vpd": round(num(f"sensor.{slug}_vpd"), 3), "lux": round(num(f"sensor.{slug}_light"), 1), "link": "Ethernet",
             "leafEntity": f"number.{slug}_leaf_temperature_offset", "leafLive": num(f"number.{slug}_leaf_temperature_offset")}
 
-def soil(sid, name, i, pos):
-    slug = f"garden_soil_{i}"
-    raw = H["soil"][f"sensor.{slug}_substrate_humidity"]
-    pts = [(parse(t), float(v)) for t, v in raw if v not in ("unknown", "unavailable")]
-    start = pts[0][0]
-    peak = max(pts, key=lambda p: p[1])[0].astimezone(NZ)
-    return {"id": sid, "name": name, "short": name, "slug": slug, "kind": "soil", "pos": pos, "level": "substrate",
-            "vwc": round(num(f"sensor.{slug}_substrate_normalised_vwc"), 1), "raw": round(num(f"sensor.{slug}_substrate_humidity"), 1),
-            "ec": round(num(f"sensor.{slug}_substrate_pore_water_ec"), 2), "bulk": round(num(f"sensor.{slug}_substrate_bulk_ec"), 2),
-            "soilT": round(num(f"sensor.{slug}_substrate_temperature"), 1), "link": "Ethernet",
-            "fsEntity": f"number.{slug}_full_saturation", "fcEntity": f"number.{slug}_field_capacity",
-            "fsLive": num(f"number.{slug}_full_saturation"), "fcLive": num(f"number.{slug}_field_capacity"), "rateS": 10,
-            "trace": [[round((t - start).total_seconds()), v] for t, v in pts], "sampleFc": num(f"number.{slug}_field_capacity"),
-            "traceNote": f"The mock can't flood a unit, so this replays this morning's real rise around {peak:%H:%M} from Home Assistant."}
-
 zones = [
     {"id": "garden", "name": "Garden", "dayAt": toMin("input_datetime.garden_day_time"), "nightAt": toMin("input_datetime.garden_night_time"), "bands": bands("garden", "bulk"), "linked": True, "lightLimits": limits("garden"),
      "emerson": {"morning": num("input_number.emerson_effect_morning_extension"), "daylight": num("input_number.emerson_effect_daylight_time"), "evening": num("input_number.emerson_effect_evening_extension")},
      "layout": {"w": 2.4, "d": 1.2, "units": 12, "rows": 3, "cols": 4},
      "sensors": [env("g-left", "Environment left", "Env left", "garden_environment_left", [0.5, 0], "in"),
-                 env("g-right", "Environment right", "Env right", "garden_environment_right", [0.5, 3], "above"),
-                 soil("g-s1", "Soil 1", 1, [0, 1]), soil("g-s2", "Soil 2", 2, [2, 1]), soil("g-s3", "Soil 3", 3, [1, 2])]},
+                 env("g-right", "Environment right", "Env right", "garden_environment_right", [0.5, 3], "above")]},
     {"id": "veg", "name": "Veg", "dayAt": toMin("input_datetime.veg_day_time"), "nightAt": toMin("input_datetime.veg_night_time"), "bands": bands("veg", "veg"), "linked": True, "lightLimits": limits("veg"),
      "layout": {"w": 1.2, "d": 1.2, "units": 4, "rows": 2, "cols": 2},
      "sensors": [env("v-env", "Veg environment", "Veg env", "veg_environment", [0.5, 0.5], "above")]},
@@ -139,7 +123,7 @@ devices = [
     dimmer("lc-veg", "Veg Light Controller", "light.veg_light_controller", ["veg", "nursery"]),
     plug("lp-veg", "Veg Lights", "switch.veg_lights", ["veg", "nursery"]),
     board("b-left", "Garden Environment Left", ["garden"]), board("b-right", "Garden Environment Right", ["garden"]),
-    board("b-soil", "Soil bus", ["garden"]), board("b-veg", "Veg Environment", ["veg"]), board("b-nursery", "Nursery Environment", ["nursery"]),
+    board("b-veg", "Veg Environment", ["veg"]), board("b-nursery", "Nursery Environment", ["nursery"]),
     {"id": "pulse", "name": "Pulse Pro", "type": "Sensor", "integration": "pulselabs", "family": "Pulse", "link": "wifi", "source": "detected", "path": "Cloud", "hub": "", "zones": ["veg"], "state": "Online"},
     {"id": "vpd", "name": "Garden environment average VPD", "type": "Calculated", "integration": "template", "family": "Template", "link": "derived", "source": "detected", "path": "Local", "hub": "", "zones": ["garden"], "state": "Online"},
 ]
