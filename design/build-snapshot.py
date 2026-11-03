@@ -94,21 +94,23 @@ for z in zones:
     z["now"] = {"temperature": statistics.fmean(s["t"] for s in e), "humidity": statistics.fmean(s["h"] for s in e),
                 "vpd": statistics.fmean(s["vpd"] for s in e), "light": statistics.fmean(s["lux"] for s in e)}
 
+def is_day(z, minute):
+    d, n = z["dayAt"], z["nightAt"]
+    return d <= minute < n if d < n else minute >= d or minute < n
+word = lambda e: "On" if S[e]["state"] == "on" else "Off"
+
+# Devices: what the panel's backend would store, with what HA reports for each entity going to the fake HA's states.
 tuya = {"integration": "tuya_local", "family": "Tuya", "link": "wifi", "source": "detected", "path": "Local", "hub": ""}
-on = lambda e: S[e]["state"] == "on"
-word = lambda e: "On" if on(e) else "Off"
-hum = lambda e: S[e]["attrs"]
+esphome = {"integration": "esphome", "family": "ESPHome", "link": "ethernet", "source": "confirmed", "path": "Local", "hub": ""}
 d1, aux = "humidifier.garden_dehumidifier", "humidifier.auxiliary_dehumidifier"
-sw = lambda i, name, typ, ic, entity, zs: {"id": i, "name": name, "type": typ, "icon": ic, "ctl": "switch", **tuya, "zones": zs, "on": on(entity), "state": word(entity)}
-def dimmer(i, name, entity, zs):
-    level = S[entity]["attrs"].get("brightness")
-    pct = None if level is None else round(level / 255 * 100)
-    return {"id": i, "name": name, "type": "Light", "icon": "sun", "ctl": "dimmer", "integration": "esphome", "family": "ESPHome", "link": "ethernet", "source": "confirmed", "path": "Local", "hub": "", "zones": zs, "on": on(entity), "state": f"On, {pct}%" if on(entity) else "Off", "brightness": pct}
+ctl = lambda i, name, typ, ic, kind, entity, zs, base=tuya, **more: {"id": i, "name": name, "type": typ, "icon": ic, "ctl": kind, **base, "zones": zs, "entity": entity, **more}
+sw = lambda i, name, typ, ic, entity, zs: ctl(i, name, typ, ic, "switch", entity, zs)
+dimmer = lambda i, name, entity, zs: ctl(i, name, "Light", "sun", "dimmer", entity, zs, esphome)
 plug = lambda i, name, entity, zs: sw(i, name, "Light", "sun", entity, zs)
-board = lambda i, name, zs: {"id": i, "name": name, "type": "Sensor board", "integration": "esphome", "family": "ESPHome", "link": "ethernet", "source": "confirmed", "path": "Local", "hub": "", "zones": zs, "state": "Online"}
+board = lambda i, name, zs: {"id": i, "name": name, "type": "Sensor board", **esphome, "zones": zs, "state": "Online"}
 devices = [
-    {"id": "dehu", "name": "Dehumidifier", "type": "Dehumidifier", "icon": "drop", "ctl": "humidifier", **tuya, "zones": ["garden"], "on": on(d1), "state": f"{word(d1)}, {hum(d1)['mode'].capitalize()} mode", "mode": hum(d1)["mode"].capitalize(), "note": "Normal is not in this device's mode list", "setpoint": hum(d1)["humidity"], "unitRh": hum(d1)["current_humidity"]},
-    {"id": "aux", "name": "Auxiliary dehumidifier", "type": "Dehumidifier", "icon": "drop", "ctl": "humidifier", **tuya, "zones": ["garden", "veg", "nursery"], "on": on(aux), "state": f"{word(aux)}, {hum(aux)['mode'].capitalize()} mode", "mode": hum(aux)["mode"].capitalize(), "note": "Unit sensor, not room RH", "setpoint": hum(aux)["humidity"], "unitRh": hum(aux)["current_humidity"]},
+    ctl("dehu", "Dehumidifier", "Dehumidifier", "drop", "humidifier", d1, ["garden"]),
+    ctl("aux", "Auxiliary dehumidifier", "Dehumidifier", "drop", "humidifier", aux, ["garden", "veg", "nursery"], note="Unit sensor, not room RH"),
     sw("ac", "Air conditioner", "Air conditioner", "gauge", "switch.air_conditioner", ["garden"]),
     sw("heater", "Heater", "Heater", "thermo", "switch.heater_mains", ["garden", "veg", "nursery"]),
     sw("intake", "Intake fan", "Fan", "fan", "switch.garden_intake_fan", ["garden"]),
@@ -127,6 +129,22 @@ devices = [
     {"id": "pulse", "name": "Pulse Pro", "type": "Sensor", "integration": "pulselabs", "family": "Pulse", "link": "wifi", "source": "detected", "path": "Cloud", "hub": "", "zones": ["veg"], "state": "Online"},
     {"id": "vpd", "name": "Garden environment average VPD", "type": "Calculated", "integration": "template", "family": "Template", "link": "derived", "source": "detected", "path": "Local", "hub": "", "zones": ["garden"], "state": "Online"},
 ]
+def ha_state(entity):
+    if entity not in S:
+        sys.exit(f"{entity} is not in the snapshot")
+    attrs = {"friendly_name": S[entity]["name"] or entity, **S[entity]["attrs"]}
+    if entity.startswith("humidifier.") and "min_humidity" not in attrs:
+        sys.exit("the snapshot predates humidifier limits: run ha-snap/states.py again")
+    return {"state": S[entity]["state"], "attributes": attrs}
+STATES = {d["entity"]: ha_state(d["entity"]) for d in devices if "entity" in d}
+# What each failsafe holds a device to at the snapshot's time: the fans always on, the light plugs on their schedule.
+def schedule(z):
+    zone = next(x for x in zones if x["id"] == z)
+    return "on" if is_day(zone, NOW) else "off"
+FAILSAFES = {"switch.veg_oscillating_fans": {"want": "on", "kind": "failsafe", "by": "Veg fans auto on"},
+             **{f"switch.garden_lights_{p}": {"want": schedule("garden"), "kind": "watchdog", "by": "Garden lights recovery"} for p in ("f_l", "f_r", "b_l", "b_r")},
+             "switch.garden_lights_under_canopy": {"want": schedule("garden"), "kind": "watchdog", "by": "Garden lights under canopy recovery"},
+             "switch.veg_lights": {"want": schedule("veg"), "kind": "watchdog", "by": "Veg lights recovery"}}
 
 # Activity: the logbook, plus band crossings worked out from history, as the real panel would.
 LOG = {"switch.air_conditioner": ("Air conditioner", "device", ["garden"]), "switch.heater_mains": ("Heater", "device", ["garden", "veg", "nursery"]),
@@ -144,10 +162,6 @@ for e in H["logbook"]:
     who = e.get("context_name") or ("Manual" if e.get("context_user_id") else "Device")
     for z in zs:
         rows[z].append((when, [f"{when:%H:%M}", kind, f"{name} turned {e['state']}", who]))
-
-def is_day(z, minute):
-    d, n = z["dayAt"], z["nightAt"]
-    return d <= minute < n if d < n else minute >= d or minute < n
 
 midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
 for z in zones:
@@ -190,15 +204,18 @@ def sub(pattern, replacement):
 sub(r'const NOW = 14 \* 60 \+ 20;\nconst DATA_LABEL = .*?HISTORY_LONG = \{\};\n',
     f'const NOW = {NOW};\nconst DATA_LABEL = "HA snapshot", BASE_DATE = "{local:%Y-%m-%d}", HISTORY = {js(HISTORY)}, HISTORY_LONG = {js(HISTORY_LONG)};\n')
 sub(r'const helperOptions = .*?;\n', 'const helperOptions = (z) => z.id === "garden" ? ["garden", "veg"] : ["veg", "garden"];\n')
-sub(r'/\* Each limit is \[min, low, target, high, max\].*?(?=const tuya = )', f'/* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */\nconst zones = {js(zones)};\n')
-sub(r'const devices = \[.*?\n\];\n', f'const devices = {js(devices)};\n')
+sub(r'/\* Each limit is \[min, low, target, high, max\].*?(?=/\* Mapped devices and what)', f'/* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */\nconst zones = {js(zones)};\n')
 sub(r'const ACTIVITY = \{.*?\n\};\n', f'const ACTIVITY = {js(ACTIVITY)};\n')
 sub(r'const EXTRA_SENSORS = \[.*?\n\];\n', 'const EXTRA_SENSORS = [];\n')
 sub(r'const LIGHTS = \{.*?\n\};\n', f'const LIGHTS = {js(lights)};\n')
 sub(r'const ALL_ON_OFF = \[.*?\n\];\n', f'const ALL_ON_OFF = {js(onoff)};\n')
-if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, devices, ACTIVITY]), re.I):
+seed = {"config": {"devices": devices}, "states": STATES, "failsafes": FAILSAFES}
+if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed, ACTIVITY]), re.I):
     sys.exit("network identifier in the snapshot")
-open(f"{root}/environment-control-mock.html", "w", encoding="utf-8").write(src)
+open(f"{root}/snapshot-ui.html", "w", encoding="utf-8").write(src)
+open(f"{root}/snapshot-seed.js", "w", encoding="utf-8").write(f'"use strict";\n/* A real room, read from Home Assistant by build-snapshot.py. Not committed. */\nconst SEED = {js(seed)};\n')
+import subprocess
+subprocess.run([sys.executable, f"{root}/build-mock.py", root, "snapshot-ui.html", "snapshot-seed.js", "environment-control-mock.html"], check=True)
 
 expect = {"zones": {
     "garden": {"temperature": num("sensor.garden_environment_average_temperature"), "humidity": num("sensor.garden_environment_average_humidity"), "vpd": num("sensor.garden_environment_average_vpd"),
@@ -206,7 +223,8 @@ expect = {"zones": {
     "veg": {"temperature": num("sensor.veg_environment_air_temp"), "humidity": num("sensor.veg_environment_humidity"), "vpd": num("sensor.veg_environment_vpd"), "light": num("sensor.veg_environment_light")},
     "nursery": {"temperature": num("sensor.nursery_environment_air_temp"), "humidity": num("sensor.nursery_environment_humidity"), "vpd": num("sensor.nursery_environment_vpd"), "light": num("sensor.nursery_environment_light")}}}
 clock = lambda e: S[e]["state"][:5]
-expect["lights"] = {"overhead": round(S["light.garden_light_controller_overhead"]["attrs"]["brightness"] / 255 * 100)}
+level = S["light.garden_light_controller_overhead"]["attrs"].get("brightness")
+expect["lights"] = {"overhead": None if S["light.garden_light_controller_overhead"]["state"] != "on" or level is None else round(level / 255 * 100)}
 expect["sched"] = {z: {"day": clock(f"input_datetime.{h}_day_time"), "night": clock(f"input_datetime.{h}_night_time"), **limits(z)} for z, h in (("garden", "garden"), ("veg", "veg"), ("nursery", "veg"))}
 e = zones[0]["emerson"]; on, off = zones[0]["dayAt"], zones[0]["nightAt"]
 hm = lambda m: f"{int(m) // 60 % 24:02d}:{int(m) % 60:02d}"

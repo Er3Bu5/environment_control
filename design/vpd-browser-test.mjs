@@ -1,5 +1,5 @@
 // Drives the mock in headless Chromium over CDP with real taps and keystrokes. Touches nothing outside the scratchpad.
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, rmSync } from "node:fs";
 
 const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
@@ -19,7 +19,10 @@ ws.onmessage = (m) => {
   if (d.method === "Runtime.executionContextCreated" && d.params.context.auxData && d.params.context.auxData.isDefault) contexts.push(d.params.context);
   if (d.method === "Runtime.exceptionThrown") exceptions.push(d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text);
 };
-const send = (method, params = {}) => new Promise((r) => { const n = ++id; waiting.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
+const rawSend = (method, params = {}) => new Promise((r) => { const n = ++id; waiting.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
+/* Tests measure inside the frame, but pointer events land on the page, so they're shifted by where the panel sits under HA's bar. */
+let frameOffset = { x: 0, y: 0 };
+const send = (method, params = {}) => rawSend(method, method.startsWith("Input.") && "x" in params ? { ...params, x: params.x + frameOffset.x, y: params.y + frameOffset.y } : params);
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, returnByValue: true, ...(frameContext ? { contextId: frameContext } : {}) }); if (r.result.exceptionDetails) throw new Error(expression + " -> " + JSON.stringify(r.result.exceptionDetails.exception?.description)); return r.result.result.value; };
 let pass = 0, fail = 0;
 const check = (name, ok, got) => { if (ok) { pass++; console.log("PASS", name); } else { fail++; console.log("FAIL", name, JSON.stringify(got)); } };
@@ -44,15 +47,26 @@ const open = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();
 await send("Page.enable"); await send("Runtime.enable");
 await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await phone(390, 844);
-writeFileSync(`${dir}/mock-wrapped.html`, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${readFileSync(`${dir}/${process.env.MOCK_FILE || "environment-control-source.html"}`, "utf8")}</body></html>`);
-writeFileSync(`${dir}/mock-framed.html`, `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head><body><iframe sandbox="allow-scripts" src="mock-wrapped.html"></iframe></body></html>`);
-await send("Page.navigate", { url: `file://${dir}/mock-framed.html` });
+/* The page plays Home Assistant: the fake HA and the host element sit on it, and the UI runs in the host's sandboxed frame, as it will in HA. */
+execFileSync("python3", [`${dir}/build-mock.py`, dir, process.env.MOCK_FILE || "environment-control-source.html", process.env.SEED_FILE || "sample-seed.js", "mock-dev.html"]);
+writeFileSync(`${dir}/mock-page.html`, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${readFileSync(`${dir}/mock-dev.html`, "utf8")}</body></html>`);
+await send("Page.navigate", { url: `file://${dir}/mock-page.html` });
 await sleep(1200);
+let topContext;
 for (const c of contexts) {
   const r = await send("Runtime.evaluate", { expression: "window.self !== window.top", returnByValue: true, contextId: c.id });
   if (r.result && r.result.result && r.result.result.value === true) frameContext = c.id;
+  else if (r.result && r.result.result && r.result.result.value === false) topContext = c.id;
 }
+/* Runs on the page that plays HA, outside the sandbox. */
+const onHA = async (expression) => { const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, contextId: topContext }); if (r.result.exceptionDetails) throw new Error(expression + " -> " + JSON.stringify(r.result.exceptionDetails.exception?.description)); return r.result.result.value; };
+frameOffset = await onHA(`(()=>{const r=document.querySelector("environment-control-panel").getBoundingClientRect();return {x:r.left,y:r.top}})()`);
 console.log("IN FRAME:", await ev(`window.self !== window.top`), "origin:", await ev(`location.origin + " / " + self.origin`));
+/* The frame holds the whole UI, so it's where a bad dependency or an injected name would run. It must reach nothing. */
+const escaped = await (async () => { const r = await send("Runtime.evaluate", { expression: `(async()=>{const r={};try{parent.document.title;r.parent="read"}catch{r.parent="blocked"}try{localStorage.length;r.storage="read"}catch{r.storage="blocked"}try{document.cookie;r.cookie="read"}catch{r.cookie="blocked"}try{await fetch("data:text/plain,x");r.fetch="sent"}catch{r.fetch="blocked"}const s=document.createElement("script");s.textContent="window.__injected=1";document.head.append(s);await new Promise(r=>setTimeout(r,50));r.script=window.__injected?"ran":"blocked";return r})()`, returnByValue: true, awaitPromise: true, contextId: frameContext }); return r.result.result.value; })();
+check("Sandbox: the frame can't reach HA's page, storage or cookies, can't fetch, and an injected script doesn't run", JSON.stringify(escaped) === JSON.stringify({ parent: "blocked", storage: "blocked", cookie: "blocked", fetch: "blocked", script: "blocked" }), escaped);
+const sandboxed = await onHA(`(()=>{const p=document.querySelector("environment-control-panel");return {shadowClosed:p.shadowRoot===null,frames:document.querySelectorAll("iframe").length}})()`);
+check("Sandbox: the frame sits in the host's closed shadow root, out of the page's reach", sandboxed.shadowClosed && sandboxed.frames === 0, sandboxed);
 
 // A real-data build has no fixture to test against, so this checks it against what Home Assistant reported.
 if (process.env.SMOKE) {
@@ -93,7 +107,7 @@ if (process.env.SMOKE) {
   await go(`ui.metric="vpd";ui.range=24;render();document.querySelector('[data-cgroup="Lights"]').scrollIntoView({block:"start"})`); await shot("real-lights");
   const lit = await ev(`[...document.querySelectorAll('[data-cgroup="Lights"] .dev')].map(d=>d.textContent)`);
   check("Lights: Garden lists its controllers and plugs", lit.length === 8, lit);
-  check("Lights: the controllers show HA's brightness", lit.filter((x) => x.includes("Brightness")).length === 2 && lit[0].includes(`${want.lights.overhead}%`), lit[0]);
+  check("Lights: the controllers show HA's brightness", (await ev(`document.querySelectorAll('[data-cgroup="Lights"] input[type=range]').length`)) === 2 && lit[0].includes(want.lights.overhead === null ? "Off." : `On, ${want.lights.overhead}%`), lit[0]);
   for (const [id, want2] of Object.entries(want.sched)) {
     await go(`ui.screen="setup";render();document.querySelector('[data-schedw="${id}"]').click()`); await clean(`${id} Day and night`);
     const v = await ev(`ui.sched.vals`);
@@ -173,7 +187,7 @@ const outer = async (expression) => { const c = frameContext; frameContext = und
 for (const [w, h, name] of [[800, 1000, "foldable"], [390, 844, "phone"]]) {
   await phone(w, h); await open(); await sleep(60);
   await tap("#vin-humidity-1"); await sleep(40);
-  await outer(`document.querySelector("iframe").style.height="59%"`); await sleep(500);
+  await outer(`document.querySelector("environment-control-panel").style.bottom="41%"`); await sleep(500);
   const m = await ev(`(()=>{const b=document.querySelector("#vin-humidity-1").getBoundingClientRect(),c=document.querySelector("#vwrap").getBoundingClientRect(),bar=document.querySelector(".topbar");return {boxTop:b.top,boxBottom:b.bottom,h:innerHeight,chart:c.bottom-(getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0),active:document.activeElement.id}})()`);
   check(`resized host ${name}: box is pushed up to just above the keyboard`, m.boxBottom <= m.h && m.boxBottom > m.h - 90 && m.active === "vin-humidity-1", m);
   check(`resized host ${name}: chart stays in view`, m.chart > 40, m);
@@ -181,7 +195,7 @@ for (const [w, h, name] of [[800, 1000, "foldable"], [390, 844, "phone"]]) {
   const m2 = await ev(`(()=>{const b=document.querySelector("#vin-vpd-3").getBoundingClientRect();return {top:b.top,bottom:b.bottom,h:innerHeight,active:document.activeElement.id}})()`);
   check(`resized host ${name}: moving box to box keeps it on screen`, m2.bottom <= m2.h && m2.top > 0 && m2.active === "vin-vpd-3", m2);
   await key("Escape", 27);
-  await outer(`document.querySelector("iframe").style.height="100%"`); await sleep(120);
+  await outer(`document.querySelector("environment-control-panel").style.bottom=""`); await sleep(120);
 }
 
 await phone(390, 844); await open();
@@ -330,15 +344,59 @@ check("Controls: shared device names who shares it", (await ev(`[...document.que
 await goTab("Nursery");
 check("Controls: nursery devices", same(await groupNames(), ["Auxiliary dehumidifier", "Heater", "Oscillating fans", "Tent light controller", "Tent lights"]), await groupNames());
 await goTab("Garden");
-const stateBefore = await ev(`JSON.stringify(devices)`), lookBefore = await ev(`document.querySelector("#main").innerHTML`);
-await tap("[data-cgroup] .sw[data-preview]");
-check("Controls: a tap says nothing was sent", (await ev(`document.querySelector("#toast").textContent`)) === (await ev(`SENT`)));
-await ev(`document.querySelectorAll("[data-cgroup] [data-preview]").forEach(b=>b.click())`); await sleep(60);
-check("Controls: no tap changes any device state", (await ev(`JSON.stringify(devices)`)) === stateBefore);
-check("Controls: no tap changes how a control looks", (await ev(`document.querySelector("#main").innerHTML`)) === lookBefore);
-check("Controls: every device row is marked Preview", (await ev(`[...document.querySelectorAll("[data-cgroup] .dev")].every(d=>d.querySelector(".pill.preview"))`)) === true);
-const down = await ev(`(()=>{const d=[...document.querySelectorAll("[data-cgroup] .dev")].find(x=>x.textContent.includes("exhaust fan"));return {all:[...d.querySelectorAll(".mock")].every(b=>b.disabled),text:d.textContent.includes("Unavailable")}})()`);
+/* Controls go through the host to the fake Home Assistant, which reports a moment later, drops what it's told to and runs failsafes. */
+const evp = async (expression) => { const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, contextId: frameContext }); if (r.result.exceptionDetails) throw new Error(expression + " -> " + JSON.stringify(r.result.exceptionDetails.exception?.description)); return r.result.result.value; };
+const haCalls = () => onHA(`fakeHA.calls.map(c=>[c.domain+"."+c.service,c.data.entity_id,c.data.brightness_pct??c.data.mode??c.data.humidity??null])`);
+const devRow = (id) => ev(`(()=>{const r=document.querySelector('[data-devrow="${id}"]');if(!r)return null;const s=r.querySelector(".sw"),t=r.querySelector(".ctl-status");return {on:s.getAttribute("aria-checked")==="true",disabled:s.disabled,status:t?t.textContent:"",cls:t?t.className:"",text:r.textContent}})()`);
+const REPORT = 600 + 300, GIVE_UP_CTL = 4000 + 300;
+check("Controls: nothing is marked Preview", (await ev(`!document.querySelector("#controls .pill.preview, #controls [data-preview]")`)) === true);
+const before = (await haCalls()).length;
+await tap('[data-devrow="heater"] .sw');
+let calls = await haCalls(), heater = await devRow("heater");
+check("Controls: a tap reaches Home Assistant as one call on the mapped entity", calls.length === before + 1 && same(calls.at(-1), ["switch.turn_on", "switch.heater_mains", null]), calls.slice(before));
+check("Controls: it says sent, and the switch stays put until HA reports", heater.status.startsWith("Sent") && heater.on === false && heater.disabled === true, heater);
+await sleep(REPORT); heater = await devRow("heater");
+check("Controls: it moves once HA reports the heater on, and the note clears", heater.on === true && heater.status === "" && heater.text.includes("On."), heater);
+await onHA(`fakeHA.knobs.dropNext=true`); await tap('[data-devrow="heater"] .sw'); await sleep(GIVE_UP_CTL); heater = await devRow("heater");
+check("Controls: a dropped command is never shown as done", heater.on === true && heater.status === "Not confirmed. Heater still reports on. A Tuya plug can drop a command without saying, so try again." && heater.cls.includes("stuck"), heater);
+await tap('[data-devrow="heater"] .sw'); await sleep(REPORT); heater = await devRow("heater");
+check("Controls: trying again works and clears the warning", heater.on === false && heater.status === "", heater);
+await goTab("Overview");
+const onCount = await ev(`document.querySelector('.zone-card[data-zone="veg"]').textContent.match(/(\\d+) of (\\d+) devices on/).slice(1).join("/")`);
+await goTab("Veg"); await tap('[data-devrow="fans"] .sw'); await sleep(REPORT);
+check("Controls: the fans report off", (await devRow("fans")).on === false, await devRow("fans"));
+await sleep(1300); let fans = await devRow("fans");
+check("Controls: a failsafe putting it back is explained, not left looking broken", fans.on === true && fans.status.startsWith("Put back by Home Assistant") && fans.cls.includes("back"), fans);
+await tap('[data-devrow="lp-tent"] .sw'); await sleep(REPORT); await sleep(3300); const tent = await devRow("lp-tent");
+check("Controls: a light against its schedule is put back too", tent.on === false && tent.status.startsWith("Put back"), tent);
+await goTab("Overview");
+check("Controls: Overview's device count follows what HA reports", (await ev(`document.querySelector('.zone-card[data-zone="veg"]').textContent.match(/(\\d+) of (\\d+) devices on/).slice(1).join("/")`)) === onCount);
+await goTab("Garden");
+await ev(`(()=>{const r=document.querySelector('[data-devrow="lc-over"] input[type=range]');r.value=60;r.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(REPORT);
+check("Controls: brightness is sent as a percentage and shown once reported", same((await haCalls()).at(-1), ["light.turn_on", "light.garden_light_controller_overhead", 60]) && (await devRow("lc-over")).text.includes("On, 60%") && (await ev(`document.querySelector('[data-devrow="lc-over"] input[type=range]').value`)) === "60", (await devRow("lc-over")).text);
+const modes = await ev(`[...document.querySelectorAll('[data-devrow="dehu"] [data-act="mode"] option')].map(o=>o.value+(o.disabled?"!":"")+(o.selected?"*":""))`);
+check("Controls: the dehumidifier shows the mode HA reports, even one outside its list, and can't pick it", same(modes, ["normal!*", "sleep", "comfort", "eco", "boost"]), modes);
+await ev(`(()=>{const s=document.querySelector('[data-devrow="dehu"] [data-act="mode"]');s.value="eco";s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(REPORT);
+let dehu = await devRow("dehu");
+check("Controls: a mode change is sent and reported", same((await haCalls()).at(-1), ["humidifier.set_mode", "humidifier.garden_dehumidifier", "eco"]) && dehu.text.includes("On, Eco mode") && !dehu.text.includes("not in this device's mode list"), dehu.text);
+await ev(`(()=>{const s=document.querySelector('[data-devrow="dehu"] [data-act="humidity"]');s.value="50";s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(REPORT);
+check("Controls: a target humidity is sent and reported", same((await haCalls()).at(-1), ["humidifier.set_humidity", "humidifier.garden_dehumidifier", 50]) && (await ev(`document.querySelector('[data-devrow="dehu"] [data-act="humidity"]').value`)) === "50");
+const down = await ev(`(()=>{const d=document.querySelector('[data-devrow="acfan"]');return {all:[...d.querySelectorAll(".ctl")].every(b=>b.disabled),text:d.textContent.includes("Unavailable")}})()`);
 check("Controls: an unavailable device can't be tapped", down.all && down.text, down);
+await onHA(`fakeHA.offline("switch.heater_mains",true)`); await sleep(100);
+check("Controls: a device going offline in HA disables its control straight away", (await devRow("heater")).disabled === true && (await devRow("heater")).text.includes("Unavailable"), await devRow("heater"));
+await onHA(`fakeHA.offline("switch.heater_mains",false)`); await sleep(100);
+check("Controls: and coming back enables it", (await devRow("heater")).disabled === false, await devRow("heater"));
+/* What a compromised UI could try. The host looks everything up itself, so none of these reach HA. */
+const n1 = (await haCalls()).length;
+const refusals = await evp(`Promise.all([ask("device",{id:"nope",action:"turn_on"}),ask("device",{id:"lc-over",action:"brightness",value:150}),ask("device",{id:"dehu",action:"mode",value:"turbo"}),ask("device",{id:"heater",action:"open_valve"}),ask("device",{id:"acfan",action:"turn_on"}),ask("device",{id:"heater",action:"humidity",value:50})]).then(r=>r.map(x=>x.ok))`);
+check("Controls: the host refuses an unknown device, a value out of range, a mode it lacks, an unknown action, an unavailable device and a wrong-kind action", same(refusals, [false, false, false, false, false, false]) && (await haCalls()).length === n1, refusals);
+await evp(`ask("device",{id:"heater",action:"turn_on",entity_id:"switch.plug_7",service:"switch.turn_off"})`);
+check("Controls: an entity or service named by the frame is ignored", same((await haCalls()).at(-1), ["switch.turn_on", "switch.heater_mains", null]), (await haCalls()).at(-1));
+await sleep(REPORT);
+await evp(`(parent.postMessage({v:1,type:"call_service",domain:"switch",service:"turn_on",service_data:{entity_id:"switch.plug_7"}},"*"),new Promise(r=>setTimeout(r,200)))`);
+check("Controls: a message type the host doesn't know is dropped", (await haCalls()).at(-1)[1] === "switch.heater_mains" && (await onHA(`fakeHA.states["switch.plug_7"].state`)) === "off");
+await tap('[data-devrow="heater"] .sw'); await sleep(REPORT);
 await tap("#main .notice.fix");
 check("Controls: an unidentified plug's notice lands on its question", (await ev(`ui.screen==="setup" && !!document.querySelector("#task-plug")`)) === true && (await ev(`(()=>{const r=document.querySelector("#task-plug").getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()`)) === true);
 await ev(`document.querySelector('[data-role="plug"][data-val="Other"]').click()`); await sleep(50); await goTab("Garden");
@@ -1000,12 +1058,10 @@ await phone(390, 844); await ev(`ui.range=24;ui.metric="vpd";render();document.q
 // ---------- Lights in Controls
 await reset(); await goTab("Garden");
 check("Lights: last group, beside the light reading", (await ev(`[...document.querySelectorAll("[data-cgroup]")].at(-1).dataset.cgroup`)) === "Lights" && (await ev(`document.querySelector('[data-cgroup="Lights"] .ctl-reading').textContent`)).includes("lx"));
-check("Lights: a controller shows its brightness", (await ev(`[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][0].textContent`)).includes("Brightness 80%"));
-check("Lights: an off controller shows no stale brightness", await ev(`(()=>{ui.zone="veg";render();const t=[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][0].textContent;return t.includes("Brightness")&&!/Brightness \d/.test(t)&&t.includes("Off")})()`));
+check("Lights: a controller shows its brightness", (await ev(`[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][0].textContent`)).includes("On, 60%") && (await ev(`document.querySelector('[data-cgroup="Lights"] .dev input[type=range]').value`)) === "60");
+check("Lights: an off controller shows no stale brightness and no slider", await ev(`(()=>{ui.zone="veg";render();const d=[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][0];return !/\d%/.test(d.textContent)&&d.textContent.includes("Off")&&!!d.querySelector("input[type=range]")})()`));
 check("Lights: shared lights name who shares them", (await ev(`[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][1].textContent`)).includes("Shared with Nursery"));
 await ev(`ui.zone="garden";render()`); await sleep(40);
-await ev(`document.querySelector('[data-cgroup="Lights"] [data-preview]').click()`); await sleep(40);
-check("Lights: Preview like the rest, a tap sends nothing", (await ev(`document.querySelector("#toast").textContent`)) === (await ev(`SENT`)));
 await shot("lights-phone");
 await ev(`ui.screen="setup";render()`); await sleep(40);
 await ev(`document.querySelector('[data-role="plug"][data-val="Light"]').click()`); await sleep(40); await goTab("Garden");

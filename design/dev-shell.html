@@ -1,0 +1,71 @@
+<title>Environment Control</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* This page plays Home Assistant. Everything in the bar and the drawer is outside the panel's sandbox, the way HA's own chrome is. */
+:root { --bg: #FAFAFA; --card: #FFFFFF; --line: #E0E0E0; --fg: #212121; --muted: #727272; --primary: #03A9F4; --bar: #03A9F4; --on-bar: #FFFFFF; --warn: #EF6C00; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111111; --card: #1C1C1C; --line: #333333; --fg: #E1E1E1; --muted: #9E9E9E; --bar: #1C1C1C; --on-bar: #E1E1E1; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #111111; --card: #1C1C1C; --line: #333333; --fg: #E1E1E1; --muted: #9E9E9E; --bar: #1C1C1C; --on-bar: #E1E1E1; color-scheme: dark; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: Roboto, system-ui, sans-serif; }
+.habar { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--bar); color: var(--on-bar); font-size: 13px; box-sizing: border-box; z-index: 2; border-bottom: 1px solid var(--line); }
+.habar strong { font-weight: 500; }
+.habar span { opacity: .8; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.habar button { font: inherit; font-size: 12px; color: inherit; background: none; border: 1px solid currentColor; border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; bottom: 0; height: auto; }
+#drawer { position: fixed; top: 36px; right: 0; width: min(380px, 100vw); max-height: calc(100dvh - 36px); overflow: auto; box-sizing: border-box; padding: 12px 16px 16px; background: var(--card); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, .25); z-index: 3; font-size: 13px; }
+#drawer h2 { font-size: 14px; font-weight: 500; margin: 12px 0 6px; }
+#drawer h2:first-child { margin-top: 0; }
+#drawer p { margin: 4px 0; color: var(--muted); }
+#drawer .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+#drawer button, #drawer select { font: inherit; font-size: 13px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-height: 30px; }
+#drawer button[aria-pressed="true"] { border-color: var(--warn); color: var(--warn); }
+#calls { margin: 0; padding: 0; list-style: none; font-family: ui-monospace, monospace; font-size: 11px; }
+#calls li { padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+</style>
+<header class="habar"><strong>Home Assistant</strong><span>Mock on this device, nothing reaches a real home</span><button id="drawer-btn" aria-expanded="false" aria-controls="drawer">Test controls</button></header>
+<environment-control-panel></environment-control-panel>
+<div id="drawer" hidden>
+  <h2>Devices</h2>
+  <p>What a real room does to a command. Failsafes here act within seconds; in your room fans come back in 1 second and lights within 2 minutes.</p>
+  <div class="row"><button id="t-drop" aria-pressed="false">Drop the next command</button><button id="t-dropall" aria-pressed="false">Drop every command</button></div>
+  <div class="row"><select id="t-entity" aria-label="Device"></select><button id="t-offline">Take offline</button></div>
+  <div class="row"><label for="t-delay">Devices report after</label><select id="t-delay"><option value="600">0.6 s</option><option value="2500">2.5 s</option></select></div>
+  <h2>Sent to Home Assistant</h2>
+  <ul id="calls"><li>Nothing yet.</li></ul>
+</div>
+<script>/*SEED*/</script>
+<script>/*FAKE_HA*/</script>
+<script>/*HOST*/</script>
+<script>/*UI*/</script>
+<script>
+"use strict";
+const fakeHA = new FakeHA(SEED);
+const panel = document.querySelector("environment-control-panel");
+const pageDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+panel.ui = UI_HTML;
+fakeHA.darkMode = pageDark();
+fakeHA.attach(panel);
+new MutationObserver(() => fakeHA.setDark(pageDark())).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fakeHA.setDark(pageDark()));
+
+const $d = (s) => document.querySelector(s);
+const drawer = $d("#drawer"), drawerBtn = $d("#drawer-btn");
+drawerBtn.addEventListener("click", () => { drawer.hidden = !drawer.hidden; drawerBtn.setAttribute("aria-expanded", String(!drawer.hidden)); });
+const controllable = Object.keys(fakeHA.states).filter((e) => /^(switch|light|fan|humidifier)\./.test(e)).sort();
+const entitySelect = $d("#t-entity");
+entitySelect.innerHTML = controllable.map((e) => `<option value="${e}">${e}</option>`).join("");
+const offlineLabel = () => { $d("#t-offline").textContent = fakeHA.states[entitySelect.value].state === "unavailable" ? "Bring back" : "Take offline"; };
+entitySelect.addEventListener("change", offlineLabel); offlineLabel();
+$d("#t-offline").addEventListener("click", () => { const e = entitySelect.value; fakeHA.offline(e, fakeHA.states[e].state !== "unavailable"); offlineLabel(); });
+const dropLabels = () => { $d("#t-drop").setAttribute("aria-pressed", String(fakeHA.knobs.dropNext)); $d("#t-dropall").setAttribute("aria-pressed", String(fakeHA.knobs.dropAll)); };
+$d("#t-drop").addEventListener("click", () => { fakeHA.knobs.dropNext = !fakeHA.knobs.dropNext; dropLabels(); });
+$d("#t-dropall").addEventListener("click", () => { fakeHA.knobs.dropAll = !fakeHA.knobs.dropAll; dropLabels(); });
+$d("#t-delay").addEventListener("change", (e) => { fakeHA.knobs.reportMs = Number(e.target.value); });
+fakeHA.onCall(() => {
+  dropLabels();
+  const rows = fakeHA.calls.slice(-8).reverse().map((c) => {
+    const { entity_id, ...rest } = c.data, extra = Object.entries(rest).map(([k, v]) => `${k}=${v}`).join(" ");
+    return `<li>${c.domain}.${c.service} ${entity_id}${extra ? ` ${extra}` : ""}${c.dropped ? " (dropped)" : ""}</li>`;
+  });
+  $d("#calls").innerHTML = rows.join("");
+});
+</script>

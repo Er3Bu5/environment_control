@@ -150,14 +150,19 @@ table.cstats { font-size: 14px; font-variant-numeric: tabular-nums; }
 .dev-sub { font-size: 12px; color: var(--muted); }
 .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
 .devs { display: flex; flex-direction: column; gap: 8px; }
-.mock { border: 1px dashed var(--off); border-radius: 8px; background: none; padding: 3px 8px; font-size: 12px; color: var(--muted); min-height: 28px; }
-.mock:hover { color: var(--fg); border-color: var(--muted); }
-.sw { width: 46px; display: inline-flex; align-items: center; justify-content: flex-start; }
-.sw i { width: 16px; height: 16px; border-radius: 50%; background: var(--off); }
+.ctl { border: 1px solid var(--off); border-radius: 8px; background: var(--card); padding: 3px 8px; font: inherit; font-size: 13px; color: var(--fg); min-height: 32px; }
+.ctl:hover { border-color: var(--muted); }
+.sw { width: 50px; display: inline-flex; align-items: center; justify-content: flex-start; cursor: pointer; }
+.sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
 .sw.on { justify-content: flex-end; }
 .sw.on i { background: var(--primary); }
-.mock:disabled { opacity: .45; cursor: not-allowed; }
-.mock:disabled:hover { color: var(--muted); border-color: var(--off); }
+.ctl:disabled { opacity: .45; cursor: not-allowed; }
+.ctl-dim { display: inline-flex; align-items: center; }
+.ctl-dim input { width: 130px; accent-color: var(--primary); }
+.ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.ctl-status.stuck, .ctl-status.error { color: var(--crit); }
+.ctl-status.back { color: var(--warn); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .cgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 h3 { font-size: 15px; font-weight: 500; }
 .ctl-reading { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
@@ -362,29 +367,9 @@ const zones = [
     layout: { w: 1.2, d: 0.6, units: 8, rows: 2, cols: 4 },
     sensors: [{ id: "n-env", name: "Nursery environment", short: "Nursery env", kind: "env", pos: [0.5, 1.5], level: "in", t: 21.1, h: 66.0, link: "Ethernet", leafEntity: "number.nursery_environment_leaf_temperature_offset", leafLive: -1 }] },
 ];
-const tuya = { integration: "tuya_local", family: "Tuya", link: "wifi", source: "detected", path: "Local", hub: "" };
-const devices = [
-  { id: "dehu", name: "Dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden"], on: true, state: "On, Normal mode", mode: "Normal", note: "Normal is not in this device's mode list", setpoint: 55, unitRh: 56 },
-  { id: "aux", name: "Auxiliary dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden", "veg", "nursery"], on: true, state: "On, Laundry mode", mode: "Laundry", note: "Unit sensor, not room RH", setpoint: 50, unitRh: 41 },
-  { id: "ac", name: "Air conditioner", type: "Air conditioner", icon: "gauge", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
-  { id: "heater", name: "Heater", type: "Heater", icon: "thermo", ctl: "switch", ...tuya, zones: ["garden", "veg", "nursery"], on: false, state: "Off" },
-  { id: "intake", name: "Intake fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
-  { id: "acfan", name: "Air conditioner exhaust fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Unavailable" },
-  { id: "plug", name: "Plug 7", type: null, icon: "plug", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Off" },
-  { id: "fans", name: "Oscillating fans", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["veg", "nursery"], on: true, state: "On" },
-  { id: "lc-over", name: "Overhead light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], on: true, state: "On, 80%", brightness: 80 },
-  { id: "lp-1", name: "Overhead lights 1", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
-  { id: "lp-2", name: "Overhead lights 2", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
-  { id: "lc-under", name: "Under canopy light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], on: true, state: "On, 45%", brightness: 45 },
-  { id: "lp-red", name: "Red lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Off" },
-  { id: "lc-tent", name: "Tent light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["veg", "nursery"], on: false, state: "Off", brightness: null },
-  { id: "lp-tent", name: "Tent lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["veg", "nursery"], on: false, state: "Off" },
-  { id: "b-left", name: "Environment left", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], state: "Online" },
-  { id: "b-veg", name: "Veg environment", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "unknown", source: "unknown", path: "Local", hub: "", zones: ["veg"], state: "Online" },
-  { id: "pulse", name: "Air monitor", type: "Sensor", integration: "pulselabs", family: "Pulse", link: "wifi", source: "detected", path: "Cloud", hub: "", zones: ["veg"], state: "Stale, 9 min old", stale: true },
-  { id: "door", name: "Door contact", type: "Sensor", integration: "hue", family: "Hue", link: "zigbee", source: "detected", path: "Local", hub: "Hue Bridge", zones: ["garden"], state: "Online" },
-  { id: "vpd", name: "Average VPD", type: "Calculated", integration: "template", family: "Template", link: "derived", source: "detected", path: "Local", hub: "", zones: ["garden"], state: "Online" },
-];
+/* Mapped devices and what Home Assistant reports for them both arrive from the host. Nothing here is a device's state until HA says so. */
+let devices = [];
+const haStates = {};
 const LINK = { ethernet: "Ethernet", wifi: "WiFi", zigbee: "Zigbee", derived: "Calculated", unknown: "Not known yet" };
 const ACTIVITY = {
   garden: [
@@ -611,19 +596,100 @@ function sensorDetail(z) {
 }
 
 const isDown = (d) => d.state === "Unavailable";
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+/* A device's on, mode and brightness are only ever what Home Assistant last reported. */
+function deviceFromState(d) {
+  if (!d.entity) return;
+  const st = haStates[d.entity], a = (st && st.attributes) || {};
+  if (!st || st.state === "unavailable" || st.state === "unknown") { Object.assign(d, { on: false, state: "Unavailable", brightness: null }); return; }
+  d.on = st.state === "on";
+  if (d.ctl === "dimmer") {
+    d.brightness = d.on && a.brightness !== null && a.brightness !== undefined ? Math.round((a.brightness / 255) * 100) : null;
+    d.state = d.on ? (d.brightness === null ? "On" : `On, ${d.brightness}%`) : "Off";
+  } else if (d.ctl === "humidifier") {
+    Object.assign(d, { mode: cap(a.mode || ""), modes: a.available_modes || [], setpoint: a.humidity, unitRh: a.current_humidity, minRh: a.min_humidity, maxRh: a.max_humidity });
+    d.state = d.on ? `On, ${d.mode} mode` : "Off";
+    d.modeNote = a.mode && !d.modes.includes(a.mode) ? `${d.mode} is not in this device's mode list` : "";
+  } else d.state = d.on ? "On" : "Off";
+}
 function deviceHead(d, z, tag = "") {
   const others = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
   const shared = others.length ? ` Shared with ${others.join(" and ")}.` : "";
-  const unit = d.ctl === "humidifier" && !isDown(d) ? ` Unit RH ${d.unitRh}%. ${esc(d.note)}.` : "";
+  const notes = [d.modeNote, d.note].filter(Boolean).join(". ");
+  const unit = d.ctl === "humidifier" && !isDown(d) ? ` Unit RH ${d.unitRh}%.${notes ? ` ${esc(notes)}.` : ""}` : "";
   const state = isDown(d) ? `<span class="pill dead">${esc(d.state)}</span>` : `${esc(d.state)}.`;
   return `${ic(d.icon, d.on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(d.name)}</span>${tag}</div><div class="dev-sub">${state}${unit}${esc(shared)}</div><div class="dev-sub">${esc(d.family)}, ${esc(LINK[d.link])}</div></div>`;
 }
-/* Mock only. A control never moves on a tap: only a real state change would, and an unavailable device can't be tapped at all. */
+/* A control never moves on a tap. It moves when Home Assistant reports the device did, and says so when it doesn't:
+   a Tuya plug can drop a command without a word, and a failsafe can put a device straight back. */
+const CTL_GIVE_UP_MS = 4000, CTL_FLIP_MS = 150000;
+const ctlState = {};
+function wanted(d, want) {
+  const st = haStates[d.entity]; if (!st) return false;
+  const a = st.attributes || {};
+  if (want.state && st.state !== want.state) return false;
+  if (want.brightness !== undefined && Math.round(((a.brightness || 0) / 255) * 100) !== want.brightness) return false;
+  if (want.mode !== undefined && a.mode !== want.mode) return false;
+  if (want.humidity !== undefined && a.humidity !== want.humidity) return false;
+  return true;
+}
+function humidityChoices(d) {
+  const lo = Number.isFinite(d.minRh) ? d.minRh : 30, hi = Number.isFinite(d.maxRh) ? d.maxRh : 80, out = [];
+  for (let v = lo; v <= hi; v++) out.push(v);
+  if (Number.isFinite(d.setpoint) && !out.includes(d.setpoint)) out.push(d.setpoint);
+  return out.sort((a, b) => a - b);
+}
 function deviceRow(d, z) {
-  const down = isDown(d), act = down ? "disabled" : "data-preview", what = down ? "unavailable" : `preview only, currently ${d.on ? "on" : "off"}`;
-  const sw = `<button class="mock sw ${d.on ? "on" : ""}" ${act} aria-label="${esc(d.name)} switch, ${what}"><i></i></button>`;
-  const extra = d.ctl === "humidifier" ? `<button class="mock" ${act}>Mode ${esc(d.mode)}</button><button class="mock" ${act}>Target ${d.setpoint}%</button>` : d.ctl === "dimmer" ? `<button class="mock" ${act}>Brightness${d.brightness === null ? "" : ` ${d.brightness}%`}</button>` : "";
-  return `<div class="dev">${deviceHead(d, z, '<span class="pill preview">Preview</span>')}<div class="dev-ctl">${extra}${sw}</div></div>`;
+  const c = ctlState[d.id] || {}, off = isDown(d) || c.status === "sending" ? " disabled" : "", a = (haStates[d.entity] || {}).attributes || {};
+  const sw = `<button class="ctl sw ${d.on ? "on" : ""}" data-dev="${d.id}" data-act="${d.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${!!d.on}" aria-label="${esc(d.name)}"${off}><i></i></button>`;
+  let extra = "";
+  if (d.ctl === "humidifier" && !isDown(d)) {
+    const modes = a.mode && !d.modes.includes(a.mode) ? [a.mode, ...d.modes] : d.modes;
+    extra = `<select class="ctl" data-dev="${d.id}" data-act="mode" aria-label="${esc(d.name)} mode"${off}>${modes.map((m) => `<option value="${esc(m)}"${m === a.mode ? " selected" : ""}${d.modes.includes(m) ? "" : " disabled"}>${esc(cap(m))}</option>`).join("")}</select>` +
+      `<select class="ctl" data-dev="${d.id}" data-act="humidity" aria-label="${esc(d.name)} target humidity"${off}>${humidityChoices(d).map((v) => `<option value="${v}"${v === d.setpoint ? " selected" : ""}>Target ${v}%</option>`).join("")}</select>`;
+  } else if (d.ctl === "dimmer" && !isDown(d)) {
+    extra = `<label class="ctl-dim"><span class="sr">${esc(d.name)} brightness</span><input type="range" min="1" max="100" step="1" value="${d.brightness === null ? 100 : d.brightness}" data-dev="${d.id}" data-act="brightness"${off}></label>`;
+  }
+  const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
+  return `<div class="dev" data-devrow="${d.id}" data-zone="${z.id}">${deviceHead(d, z)}<div class="dev-ctl">${extra}${sw}</div>${line}</div>`;
+}
+/* Redraws the rows for one device and puts focus back where it was, so a state arriving mid-tap doesn't lose your place. */
+function redrawDevice(d) {
+  for (const el of document.querySelectorAll(`[data-devrow="${d.id}"]`)) {
+    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.act : null, z = zoneById(el.dataset.zone);
+    if (!z) continue;
+    el.outerHTML = deviceRow(d, z);
+    if (focused) { const again = document.querySelector(`[data-devrow="${d.id}"] [data-act="${focused}"]`) || document.querySelector(`[data-devrow="${d.id}"] [data-act^="turn_"]`); if (again && !again.disabled) again.focus(); }
+  }
+  if ((ui.screen === "overview" || ui.screen === "devices") && !ui.review && !ui.guard && !typedBox(document.activeElement)) render();
+}
+async function sendControl(d, action, value) {
+  const want = action === "turn_on" ? { state: "on" } : action === "turn_off" ? { state: "off" } : action === "brightness" ? { state: "on", brightness: value } : action === "mode" ? { mode: value } : { humidity: value };
+  const c = { status: "sending", text: `Sent. Waiting for ${d.name} to report back.`, want };
+  ctlState[d.id] = c;
+  redrawDevice(d);
+  const r = await ask("device", { id: d.id, action, ...(value === undefined ? {} : { value }) });
+  if (ctlState[d.id] !== c) return;
+  if (!r.ok) { ctlState[d.id] = { status: "error", text: `Not sent. ${r.error}` }; redrawDevice(d); return; }
+  if (wanted(d, want)) { ctlState[d.id] = { status: "done", want, at: Date.now() }; redrawDevice(d); return; }
+  c.timer = setTimeout(() => {
+    if (ctlState[d.id] !== c) return;
+    ctlState[d.id] = { status: "stuck", want, text: `Not confirmed. ${d.name} still reports ${d.state.toLowerCase()}. A Tuya plug can drop a command without saying, so try again.` };
+    redrawDevice(d);
+  }, CTL_GIVE_UP_MS);
+}
+function statesChanged(states) {
+  Object.assign(haStates, states);
+  for (const d of devices) {
+    if (!d.entity || !(d.entity in states)) continue;
+    deviceFromState(d);
+    const c = ctlState[d.id], by = (states[d.entity] || {}).by;
+    if (c && (c.status === "sending" || c.status === "stuck") && wanted(d, c.want)) { clearTimeout(c.timer); ctlState[d.id] = { status: "done", want: c.want, at: Date.now() }; }
+    else if (c && c.status === "done" && Date.now() - c.at < CTL_FLIP_MS && !wanted(d, c.want) && by !== "user") {
+      ctlState[d.id] = { status: "back", text: by === "automation" ? "Put back by Home Assistant straight after, most likely a failsafe or the light schedule." : `${d.name} went back on its own.` };
+    }
+    redrawDevice(d);
+  }
 }
 function targetsTable(z) {
   const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td><button class="tv" data-preview aria-label="${name} ${p} ${v}, preview only">${v}</button></td>`).join("")}</tr>`;
@@ -793,7 +859,7 @@ function controlsCard(z) {
     return list.length ? `<div class="cgroup" data-cgroup="${g.title}"><div class="card-head"><h3>${g.title}</h3>${g.metric ? reading(g.metric) : ""}</div><div class="devs">${list.map((d) => deviceRow(d, z)).join("")}</div></div>` : "";
   }).join("");
   const empty = `<p class="small muted">No devices in ${esc(z.name)} yet.</p><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button></div>`;
-  return `<section class="card" id="controls"><div><h2>Controls</h2><p class="muted small">States are real, but nothing here works yet, so a tap sends nothing.</p></div>${unknown}${groups || empty}</section>`;
+  return `<section class="card" id="controls"><div><h2>Controls</h2><p class="muted small">A tap is sent to Home Assistant, and a control only moves once the device reports back.</p></div>${unknown}${groups || empty}</section>`;
 }
 
 /* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
@@ -1861,6 +1927,7 @@ document.addEventListener("click", (e) => {
   if (q("[data-ddiscard]")) { const d = topDraft(); if (d) { d.discard(); toast("Changes discarded."); } return; }
   if (q("[data-dreview]")) { openReview(); return; }
   if (q("[data-preview]")) { toast(SENT); return; }
+  if ((el = q("button[data-dev]"))) { const d = devices.find((x) => x.id === el.dataset.dev); if (d) sendControl(d, el.dataset.act); return; }
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
@@ -1998,6 +2065,11 @@ document.addEventListener("focusout", (e) => {
   if (!pressing && typedBox(e.target) && !typedBox(e.relatedTarget)) document.body.classList.remove("vtyping");
 });
 document.addEventListener("change", (e) => {
+  if (e.target.dataset.dev) {
+    const d = devices.find((x) => x.id === e.target.dataset.dev), act = e.target.dataset.act;
+    if (d) sendControl(d, act, act === "mode" ? e.target.value : Number(e.target.value));
+    return;
+  }
   if (e.target.dataset.vin) { vCommit(e.target); return; }
   if (e.target.dataset.lin) { lCommit(e.target); return; }
   if (e.target.dataset.sin) { sCommit(e.target); return; }
@@ -2046,5 +2118,28 @@ let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
 window.addEventListener("resize", vReveal);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", vReveal);
-render();
+
+/* The frame's only way out. The host answers each request by number and pushes state changes, and anything that isn't
+   from the page holding this frame is ignored. */
+const bridge = { n: 0, waiting: new Map() };
+function ask(type, body) {
+  const req = ++bridge.n;
+  return new Promise((resolve) => { bridge.waiting.set(req, resolve); parent.postMessage({ v: 1, type, req, ...body }, "*"); });
+}
+const setTheme = (t) => { if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; };
+window.addEventListener("message", (e) => {
+  const m = e.data;
+  if (e.source !== window.parent || window.parent === window || !m || m.v !== 1) return;
+  if (m.type === "init") {
+    setTheme(m.theme);
+    devices = m.devices.map((d) => ({ ...d, zones: [...d.zones] }));
+    Object.assign(haStates, m.states);
+    devices.forEach(deviceFromState);
+    render();
+  } else if (m.type === "states") statesChanged(m.states);
+  else if (m.type === "theme") { setTheme(m.theme); drawChart(); }
+  else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
+});
+if (window.parent === window) render();
+else parent.postMessage({ v: 1, type: "ready" }, "*");
 </script>
