@@ -12,6 +12,12 @@
   const isId = (v) => typeof v === "string" && /^[a-z0-9_-]{1,64}$/.test(v);
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
+  const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
+  /* The settings a zone can link to a helper. The frame names one of these, never an entity. */
+  const SETTINGS = ["day", "night", "morning", "daylight", "evening", "light.dayMin", "light.nightMax",
+    ...["day", "night"].flatMap((p) => ["temperature", "humidity", "vpd"].flatMap((k) => ["min", "target", "max"].map((slot) => `bands.${p}.${k}.${slot}`)))];
+  const linkAt = (z, name) => name.split(".").reduce((o, key) => (o && typeof o === "object" ? o[key] : undefined), z.helpers || {});
+  const helperLinks = (z) => SETTINGS.map((n) => linkAt(z, n)).filter((e) => typeof e === "string" && HELPER.test(e));
   /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
   const ARM_MS = 1000;
   const CAN = { switch: "Can be switched on and off", fan: "Can be switched on and off", light: "Can be switched on and off and dimmed", humidifier: "Can be switched on and off, and its mode and target humidity set" };
@@ -67,6 +73,7 @@
       const out = new Set();
       for (const d of this.config.devices) if (d.entity && d.zones.length) out.add(d.entity);
       for (const z of this.config.zones) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
+      for (const z of this.config.zones) for (const e of helperLinks(z)) out.add(e);
       return out;
     }
     pick(st) {
@@ -111,6 +118,7 @@
       else if (m.type === "device") this.device(m);
       else if (m.type === "save") this.save(m);
       else if (m.type === "calibrate") this.calibrate(m);
+      else if (m.type === "setting") this.setting(m);
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 
@@ -155,6 +163,32 @@
       if (!(m.value >= a.min && m.value <= a.max) || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max} °C, in steps of ${a.step}.`);
       try {
         await this._hass.callService("number", "set_value", { entity_id: sensor.leafEntity, value: m.value });
+        this.reply(m.req, true);
+      } catch (err) {
+        refuse(String((err && err.message) || err));
+      }
+    }
+
+    /* The setting write: a zone and the name of one of its linked settings. The helper is the one that zone links to in this
+       element's config, and the value has to fit that helper's own limits and step, or be a time for a time helper. */
+    async setting(m) {
+      const refuse = (why) => this.reply(m.req, false, why);
+      if (!isId(m.zone) || !SETTINGS.includes(m.name)) return refuse("Not a setting this panel knows.");
+      const z = this.config.zones.find((x) => x && x.id === m.zone), entity = z && linkAt(z, m.name);
+      if (typeof entity !== "string" || !HELPER.test(entity)) return refuse("That setting isn't linked to a helper.");
+      const st = this._hass.states[entity];
+      if (!st || st.state === "unavailable") return refuse(`Home Assistant has no ${entity} it can set.`);
+      let call;
+      if (entity.startsWith("input_datetime.")) {
+        if (typeof m.value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(m.value)) return refuse("That isn't a time.");
+        call = ["input_datetime", "set_datetime", { entity_id: entity, time: `${m.value}:00` }];
+      } else {
+        const a = st.attributes || {}, steps = isNum(m.value) ? (m.value - a.min) / a.step : NaN;
+        if (!isNum(m.value) || m.value < a.min || m.value > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max}, in steps of ${a.step}.`);
+        call = ["input_number", "set_value", { entity_id: entity, value: m.value }];
+      }
+      try {
+        await this._hass.callService(...call);
         this.reply(m.req, true);
       } catch (err) {
         refuse(String((err && err.message) || err));

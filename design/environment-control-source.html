@@ -666,8 +666,23 @@ async function sendControl(d, action, value) {
     redrawDevice(d);
   }, CTL_GIVE_UP_MS);
 }
+/* A linked value is whatever HA last reported for its helper. */
+const SLOT_INDEX = { min: 0, target: 2, max: 4 };
+function helpersFromStates() {
+  const num = (e) => { const st = e && haStates[e], v = st ? Number(st.state) : NaN; return Number.isFinite(v) ? v : null; };
+  for (const z of zones) {
+    const h = z.helpers || {};
+    for (const k of ["day", "night"]) { const st = h[k] && haStates[h[k]]; if (st && onHelpers(z) && /^\d\d:\d\d/.test(st.state)) z[k === "day" ? "dayAt" : "nightAt"] = toMin(st.state.slice(0, 5)); }
+    for (const k of ["morning", "daylight", "evening"]) if (z.emerson && num(h[k]) !== null) z.emerson[k] = num(h[k]);
+    /* Limits come from helpers only while the zone is set to use them. */
+    if (!z.linked) continue;
+    for (const [p, metrics] of Object.entries(h.bands || {})) for (const [k, slots] of Object.entries(metrics)) for (const [slot, e] of Object.entries(slots)) if (num(e) !== null) z.bands[p][k][SLOT_INDEX[slot]] = num(e);
+    for (const [k, e] of Object.entries(h.light || {})) if (num(e) !== null) z.lightLimits[k] = num(e);
+  }
+}
 /* A board's offset is whatever HA last reported for its setting. */
 function sensorsFromStates() {
+  helpersFromStates();
   for (const z of zones) for (const x of z.sensors) {
     const st = x.leafEntity && haStates[x.leafEntity];
     if (!st) continue;
@@ -922,7 +937,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: linkOf(z, "night") || `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
@@ -1059,6 +1074,7 @@ function saveMap(m) {
   }
   z.linked = m.band === "helpers";
   z.periodMode = m.period; z.lights = m.period === "detected" ? Object.keys(m.lights) : []; z.rule = m.rule;
+  if (m.period === "helper") z.helpers = { ...(z.helpers || {}), day: m.onHelper, night: m.offHelper };
   if (m.period === "fixed") { z.dayAt = toMin(m.fixedOn); z.nightAt = toMin(m.fixedOff); }
 }
 
@@ -1515,19 +1531,16 @@ async function saveLeaf(l, done) {
 const SCHED_NAME = { day: "Lights on", night: "Lights off", morning: "Morning extension", daylight: "Daylight time", evening: "Evening extension" };
 const SCHED_RANGE = { morning: [0, 59, 1, "min"], daylight: [0, 59, 1, "min"], evening: [0, 59, 1, "min"] };
 const schedSends = [];
-/* The mock's helpers answer after this, until helper writes go through the host. */
-const SCHED_ACK_MS = 500;
 const dayLength = (on, off) => span(((off - on) % 1440 + 1440) % 1440);
 const timesHere = (z) => z.periodMode !== "detected";
-const onHelpers = (z) => (z.periodMode || "helper") === "helper";
-const sharesHelpers = (z) => (onHelpers(z) ? zones.filter((o) => o !== z && onHelpers(o) && helperOptions(o)[0] === helperOptions(z)[0]) : []);
+/* Each zone stores the exact helpers it's linked to, so what's shared is whatever points at the same entity. */
+const linkOf = (z, k) => (z.helpers || {})[k];
+const onHelpers = (z) => (z.periodMode || "helper") === "helper" && !!linkOf(z, "day");
+const sharesHelpers = (z) => (onHelpers(z) ? zones.filter((o) => o !== z && onHelpers(o) && linkOf(o, "day") === linkOf(z, "day")) : []);
 const schedValues = (z) => ({ day: hhmm(z.dayAt), night: hhmm(z.nightAt), ...(z.emerson || {}) });
 const schedText = (k, v) => (SCHED_RANGE[k] ? `${v} ${SCHED_RANGE[k][3]}` : v);
-const schedHeld = (z, k) => (k === "day" || k === "night" ? onHelpers(z) : true);
-function schedEntity(z, k) {
-  if (k === "day" || k === "night") return `input_datetime.${helperOptions(z)[0]}_${k}_time`;
-  return `input_number.emerson_effect_${k === "daylight" ? "daylight_time" : `${k}_extension`}`;
-}
+const schedHeld = (z, k) => (k === "day" || k === "night" ? onHelpers(z) : !!linkOf(z, k));
+const schedEntity = (z, k) => linkOf(z, k);
 function openSched(id) {
   ui.sched = { id, vals: schedValues(zoneById(id)), status: "", back: { screen: ui.screen, zone: ui.zone } };
   ui.screen = "setup";
@@ -1603,6 +1616,7 @@ function leaveSched() {
   render(); window.scrollTo(0, 0);
 }
 function schedCommit(z, k, val) {
+  if (schedHeld(z, k)) return;
   if (k === "day" || k === "night") for (const o of [z, ...sharesHelpers(z)]) o[k === "day" ? "dayAt" : "nightAt"] = toMin(val);
   else z.emerson[k] = val;
 }
@@ -1614,10 +1628,9 @@ async function saveSched(s, done) {
     const r = await saveConfig(() => { const zz = zoneById(s.id); for (const k of changed) if (!sends.includes(k)) schedCommit(zz, k, s.vals[k]); });
     if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
   }
-  const z = zoneById(s.id);
+  const z = zoneById(s.id), stuck = [];
   const finish = () => {
     s.sending = false;
-    const stuck = sends.filter(() => z.helperStuck);
     if (ui.sched !== s) { done(); return; }
     if (stuck.length) {
       s.status = stuck.map((k) => `${SCHED_NAME[k]}: not confirmed. Home Assistant still reports ${schedText(k, was[k])}.`).join(" ");
@@ -1630,9 +1643,14 @@ async function saveSched(s, done) {
   if (!sends.length) { finish(); return; }
   s.sending = true; s.status = "Sending to Home Assistant...";
   render();
-  for (const k of sends) schedSends.push({ entity_id: schedEntity(z, k), value: s.vals[k] });
-  const answers = !z.helperStuck;
-  setTimeout(() => { if (answers) for (const k of sends) schedCommit(z, k, s.vals[k]); finish(); }, answers ? SCHED_ACK_MS : LEAF_GIVE_UP_MS);
+  /* The host writes each linked helper. A value counts once Home Assistant reports it. */
+  await Promise.all(sends.map(async (k) => {
+    schedSends.push({ entity_id: schedEntity(z, k), value: s.vals[k] });
+    const r = await ask("setting", { zone: s.id, name: k, value: s.vals[k] });
+    const landed = r.ok && (await untilState(() => zoneById(s.id) && schedValues(zoneById(s.id))[k] === s.vals[k], LEAF_GIVE_UP_MS));
+    if (!landed) stuck.push(k);
+  }));
+  finish();
 }
 function schedDraft(s) {
   const z = zoneById(s.id), was = schedValues(z), v = s.vals, [items, add] = changeList(), others = sharesHelpers(z);

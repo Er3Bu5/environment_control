@@ -487,6 +487,7 @@ const openL = async (zone = "garden") => { await ev(`ui.review=null;ui.guard=nul
 const ACK = 900, GIVE_UP = 1620;
 /* A board's offset lives in the fake HA now, so resets and silent boards are set there. */
 const boardSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,Number(v).toFixed(1)))`); await sleep(60); };
+const haSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,String(v)))`); await sleep(60); };
 const boardSilent = (entity, on) => onHA(`fakeHA.knobs.ignore.${on ? "add" : "delete"}("${entity}")`);
 const leafSave = (wait = ACK) => ev(`(document.querySelector("[data-dreview]").click(),document.querySelector("[data-rapply]")?.click())`).then(() => sleep(wait));
 const sends = () => ev(`leafSends.map(x=>x.entity_id+"="+x.value)`);
@@ -1201,7 +1202,7 @@ check("Apply: sends only what changed, to the right helper", (await schedSent())
 check("Apply: never optimistic", (await ev(`zoneById("garden").nightAt`)) === 19 * 60 && (await ev(`document.querySelector("[data-rapply]").textContent`)).includes("verifying"));
 await sleep(ACK);
 check("Apply: counts once Home Assistant reports it", (await ev(`zoneById("garden").nightAt`)) === 18 * 60 && (await ev(`!ui.sched && !ui.review`)) === true);
-await ev(`zoneById("garden").nightAt=19*60;render()`);
+await haSet([["input_datetime.garden_night_time", "19:00:00"]]); await ev(`render()`);
 await schedOpen("veg");
 check("Sched: across midnight the length is right", (await ev(`document.querySelector("#s-len").textContent`)) === "18h 00m of light, 6h 00m of dark", await ev(`document.querySelector("#s-len").textContent`));
 check("Sched: shared helpers are named", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
@@ -1211,14 +1212,23 @@ await setBox("day", "15:00"); await clickIt("[data-dreview]");
 check("Review: names the zone that moves with it", (await schedModal()).includes("Veg and Nursery") && (await schedModal()).includes("Nursery uses the same helpers"), await schedModal());
 await clickIt("[data-rapply]"); await sleep(ACK);
 check("Apply: the sharing zone moves too", (await ev(`zoneById("veg").dayAt`)) === 15 * 60 && (await ev(`zoneById("nursery").dayAt`)) === 15 * 60);
-await ev(`zoneById("veg").dayAt=16*60;zoneById("nursery").dayAt=16*60;render()`);
-await schedOpen("garden"); await ev(`zoneById("garden").helperStuck=true`); await setBox("morning", "7");
+await haSet([["input_datetime.veg_day_time", "16:00:00"]]); await ev(`render()`);
+await schedOpen("garden"); await boardSilent("input_number.emerson_effect_morning_extension", true); await setBox("morning", "7");
 await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(GIVE_UP);
 check("Apply: no answer is never shown as saved", (await ev(`zoneById("garden").emerson.morning`)) === 5 && (await schedModal()).includes("still reports 5 min"), await schedModal());
 check("Apply: the review stays open to try again", (await ev(`!!ui.review && !!ui.sched`)) === true && (await ev(`!document.querySelector("[data-rapply]").disabled`)) === true);
-await ev(`zoneById("garden").helperStuck=false`); await clickIt("[data-rapply]"); await sleep(ACK);
+await boardSilent("input_number.emerson_effect_morning_extension", false); await clickIt("[data-rapply]"); await sleep(ACK);
+/* The setting write path. The frame names a zone and a setting, never an entity, and the host checks the helper's own limits. */
+const helperCalls = () => onHA(`fakeHA.calls.filter(c=>c.domain.startsWith("input_")).map(c=>c.data.entity_id+"="+(c.data.value??c.data.time))`);
+const hBefore = (await helperCalls()).length;
+const hTries = await evp(`Promise.all([ask("setting",{zone:"garden",name:"heater",value:1}),ask("setting",{zone:"nursery",name:"bands.day.vpd.min",value:0.8}),ask("setting",{zone:"garden",name:"night",value:"25:00"}),ask("setting",{zone:"garden",name:"morning",value:7.5}),ask("setting",{zone:"garden",name:"morning",value:90}),ask("setting",{zone:"nope",name:"day",value:"07:00"})]).then(r=>r.map(x=>x.ok))`);
+check("Setting: the host refuses an unknown setting, one the zone doesn't link, a bad time, a value off the helper's step or past its limit, and an unknown zone", JSON.stringify(hTries) === JSON.stringify([false, false, false, false, false, false]) && (await helperCalls()).length === hBefore, hTries);
+await evp(`ask("setting",{zone:"garden",name:"night",value:"19:30",entity_id:"input_datetime.veg_night_time"})`); await sleep(ACK);
+check("Setting: it writes the zone's own helper, whatever entity the frame names, with the time HA expects", JSON.stringify((await helperCalls()).slice(hBefore)) === JSON.stringify(["input_datetime.garden_night_time=19:30:00"]) && (await ev(`zoneById("garden").nightAt`)) === 19.5 * 60, await helperCalls());
+await haSet([["input_datetime.garden_night_time", "19:00:00"]]);
+check("Setting: a helper changed from elsewhere shows here", (await ev(`zoneById("garden").nightAt`)) === 19 * 60);
 check("Apply: and trying again works", (await ev(`zoneById("garden").emerson.morning`)) === 7 && (await ev(`!ui.review`)) === true);
-await ev(`zoneById("garden").emerson.morning=5;render()`);
+await haSet([["input_number.emerson_effect_morning_extension", "5.0"]]); await ev(`render()`);
 await schedOpen("garden");
 await setBox("night", "07:00");
 check("Problem: the same time twice stops the review", (await ev(`document.querySelector("[data-dreview]").disabled`)) === true && (await ev(`document.querySelector("#s-issues").textContent`)).includes("two different times"));
@@ -1243,7 +1253,7 @@ await ev(`zoneById("nursery").periodMode="fixed";zoneById("nursery").dayAt=16*60
 await schedOpen("nursery");
 check("Sched: Set here shares with nobody", (await ev(`document.querySelector("#s-times").textContent`)).includes("Stored in Environment Control") && !(await ev(`document.querySelector("#s-times").textContent`)).includes("same helpers"));
 await setBox("day", "15:30"); const sentFixed = await schedSent(); await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(40);
-check("Sched: Set here saves at once and sends nothing", (await schedSent()) === sentFixed && (await ev(`zoneById("nursery").dayAt`)) === 15.5 * 60 && (await ev(`zoneById("veg").dayAt`)) === 16 * 60);
+check("Sched: Set here saves at once and sends nothing", (await schedSent()) === sentFixed && (await ev(`zoneById("nursery").dayAt`)) === 15.5 * 60 && (await ev(`zoneById("veg").dayAt`)) === 16 * 60, [await schedSent(), sentFixed, await ev(`[zoneById("nursery").dayAt,zoneById("veg").dayAt,ui.review&&ui.review.errors]`)]);
 await ev(`zoneById("nursery").periodMode=undefined;zoneById("nursery").dayAt=16*60;zoneById("garden").periodMode="detected";zoneById("garden").lights=["switch.tent_lights"];render()`);
 await schedOpen("garden");
 check("Sched: Detected has no times to set", (await ev(`!document.querySelector("#sin-day") && document.querySelector("#s-times").textContent.includes("no times to set") && !!document.querySelector("#s-times [data-mapw]")`)) === true);

@@ -74,6 +74,26 @@ const SEED = (() => {
     "light.garden_light_controller_under_canopy": "garden", "switch.garden_lights_red": "garden", "light.tent_light_controller": "veg", "switch.tent_lights": "veg", "switch.reservoir_pump": "reservoir" };
   const entities = Object.fromEntries(Object.keys(states).map((e) => [e, { entity_id: e, platform: e.startsWith("light.") ? "esphome" : "tuya_local", area_id: area[e] || null }]));
   const areas = Object.fromEntries(["Garden", "Veg", "Nursery", "Reservoir"].map((n) => [n.toLowerCase(), { area_id: n.toLowerCase(), name: n }]));
+  /* The helpers each zone links to, as the backend stores them, and what HA reports for each. Veg and Nursery share their
+     schedule helpers. Nursery's limits are set in Environment Control, so it links no threshold helpers. */
+  const bandLinks = (zone) => Object.fromEntries(["day", "night"].map((p) => [p, Object.fromEntries(["temperature", "humidity", "vpd"].map((k) =>
+    [k, { min: `input_number.${zone}_${p}_${k}_min_threshold`, target: `input_number.${zone}_${p}_${k}_target`, max: `input_number.${zone}_${p}_${k}_max_threshold` }]))]));
+  const lightLinks = (zone) => ({ dayMin: `input_number.day_lights_${zone}_min_threshold`, nightMax: `input_number.night_lights_${zone}_max_threshold` });
+  zones[0].helpers = { day: "input_datetime.garden_day_time", night: "input_datetime.garden_night_time", morning: "input_number.emerson_effect_morning_extension",
+    daylight: "input_number.emerson_effect_daylight_time", evening: "input_number.emerson_effect_evening_extension", bands: bandLinks("garden"), light: lightLinks("garden") };
+  zones[1].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time", bands: bandLinks("veg"), light: lightLinks("veg") };
+  zones[2].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time" };
+  const LIMITS = { temperature: [-20, 50, 0.1], humidity: [0, 100, 0.1], vpd: [0, 3, 0.01] };
+  const helper = (value, [min, max, step], name) => ({ state: String(value), attributes: { friendly_name: name, min, max, step, mode: "box" } });
+  const clock = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:00`;
+  for (const z of zones) {
+    const h = z.helpers;
+    states[h.day] = { state: clock(z.dayAt), attributes: { friendly_name: h.day, has_date: false, has_time: true } };
+    states[h.night] = { state: clock(z.nightAt), attributes: { friendly_name: h.night, has_date: false, has_time: true } };
+    for (const k of ["morning", "daylight", "evening"]) if (h[k]) states[h[k]] = helper(z.emerson[k], [0, 59, 1], h[k]);
+    for (const [p, metrics] of Object.entries(h.bands || {})) for (const [k, slots] of Object.entries(metrics)) for (const [slot, e] of Object.entries(slots)) states[e] = helper(z.bands[p][k][{ min: 0, target: 2, max: 4 }[slot]], LIMITS[k], e);
+    for (const [k, e] of Object.entries(h.light || {})) states[e] = helper(z.lightLimits[k], [0, 10000, 10], e);
+  }
   /* What each failsafe holds a device to at the mock's time: fans always on, and light plugs on their schedule. */
   const failsafes = {
     "switch.veg_oscillating_fans": { want: "on", kind: "failsafe", by: "Veg fans auto on" },

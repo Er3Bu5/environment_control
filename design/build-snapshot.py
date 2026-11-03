@@ -89,6 +89,18 @@ zones = [
      "layout": {"w": 1.2, "d": 0.6, "units": 8, "rows": 2, "cols": 4},
      "sensors": [env("n-env", "Nursery environment", "Nursery env", "nursery_environment", [0.5, 1.5], "in")]},
 ]
+# The helpers each zone links to, only where HA has them: Veg and Nursery have no target helpers.
+def links(zone, sched, emerson):
+    have = lambda e: e if e in S else None
+    bands = {p: {m: {k: e for k, e in (("min", have(f"input_number.{zone}_{p}_{m}_min_threshold")), ("target", have(f"input_number.{zone}_{p}_{m}_target")),
+                                        ("max", have(f"input_number.{zone}_{p}_{m}_max_threshold"))) if e} for m in METRICS} for p in ("day", "night")}
+    out = {"day": f"input_datetime.{sched}_day_time", "night": f"input_datetime.{sched}_night_time", "bands": bands,
+           "light": {"dayMin": f"input_number.day_lights_{zone}_min_threshold", "nightMax": f"input_number.night_lights_{zone}_max_threshold"}}
+    if emerson:
+        out.update(morning="input_number.emerson_effect_morning_extension", daylight="input_number.emerson_effect_daylight_time", evening="input_number.emerson_effect_evening_extension")
+    return out
+for z, sched in zip(zones, ("garden", "veg", "veg")):
+    z["helpers"] = links(z["id"], sched, z["id"] == "garden")
 for z in zones:
     e = [s for s in z["sensors"] if s["kind"] == "env"]
     z["now"] = {"temperature": statistics.fmean(s["t"] for s in e), "humidity": statistics.fmean(s["h"] for s in e),
@@ -137,6 +149,11 @@ def ha_state(entity):
         sys.exit("the snapshot predates humidifier limits: run ha-snap/states.py again")
     return {"state": S[entity]["state"], "attributes": attrs}
 STATES = {d["entity"]: ha_state(d["entity"]) for d in devices if "entity" in d}
+def flat(v):
+    return [v] if isinstance(v, str) else [e for x in v.values() for e in flat(x)]
+for z in zones:
+    for e in flat(z["helpers"]):
+        STATES[e] = {"state": S[e]["state"], "attributes": {"friendly_name": S[e]["name"] or e, **S[e]["attrs"], **({"has_date": False, "has_time": True} if e.startswith("input_datetime.") else {})}}
 for z in zones:
     for x in z["sensors"]:
         e = x.get("leafEntity")
