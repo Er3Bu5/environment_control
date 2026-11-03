@@ -456,7 +456,8 @@ function chartLeaf(z, basis, offsetOf) {
 const zoneLeaf = (z) => chartLeaf(z, z.leafBasis, leafOf);
 function leafLine(z) {
   const vals = new Set(envOf(z).map(leafOf));
-  return vals.size === 1 ? leafWords([...vals][0]) : "Leaf offset per sensor";
+  const x = [...vals][0];
+  return vals.size === 1 ? `Leaf temperature offset ${x > 0 ? "+" : ""}${x.toFixed(1)} °C` : "Leaf temperature offset per sensor";
 }
 const sideName = (s) => s.short.replace(/^Env /, "").replace(/^[a-z]/, (c) => c.toUpperCase());
 function combinedNote(z) {

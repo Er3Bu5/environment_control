@@ -605,6 +605,15 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
 await phone(320, 640); await openL(); await sleep(60);
 check("Leaf 320px: a long entity id wraps instead of widening the page", await ev(`document.documentElement.scrollWidth<=innerWidth`));
 check("Leaf: box text is 16px on touch", (await ev(`getComputedStyle(document.querySelector("[data-lin]")).fontSize`)) === "16px");
+// ---------- VPD tile: leaf link names the offset as signed degrees
+const leafLink = async () => ev(`(()=>{ui.screen="zone";ui.zone=zones[0].id;render();return document.querySelector('#main .tile [data-calw]').textContent.trim()})()`);
+await ev(`window.__lk=envOf(zones[0]).map(s=>[s.leafLive,s.leaf]);envOf(zones[0]).forEach(s=>{s.leafLive=-1;s.leaf=-1})`);
+check("VPD tile: a shared offset reads as signed degrees", (await leafLink()) === "Leaf temperature offset -1.0 °C ›", await leafLink());
+await ev(`envOf(zones[0]).forEach(s=>{s.leafLive=0.5;s.leaf=0.5})`);
+check("VPD tile: an offset above air carries a plus", (await leafLink()) === "Leaf temperature offset +0.5 °C ›", await leafLink());
+await ev(`envOf(zones[0]).forEach((s,i)=>{s.leafLive=i?-1:-0.5;s.leaf=s.leafLive})`);
+check("VPD tile: offsets that differ say per sensor", (await leafLink()) === "Leaf temperature offset per sensor ›", await leafLink());
+await ev(`envOf(zones[0]).forEach((s,i)=>{[s.leafLive,s.leaf]=window.__lk[i]});render()`);
 // ---------- Tiles: tracks in one row line up
 const trackTops = (id) => ev(`(()=>{ui.screen="zone";ui.zone="${id}";render();return [...document.querySelectorAll("#main .tiles .tile")].map(t=>{const r=t.getBoundingClientRect(),k=t.querySelector(".track");return {row:Math.round(r.top),top:k?Math.round(k.getBoundingClientRect().top*10)/10:null}}).filter(x=>x.top!==null)})()`);
 const rowsLineUp = (tops) => Object.values(tops.reduce((a, x) => ((a[x.row] ||= []).push(x.top), a), {})).every((r) => r.every((t) => Math.abs(t - r[0]) < 0.6));
