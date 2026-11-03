@@ -429,7 +429,8 @@ const leafPhrase = (x) => `l${leafWords(x).slice(1)}`;
 const sensorValue = (z, s, k) => (s.t === null || s.t === undefined ? null : k === "temperature" ? s.t : k === "humidity" ? s.h : (s.vpd ?? calcVpd(s.t, s.h, leafOf(s))));
 /* A zone's reading is the mean of its live sensors. A dead sensor, or one left out by choice, never counts. */
 const METHODS = { mean: "Average", median: "Median", highest: "Highest", lowest: "Lowest" };
-const methodOf = (z, k) => (z.combine && z.combine[k]) || "mean";
+const classOfMetric = (k) => (["moisture", "ec", "soiltemp"].includes(k) ? "soil" : "env");
+const methodOf = (z, k) => (z.combine && z.combine[classOfMetric(k)]) || "mean";
 function combine(method, xs) {
   if (!xs.length) return null;
   if (method === "highest") return Math.max(...xs);
@@ -463,8 +464,7 @@ const sideName = (s) => s.short.replace(/^Env /, "").replace(/^[a-z]/, (c) => c.
 function combinedNote(z) {
   const n = countedEnv(z).filter((s) => s.t !== null && s.t !== undefined).length;
   if (n < 2) return "";
-  const methods = new Set(Object.keys(M).map((k) => methodOf(z, k)));
-  return `<p class="small muted">${methods.size === 1 ? METHODS[[...methods][0]] : "Combined from"}${methods.size === 1 ? " of" : ""} ${n} sensors.</p>`;
+  return `<p class="small muted">${METHODS[methodOf(z, "temperature")]} of ${n} sensors.</p>`;
 }
 function avgNote(z, k) {
   const envs = envOf(z); if (envs.length < 2) return "";
@@ -816,21 +816,35 @@ function catalog() {
   for (const s of EXTRA_SENSORS) if (!seen[s.id]) out.push({ ...s });
   return out;
 }
-function entitiesOf(s) {
+/* Everything a device reports, tagged with what kind of reading it is, the way device classes would tag it. */
+function deviceEntities(s) {
   const n = s.slug || slug(s.name), sub = s.slug ? `${s.slug}_substrate` : n;
   const lux = s.lux === undefined ? "41,200 lx" : `${Math.round(s.lux).toLocaleString("en-NZ")} lx`;
-  if (s.kind === "env") return {
-    temperature: [[`sensor.${n}_air_temp`, `${s.t.toFixed(1)} °C`]], humidity: [[`sensor.${n}_humidity`, `${s.h.toFixed(1)} %`]],
-    vpd: [[`sensor.${n}_vpd`, `${(s.vpd ?? calcVpd(s.t, s.h, leafOf(s))).toFixed(2)} kPa`]], light: [[`sensor.${n}_light`, lux]],
-    ...(s.leafEntity ? { leaf: [[s.leafEntity, `${s.leafLive.toFixed(1)} °C`]] } : {}),
-  };
+  if (s.kind === "env") return [
+    [`sensor.${n}_air_temp`, `${s.t.toFixed(1)} °C`, "temperature"], [`sensor.${n}_humidity`, `${s.h.toFixed(1)} %`, "humidity"],
+    [`sensor.${n}_vpd`, `${(s.vpd ?? calcVpd(s.t, s.h, leafOf(s))).toFixed(2)} kPa`, "vpd"], [`sensor.${n}_light`, lux, "illuminance"],
+    ...(s.leafEntity ? [[s.leafEntity, `${s.leafLive.toFixed(1)} °C`, "leaf"]] : []),
+  ];
   const raw = s.vwc === null ? "No data" : `${(s.raw ?? s.vwc * (s.fsLive || 90) / 100).toFixed(1)} %`, norm = s.vwc === null ? "No data" : `${s.vwc.toFixed(1)} %`, ec = s.ec === null ? "No data" : `${s.ec.toFixed(1)} mS/cm`;
-  return {
-    moisture: [[`sensor.${n}_substrate_humidity`, raw], [`sensor.${sub}_normalised_vwc`, norm]],
-    ec: [[`sensor.${sub}_pore_water_ec`, ec], [`sensor.${sub}_bulk_ec`, s.bulk === undefined ? ec : `${s.bulk.toFixed(1)} mS/cm`]],
-    soiltemp: [[`sensor.${n}_substrate_temperature`, `${(s.soilT ?? 22.4).toFixed(1)} °C`]],
-    ...(s.fsEntity ? { fullsat: [[s.fsEntity, `${s.fsLive.toFixed(1)} %`]], fieldcap: [[s.fcEntity, `${s.fcLive.toFixed(1)} %`]] } : {}),
-  };
+  return [
+    [`sensor.${n}_substrate_humidity`, raw, "moisture"], [`sensor.${sub}_normalised_vwc`, norm, "moisture"],
+    [`sensor.${sub}_pore_water_ec`, ec, "conductivity"], [`sensor.${sub}_bulk_ec`, s.bulk === undefined ? ec : `${s.bulk.toFixed(1)} mS/cm`, "conductivity"],
+    [`sensor.${n}_substrate_temperature`, `${(s.soilT ?? 22.4).toFixed(1)} °C`, "temperature"],
+    ...(s.fsEntity ? [[s.fsEntity, `${s.fsLive.toFixed(1)} %`, "fullsat"], [s.fcEntity, `${s.fcLive.toFixed(1)} %`, "fieldcap"]] : []),
+  ];
+}
+/* A sensor's class decides which readings it is asked for, and each slot takes one kind of entity from the device. So a soil probe mapped as environment still offers its temperature. */
+const SENSOR_CLASS = { env: "Environment", soil: "Soil" };
+const CLASS_SLOTS = { env: ["temperature", "humidity", "vpd", "light", "leaf"], soil: ["moisture", "ec", "soiltemp", "fullsat", "fieldcap"] };
+const SLOT_TAKES = { temperature: "temperature", soiltemp: "temperature", humidity: "humidity", vpd: "vpd", light: "illuminance", leaf: "leaf", moisture: "moisture", ec: "conductivity", fullsat: "fullsat", fieldcap: "fieldcap" };
+const SLOT_REQUIRED = { env: ["temperature", "humidity"], soil: ["moisture"] };
+const SLOT_NONE = { leaf: "None, kept in Environment Control", fullsat: "None, can't be calibrated here", fieldcap: "None, can't be calibrated here" };
+const slotsOf = (s, cls) => Object.fromEntries(CLASS_SLOTS[cls].map((k) => [k, deviceEntities(s).filter((e) => e[2] === SLOT_TAKES[k]).map(([e, v]) => [e, v])]));
+const classOf = (m, s) => m.cls[s.id] || s.kind;
+/* One candidate is taken, none means not used, and several wait for an answer. */
+function seedChoices(m, s) {
+  m.choice[s.id] = {};
+  for (const [k, o] of Object.entries(slotsOf(s, classOf(m, s)))) if (o.length < 2) m.choice[s.id][k] = o.length ? o[0][0] : "none";
 }
 const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"];
 const MAP_STEPS = ["Sensors", "Devices", "Day, night and limits", "Check"];
@@ -845,27 +859,31 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { ...(z.combine || {}) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z, "temperature"), soil: methodOf(z, "moisture") } };
   for (const s of z.sensors) {
-    m.pickS[s.id] = true; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
-    for (const [k, opts] of Object.entries(entitiesOf(s))) m.choice[s.id][k] = opts[opts.length - 1][0];
+    m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
+    for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
     if (s.leafUnused) m.choice[s.id].leaf = "none";
   }
   for (const d of devices) if (d.ctl) { m.roles[d.id] = d.type || ""; if (d.zones.includes(id)) m.pickD[d.id] = true; }
   ui.mapw = m; ui.wiz = null; ui.vpdw = null; ui.leafw = null; ui.sched = null; ui.screen = "setup";
 }
-function needsChoice(m, s) { return Object.entries(entitiesOf(s)).filter(([k, o]) => o.length > 1 && !(m.choice[s.id] || {})[k]).map(([k]) => METRIC_NAME[k]); }
+function needsChoice(m, s) { return Object.entries(slotsOf(s, classOf(m, s))).filter(([k, o]) => o.length > 1 && !(m.choice[s.id] || {})[k]).map(([k]) => METRIC_NAME[k]); }
+const missingRequired = (m, s) => SLOT_REQUIRED[classOf(m, s)].filter((k) => (m.choice[s.id] || {})[k] === "none");
 function toggleSensor(m, s) {
   if (m.pickS[s.id]) { delete m.pickS[s.id]; return; }
-  m.pickS[s.id] = true; m.choice[s.id] = m.choice[s.id] || {};
-  for (const [k, o] of Object.entries(entitiesOf(s))) if (o.length === 1) m.choice[s.id][k] = o[0][0];
+  m.pickS[s.id] = true; m.cls[s.id] = classOf(m, s);
+  if (!m.choice[s.id]) seedChoices(m, s);
 }
-const metricsLine = (s) => Object.keys(entitiesOf(s)).map((k) => METRIC_NAME[k]).join(", ");
+const metricsLine = (s) => `${SENSOR_CLASS[s.kind]}: ${Object.entries(slotsOf(s, s.kind)).filter(([, o]) => o.length).map(([k]) => METRIC_NAME[k]).join(", ")}`;
 function sensorRow(m, z, s) {
   const on = !!m.pickS[s.id], ask = on ? needsChoice(m, s) : [];
   const where = zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
   const pill = ask.length ? '<span class="pill high">Pick one</span>' : s.area === z.name ? '<span class="pill plain">Suggested</span>' : where.length ? `<span class="pill plain">In ${esc(where[0])}</span>` : "";
-  const detail = !on ? "" : `<div class="ents">${Object.entries(entitiesOf(s)).map(([k, opts]) => `<label class="ent"><span>${METRIC_NAME[k]}</span><select data-mmetric="${s.id}:${k}" aria-label="${esc(s.name)} ${METRIC_NAME[k]}">${opts.length > 1 ? `<option value=""${(m.choice[s.id] || {})[k] ? "" : " selected"}>Pick one</option>` : ""}${opts.map(([e, v]) => `<option value="${e}"${(m.choice[s.id] || {})[k] === e ? " selected" : ""}>${esc(e)} (${esc(v)})</option>`).join("")}<option value="none">Not used</option></select></label>`).join("")}${s.kind === "env" ? `<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? "" : " checked"}> Count in the zone average</label>` : ""}</div>`;
+  const cls = classOf(m, s), ch = m.choice[s.id] || {};
+  const classBox = `<label class="ent"><span>Class</span><select data-mclass="${s.id}" aria-label="${esc(s.name)} class">${Object.entries(SENSOR_CLASS).map(([k, l]) => `<option value="${k}"${cls === k ? " selected" : ""}>${l}${k === s.kind ? " (detected)" : ""}</option>`).join("")}</select></label>`;
+  const slotBox = ([k, opts]) => `<label class="ent"><span>${METRIC_NAME[k]}</span><select data-mmetric="${s.id}:${k}" aria-label="${esc(s.name)} ${METRIC_NAME[k]}">${opts.length > 1 ? `<option value=""${ch[k] ? "" : " selected"}>Pick one</option>` : ""}${opts.map(([e, v]) => `<option value="${e}"${ch[k] === e ? " selected" : ""}>${esc(e)} (${esc(v)})</option>`).join("")}<option value="none"${ch[k] === "none" ? " selected" : ""}>${opts.length ? "Not used" : SLOT_NONE[k] || "None found"}</option></select></label>`;
+  const detail = !on ? "" : `<div class="ents">${classBox}${Object.entries(slotsOf(s, cls)).map(slotBox).join("")}<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? " checked" : ""}> Exclude from average</label></div>`;
   return `<div class="pickwrap" id="ms-${s.id}"><button class="pickrow" data-msensor="${s.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(s.name)}</strong><span class="dev-sub">${esc(s.family)}, ${esc(s.link)}. ${esc(metricsLine(s))}</span></span>${pill}</button>${detail}</div>`;
 }
 function deviceMapRow(m, z, d) {
@@ -902,8 +920,9 @@ function lightRows(m, z) {
 function mapIssues(m) {
   const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
   for (const s of chosen) for (const n of needsChoice(m, s)) out.push({ text: `${s.name}: pick which ${n} entity to use.`, step: 1, target: `ms-${s.id}` });
+  for (const s of chosen) { const miss = missingRequired(m, s); if (miss.length) out.push({ text: `${s.name}: ${classOf(m, s) === "env" ? "an environment" : "a soil"} sensor needs ${miss.map((k) => METRIC_NAME[k].toLowerCase()).join(" and ")}. Pick ${miss.length > 1 ? "them" : "it"}, or change its class.`, step: 1, target: `ms-${s.id}` }); }
   for (const d of devices) if (m.pickD[d.id] && !m.roles[d.id]) out.push({ text: `${d.name}: say what it is.`, step: 2, target: `md-${d.id}` });
-  if (!chosen.some((s) => s.kind === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
+  if (!chosen.some((s) => classOf(m, s) === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
   if (m.period === "detected" && !Object.keys(m.lights).length) out.push({ text: "Pick at least one light switch, so this zone can detect day and night.", step: 3, target: "map-lq" });
   if (m.period === "fixed" && (!m.fixedOn || !m.fixedOff || m.fixedOn === m.fixedOff)) out.push({ text: "Lights on and lights off need two different times.", step: 3, target: "map-fixedOn" });
   return out;
@@ -914,9 +933,9 @@ function renderMap() {
   const search = `<label class="field" for="map-q">Search Home Assistant<input id="map-q" type="search" value="${esc(m.q)}" placeholder="Name or integration"></label>`;
   let body = "";
   if (m.step === 1) {
-    const envCount = chosen.filter((s) => s.kind === "env" && m.avg[s.id] !== false).length;
-    const combineBox = envCount < 2 ? "" : `<div class="combine"><p class="muted">With ${envCount} sensors counted, how should each reading combine?</p><div class="fields">${["temperature", "humidity", "vpd", "light"].map((k) => `<label class="field" for="map-c-${k}">${M[k].label}<select id="map-c-${k}" data-mcombine="${k}">${Object.entries(METHODS).map(([id, l]) => `<option value="${id}"${(m.combine[k] || "mean") === id ? " selected" : ""}>${l}</option>`).join("")}</select></label>`).join("")}</div></div>`;
-    body = `<p class="muted">Pick the sensors in ${esc(z.name)}. Each one is a physical device, and its readings are matched for you.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>${combineBox}`;
+    const counted = (c) => chosen.filter((s) => classOf(m, s) === c && m.avg[s.id] !== false).length, classes = Object.keys(SENSOR_CLASS).filter((c) => counted(c) >= 2);
+    const combineBox = !classes.length ? "" : `<div class="combine"><p class="muted">How should each class of sensor combine into the zone's reading?</p><div class="fields">${classes.map((c) => `<label class="field" for="map-c-${c}">${SENSOR_CLASS[c]}, ${counted(c)} sensors<select id="map-c-${c}" data-mcombine="${c}">${Object.entries(METHODS).map(([id, l]) => `<option value="${id}"${m.combine[c] === id ? " selected" : ""}>${l}</option>`).join("")}</select></label>`).join("")}</div></div>`;
+    body = `<p class="muted">Pick the sensors in ${esc(z.name)}. Each one is a physical device. Its class says which readings it's asked for, and they're matched for you.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>${combineBox}`;
   }
   if (m.step === 2) body = `<p class="muted">Pick what runs in ${esc(z.name)}. Shared hardware can be added to several zones.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>`;
   if (m.step === 3) {
@@ -934,7 +953,7 @@ function renderMap() {
       <p class="small muted">${m.band === "helpers" ? "Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>`;
   }
   if (m.step === 4) {
-    const ds = devices.filter((d) => m.pickD[d.id]), issues = mapIssues(m), unplaced = chosen.filter((s) => !z.sensors.some((x) => x.id === s.id)).length;
+    const ds = devices.filter((d) => m.pickD[d.id]), issues = mapIssues(m), unplaced = chosen.filter((s) => { const had = z.sensors.find((x) => x.id === s.id); return !had || had.kind !== classOf(m, s); }).length;
     body = `<div class="review"><div><strong>${chosen.length} sensors</strong><p class="small muted">${esc(chosen.map((s) => s.name).join(", ")) || "None"}</p></div>
       <div><strong>${ds.length} devices</strong><p class="small muted">${esc(ds.map((d) => `${d.name} (${m.roles[d.id] || "not set"})`).join(", ")) || "None"}</p></div>
       <div><strong>Day, night and limits</strong><p class="small muted">${esc(periodSummary(m.period, z, m.period === "fixed" ? m.fixedOn : hhmm(z.dayAt), m.period === "fixed" ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule))}. Limits ${m.band === "helpers" ? "from your helpers" : "set here"}.</p></div></div>
@@ -948,14 +967,20 @@ function renderMap() {
 }
 function saveMap(m) {
   const z = zoneById(m.id), cat = catalog();
-  z.sensors = cat.filter((s) => m.pickS[s.id]).map((s) => { const had = z.sensors.find((x) => x.id === s.id); return had || { ...s, pos: null, level: s.kind === "soil" ? "substrate" : s.level }; });
+  const levelFor = (cls, s) => (cls === "soil" ? "substrate" : s.kind === "env" ? s.level : "in");
+  z.sensors = cat.filter((s) => m.pickS[s.id]).map((s) => {
+    const had = z.sensors.find((x) => x.id === s.id), cls = classOf(m, s);
+    /* A sensor that changes class has to be placed again: soil goes in a unit, environment can sit in an aisle. */
+    if (had && had.kind !== cls) Object.assign(had, { kind: cls, pos: null, level: levelFor(cls, had) });
+    return had || { ...s, kind: cls, pos: null, level: levelFor(cls, s) };
+  });
   for (const s of z.sensors) s.avg = m.avg[s.id] !== false;
   for (const s of z.sensors) if (s.leafEntity) {
     const was = s.leafUnused;
     s.leafUnused = (m.choice[s.id] || {}).leaf === "none";
     if (s.leafUnused && !was) s.leaf = s.leafLive;
   }
-  z.combine = m.combine;
+  z.combine = { ...m.combine };
   for (const d of devices) if (d.ctl) {
     const has = d.zones.includes(z.id);
     if (m.pickD[d.id] && !has) d.zones = [...d.zones, z.id];
@@ -1898,10 +1923,11 @@ function soilDraft(c) {
 function mapDraft(m) {
   const z = zoneById(m.id), [items, add] = changeList(), yes = (on, a, b) => (on ? a : b), names = (list) => [...list].sort().join(", ") || "None";
   for (const s of catalog()) {
-    const had = z.sensors.some((x) => x.id === s.id), on = !!m.pickS[s.id];
+    const was = z.sensors.find((x) => x.id === s.id), had = !!was, on = !!m.pickS[s.id];
     add(s.name, yes(had, "Mapped", "Not mapped"), yes(on, "Mapped", "Not mapped"));
     if (!had || !on) continue;
-    add(`${s.name} in the zone reading`, yes(s.avg !== false, "Counted", "Left out"), yes(m.avg[s.id] !== false, "Counted", "Left out"));
+    add(`${s.name} class`, SENSOR_CLASS[was.kind], SENSOR_CLASS[classOf(m, s)]);
+    add(`${s.name} average`, yes(was.avg !== false, "Included", "Excluded"), yes(m.avg[s.id] !== false, "Included", "Excluded"));
     if (s.leafEntity) add(`${s.name} leaf temperature offset`, yes(!!s.leafUnused, "Kept here", "On the board"), yes((m.choice[s.id] || {}).leaf === "none", "Kept here", "On the board"));
   }
   for (const d of devices) if (d.ctl) {
@@ -1913,7 +1939,7 @@ function mapDraft(m) {
   add("Day and night", zonePeriod(z), periodSummary(m.period, z, fixed ? m.fixedOn : hhmm(z.dayAt), fixed ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule));
   if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
-  for (const k of ["temperature", "humidity", "vpd", "light"]) add(`${M[k].label} combines by`, METHODS[(z.combine || {})[k] || "mean"], METHODS[m.combine[k] || "mean"]);
+  for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z, c === "soil" ? "moisture" : "temperature")], METHODS[m.combine[c]]);
   return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved in this mock."); done(); } };
 }
 function finishMap(m, said) {
@@ -2223,7 +2249,14 @@ document.addEventListener("change", (e) => {
     const t = e.target.dataset;
     if (t.mmetric) { const [id, k] = t.mmetric.split(":"); m.choice[id] = m.choice[id] || {}; m.choice[id][k] = e.target.value; render(); }
     if (t.mrole) { m.roles[t.mrole] = e.target.value; render(); }
-    if (t.mavg) { m.avg[t.mavg] = e.target.checked; render(); }
+    if (t.mavg) { m.avg[t.mavg] = !e.target.checked; render(); }
+    if (t.mclass) {
+      /* Picks are kept per class, so changing class and back restores what was chosen. */
+      const sensor = catalog().find((x) => x.id === t.mclass), kept = (m.kept ||= {})[sensor.id] ||= {};
+      kept[classOf(m, sensor)] = m.choice[sensor.id]; m.cls[sensor.id] = e.target.value;
+      if (kept[e.target.value]) m.choice[sensor.id] = kept[e.target.value]; else seedChoices(m, sensor);
+      render();
+    }
     if (t.mcombine) m.combine[t.mcombine] = e.target.value;
     if (t.msched) { const was = mapIssues(m).length; m[t.msched] = e.target.value; if (mapIssues(m).length !== was) render(); }
     return;
