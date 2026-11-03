@@ -27,7 +27,7 @@
     ul{list-style:none;margin:0 0 16px;padding:0;max-height:50dvh;overflow:auto}li{padding:10px 0;border-top:1px solid rgba(128,128,128,.3);display:flex;flex-direction:column;gap:2px}
     code{font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}span{font-size:13px;opacity:.8}strong{font-size:13px;font-weight:500;color:#D32F2F}dialog.dark strong{color:#EF9A9A}
     .row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid rgba(128,128,128,.5);background:none;color:inherit;cursor:pointer}
-    button.allow{background:#03A9F4;border-color:#03A9F4;color:#FFFFFF}button:disabled{opacity:.45;cursor:default}`;
+    summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:#03A9F4;border-color:#03A9F4;color:#FFFFFF}button:disabled{opacity:.45;cursor:default}`;
 
   class EnvironmentControlPanel extends HTMLElement {
     constructor() {
@@ -176,6 +176,7 @@
       if (!isId(m.zone) || !SETTINGS.includes(m.name)) return refuse("Not a setting this panel knows.");
       const z = this.config.zones.find((x) => x && x.id === m.zone), entity = z && linkAt(z, m.name);
       if (typeof entity !== "string" || !HELPER.test(entity)) return refuse("That setting isn't linked to a helper.");
+      if (/^(bands|light)\./.test(m.name) && z.linked !== true) return refuse("That zone's limits are set in Environment Control, not on its helpers.");
       const st = this._hass.states[entity];
       if (!st || st.state === "unavailable") return refuse(`Home Assistant has no ${entity} it can set.`);
       let call;
@@ -228,6 +229,12 @@
         if (!this._hass.states[d.entity]) return `Home Assistant has no ${d.entity}.`;
         out.push({ entity: d.entity, zones: d.zones });
       }
+      const linked = new Set(this.config.zones.flatMap(helperLinks));
+      for (const z of config.zones) for (const e of z && typeof z === "object" ? helperLinks(z) : []) {
+        if (linked.has(e) || out.some((x) => x.entity === e)) continue;
+        if (!this._hass.states[e]) return `Home Assistant has no ${e}.`;
+        out.push({ entity: e, zones: [z.id], helper: true });
+      }
       return out;
     }
     /* Everything shown comes from Home Assistant's own state and registries, never from the frame, and is set as text. */
@@ -236,8 +243,8 @@
       const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
       const zones = item.zones.map((id) => (config.zones.find((z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
       const domain = item.entity.split(".")[0], a = st.attributes || {};
-      const can = domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
-      const flag = !area ? "Has no area in Home Assistant" : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not ${zones.join(" or ")}`;
+      const can = item.helper ? "Its value can be changed" : domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
+      const flag = item.helper ? "" : !area ? "Has no area in Home Assistant" : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not ${zones.join(" or ")}`;
       return { name: String(a.friendly_name || item.entity), facts: [reg.platform, area].filter(Boolean).map(String).join(", "), can, flag, zones };
     }
     confirm(items, config) {
@@ -251,17 +258,23 @@
         const style = make("style", DIALOG_CSS), title = make("h2", "Allow Environment Control to control these?");
         title.id = "ec-confirm-title"; title.tabIndex = -1;
         const sub = make("p", `Asked for by the panel${zones.length ? `, for ${zones.join(" and ")}` : ""}. Allow only what you meant to add: once allowed, the panel can switch it from now on.`);
-        const list = make("ul");
-        for (const r of rows) {
+        const item = (r) => {
           const li = make("li");
           li.append(make("code", r.it.entity), make("span", r.facts ? `${r.name}. ${r.facts}` : r.name), make("span", r.can));
           if (r.flag) li.append(make("strong", r.flag));
-          list.append(li);
-        }
-        const cancel = make("button", "Cancel"), allow = make("button", `Allow ${rows.length} device${rows.length > 1 ? "s" : ""}`, "allow");
+          return li;
+        };
+        /* Devices move hardware, so they're always listed. Helpers fold away under a count. */
+        const devices = rows.filter((r) => !r.it.helper), helpers = rows.filter((r) => r.it.helper), list = make("ul");
+        devices.forEach((r) => list.append(item(r)));
+        const fold = make("details"), hlist = make("ul");
+        fold.append(make("summary", `${helpers.length} helper${helpers.length > 1 ? "s" : ""}: values can be changed`), hlist);
+        helpers.forEach((r) => hlist.append(item(r)));
+        const count = (n, word) => (n ? `${n} ${word}${n > 1 ? "s" : ""}` : "");
+        const cancel = make("button", "Cancel"), allow = make("button", `Allow ${[count(devices.length, "device"), count(helpers.length, "helper")].filter(Boolean).join(" and ")}`, "allow");
         cancel.dataset.host = "cancel"; allow.dataset.host = "allow";
         const row = make("div", undefined, "row"); row.append(cancel, allow);
-        dlg.append(style, title, sub, list, row);
+        dlg.append(style, title, sub, ...(devices.length ? [list] : []), ...(helpers.length ? [fold] : []), row);
         let timer;
         const arm = () => { allow.disabled = true; clearTimeout(timer); timer = setTimeout(() => { allow.disabled = false; }, ARM_MS); };
         const seen = () => { if (document.visibilityState === "visible") arm(); };

@@ -459,6 +459,14 @@ check("Confirm: the dialog names the real entity, not the name the frame gave it
 check("Confirm: and flags that it's in another area", dlg.text.includes("In the Reservoir area in Home Assistant, not Garden"), dlg.text);
 await key("Escape", 27); await sleep(150);
 check("Confirm: Escape is a no", (await sneaky) === false && (await hostDialog()).open === false && (await onHA(`JSON.parse(fakeHA.disk).devices.some(d=>d.entity==="switch.reservoir_pump")`)) === false);
+const linking = evp(`saveConfig(()=>{const z=zoneById("veg");z.helpers.bands.day.vpd.min="input_number.spare_vpd_threshold"}).then(r=>r.ok)`);
+await sleep(300); dlg = await hostDialog();
+check("Confirm: a newly linked helper is asked about too, folded under a count", dlg.open && dlg.text.includes("1 helper: values can be changed") && dlg.text.includes("input_number.spare_vpd_threshold") && dlg.text.includes("Allow 1 helper"), dlg.text);
+await sleep(1100); await hostClick("allow"); await sleep(150);
+check("Confirm: and once allowed, the link is saved", (await linking) === true && (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg").helpers.bands.day.vpd.min`)) === "input_number.spare_vpd_threshold");
+const unlinking = evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.vpd.min="input_number.veg_day_vpd_min_threshold"}).then(r=>r.ok)`);
+await sleep(1300); await hostClick("allow");
+check("Confirm: putting back a helper that was dropped asks again, since it's new again", (await unlinking) === true);
 const unknown = await evp(`saveConfig(()=>{devices.push({id:"lock",name:"Lock",ctl:"switch",zones:["garden"],entity:"lock.front_door"})}).then(r=>[r.ok,r.error])`);
 check("Confirm: an entity the panel can't control is refused without asking", unknown[0] === false && unknown[1].includes("isn't something this panel can control") && (await hostDialog()).open === false, unknown);
 /* The plug's question was answered only to get past it here, so it goes back to unanswered for the tests after. */
@@ -488,6 +496,7 @@ const ACK = 900, GIVE_UP = 1620;
 /* A board's offset lives in the fake HA now, so resets and silent boards are set there. */
 const boardSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,Number(v).toFixed(1)))`); await sleep(60); };
 const haSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,String(v)))`); await sleep(60); };
+const helperCalls = () => onHA(`fakeHA.calls.filter(c=>c.domain.startsWith("input_")).map(c=>c.data.entity_id+"="+(c.data.value??c.data.time))`);
 const boardSilent = (entity, on) => onHA(`fakeHA.knobs.ignore.${on ? "add" : "delete"}("${entity}")`);
 const leafSave = (wait = ACK) => ev(`(document.querySelector("[data-dreview]").click(),document.querySelector("[data-rapply]")?.click())`).then(() => sleep(wait));
 const sends = () => ev(`leafSends.map(x=>x.entity_id+"="+x.value)`);
@@ -1000,15 +1009,20 @@ check("Targets: tapping it opens that period", (await ev(`ui.vpdw.period`)) === 
 await clickIt("[data-ddiscard]");
 await openT("garden"); await ev(`ui.vpdw.bands[ui.vpdw.period].temperature[0]-=1;ui.vpdw.bands[ui.vpdw.period].temperature[1]-=0.5;render()`); await sleep(40);
 await clickIt("[data-dreview]");
-check("Linked: helper values are shown as a preview, not applied", (await modalText()).includes("stay a preview") && (await ev(`document.querySelector("[data-rapply]").textContent`)) === "Apply 1 change" && (await ev(`document.querySelectorAll(".review-list.preview .review-row").length`)) === 1, await modalText());
-const lp = await ev(`ui.vpdw.period`), minBefore = await ev(`zones[0].bands["${lp}"].temperature[0]`), lowWant = await ev(`ui.vpdw.bands["${lp}"].temperature[1]`);
-await clickIt("[data-rapply]");
-check("Linked: only the one stored here moves", (await ev(`zones[0].bands["${lp}"].temperature[0]`)) === minBefore && (await ev(`zones[0].bands["${lp}"].temperature[1]`)) === lowWant);
+check("Linked: a value on a helper is applied there, and the review says so", (await modalText()).includes("Temperature Min, on your helper") && (await modalText()).includes("follows straight away") && (await ev(`document.querySelector("[data-rapply]").textContent`)) === "Apply 2 changes" && (await ev(`!document.querySelector(".review-list.preview")`)) === true, await modalText());
+const lp = await ev(`ui.vpdw.period`), minBefore = await ev(`zones[0].bands["${lp}"].temperature[0]`), minWant = await ev(`ui.vpdw.bands["${lp}"].temperature[0]`), lowWant = await ev(`ui.vpdw.bands["${lp}"].temperature[1]`);
+const minHelper = `input_number.garden_${lp}_temperature_min_threshold`;
+await clickIt("[data-rapply]"); await sleep(ACK);
+check("Linked: the Min goes to its helper through the host, and the Low is saved here", (await ev(`zones[0].bands["${lp}"].temperature[0]`)) === minWant && (await ev(`zones[0].bands["${lp}"].temperature[1]`)) === lowWant && (await helperCalls()).at(-1) === `${minHelper}=${minWant}` && (await ev(`!ui.vpdw && !ui.review`)) === true, [await helperCalls(), await ev(`ui.review && ui.review.errors`)]);
+await haSet([[minHelper, minBefore]]);
+await openT("garden"); await ev(`ui.vpdw.bands[ui.vpdw.period].temperature[0]=${minBefore}-0.05;render()`); await sleep(40);
+check("Linked: a value the helper can't take is a problem before review, not a refusal after", (await ev(`document.querySelector("#v-issues").textContent`)).includes("Temperature Min goes to your helper, which takes -20 to 50 in steps of 0.1") && (await reviewBtn()) === true, await ev(`document.querySelector("#v-issues").textContent`));
+await clickIt("[data-ddiscard]");
+await boardSilent(minHelper, true);
 await openT("garden"); await ev(`ui.vpdw.bands[ui.vpdw.period].temperature[0]-=1;render()`); await sleep(40);
-check("Linked: helper values alone have nothing to apply", (await barText()).includes("preview only"), await barText());
-await clickIt("[data-dreview]");
-check("Linked: and Apply stays off", (await ev(`document.querySelector("[data-rapply]").disabled`)) === true);
-await clickIt("[data-rback]");
+await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(GIVE_UP);
+check("Linked: a helper that doesn't report keeps the review open and says what it still holds", ((await ev(`ui.review && ui.review.errors`)) || []).some((e) => e.includes("Temperature Min: not confirmed. Your helper still reports")), await ev(`ui.review && ui.review.errors`));
+await boardSilent(minHelper, false); await ev(`ui.review=null;renderModal()`); await clickIt("[data-ddiscard]");
 
 await openT("nursery"); await tap("#vin-temperature-2"); await type("23.5"); await key("Enter", 13); await sleep(80);
 await clickIt("[data-calw]");
@@ -1219,7 +1233,6 @@ check("Apply: no answer is never shown as saved", (await ev(`zoneById("garden").
 check("Apply: the review stays open to try again", (await ev(`!!ui.review && !!ui.sched`)) === true && (await ev(`!document.querySelector("[data-rapply]").disabled`)) === true);
 await boardSilent("input_number.emerson_effect_morning_extension", false); await clickIt("[data-rapply]"); await sleep(ACK);
 /* The setting write path. The frame names a zone and a setting, never an entity, and the host checks the helper's own limits. */
-const helperCalls = () => onHA(`fakeHA.calls.filter(c=>c.domain.startsWith("input_")).map(c=>c.data.entity_id+"="+(c.data.value??c.data.time))`);
 const hBefore = (await helperCalls()).length;
 const hTries = await evp(`Promise.all([ask("setting",{zone:"garden",name:"heater",value:1}),ask("setting",{zone:"nursery",name:"bands.day.vpd.min",value:0.8}),ask("setting",{zone:"garden",name:"night",value:"25:00"}),ask("setting",{zone:"garden",name:"morning",value:7.5}),ask("setting",{zone:"garden",name:"morning",value:90}),ask("setting",{zone:"nope",name:"day",value:"07:00"})]).then(r=>r.map(x=>x.ok))`);
 check("Setting: the host refuses an unknown setting, one the zone doesn't link, a bad time, a value off the helper's step or past its limit, and an unknown zone", JSON.stringify(hTries) === JSON.stringify([false, false, false, false, false, false]) && (await helperCalls()).length === hBefore, hTries);
@@ -1311,7 +1324,7 @@ await period2("night");
 check("Limits: a bad day value is reachable from Night", (await ev(`document.querySelector("#v-issues").textContent`)).includes("Day has a value to fix"));
 await period2("day"); await typeLimit("2500");
 await clickIt("[data-dreview]");
-check("Limits: a linked zone's change is a preview, as with its other helpers", (await schedModal()).includes("Day Light Min") && (await schedModal()).includes("2,500 lx") && (await ev(`vpdDraft(ui.vpdw).items.length`)) === 0 && (await ev(`vpdDraft(ui.vpdw).skipped.length`)) === 1, await schedModal());
+check("Limits: a linked zone's light limit goes to its helper, like its other helpers", (await schedModal()).includes("Day Light Min, on your helper") && (await schedModal()).includes("2,500 lx") && (await ev(`vpdDraft(ui.vpdw).items.length`)) === 1 && (await ev(`vpdDraft(ui.vpdw).skipped.length`)) === 0, await schedModal());
 await ev(`ui.review=null;render()`); await sleep(30);
 await ev(`document.querySelector('[data-vstage="veg"]').click()`); await sleep(40);
 check("Limits: an Athena stage leaves them alone", (await limitBox()) === "2500");

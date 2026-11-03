@@ -330,8 +330,7 @@ body.vtyping .draftbar { display: none; }
 const NOW = 14 * 60 + 20;
 const DATA_LABEL = "Sample data", BASE_DATE = "2026-11-03", HISTORY = {}, HISTORY_LONG = {};
 const RANGES = [[6, "6h"], [24, "24h"], [72, "72h"], [168, "7d"]];
-const helperOptions = (z) => [z.id === "nursery" ? "veg" : slug(z.name), "shared"];
-const SENT = "Controls aren't active yet. Nothing was sent.";
+const helperOptions = (z) => (z.id === "garden" ? ["garden", "veg"] : ["veg", "garden"]);
 const M = {
   temperature: { label: "Temperature", short: "Temp", unit: "°C", dp: 1, icon: "thermo", c: "--temp" },
   humidity: { label: "Humidity", short: "RH", unit: "%", dp: 1, icon: "drop", c: "--hum" },
@@ -716,8 +715,8 @@ function statesChanged(states) {
   }
 }
 function targetsTable(z) {
-  const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td><button class="tv" data-preview aria-label="${name} ${p} ${v}, preview only">${v}</button></td>`).join("")}</tr>`;
-  const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? `<button class="tv" data-preview aria-label="Light ${p} ${slot} ${v}, preview only">${v}</button>` : ""}</td>`).join("")}</tr>`; };
+  const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td>${v}</td>`).join("")}</tr>`;
+  const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? v : ""}</td>`).join("")}</tr>`; };
   const table = (p, title) => `<div class="tbl-wrap"><table><thead><tr><th>${title}</th><th>Min</th><th>Low</th><th>Target</th><th>High</th><th>Max</th></tr></thead><tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody></table></div>`;
   return `${table("day", "Day")}${table("night", "Night")}
   <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Min, Target and Max are linked to your helpers, so your alerts read the same numbers. Low and High are stored here." : "All stored here. Link them to helpers in Setup."}</p>`;
@@ -742,7 +741,7 @@ function renderZone() {
     <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div></section>
     <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div>${activityList(z)}</section>
-    <section class="card"><div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" data-vpd="${z.id}">Set targets</button><span class="pill preview">Preview</span></div></div>${targetsTable(z)}</section></div>`;
+    <section class="card"><div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" data-vpd="${z.id}">Set targets</button></div></div>${targetsTable(z)}</section></div>`;
 }
 
 /* Seeded so a redraw keeps the same line. */
@@ -1144,7 +1143,8 @@ function vProblems(b) {
   return out;
 }
 function vIssues(v, b) {
-  const issues = vProblems(b);
+  const p = Object.keys(v.bands).find((x) => v.bands[x] === b) || v.period;
+  const issues = [...vProblems(b), ...vHelperIssues(v, p, b)];
   if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
   return issues;
 }
@@ -1345,7 +1345,7 @@ function renderVpd() {
     <div class="vside">${summary("temperature", "Temperature °C")}${summary("humidity", "Humidity %")}${summary("vpd", "VPD kPa")}${lightRow}
       <p class="small muted">Drag on the chart or type a number here. Bright cells are your ideal zone. Faded cells are outside it but not critical. Dark cells are past Min or Max. Light is what your sensors read, not the % set on the lights, so it isn't on the chart.</p></div></div>
     <div class="vissues" id="v-issues" data-html="${esc(vIssueBox(v, issues))}">${vIssueBox(v, issues)}</div>
-    ${z.linked ? `<p class="small muted">${esc(z.name)}'s Min, Target, Max and light limit are linked to your helpers, so those are a preview and applying won't change them. Low and High are saved here.</p>` : ""}
+    ${z.linked ? `<p class="small muted">${esc(z.name)}'s values on your helpers change there when you apply, and your alerts follow straight away. Low and High, and anything without a helper, are saved here.</p>` : ""}
     <div class="row"><button class="btn" data-vexit>Back</button></div>
   </section></div>`;
 }
@@ -1859,30 +1859,61 @@ function leafDraft(l) {
   return { zone: z.name, items, skipped: [], bar: true, busy: !!l.sending, blocked: lProblems(l, z).length ? "fix the problems before review" : "", note: boards ? `${moves}Offsets change on the board itself, and anything reading its VPD, like your alerts, follows straight away.` : moves,
     apply: (done) => saveLeaf(l, done), discard: () => { l.rows = leafRows(z); l.basis = z.leafBasis || ""; render(); } };
 }
+/* Which of a zone's limits sit on a helper. Each one changes there, through the host, and counts once HA reports it. */
+const BAND_SLOT = { 0: "min", 2: "target", 4: "max" };
+const bandSetting = (p, k, i) => `bands.${p}.${k}.${BAND_SLOT[i]}`;
+const lightSetting = (p) => `light.${LIGHT_LIMIT[p][0]}`;
+const settingLink = (z, name) => (z.linked || !/^(bands|light)\./.test(name) ? name.split(".").reduce((o, key) => (o && typeof o === "object" ? o[key] : undefined), z.helpers || {}) : undefined);
+function vHelperIssues(v, p, b) {
+  const z = zoneById(v.id), out = [];
+  const check = (name, x, label, edit, slot) => {
+    const e = settingLink(z, name), a = e && haStates[e] && haStates[e].attributes;
+    if (!a || !Number.isFinite(a.min)) return;
+    const steps = (x - a.min) / a.step;
+    if (x < a.min || x > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) out.push({ text: `${label} goes to your helper, which takes ${a.min} to ${a.max} in steps of ${a.step}.`, edit, slot });
+  };
+  for (const k of Object.keys(VNAME)) for (const i of [0, 2, 4]) check(bandSetting(p, k, i), b[k][i], `${VNAME[k]} ${SLOT_NAME[i]}`, k, i);
+  if (b.light) check(lightSetting(p), b.light[0], "Light limit", "light", 0);
+  return out;
+}
 function vpdDraft(v) {
-  const z = zoneById(v.id), items = [], skipped = [];
+  const z = zoneById(v.id), items = [];
   for (const [p, day] of PERIODS) for (const k of Object.keys(VNAME)) v.bands[p][k].forEach((x, i) => {
-    const was = z.bands[p][k][i];
-    if (differs(x, was)) (z.linked && i !== 1 && i !== 3 ? skipped : items).push({ label: `${day} ${VNAME[k]} ${SLOT_NAME[i]}`, before: `${round2(was)}${VUNIT[k]}`, after: `${round2(x)}${VUNIT[k]}` });
+    const was = z.bands[p][k][i], helper = !!settingLink(z, bandSetting(p, k, i) || "");
+    if (differs(x, was)) items.push({ label: `${day} ${VNAME[k]} ${SLOT_NAME[i]}${helper ? ", on your helper" : ""}`, before: `${round2(was)}${VUNIT[k]}`, after: `${round2(x)}${VUNIT[k]}`, helper });
   });
   for (const [p, day] of PERIODS) {
-    const [key, slot] = LIGHT_LIMIT[p], was = z.lightLimits[key], x = v.bands[p].light[0];
-    if (differs(x, was)) (z.linked ? skipped : items).push({ label: `${day} Light ${slot}`, before: `${fmt("light", was)} lx`, after: `${fmt("light", x)} lx` });
+    const [key, slot] = LIGHT_LIMIT[p], was = z.lightLimits[key], x = v.bands[p].light[0], helper = !!settingLink(z, lightSetting(p));
+    if (differs(x, was)) items.push({ label: `${day} Light ${slot}${helper ? ", on your helper" : ""}`, before: `${fmt("light", was)} lx`, after: `${fmt("light", x)} lx`, helper });
   }
   const bad = PERIODS.filter(([p]) => vPeriodBad(v, p)).map(([, name]) => name);
-  return { zone: z.name, items, skipped, bar: true, busy: false, blocked: bad.length ? `fix ${bad.join(" and ")} before review` : "", note: "", apply: (done) => { saveVpd(v).then(done); },
+  const note = items.some((i) => i.helper) ? "Values on your helpers change there, and anything reading them, like your alerts, follows straight away." : "";
+  return { zone: z.name, items, skipped: [], bar: true, busy: false, blocked: bad.length ? `fix ${bad.join(" and ")} before review` : "", note, apply: (done) => { saveVpd(v).then(done); },
     discard: () => { v.bands = vDraftBands(z); v.stage = null; v.sel = null; render(); } };
 }
 async function saveVpd(v) {
-  const linked = zoneById(v.id).linked;
+  const z0 = zoneById(v.id), sends = [];
+  for (const [p] of PERIODS) {
+    for (const k of Object.keys(VNAME)) for (const i of [0, 2, 4]) if (settingLink(z0, bandSetting(p, k, i)) && differs(v.bands[p][k][i], z0.bands[p][k][i])) sends.push([bandSetting(p, k, i), v.bands[p][k][i], `${p} ${VNAME[k]} ${SLOT_NAME[i]}`, () => zoneById(v.id).bands[p][k][i]]);
+    if (settingLink(z0, lightSetting(p)) && differs(v.bands[p].light[0], z0.lightLimits[LIGHT_LIMIT[p][0]])) sends.push([lightSetting(p), v.bands[p].light[0], `${p} Light ${LIGHT_LIMIT[p][1]}`, () => zoneById(v.id).lightLimits[LIGHT_LIMIT[p][0]]]);
+  }
+  /* What's kept here is saved by the backend first. Helpers are written after. */
   const r = await saveConfig(() => {
     const z = zoneById(v.id), b = clone(v.bands);
-    if (z.linked) { for (const [p] of PERIODS) for (const k of Object.keys(VNAME)) for (const i of [1, 3]) z.bands[p][k][i] = b[p][k][i]; return; }
-    for (const [p] of PERIODS) { z.lightLimits[LIGHT_LIMIT[p][0]] = b[p].light[0]; delete b[p].light; }
-    z.bands = b;
+    for (const [p] of PERIODS) {
+      for (const k of Object.keys(VNAME)) for (let i = 0; i < 5; i++) if (!settingLink(z, bandSetting(p, k, i) || "")) z.bands[p][k][i] = b[p][k][i];
+      if (!settingLink(z, lightSetting(p))) z.lightLimits[LIGHT_LIMIT[p][0]] = b[p].light[0];
+    }
   });
   if (!r.ok) return [`Not saved. ${r.error}`];
-  toast(linked ? "Ideal zone saved. Your helpers weren't changed." : "Targets saved.");
+  const stuck = [];
+  await Promise.all(sends.map(async ([name, value, label, now]) => {
+    const w = await ask("setting", { zone: v.id, name, value });
+    if (!w.ok) { stuck.push(`${cap(label)}: not sent. ${w.error}`); return; }
+    if (!(await untilState(() => zoneById(v.id) && !differs(now(), value), LEAF_GIVE_UP_MS))) stuck.push(`${cap(label)}: not confirmed. Your helper still reports ${round2(now())}.`);
+  }));
+  if (stuck.length) { if (ui.vpdw === v) render(); return stuck; }
+  toast(sends.length ? "Targets saved, on your helpers too." : "Targets saved.");
   ui.vpdw = null;
   if (!guideReturn(v.id, "targets")) { ui.screen = "zone"; ui.zone = v.id; }
   render();
@@ -2045,7 +2076,6 @@ document.addEventListener("click", (e) => {
   }
   if (q("[data-ddiscard]")) { const d = topDraft(); if (d) { d.discard(); toast("Changes discarded."); } return; }
   if (q("[data-dreview]")) { openReview(); return; }
-  if (q("[data-preview]")) { toast(SENT); return; }
   if ((el = q("button[data-dev]"))) { const d = devices.find((x) => x.id === el.dataset.dev); if (d) sendControl(d, el.dataset.act); return; }
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-go]"))) {

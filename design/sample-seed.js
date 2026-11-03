@@ -94,6 +94,7 @@ const SEED = (() => {
     for (const [p, metrics] of Object.entries(h.bands || {})) for (const [k, slots] of Object.entries(metrics)) for (const [slot, e] of Object.entries(slots)) states[e] = helper(z.bands[p][k][{ min: 0, target: 2, max: 4 }[slot]], LIMITS[k], e);
     for (const [k, e] of Object.entries(h.light || {})) states[e] = helper(z.lightLimits[k], [0, 10000, 10], e);
   }
+  states["input_number.spare_vpd_threshold"] = helper(0.9, LIMITS.vpd, "Spare VPD threshold");
   /* What each failsafe holds a device to at the mock's time: fans always on, and light plugs on their schedule. */
   const failsafes = {
     "switch.veg_oscillating_fans": { want: "on", kind: "failsafe", by: "Veg fans auto on" },
