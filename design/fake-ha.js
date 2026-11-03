@@ -8,22 +8,37 @@ class FakeHA {
     this.states = JSON.parse(JSON.stringify(seed.states));
     this.config = JSON.parse(JSON.stringify(seed.config));
     this.failsafes = seed.failsafes || {};
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000 };
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500 };
     this.calls = [];
+    this.saves = [];
     this.panels = new Set();
     this.listeners = new Set();
+    this.statusListeners = new Set();
+    this.readyListeners = new Set();
     this.darkMode = false;
+    this.running = true;
+    /* .storage/environment_control. A save replaces it whole or not at all, as HA's atomic writes do. */
+    this.disk = JSON.stringify(this.config);
+    const ha = this;
+    this.connection = {
+      sendMessagePromise: (msg) => ha.command(msg),
+      addEventListener: (type, fn) => { if (type === "ready") ha.readyListeners.add(fn); },
+      removeEventListener: (type, fn) => { if (type === "ready") ha.readyListeners.delete(fn); },
+    };
   }
 
   attach(panel) { this.panels.add(panel); panel.hass = this.hass(); }
+  detach(panel) { this.panels.delete(panel); }
   onCall(fn) { this.listeners.add(fn); }
+  onStatus(fn) { this.statusListeners.add(fn); }
+  status(text) { for (const fn of this.statusListeners) fn(text); }
   hass() {
     return {
       states: this.states,
       user: { is_admin: true },
       themes: { darkMode: this.darkMode },
       callService: (domain, service, data) => this.callService(domain, service, data),
-      connection: { sendMessagePromise: (msg) => this.command(msg) },
+      connection: this.connection,
     };
   }
   /* HA gives the panel a new hass object on every change, never a mutated one. */
@@ -77,7 +92,9 @@ class FakeHA {
       default: return service === "turn_on" ? ["on", {}] : service === "turn_off" ? ["off", {}] : [String(data.value), {}];
     }
   }
+  down() { const e = new Error("Lost connection to Home Assistant"); e.code = "connection_lost"; throw e; }
   async callService(domain, service, data) {
+    if (!this.running) this.down();
     this.validate(domain, service, data);
     const entity = data.entity_id, s = this.states[entity];
     if (s.state === "unavailable") { const e = new Error(`${entity} is unavailable`); e.code = "home_assistant_error"; throw e; }
@@ -93,9 +110,56 @@ class FakeHA {
 
   /* The panel's own backend commands. */
   async command(msg) {
+    if (!this.running) this.down();
     if (!msg || typeof msg.type !== "string") this.fail("Bad message");
     if (msg.type === "environment_control/config") return JSON.parse(JSON.stringify(this.config));
+    if (msg.type === "environment_control/config/save") return this.save(msg);
     this.fail(`Unknown command ${msg.type}`);
+  }
+  /* The real backend checks every field against a schema. This checks enough to catch a host that forwards junk. */
+  checkConfig(c) {
+    const ok = c && Array.isArray(c.zones) && Array.isArray(c.devices) && c.zones.length <= 20 && c.devices.length <= 200;
+    if (!ok) this.fail("Config isn't zones and devices");
+    const ids = new Set(c.zones.map((z) => z.id));
+    if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
+    for (const d of c.devices) {
+      if (!Array.isArray(d.zones) || d.zones.some((z) => !ids.has(z))) this.fail(`${d.id} is in a zone that doesn't exist`);
+      if (d.entity !== undefined && !/^(switch|light|fan|humidifier)\.[a-z0-9_]+$/.test(d.entity)) this.fail(`${d.id} has an entity this panel can't control`);
+    }
+  }
+  /* Revision-checked, so a save made from a stale copy can't undo someone else's. */
+  save(msg) {
+    if (msg.revision !== this.config.revision) this.fail("Setup was saved from somewhere else since this was opened. Reopen the panel to see it.");
+    this.checkConfig(msg.config);
+    const next = { ...JSON.parse(JSON.stringify(msg.config)), revision: this.config.revision + 1 };
+    this.saves.push({ revision: next.revision, cut: this.knobs.cutPower });
+    if (this.knobs.cutPower) {
+      /* The power goes before the new file lands, so the old one is what HA finds when it comes back. */
+      this.knobs.cutPower = false;
+      this.powerCut();
+      this.down();
+    }
+    this.config = next;
+    this.disk = JSON.stringify(next);
+    return JSON.parse(this.disk);
+  }
+  /* What HA has in memory goes, and what's on disk comes back. Device states survive, as HA restores them. */
+  restart() {
+    this.running = false;
+    this.status("Home Assistant is restarting");
+    setTimeout(() => this.boot(), this.knobs.restartMs);
+  }
+  powerCut() {
+    this.running = false;
+    this.status("Power cut. Home Assistant is starting up again");
+    setTimeout(() => this.boot(), this.knobs.restartMs);
+  }
+  boot() {
+    this.config = JSON.parse(this.disk);
+    this.running = true;
+    this.status("");
+    this.publish();
+    for (const fn of this.readyListeners) fn();
   }
 
   offline(entity, down) {

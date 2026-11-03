@@ -204,12 +204,11 @@ def sub(pattern, replacement):
 sub(r'const NOW = 14 \* 60 \+ 20;\nconst DATA_LABEL = .*?HISTORY_LONG = \{\};\n',
     f'const NOW = {NOW};\nconst DATA_LABEL = "HA snapshot", BASE_DATE = "{local:%Y-%m-%d}", HISTORY = {js(HISTORY)}, HISTORY_LONG = {js(HISTORY_LONG)};\n')
 sub(r'const helperOptions = .*?;\n', 'const helperOptions = (z) => z.id === "garden" ? ["garden", "veg"] : ["veg", "garden"];\n')
-sub(r'/\* Each limit is \[min, low, target, high, max\].*?(?=/\* Mapped devices and what)', f'/* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */\nconst zones = {js(zones)};\n')
 sub(r'const ACTIVITY = \{.*?\n\};\n', f'const ACTIVITY = {js(ACTIVITY)};\n')
 sub(r'const EXTRA_SENSORS = \[.*?\n\];\n', 'const EXTRA_SENSORS = [];\n')
 sub(r'const LIGHTS = \{.*?\n\};\n', f'const LIGHTS = {js(lights)};\n')
 sub(r'const ALL_ON_OFF = \[.*?\n\];\n', f'const ALL_ON_OFF = {js(onoff)};\n')
-seed = {"config": {"devices": devices}, "states": STATES, "failsafes": FAILSAFES}
+seed = {"config": {"revision": 1, "zones": zones, "devices": devices}, "states": STATES, "failsafes": FAILSAFES}
 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed, ACTIVITY]), re.I):
     sys.exit("network identifier in the snapshot")
 open(f"{root}/snapshot-ui.html", "w", encoding="utf-8").write(src)

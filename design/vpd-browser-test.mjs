@@ -1338,6 +1338,44 @@ for (let i = 0; i < 3; i++) await cClick('[data-wiz="next"]');
 await cClick("[data-rapply]"); await sleep(80); await ev(`ui.mapw=null;render()`);
 check("Remove: and the first zone is back on Overview", (await see("overview")).includes("Fresh start"));
 
+// ---------- Storage: setup is written by the backend, and survives restarts, power cuts and updates
+/* Reopening the panel builds a new frame, so the tests follow it to its new context. */
+const refindFrame = async () => {
+  await sleep(700);
+  for (const c of [...contexts].reverse()) {
+    const r = await rawSend("Runtime.evaluate", { expression: "window.self!==window.top && typeof ui==='object' && Array.isArray(zones)", returnByValue: true, contextId: c.id });
+    if (r.result && r.result.result && r.result.result.value === true) { frameContext = c.id; return; }
+  }
+};
+const onDisk = () => onHA(`JSON.parse(fakeHA.disk).zones.map(z=>z.name)`);
+const names = () => ev(`zones.map(z=>z.name)`);
+const reviewErrors = () => ev(`ui.review ? ui.review.errors : null`);
+const rename = async (name) => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.mapw=null;openWizard(zones[0].id);ui.wiz.name=${JSON.stringify(name)};ui.screen="setup";render()`); await sleep(30); for (let i = 0; i < 3; i++) await cClick('[data-wiz="next"]'); };
+const rev0 = await ev(`configRevision`);
+await rename("Flower room"); await cClick("[data-rapply]"); await sleep(150);
+check("Storage: an applied change is written by the backend, and the revision moves on", same(await onDisk(), ["Flower room"]) && same(await names(), ["Flower room"]) && (await ev(`configRevision`)) === rev0 + 1, [await onDisk(), await ev(`configRevision`), rev0]);
+await onHA(`fakeHA.restart()`); await sleep(200);
+check("Storage: a restart shows HA's notice outside the panel", (await onHA(`document.querySelector("#ha-status").textContent`)).includes("restarting"));
+await sleep(1600);
+check("Storage: after a restart the change is still there", same(await names(), ["Flower room"]) && (await onHA(`document.querySelector("#ha-status").hidden`)) === true);
+await onHA(`reopenPanel()`); await refindFrame();
+check("Storage: reopening the panel reads it back from storage", same(await names(), ["Flower room"]), await names());
+await onHA(`fakeHA.knobs.cutPower=true`); await rename("Lost name"); await cClick("[data-rapply]"); await sleep(200);
+check("Storage: a power cut mid-save keeps the review open and says it wasn't saved", ((await reviewErrors()) || []).some((e) => e.includes("Lost connection")) && same(await names(), ["Flower room"]), await reviewErrors());
+check("Storage: and what's on disk is the old setup, whole", same(await onDisk(), ["Flower room"]), await onDisk());
+await sleep(1700);
+await cClick("[data-rapply]"); await sleep(200);
+check("Storage: once HA is back, applying again saves it", same(await onDisk(), ["Lost name"]) && (await ev(`ui.review`)) === null, [await onDisk(), await reviewErrors()]);
+await onHA(`installUpdate()`); await refindFrame();
+check("Storage: an update keeps every setting", same(await names(), ["Lost name"]) && (await onHA(`document.querySelector("#ha-status").textContent`)).startsWith("Updated"), await names());
+await onHA(`fakeHA.config.revision+=1;fakeHA.disk=JSON.stringify(fakeHA.config)`);
+await rename("Stale"); await cClick("[data-rapply]"); await sleep(150);
+check("Storage: a save made from an older copy is refused, not merged", ((await reviewErrors()) || []).some((e) => e.includes("saved from somewhere else")) && same(await onDisk(), ["Lost name"]), await reviewErrors());
+await onHA(`reopenPanel()`); await refindFrame();
+const diskBefore = await onHA(`fakeHA.disk`);
+const junk = await evp(`Promise.all([ask("save",{base:configRevision,config:{zones:clone(zones),devices:[{id:"x",zones:["nowhere"]}]}}),ask("save",{base:configRevision,config:{zones:clone(zones),devices:[{id:"lock",zones:[zones[0].id],entity:"lock.front_door"}]}}),ask("save",{base:"1",config:{}})]).then(r=>r.map(x=>x.ok))`);
+check("Storage: the backend refuses a device in a missing zone, an entity it can't control and a malformed save", same(junk, [false, false, false]) && (await onHA(`fakeHA.disk`)) === diskBefore, junk);
+
 check("no script errors", exceptions.length === 0, exceptions);
 
 console.log(`\n${pass} passed, ${fail} failed`);

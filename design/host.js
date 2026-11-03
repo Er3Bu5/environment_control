@@ -25,11 +25,22 @@
       if (first) this.start(); else this.forward();
     }
     get hass() { return this._hass; }
-    disconnectedCallback() { window.removeEventListener("message", this.onMessage); }
+    disconnectedCallback() {
+      window.removeEventListener("message", this.onMessage);
+      if (this.onReady) this._hass.connection.removeEventListener("ready", this.onReady);
+    }
 
     async start() {
       if (!this._hass.user || !this._hass.user.is_admin) { this.shadow.textContent = "Environment Control is for admins."; return; }
-      this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config" });
+      /* HA reconnects after a restart without reloading this page, so what's stored is read again then. */
+      if (!this.onReady) { this.onReady = () => this.reload(); this._hass.connection.addEventListener("ready", this.onReady); }
+      try {
+        this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config" });
+      } catch {
+        this.shadow.textContent = "Can't reach Home Assistant. This panel opens when it's back.";
+        return;
+      }
+      this.shadow.textContent = "";
       const style = document.createElement("style");
       style.textContent = ":host{display:block;height:100%}iframe{display:block;width:100%;height:100%;border:0}";
       this.frame = document.createElement("iframe");
@@ -60,8 +71,14 @@
       const states = {};
       for (const e of this.mapped()) { states[e] = this.pick(this._hass.states[e]); this.forwarded[e] = JSON.stringify(states[e]); }
       this.sentTheme = this.theme();
-      this.post({ type: "init", devices: this.config.devices, states, theme: this.sentTheme });
+      this.post({ type: "init", ...this.stored(), states, theme: this.sentTheme });
       this.ready = true;
+    }
+    stored() { return { revision: this.config.revision, zones: this.config.zones, devices: this.config.devices }; }
+    async reload() {
+      if (!this.frame) { this.start(); return; }
+      try { this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config" }); } catch { return; }
+      if (this.ready) { this.post({ type: "config", ...this.stored() }); this.forward(); }
     }
     forward() {
       if (!this.ready) return;
@@ -80,6 +97,7 @@
       if (!m || typeof m !== "object" || m.v !== 1 || typeof m.type !== "string") return;
       if (m.type === "ready") this.init();
       else if (m.type === "device") this.device(m);
+      else if (m.type === "save") this.save(m);
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 
@@ -107,6 +125,21 @@
       } catch (err) {
         refuse(String((err && err.message) || err));
       }
+    }
+
+    /* Setup changes only this integration's own storage, through its backend, which checks the whole config and the
+       revision it was based on. The host keeps the backend's answer, never the frame's copy, as its config. */
+    async save(m) {
+      const refuse = (why) => this.reply(m.req, false, why);
+      if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
+      if (JSON.stringify(m.config).length > 512 * 1024) return refuse("That setup is too large to save.");
+      try {
+        this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config/save", revision: m.base, config: { zones: m.config.zones, devices: m.config.devices } });
+      } catch (err) {
+        return refuse(String((err && err.message) || err));
+      }
+      this.post({ type: "result", req: m.req, ok: true, ...this.stored() });
+      this.forward();
     }
   }
   if (!customElements.get("environment-control-panel")) customElements.define("environment-control-panel", EnvironmentControlPanel);

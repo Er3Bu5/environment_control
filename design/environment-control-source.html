@@ -349,24 +349,9 @@ const ICON = {
 const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
 const ic = (n, c) => `<span class="ic" style="--c:${c}">${icon(n)}</span>`;
 
-/* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */
-const bandsA = { day: { temperature: [23, 24, 25, 27, 28], humidity: [55, 60, 64, 67, 70], vpd: [0.8, 0.95, 1.1, 1.2, 1.3] }, night: { temperature: [16, 20, 23, 25, 26], humidity: [55, 58, 62, 65, 68], vpd: [0.7, 0.85, 1.0, 1.1, 1.2] } };
-const bandsB = () => ({ day: { temperature: [22, 23, 25, 27, 28], humidity: [55, 58, 62, 67, 70], vpd: [0.7, 0.8, 0.9, 1.05, 1.2] }, night: { temperature: [18, 19, 21, 23, 25], humidity: [55, 58, 62, 67, 70], vpd: [0.7, 0.75, 0.85, 1.0, 1.1] } });
-const zones = [
-  { id: "garden", name: "Garden", dayAt: 7 * 60, nightAt: 19 * 60, now: { temperature: 26.8, humidity: 63.4, vpd: 1.06, light: 41200 }, bands: bandsA, linked: true, lightLimits: { dayMin: 2000, nightMax: 200 }, emerson: { morning: 5, daylight: 10, evening: 5 },
-    layout: { w: 2.4, d: 1.2, units: 12, rows: 3, cols: 4 },
-    sensors: [
-      { id: "g-left", name: "Environment left", short: "Env left", kind: "env", pos: [0.5, 0], level: "in", t: 26.6, h: 64.2, link: "Ethernet", leafEntity: "number.environment_left_leaf_temperature_offset", leafLive: -1 },
-      { id: "g-right", name: "Environment right", short: "Env right", kind: "env", pos: [0.5, 3], level: "above", t: 27.0, h: 62.6, link: "Ethernet", leafEntity: "number.environment_right_leaf_temperature_offset", leafLive: -1 },
-      { id: "g-under", name: "Environment under", short: "Env under", kind: "env", pos: [1.5, 1.5], level: "under", t: 24.9, h: 71.0, link: "Ethernet", leaf: -0.5 },
-    ] },
-  { id: "veg", name: "Veg", dayAt: 16 * 60, nightAt: 10 * 60, now: { temperature: 20.4, humidity: 72.1, vpd: 0.59, light: 0 }, bands: bandsB(), linked: true, lightLimits: { dayMin: 800, nightMax: 200 },
-    layout: { w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2 },
-    sensors: [{ id: "v-env", name: "Veg environment", short: "Veg env", kind: "env", pos: [0.5, 0.5], level: "above", t: 20.4, h: 72.1, link: "Not known yet", leafEntity: "number.veg_environment_leaf_temperature_offset", leafLive: -1 }] },
-  { id: "nursery", name: "Nursery", dayAt: 16 * 60, nightAt: 10 * 60, now: { temperature: 21.1, humidity: 66.0, vpd: 0.74, light: 0 }, bands: bandsB(), linked: false, lightLimits: { dayMin: 300, nightMax: 200 },
-    layout: { w: 1.2, d: 0.6, units: 8, rows: 2, cols: 4 },
-    sensors: [{ id: "n-env", name: "Nursery environment", short: "Nursery env", kind: "env", pos: [0.5, 1.5], level: "in", t: 21.1, h: 66.0, link: "Ethernet", leafEntity: "number.nursery_environment_leaf_temperature_offset", leafLive: -1 }] },
-];
+/* Zones and devices are what the panel's backend has stored. They arrive from the host, and change only once a save is confirmed. */
+let zones = [];
+let configRevision = 0;
 /* Mapped devices and what Home Assistant reports for them both arrive from the host. Nothing here is a device's state until HA says so. */
 let devices = [];
 const haStates = {};
@@ -1448,14 +1433,22 @@ function lFollowChart(z) {
   return moved;
 }
 /* A board's value only counts once the board reports it, so nothing here assumes the write landed. */
-function saveLeaf(l, done) {
+async function saveLeaf(l, done) {
+  /* What's kept here, the chart's choice and offsets for sensors with nowhere to hold one, is saved first. Boards are written after. */
+  const kept = (s) => !hasLeafEntity(s) && s.leaf !== lValue(l.rows[s.id]), was = zoneById(l.id);
+  if ((was.leafBasis || "") !== (l.basis || "") || envOf(was).some(kept)) {
+    const r = await saveConfig(() => {
+      const z = zoneById(l.id);
+      z.leafBasis = l.basis;
+      for (const s of envOf(z)) if (kept(s)) { delete s.vpd; s.leaf = lValue(l.rows[s.id]); }
+    });
+    if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
+  }
   const z = zoneById(l.id), sends = [];
-  z.leafBasis = l.basis;
   for (const s of envOf(z)) {
     const r = l.rows[s.id];
     r.status = "";
-    if (!hasLeafEntity(s)) { if (s.leaf !== lValue(r)) delete s.vpd; s.leaf = lValue(r); }
-    else if (!boardOffline(s) && lValue(r) !== s.leafLive) { sends.push(s); r.status = "sending"; }
+    if (hasLeafEntity(s) && !boardOffline(s) && lValue(r) !== s.leafLive) { sends.push(s); r.status = "sending"; }
   }
   const finish = () => {
     l.sending = false;
@@ -1466,7 +1459,7 @@ function saveLeaf(l, done) {
     /* Stays here unless the chart sent you, so the result can be read where it was set. */
     if (ui.vpdw) leaveLeaf(); else render();
     done();
-    const said = sends.length ? "Leaf temperature offsets saved on the boards in this mock." : "Leaf temperature offsets saved in this mock.";
+    const said = sends.length ? "Leaf temperature offsets saved on the boards." : "Leaf temperature offsets saved.";
     toast(moved ? `${said} Target moved to stay in the ideal zone.` : said);
   };
   if (!sends.length) { finish(); return; }
@@ -1568,9 +1561,14 @@ function schedCommit(z, k, val) {
   else z.emerson[k] = val;
 }
 /* A helper's value only counts once Home Assistant reports it, the same as a board's. */
-function saveSched(s, done) {
-  const z = zoneById(s.id), was = schedValues(z), changed = Object.keys(s.vals).filter((k) => s.vals[k] !== was[k]), sends = changed.filter((k) => schedHeld(z, k));
-  for (const k of changed) if (!sends.includes(k)) schedCommit(z, k, s.vals[k]);
+async function saveSched(s, done) {
+  const z0 = zoneById(s.id), was = schedValues(z0), changed = Object.keys(s.vals).filter((k) => s.vals[k] !== was[k]), sends = changed.filter((k) => schedHeld(z0, k));
+  /* Times kept here are saved by the backend first. Helpers are written after. */
+  if (changed.some((k) => !sends.includes(k))) {
+    const r = await saveConfig(() => { const zz = zoneById(s.id); for (const k of changed) if (!sends.includes(k)) schedCommit(zz, k, s.vals[k]); });
+    if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
+  }
+  const z = zoneById(s.id);
   const finish = () => {
     s.sending = false;
     const stuck = sends.filter(() => z.helperStuck);
@@ -1581,7 +1579,7 @@ function saveSched(s, done) {
     }
     s.status = "";
     leaveSched(); done();
-    toast(sends.length ? "Saved on your helpers in this mock." : "Saved in this mock.");
+    toast(sends.length ? "Saved on your helpers." : "Saved.");
   };
   if (!sends.length) { finish(); return; }
   s.sending = true; s.status = "Sending to Home Assistant...";
@@ -1679,16 +1677,16 @@ function askRemoveZone(id) {
     rows: removeRows(z), note: "Its sensors and devices can be mapped to another zone. Anything set on a board stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
   renderModal();
 }
-function removeZone(id) {
-  const z = zoneById(id), mapped = catalog().filter((s) => z.sensors.some((x) => x.id === s.id));
-  zones.splice(zones.indexOf(z), 1);
+async function removeZone(id) {
+  const name = zoneById(id).name, mapped = catalog().filter((s) => zoneById(id).sensors.some((x) => x.id === s.id));
+  const r = await saveConfig(() => { zones.splice(zones.indexOf(zoneById(id)), 1); for (const d of devices) d.zones = d.zones.filter((x) => x !== id); });
+  if (!r.ok) { toast(`${name} wasn't removed. ${r.error}`); return; }
   for (const s of mapped) if (!catalog().some((x) => x.id === s.id)) EXTRA_SENSORS.push({ ...s, pos: null, avg: true, leaf: undefined, leafUnused: false });
-  for (const d of devices) d.zones = d.zones.filter((x) => x !== id);
   delete ACTIVITY[id]; delete LIGHTS[id];
   if (ui.zone === id) ui.zone = zones.length ? zones[0].id : null;
   render();
   $("[data-addzone]").focus({ preventScroll: true });
-  toast(`${z.name} removed in this mock.`);
+  toast(`${name} removed.`);
 }
 function renderWizard() {
   const w = ui.wiz, lost = stranded(w), nameIssue = zoneNameIssue(w), called = w.name.trim();
@@ -1765,19 +1763,21 @@ function vpdDraft(v) {
     if (differs(x, was)) (z.linked ? skipped : items).push({ label: `${day} Light ${slot}`, before: `${fmt("light", was)} lx`, after: `${fmt("light", x)} lx` });
   }
   const bad = PERIODS.filter(([p]) => vPeriodBad(v, p)).map(([, name]) => name);
-  return { zone: z.name, items, skipped, bar: true, busy: false, blocked: bad.length ? `fix ${bad.join(" and ")} before review` : "", note: "", apply: (done) => { saveVpd(v); done(); },
+  return { zone: z.name, items, skipped, bar: true, busy: false, blocked: bad.length ? `fix ${bad.join(" and ")} before review` : "", note: "", apply: (done) => { saveVpd(v).then(done); },
     discard: () => { v.bands = vDraftBands(z); v.stage = null; v.sel = null; render(); } };
 }
-function saveVpd(v) {
-  const z = zoneById(v.id);
-  if (z.linked) {
-    for (const [p] of PERIODS) for (const k of Object.keys(VNAME)) for (const i of [1, 3]) z.bands[p][k][i] = v.bands[p][k][i];
-    toast("Ideal zone saved in this mock. Your helpers weren't changed.");
-  } else {
-    for (const [p] of PERIODS) { z.lightLimits[LIGHT_LIMIT[p][0]] = v.bands[p].light[0]; delete v.bands[p].light; }
-    z.bands = v.bands; toast("Targets saved in this mock.");
-  }
-  ui.vpdw = null; ui.screen = "zone"; ui.zone = z.id; render();
+async function saveVpd(v) {
+  const linked = zoneById(v.id).linked;
+  const r = await saveConfig(() => {
+    const z = zoneById(v.id), b = clone(v.bands);
+    if (z.linked) { for (const [p] of PERIODS) for (const k of Object.keys(VNAME)) for (const i of [1, 3]) z.bands[p][k][i] = b[p][k][i]; return; }
+    for (const [p] of PERIODS) { z.lightLimits[LIGHT_LIMIT[p][0]] = b[p].light[0]; delete b[p].light; }
+    z.bands = b;
+  });
+  if (!r.ok) return [`Not saved. ${r.error}`];
+  toast(linked ? "Ideal zone saved. Your helpers weren't changed." : "Targets saved.");
+  ui.vpdw = null; ui.screen = "zone"; ui.zone = v.id; render();
+  return [];
 }
 function mapDraft(m) {
   const z = zoneById(m.id), [items, add] = changeList(), yes = (on, a, b) => (on ? a : b), names = (list) => [...list].sort().join(", ") || "None";
@@ -1799,13 +1799,17 @@ function mapDraft(m) {
   if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
   for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
-  return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved in this mock."); done(); } };
+  return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved.").then(done); } };
 }
-function finishMap(m, said) {
-  saveMap(m); ui.mapw = null; toast(said);
+async function finishMap(m, said) {
+  const r = await saveConfig(() => saveMap(m));
+  if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
+  if (ui.mapw === m) ui.mapw = null;
+  toast(said);
   const z = zoneById(m.id);
-  if (m.thenPlace && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
+  if (m.thenPlace && z && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
   render(); window.scrollTo(0, 0);
+  return [];
 }
 function wizDraft(w) {
   const z = w.id && zoneById(w.id), L = wizLayout(w), [items, add] = changeList(), was = (f) => (z ? f(z.layout) : "Not set");
@@ -1816,14 +1820,16 @@ function wizDraft(w) {
     const old = z && z.sensors.find((x) => x.id === s.id), where = (p, g) => (p ? posText(p, g) : "Not placed");
     if (old) { add(`${s.name} position`, where(old.pos, z.layout), where(s.pos, L)); add(`${s.name} height`, LEVELS[old.level], LEVELS[s.level]); }
   }
-  return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note: "", apply: (done) => { saveWizard(w, "Placement saved in this mock."); done(); } };
+  return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note: "", apply: (done) => { saveWizard(w, "Placement saved.").then(done); } };
 }
-function saveWizard(w, said) {
-  const z = w.id ? zoneById(w.id) : createZone(w);
-  z.name = w.name.trim(); z.layout = wizLayout(w); z.sensors = w.sensors;
+async function saveWizard(w, said) {
+  const r = await saveConfig(() => { const z = w.id ? zoneById(w.id) : createZone(w); z.name = w.name.trim(); z.layout = wizLayout(w); z.sensors = clone(w.sensors); return z.id; });
+  if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
+  const z = zoneById(r.value);
   ui.wiz = null; ui.zone = z.id; ui.picked = null;
-  if (!z.sensors.length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return; }
+  if (!z.sensors.length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
   ui.screen = "zone"; toast(said); render();
+  return [];
 }
 const openDrafts = () => [ui.leafw && leafDraft(ui.leafw), ui.sched && schedDraft(ui.sched), ui.mapw && mapDraft(ui.mapw), ui.vpdw && vpdDraft(ui.vpdw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
 const topDraft = () => (ui.leafw ? leafDraft(ui.leafw) : ui.sched ? schedDraft(ui.sched) : ui.mapw ? mapDraft(ui.mapw) : ui.vpdw ? vpdDraft(ui.vpdw) : ui.wiz ? wizDraft(ui.wiz) : null);
@@ -1870,7 +1876,7 @@ function modalHtml() {
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
   const failed = errors.length ? `<div class="notice critical" role="alert"><strong>Some changes were not applied.</strong>${errors.map((e) => `<span>${esc(e)}</span>`).join("")}<span>Anything that went through is saved. What's left is still here to try again.</span></div>` : "";
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">Review changes</h2>
-    <p class="muted small" id="dlg-text">These changes affect ${esc(d.zone)} only. Confirm each value before applying. This mock sends nothing to Home Assistant.</p>
+    <p class="muted small" id="dlg-text">These changes affect ${esc(d.zone)} only. Confirm each value before applying.</p>
     <div class="review-scroll">${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
     <div class="row"><button class="btn" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="btn primary" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
 }
@@ -1939,8 +1945,8 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-level]"))) { ui.level = el.dataset.level; render(); return; }
   if ((el = q("[data-link]"))) { ui.linkFilter = el.dataset.link; render(); return; }
   if ((el = q("[data-activity]"))) { ui.activity = el.dataset.activity; render(); return; }
-  if ((el = q("[data-answer]"))) { const d = devices.find((x) => x.id === el.dataset.answer); d.link = el.dataset.val; d.source = "confirmed"; toast(`Saved ${d.name} as ${LINK[d.link]}.`); render(); return; }
-  if ((el = q("[data-role]"))) { const d = devices.find((x) => x.id === el.dataset.role); d.type = el.dataset.val; toast(`Saved ${d.name} as ${d.type}.`); render(); return; }
+  if ((el = q("[data-answer]"))) { const id = el.dataset.answer, val = el.dataset.val; saveConfig(() => { const d = devices.find((x) => x.id === id); d.link = val; d.source = "confirmed"; return d.name; }).then((r) => { toast(r.ok ? `Saved ${r.value} as ${LINK[val]}.` : `Not saved. ${r.error}`); render(); }); return; }
+  if ((el = q("[data-role]"))) { const id = el.dataset.role, val = el.dataset.val; saveConfig(() => { const d = devices.find((x) => x.id === id); d.type = val; return d.name; }).then((r) => { toast(r.ok ? `Saved ${r.value} as ${val}.` : `Not saved. ${r.error}`); render(); }); return; }
   if ((el = q("[data-wizard]"))) {
     openWizard(el.dataset.wizard);
     if (el.dataset.wstep) { ui.wiz.step = 3; const first = stranded(ui.wiz)[0]; ui.wiz.pick = first ? first.id : null; }
@@ -2119,6 +2125,32 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
 window.addEventListener("resize", vReveal);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", vReveal);
 
+/* Setup is saved by the panel's backend, never assumed. A change runs against a copy of what's stored, the copy goes to the
+   host, and the UI only takes it on once the backend has written it. If it doesn't, nothing here has changed. */
+const DERIVED = ["on", "state", "brightness", "mode", "modes", "setpoint", "unitRh", "minRh", "maxRh", "modeNote"];
+const clone = (x) => JSON.parse(JSON.stringify(x));
+function configOf() {
+  return { zones: clone(zones), devices: devices.map((d) => { const out = clone(d); if (d.entity) for (const k of DERIVED) delete out[k]; return out; }) };
+}
+function adoptConfig(c) {
+  zones = clone(c.zones);
+  devices = clone(c.devices);
+  configRevision = c.revision;
+  devices.forEach(deviceFromState);
+  if (ui.zone && !zoneById(ui.zone)) ui.zone = zones.length ? zones[0].id : null;
+}
+function withConfig(c, change) {
+  const held = [zones, devices];
+  zones = c.zones; devices = c.devices;
+  try { return change(); } finally { [zones, devices] = held; }
+}
+async function saveConfig(change) {
+  const next = configOf(), value = withConfig(next, change);
+  const r = await ask("save", { base: configRevision, config: next });
+  if (r.ok) adoptConfig(r);
+  return { ...r, value };
+}
+
 /* The frame's only way out. The host answers each request by number and pushes state changes, and anything that isn't
    from the page holding this frame is ignored. */
 const bridge = { n: 0, waiting: new Map() };
@@ -2132,11 +2164,11 @@ window.addEventListener("message", (e) => {
   if (e.source !== window.parent || window.parent === window || !m || m.v !== 1) return;
   if (m.type === "init") {
     setTheme(m.theme);
-    devices = m.devices.map((d) => ({ ...d, zones: [...d.zones] }));
     Object.assign(haStates, m.states);
-    devices.forEach(deviceFromState);
+    adoptConfig(m);
     render();
-  } else if (m.type === "states") statesChanged(m.states);
+  } else if (m.type === "config") { if (m.revision !== configRevision) { adoptConfig(m); render(); } }
+  else if (m.type === "states") statesChanged(m.states);
   else if (m.type === "theme") { setTheme(m.theme); drawChart(); }
   else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
 });

@@ -18,17 +18,23 @@ environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; botto
 #drawer .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
 #drawer button, #drawer select { font: inherit; font-size: 13px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-height: 30px; }
 #drawer button[aria-pressed="true"] { border-color: var(--warn); color: var(--warn); }
+#ha-status { position: fixed; top: 36px; left: 0; right: 0; z-index: 2; padding: 8px 16px; background: var(--warn); color: #FFFFFF; font-size: 13px; text-align: center; }
 #calls { margin: 0; padding: 0; list-style: none; font-family: ui-monospace, monospace; font-size: 11px; }
 #calls li { padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 </style>
 <header class="habar"><strong>Home Assistant</strong><span>Mock on this device, nothing reaches a real home</span><button id="drawer-btn" aria-expanded="false" aria-controls="drawer">Test controls</button></header>
 <environment-control-panel></environment-control-panel>
+<div id="ha-status" role="status" hidden></div>
 <div id="drawer" hidden>
   <h2>Devices</h2>
   <p>What a real room does to a command. Failsafes here act within seconds; in your room fans come back in 1 second and lights within 2 minutes.</p>
   <div class="row"><button id="t-drop" aria-pressed="false">Drop the next command</button><button id="t-dropall" aria-pressed="false">Drop every command</button></div>
   <div class="row"><select id="t-entity" aria-label="Device"></select><button id="t-offline">Take offline</button></div>
   <div class="row"><label for="t-delay">Devices report after</label><select id="t-delay"><option value="600">0.6 s</option><option value="2500">2.5 s</option></select></div>
+  <h2>Home Assistant</h2>
+  <p>The panel's settings live in HA's storage, outside the panel's own code. A restart, a power cut or an update can't lose a save that finished, and a save that didn't finish leaves the old settings whole.</p>
+  <div class="row"><button id="t-restart">Restart Home Assistant</button><button id="t-cut" aria-pressed="false">Cut power during the next save</button></div>
+  <div class="row"><button id="t-reopen">Reopen the panel</button><button id="t-update">Install an update</button></div>
   <h2>Sent to Home Assistant</h2>
   <ul id="calls"><li>Nothing yet.</li></ul>
 </div>
@@ -39,7 +45,7 @@ environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; botto
 <script>
 "use strict";
 const fakeHA = new FakeHA(SEED);
-const panel = document.querySelector("environment-control-panel");
+let panel = document.querySelector("environment-control-panel");
 const pageDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
 panel.ui = UI_HTML;
 fakeHA.darkMode = pageDark();
@@ -60,6 +66,31 @@ const dropLabels = () => { $d("#t-drop").setAttribute("aria-pressed", String(fak
 $d("#t-drop").addEventListener("click", () => { fakeHA.knobs.dropNext = !fakeHA.knobs.dropNext; dropLabels(); });
 $d("#t-dropall").addEventListener("click", () => { fakeHA.knobs.dropAll = !fakeHA.knobs.dropAll; dropLabels(); });
 $d("#t-delay").addEventListener("change", (e) => { fakeHA.knobs.reportMs = Number(e.target.value); });
+/* A new panel element and frame, reading what's stored, the same as closing the panel and opening it again. */
+function reopenPanel() {
+  const next = document.createElement("environment-control-panel");
+  next.ui = UI_HTML;
+  fakeHA.detach(panel); panel.replaceWith(next); panel = next;
+  fakeHA.attach(next);
+}
+/* HACS replaces custom_components/environment_control and nothing else, so storage is untouched and the new panel reads it. */
+function installUpdate() {
+  reopenPanel();
+  showStatus("Updated. Settings kept, read back from storage.", 2500);
+}
+let statusTimer;
+function showStatus(text, ms) {
+  const box = $d("#ha-status");
+  clearTimeout(statusTimer);
+  box.textContent = text; box.hidden = !text;
+  if (text && ms) statusTimer = setTimeout(() => { box.hidden = true; }, ms);
+}
+fakeHA.onStatus((text) => showStatus(text));
+$d("#t-restart").addEventListener("click", () => fakeHA.restart());
+$d("#t-cut").addEventListener("click", () => { fakeHA.knobs.cutPower = !fakeHA.knobs.cutPower; $d("#t-cut").setAttribute("aria-pressed", String(fakeHA.knobs.cutPower)); });
+fakeHA.onStatus(() => $d("#t-cut").setAttribute("aria-pressed", String(fakeHA.knobs.cutPower)));
+$d("#t-reopen").addEventListener("click", reopenPanel);
+$d("#t-update").addEventListener("click", installUpdate);
 fakeHA.onCall(() => {
   dropLabels();
   const rows = fakeHA.calls.slice(-8).reverse().map((c) => {
