@@ -5,6 +5,8 @@ import { writeFileSync, readFileSync, rmSync } from "node:fs";
 const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
 process.on("uncaughtException", (e) => { console.log("Error", e.message); browser.kill(); process.exit(2); });
 const browser = spawn("chromium", ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--disable-features=IsolateSandboxedIframes", "--disable-site-isolation-trials", "about:blank"], { stdio: "ignore" });
+/* Chromium keeps writing its profile for a moment after the kill, so wait for it to exit before removing it. */
+const finish = async () => { const gone = new Promise((r) => browser.once("exit", r)); browser.kill(); await gone; rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); process.exit(fail ? 1 : 0); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let info;
 for (let n = 0; n < 50 && !info; n++) { await sleep(200); try { info = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" })).json(); } catch {} }
@@ -144,7 +146,7 @@ if (process.env.SMOKE) {
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview with no zones"], [`ui.screen="devices";render()`, "Devices with no zones"], [`ui.screen="setup";render()`, "Setup with no zones"]]) { await go(e); await clean(name); }
   check("Remove: real data, nothing left", (await ev(`zones.length`)) === 0);
   check("no script errors", exceptions.length === 0, exceptions.slice(0, 3));
-  console.log(`${pass} passed, ${fail} failed`); browser.kill(); rmSync(profile, { recursive: true, force: true }); process.exit(fail ? 1 : 0);
+  console.log(`${pass} passed, ${fail} failed`); await finish();
 }
 
 // Keyboard: heights taken from the user's foldable (41% of the screen), plus margin
@@ -1359,6 +1361,4 @@ check("Remove: and the first zone is back on Overview", (await see("overview")).
 check("no script errors", exceptions.length === 0, exceptions);
 
 console.log(`\n${pass} passed, ${fail} failed`);
-ws.close(); browser.kill(); await sleep(300);
-rmSync(profile, { recursive: true, force: true });
-process.exit(fail ? 1 : 0);
+ws.close(); await finish();
