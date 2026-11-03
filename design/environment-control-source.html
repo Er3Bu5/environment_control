@@ -1524,7 +1524,7 @@ function renderSched() {
   const where = !timesHere(z) ? "" : onHelpers(z) ? `These are your helpers, ${schedEntity(z, "day")} and ${schedEntity(z, "night")}. Anything reading them, like your light schedule, follows straight away.${shared}` : "Stored in Environment Control.";
   const times = timesHere(z) ? `<div class="fields">${time("day")}${time("night")}</div><div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div><p class="small muted">${esc(where)}</p>` : `<p class="muted">${esc(z.name)} follows its light switches, so there are no times to set.</p><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button></div>`;
   const emerson = z.emerson ? `<section class="card" id="s-emerson"><div><h2>Emerson effect</h2><p class="muted small">Red lights either side of the white lights.</p></div><div class="fields">${box("morning", "Morning extension")}${box("daylight", "Daylight time")}${box("evening", "Evening extension")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div><p class="small muted">Your automations still switch the red lights. This only sets the numbers they read.</p></section>` : "";
-  return `<div class="wrap"><div class="sched-title"><h1>Day and night: ${esc(z.name)}</h1><span class="pill preview">Coming in v2</span></div>
+  return `<div class="wrap"><div class="sched-title"><h1>Day and night: ${esc(z.name)}</h1></div>
     <section class="card" id="s-times"><div><h2>Schedule</h2><p class="muted small">When this zone's day starts and ends.</p></div>${times}</section>
     ${emerson}
     <div class="vissues" id="s-issues" data-html="${esc(sIssueHtml(issues))}">${sIssueHtml(issues)}</div>
@@ -1600,7 +1600,10 @@ function schedDraft(s) {
   if (moved) parts.push(`Light goes from ${dayLength(toMin(was.day), toMin(was.night))} to ${dayLength(toMin(v.day), toMin(v.night))} a day.`);
   if (emersonMoved) parts.push(`${emersonLine(v)}.`);
   if (moved && others.length) parts.push(`${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
-  if (Object.keys(v).some((k) => v[k] !== was[k] && schedHeld(z, k))) parts.push("These change on your helpers, and anything reading them, like your light schedule and alerts, follows straight away.");
+  const onHelpersNow = Object.keys(v).some((k) => v[k] !== was[k] && schedHeld(z, k));
+  if (onHelpersNow) parts.push("These change on your helpers, and anything reading them, like your alerts, follows straight away.");
+  /* Saving here moves live hardware: the light automations and their watchdogs read these helpers. */
+  if (onHelpersNow && (moved || emersonMoved)) parts.push("Light automations that read them follow too, so lights can switch within minutes of applying.");
   const blocked = sProblems(s, z).length ? "fix the problems before review" : "";
   return { zone: moved && others.length ? [z, ...others].map((o) => o.name).join(" and ") : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
