@@ -134,6 +134,16 @@ if (process.env.SMOKE) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
+  const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
+  for (const id of ["garden", "veg", "nursery"]) {
+    await go(`ui.screen="setup";openMap("${id}");ui.mapw.step=3;render()`); await sleep(150); await clean(`${id} Map devices helpers`);
+    const r = await ev(`({issues:mapIssues(ui.mapw).map(i=>i.text),changes:mapDraft(ui.mapw).items.length,numbers:helperCatalog.filter(h=>h.entity.startsWith("input_number.")).length})`);
+    check(`${id} Map devices: every helper it links is offered, in the right unit`, r.issues.length === 0, r.issues);
+    check(`${id} Map devices: opening it changes nothing`, r.changes === 0, r.changes);
+    check(`${id} Map devices: every number helper HA reported is offered`, r.numbers === snapIds.filter((e) => e.startsWith("input_number.")).length, r.numbers);
+    if (id === "garden") { await go(`ui.mapw.lp="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
+  }
+  await go(`ui.mapw=null;ui.screen="setup";render()`);
   await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
   await go(`ui.leafw=null;ui.screen="setup";render()`);
   check("Setup: Sensor Calibration sits before Targets in every zone", (await ev(`["garden","veg","nursery"].every(z=>document.querySelector('[data-calw="'+z+'"]').nextElementSibling.dataset.vpd===z)`)) === true);
@@ -1367,6 +1377,79 @@ await phone(390, 844); await reset();
 await ev(`document.documentElement.dataset.theme="dark"`); await schedOpen("garden"); await shot("sched-dark");
 await goTab("Garden"); await ev(`document.querySelector("#chart").scrollIntoView({block:"start"})`); await shot("chart-dark");
 await ev(`delete document.documentElement.dataset.theme`);
+await reset();
+
+// ---------- Helper picker: every link is picked from what HA has, never built from a zone's name
+await reset();
+/* Raced against a second, so a host that never answers fails here rather than hanging the run. */
+const helperList = await evp(`Promise.race([ask("helpers",{}).then(r=>r.helpers),new Promise(r=>setTimeout(()=>r([]),1000))])`), listed = helperList.map((h) => h.entity);
+check("Helpers: the host lists HA's number and time helpers, linked or not", ["input_number.nursery_day_temperature_min_threshold", "input_datetime.reservoir_refill_time", "input_number.garden_day_temperature_min_threshold", "input_datetime.veg_day_time"].every((e) => listed.includes(e)), listed);
+check("Helpers: and nothing else, not even a date-and-time helper", listed.every((e) => /^input_(number|datetime)\./.test(e)) && !listed.includes("input_datetime.last_reservoir_refill"), listed);
+const HOST_ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
+check("Helpers: only allowlisted attributes cross", helperList.every((h) => Object.keys(h.attributes).every((k) => HOST_ATTRS.includes(k))), helperList.find((h) => Object.keys(h.attributes).some((k) => !HOST_ATTRS.includes(k))));
+check("Helpers: listing them maps nothing, so no unlinked helper's state reaches the frame", (await ev(`"input_number.nursery_day_temperature_min_threshold" in haStates`)) === false);
+const pick = async (sel, value) => { await ev(`(()=>{const s=document.querySelector("#${sel}");s.value=${JSON.stringify(value)};s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
+const opts = (sel) => ev(`[...document.querySelectorAll("#${sel} option")].map(o=>o.value)`);
+const fixText = () => ev(`document.querySelector(".fixlink")?.textContent || ""`);
+const mapNextOff = () => ev(`document.querySelector('[data-mstep="next"]').disabled`);
+await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+const onOpts = await opts("map-onHelper");
+check("Picker: lights on lists every time helper HA has, not names built from the zone", onOpts.includes("input_datetime.reservoir_refill_time") && onOpts.includes("input_datetime.garden_day_time") && !onOpts.includes("input_datetime.last_reservoir_refill"), onOpts);
+check("Picker: limit pickers only show once the zone uses its helpers", (await ev(`!!document.querySelector("[data-mlink^='bands']")`)) === false);
+await clickIt('[data-mband="helpers"]');
+const tmin = "map-l-bands-day-temperature-min", nT = "input_number.nursery_day_temperature_min_threshold";
+const groups = await ev(`[...document.querySelectorAll("#${tmin} optgroup")].map(g=>[g.label,[...g.querySelectorAll("option")].map(o=>o.value)])`);
+check("Picker: helpers in the setting's unit come first, °C and ℃ alike", groups[0][0] === "In °C" && groups[0][1].includes(nT) && groups[0][1].includes("input_number.garden_day_temperature_min_threshold") && !groups[0][1].includes("input_number.nursery_day_humidity_min_threshold") && groups[1][0] === "Other helpers" && groups[1][1].includes("input_number.nursery_day_humidity_min_threshold"), groups);
+const nTval = await onHA(`fakeHA.states["${nT}"].state`);
+check("Picker: each option names the helper and what it holds", (await ev(`[...document.querySelectorAll("#${tmin} option")].find(o=>o.value==="${nT}").textContent`)) === `${nT} (${nTval} °C)`);
+check("Picker: My helpers with nothing linked says so and holds Next", (await mapNextOff()) === true && (await fixText()).includes("Link at least one limit"), await fixText());
+await pick(tmin, "input_number.nursery_day_humidity_min_threshold");
+check("Picker: a helper in another unit is flagged and holds Next", (await mapNextOff()) === true && (await fixText()).includes("Day temperature Min: input_number.nursery_day_humidity_min_threshold is in %, not °C"), await fixText());
+await pick(tmin, nT);
+check("Picker: the box keeps focus through the redraw", (await active()) === tmin);
+await pick("map-l-bands-day-temperature-max", nT);
+check("Picker: one helper behind two limits is flagged", (await fixText()).includes(`${nT} is linked to both Day temperature Min and Day temperature Max`), await fixText());
+await pick("map-l-bands-day-temperature-max", "input_number.nursery_day_temperature_max_threshold");
+await clickIt('[data-mlp="night"]');
+await pick("map-l-bands-night-vpd-min", "input_number.reservoir_target_ec");
+await clickIt('[data-mlp="day"]');
+check("Picker: a problem on the other period is still caught", (await fixText()).includes("Night VPD Min: input_number.reservoir_target_ec is in mS/cm, not kPa"), await fixText());
+await clickIt(".fixlink");
+check("Picker: and its Fix opens Night on that box", (await ev(`ui.mapw.lp`)) === "night" && (await active()) === "map-l-bands-night-vpd-min");
+await pick("map-l-bands-night-vpd-min", "input_number.nursery_night_vpd_min_threshold");
+await pick("map-l-morning", "input_number.emerson_effect_morning_extension");
+check("Picker: part of the Emerson effect is flagged", (await fixText()).includes("Emerson effect: pick all three helpers, or none"), await fixText());
+await pick("map-l-morning", "");
+check("Picker: with every problem fixed, Next is on", (await mapNextOff()) === false, await fixText());
+await ev(`ui.mapw.step=4;render()`); await sleep(40);
+await clickIt('[data-mstep="next"]');
+const linkReview = await modalText();
+check("Picker: the review lists each new link with what it holds, and says HA will ask", linkReview.includes("Day temperature Min") && linkReview.includes(`${nT} (${nTval} °C)`) && linkReview.includes("Set here") && linkReview.includes("asks you to allow each helper"), linkReview);
+check("Picker: nothing is saved before Apply", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").helpers.bands`)) === undefined);
+await clickIt("[data-rapply]"); await sleep(300);
+const linkDlg = await hostDialog();
+check("Picker: Home Assistant asks before the links are saved, naming each helper", linkDlg.open && linkDlg.text.includes("3 helpers: values can be changed") && linkDlg.text.includes(nT) && linkDlg.text.includes("input_number.nursery_night_vpd_min_threshold"), linkDlg.text);
+await sleep(1100); await hostClick("allow"); await sleep(400);
+const savedLinks = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery")`);
+check("Picker: once allowed, exactly the picked links are on disk", savedLinks.linked === true && JSON.stringify(savedLinks.helpers.bands) === JSON.stringify({ day: { temperature: { min: nT, max: "input_number.nursery_day_temperature_max_threshold" } }, night: { vpd: { min: "input_number.nursery_night_vpd_min_threshold" } } }) && savedLinks.helpers.light === undefined, savedLinks.helpers);
+check("Picker: Targets now treats them as on your helper", (await ev(`settingLink(zoneById("nursery"),"bands.day.temperature.min")`)) === nT && (await ev(`settingLink(zoneById("nursery"),"bands.day.humidity.min")`)) === undefined);
+await haSet([[nT, 17.5]]);
+check("Picker: and the zone reads what the helper holds", (await ev(`zoneById("nursery").bands.day.temperature[0]`)) === 17.5, await ev(`zoneById("nursery").bands.day.temperature`));
+await reset(); await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+await pick("map-onHelper", "input_datetime.reservoir_refill_time");
+await ev(`ui.mapw.step=4;render()`); await sleep(40);
+check("Picker: changing only which helper holds lights on is a change to review", (await ev(`document.querySelector('[data-mstep="next"]').textContent`)) === "Review and apply");
+await clickIt('[data-mstep="next"]');
+check("Picker: and the review names both helpers", /Lights on helper.*input_datetime\.veg_day_time \(16:00\).*input_datetime\.reservoir_refill_time \(09:00\)/.test(await modalText()), await modalText());
+await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
+for (const [k, e] of [["morning", "morning_extension"], ["daylight", "daylight_time"], ["evening", "evening_extension"]]) await pick(`map-l-${k}`, `input_number.emerson_effect_${e}`);
+await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]'); await clickIt("[data-rapply]"); await sleep(400);
+check("Picker: a helper another zone already links isn't asked about again", (await hostDialog()).open === false);
+check("Picker: linking all three Emerson helpers gives Veg the Emerson effect, read from them", JSON.stringify(await ev(`zoneById("veg").emerson`)) === JSON.stringify(await ev(`zoneById("garden").emerson`)), await ev(`zoneById("veg").emerson`));
+await ev(`openSched("veg");render()`); await sleep(40);
+check("Picker: and Day and night shows it", (await ev(`!!document.querySelector("#s-emerson")`)) === true);
+const wrongKind = await evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.humidity.min="input_datetime.veg_day_time"}).then(r=>[r.ok,r.error])`);
+check("Picker: the backend refuses a limit linked to a time helper", wrongKind[0] === false && wrongKind[1].includes("isn't a number helper"), wrongKind);
 await reset();
 
 // Removing a zone. Last, because it takes the fixture's zones with it, so nothing here can call reset().

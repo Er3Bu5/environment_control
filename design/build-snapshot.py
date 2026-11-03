@@ -151,9 +151,20 @@ def ha_state(entity):
 STATES = {d["entity"]: ha_state(d["entity"]) for d in devices if "entity" in d}
 def flat(v):
     return [v] if isinstance(v, str) else [e for x in v.values() for e in flat(x)]
+# Every number and date helper HA reported, linked or not, so the picker offers what this room really has. The snapshot keeps
+# no has_date or has_time, so a time-only helper is told by its state, which HA writes as HH:MM:SS.
+def helper_state(e):
+    a = {"friendly_name": S[e]["name"] or e, **S[e]["attrs"], **({"unit_of_measurement": S[e]["unit"]} if S[e].get("unit") else {})}
+    if e.startswith("input_datetime."):
+        a.update(has_date=not re.fullmatch(r"\d\d:\d\d:\d\d", str(S[e]["state"])), has_time=True)
+    return {"state": S[e]["state"], "attributes": a}
+for e in S:
+    if e.startswith(("input_number.", "input_datetime.")):
+        STATES[e] = helper_state(e)
 for z in zones:
     for e in flat(z["helpers"]):
-        STATES[e] = {"state": S[e]["state"], "attributes": {"friendly_name": S[e]["name"] or e, **S[e]["attrs"], **({"has_date": False, "has_time": True} if e.startswith("input_datetime.") else {})}}
+        if e not in STATES:
+            sys.exit(f"{e} is linked but not in the snapshot")
 for z in zones:
     for x in z["sensors"]:
         e = x.get("leafEntity")
@@ -225,7 +236,6 @@ def sub(pattern, replacement):
 
 sub(r'const NOW = 14 \* 60 \+ 20;\nconst DATA_LABEL = .*?HISTORY_LONG = \{\};\n',
     f'const NOW = {NOW};\nconst DATA_LABEL = "HA snapshot", BASE_DATE = "{local:%Y-%m-%d}", HISTORY = {js(HISTORY)}, HISTORY_LONG = {js(HISTORY_LONG)};\n')
-sub(r'const helperOptions = .*?;\n', 'const helperOptions = (z) => z.id === "garden" ? ["garden", "veg"] : ["veg", "garden"];\n')
 sub(r'const ACTIVITY = \{.*?\n\};\n', f'const ACTIVITY = {js(ACTIVITY)};\n')
 sub(r'const EXTRA_SENSORS = \[.*?\n\];\n', 'const EXTRA_SENSORS = [];\n')
 sub(r'const LIGHTS = \{.*?\n\};\n', f'const LIGHTS = {js(lights)};\n')

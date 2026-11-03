@@ -83,18 +83,32 @@ const SEED = (() => {
     daylight: "input_number.emerson_effect_daylight_time", evening: "input_number.emerson_effect_evening_extension", bands: bandLinks("garden"), light: lightLinks("garden") };
   zones[1].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time", bands: bandLinks("veg"), light: lightLinks("veg") };
   zones[2].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time" };
-  const LIMITS = { temperature: [-20, 50, 0.1], humidity: [0, 100, 0.1], vpd: [0, 3, 0.01] };
-  const helper = (value, [min, max, step], name) => ({ state: String(value), attributes: { friendly_name: name, min, max, step, mode: "box" } });
+  /* HA writes Celsius both ways, so Garden's temperature helpers say ℃ and the rest °C, as in this room. */
+  const LIMITS = { temperature: [-20, 50, 0.1, "°C"], humidity: [0, 100, 0.1, "%"], vpd: [0, 3, 0.01, "kPa"], light: [0, 10000, 10, "lx"], minutes: [0, 59, 1, "minutes"] };
+  const helper = (value, [min, max, step, unit], name) => ({ state: String(value), attributes: { friendly_name: name, min, max, step, mode: "box", unit_of_measurement: unit } });
   const clock = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:00`;
+  const time = (m, name) => ({ state: clock(m), attributes: { friendly_name: name, has_date: false, has_time: true } });
   for (const z of zones) {
     const h = z.helpers;
-    states[h.day] = { state: clock(z.dayAt), attributes: { friendly_name: h.day, has_date: false, has_time: true } };
-    states[h.night] = { state: clock(z.nightAt), attributes: { friendly_name: h.night, has_date: false, has_time: true } };
-    for (const k of ["morning", "daylight", "evening"]) if (h[k]) states[h[k]] = helper(z.emerson[k], [0, 59, 1], h[k]);
-    for (const [p, metrics] of Object.entries(h.bands || {})) for (const [k, slots] of Object.entries(metrics)) for (const [slot, e] of Object.entries(slots)) states[e] = helper(z.bands[p][k][{ min: 0, target: 2, max: 4 }[slot]], LIMITS[k], e);
-    for (const [k, e] of Object.entries(h.light || {})) states[e] = helper(z.lightLimits[k], [0, 10000, 10], e);
+    states[h.day] = time(z.dayAt, h.day);
+    states[h.night] = time(z.nightAt, h.night);
+    for (const k of ["morning", "daylight", "evening"]) if (h[k]) states[h[k]] = helper(z.emerson[k], LIMITS.minutes, h[k]);
+    for (const [p, metrics] of Object.entries(h.bands || {})) for (const [k, slots] of Object.entries(metrics)) for (const [slot, e] of Object.entries(slots)) states[e] = helper(z.bands[p][k][{ min: 0, target: 2, max: 4 }[slot]], k === "temperature" && z.id === "garden" ? [...LIMITS.temperature.slice(0, 3), "℃"] : LIMITS[k], e);
+    for (const [k, e] of Object.entries(h.light || {})) states[e] = helper(z.lightLimits[k], LIMITS.light, e);
   }
+  /* Helpers HA has that nothing links yet, for the picker. Nursery's own thresholds exist, as in this room, but its limits are
+     set here until someone links them. The rest are what a real HA also holds: wrong units, and a date-and-time helper the
+     picker must leave out. */
+  for (const p of ["day", "night"]) for (const k of ["temperature", "humidity", "vpd"]) for (const [slot, i] of [["min", 0], ["max", 4]]) {
+    const e = `input_number.nursery_${p}_${k}_${slot}_threshold`;
+    states[e] = helper(zones[2].bands[p][k][i], LIMITS[k], e);
+  }
+  states["input_number.day_lights_nursery_min_threshold"] = helper(zones[2].lightLimits.dayMin, LIMITS.light, "input_number.day_lights_nursery_min_threshold");
+  states["input_number.night_lights_nursery_max_threshold"] = helper(zones[2].lightLimits.nightMax, LIMITS.light, "input_number.night_lights_nursery_max_threshold");
   states["input_number.spare_vpd_threshold"] = helper(0.9, LIMITS.vpd, "Spare VPD threshold");
+  states["input_number.reservoir_target_ec"] = helper(1.8, [0, 5, 0.1, "mS/cm"], "Reservoir target EC");
+  states["input_datetime.reservoir_refill_time"] = time(9 * 60, "Reservoir refill time");
+  states["input_datetime.last_reservoir_refill"] = { state: "2026-11-03 09:12:00", attributes: { friendly_name: "Last reservoir refill", has_date: true, has_time: true } };
   /* What each failsafe holds a device to at the mock's time: fans always on, and light plugs on their schedule. */
   const failsafes = {
     "switch.veg_oscillating_fans": { want: "on", kind: "failsafe", by: "Veg fans auto on" },

@@ -128,6 +128,12 @@ class FakeHA {
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
     const helper = (v) => v === undefined || (typeof v === "string" && /^input_(number|datetime)\.[a-z0-9_]+$/.test(v)) || (v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every(helper));
     for (const z of c.zones) if (z.helpers !== undefined && !helper(z.helpers)) this.fail(`${z.id} links a setting to something that isn't a helper`);
+    const flat = (v) => (v === undefined ? [] : typeof v === "string" ? [v] : Object.values(v).flatMap(flat));
+    for (const z of c.zones) {
+      const h = z.helpers || {};
+      if ([h.day, h.night].some((e) => e !== undefined && !e.startsWith("input_datetime."))) this.fail(`${z.id} links lights on or off to something that isn't a time helper`);
+      if ([h.morning, h.daylight, h.evening, ...flat(h.bands), ...flat(h.light)].some((e) => e !== undefined && !e.startsWith("input_number."))) this.fail(`${z.id} links a number setting to something that isn't a number helper`);
+    }
     for (const z of c.zones) for (const x of z.sensors || []) if (x.leafEntity !== undefined && !/^number\.[a-z0-9_]+$/.test(x.leafEntity)) this.fail(`${x.id} has a leaf temperature offset that isn't a number entity`);
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || d.zones.some((z) => !ids.has(z))) this.fail(`${d.id} is in a zone that doesn't exist`);

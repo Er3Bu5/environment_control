@@ -2,7 +2,8 @@
 /* The panel element Home Assistant mounts, and the only code that holds your login. The whole UI runs in a sandboxed
    frame with its own origin and no network, and this element is its only way out: it hands the frame the states of
    mapped entities and runs the few actions in the v1 write table, looking every entity up in the config it fetched
-   itself. The frame sends ids, never an entity or a service, and anything not on the allowlist is dropped.
+   itself. The frame sends ids, never an entity or a service, and anything not on the allowlist is dropped. The one list
+   it hands over beyond mapped entities is HA's number and time helpers, read only, so Setup can offer them to link.
    Kept small and dependency-free on purpose, because it runs with full trust. */
 (() => {
   const WRITE_DOMAINS = ["switch", "light", "fan", "humidifier"];
@@ -119,6 +120,22 @@
       else if (m.type === "save") this.save(m);
       else if (m.type === "calibrate") this.calibrate(m);
       else if (m.type === "setting") this.setting(m);
+      else if (m.type === "helpers") this.helpers(m);
+    }
+    /* Setup's helper picker: number helpers and time-only date helpers, with only the allowlisted attributes. Reading the list
+       links nothing. A helper becomes writable only once a save links it, and that save asks you first. */
+    helpers(m) {
+      if (!Number.isInteger(m.req)) return;
+      const list = [];
+      for (const [e, st] of Object.entries(this._hass.states)) {
+        if (!HELPER.test(e) || !st) continue;
+        const a = st.attributes || {};
+        if (e.startsWith("input_datetime.") && !(a.has_time === true && a.has_date === false)) continue;
+        const { state, attributes } = this.pick(st);
+        list.push({ entity: e, state, attributes });
+        if (list.length >= 2000) break;
+      }
+      this.post({ type: "result", req: m.req, ok: true, helpers: list });
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 

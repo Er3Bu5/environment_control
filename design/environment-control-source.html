@@ -211,6 +211,9 @@ td .sub { display: block; font-size: 12px; color: var(--muted); }
 .steps { display: flex; flex-wrap: wrap; gap: 4px 18px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
 .steps li[aria-current="step"] { color: var(--primary); font-weight: 500; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
+/* Helper ids run long and look alike when cut, so pickers take the full width and spell out what each one holds. */
+.fields.links { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.linkis { font-size: 12px; overflow-wrap: anywhere; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .field input, .field select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
 .stepper { display: inline-flex; align-items: center; gap: 8px; }
@@ -330,7 +333,6 @@ body.vtyping .draftbar { display: none; }
 const NOW = 14 * 60 + 20;
 const DATA_LABEL = "Sample data", BASE_DATE = "2026-11-03", HISTORY = {}, HISTORY_LONG = {};
 const RANGES = [[6, "6h"], [24, "24h"], [72, "72h"], [168, "7d"]];
-const helperOptions = (z) => (z.id === "garden" ? ["garden", "veg"] : ["veg", "garden"]);
 const M = {
   temperature: { label: "Temperature", short: "Temp", unit: "°C", dp: 1, icon: "thermo", c: "--temp" },
   humidity: { label: "Humidity", short: "RH", unit: "%", dp: 1, icon: "drop", c: "--hum" },
@@ -719,7 +721,7 @@ function targetsTable(z) {
   const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? v : ""}</td>`).join("")}</tr>`; };
   const table = (p, title) => `<div class="tbl-wrap"><table><thead><tr><th>${title}</th><th>Min</th><th>Low</th><th>Target</th><th>High</th><th>Max</th></tr></thead><tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody></table></div>`;
   return `${table("day", "Day")}${table("night", "Night")}
-  <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Min, Target and Max are linked to your helpers, so your alerts read the same numbers. Low and High are stored here." : "All stored here. Link them to helpers in Setup."}</p>`;
+  <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Values on your helpers are read from them, so your alerts read the same numbers. Low and High, and anything without a helper, are stored here." : "All stored here. Link them to helpers in Map devices."}</p>`;
 }
 function activityList(z) {
   const rows = ACTIVITY[z.id].filter((a) => ui.activity === "all" || a[1] === ui.activity);
@@ -936,7 +938,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: linkOf(z, "night") || `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || "", offHelper: linkOf(z, "night") || "", links: linksOf(z), lp: "day", fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
@@ -944,6 +946,7 @@ function openMap(id) {
   }
   for (const d of devices) if (d.ctl) { m.roles[d.id] = d.type || ""; if (d.zones.includes(id)) m.pickD[d.id] = true; }
   ui.mapw = m; ui.wiz = null; ui.vpdw = null; ui.leafw = null; ui.sched = null; ui.screen = "setup";
+  loadHelpers();
 }
 function needsChoice(m, s) { return Object.entries(slotsOf(s, classOf(m, s))).filter(([k, o]) => o.length > 1 && !(m.choice[s.id] || {})[k]).map(([k]) => METRIC_NAME[k]); }
 const missingRequired = (m, s) => SLOT_REQUIRED[classOf(m, s)].filter((k) => (m.choice[s.id] || {})[k] === "none");
@@ -1002,6 +1005,77 @@ function lightRows(m, z) {
   if (!shownNear.length && !shownRest.length) return `<p class="small muted">${q ? "Nothing matches that search." : "Home Assistant has no light switches to follow."}</p>`;
   return shownNear.map(row).join("") + (shownRest.length ? `<p class="small muted">${near.length ? "Everything else in Home Assistant" : "Everything in Home Assistant"}</p>${shownRest.map(row).join("")}` : "");
 }
+/* Settings a zone can link to a helper, by the name the host knows each one by. Every link is picked by hand: nothing is
+   guessed from a helper's name. */
+const EMERSON_KEYS = ["morning", "daylight", "evening"];
+const EMERSON_NAME = { morning: "Morning extension", daylight: "Daylight time", evening: "Evening extension" };
+const limitNames = (p) => [...Object.keys(VNAME).flatMap((k) => ["min", "target", "max"].map((s) => `bands.${p}.${k}.${s}`)), `light.${LIGHT_LIMIT[p][0]}`];
+const linkNames = () => [...EMERSON_KEYS, ...limitNames("day"), ...limitNames("night")];
+const linkKind = (n) => (n.startsWith("bands.") ? n.split(".")[2] : n.startsWith("light.") ? "light" : "emerson");
+/* HA writes Celsius both ways: °C, and the single character ℃. */
+const LINK_UNITS = { temperature: ["°C", "℃"], humidity: ["%"], vpd: ["kPa"], light: ["lx"], emerson: ["min", "minute", "minutes"] };
+const LINK_UNIT_NAME = { temperature: "°C", humidity: "%", vpd: "kPa", light: "lx", emerson: "minutes" };
+const SLOT_WORD = { min: "Min", target: "Target", max: "Max" };
+function linkLabel(n) {
+  const [a, p, k, s] = n.split(".");
+  if (a === "bands") return `${cap(p)} ${k === "vpd" ? "VPD" : k} ${SLOT_WORD[s]}`;
+  if (a === "light") return p === "dayMin" ? "Day light Min" : "Night light Max";
+  return `Emerson ${EMERSON_NAME[a].toLowerCase()}`;
+}
+const linkAtName = (z, n) => n.split(".").reduce((o, key) => (o && typeof o === "object" ? o[key] : undefined), z.helpers || {});
+const linksOf = (z) => Object.fromEntries(linkNames().map((n) => [n, linkAtName(z, n)]).filter(([, e]) => typeof e === "string"));
+const linkTarget = (n) => `map-l-${n.replace(/\./g, "-")}`;
+/* HA's number and time helpers, from the host. Asked for each time Map devices opens, so one made since shows up. */
+let helperCatalog = null;
+async function loadHelpers() {
+  const r = await ask("helpers", {});
+  if (!r.ok || !Array.isArray(r.helpers)) return;
+  helperCatalog = r.helpers.filter((h) => h && typeof h.entity === "string" && h.attributes);
+  if (ui.mapw && ui.mapw.step === 3) render();
+}
+const helperFound = (e) => (helperCatalog || []).find((h) => h.entity === e);
+const helperUnit = (h) => (h && h.attributes && h.attributes.unit_of_measurement) || "";
+function helperText(e) {
+  const h = helperFound(e) || (haStates[e] && { entity: e, ...haStates[e] });
+  if (!h) return helperCatalog ? `${e}, not in Home Assistant` : e;
+  const down = h.state === "unavailable" || h.state === "unknown", u = helperUnit(h);
+  return `${e} (${down ? "unavailable" : e.startsWith("input_datetime.") ? h.state.slice(0, 5) : `${h.state}${u ? ` ${u}` : ""}`})`;
+}
+/* One picker per setting. Time pickers list every time helper; number pickers put the ones in the setting's unit first. */
+function linkSelect(m, key, label, opts = {}) {
+  const time = key === "onHelper" || key === "offHelper", cur = (time ? m[key] : m.links[key]) || "", kind = !time && linkKind(key);
+  const all = (helperCatalog || []).filter((h) => h.entity.startsWith(time ? "input_datetime." : "input_number."));
+  const fits = time ? all : all.filter((h) => LINK_UNITS[kind].includes(helperUnit(h))), rest = time ? [] : all.filter((h) => !fits.includes(h));
+  const opt = (e) => `<option value="${esc(e)}"${cur === e ? " selected" : ""}>${esc(helperText(e))}</option>`;
+  const id = time ? `map-${key}` : linkTarget(key);
+  const first = time ? (cur ? "" : `<option value="" selected>${helperCatalog ? "Pick a helper" : "Loading helpers"}</option>`) : `<option value=""${cur ? "" : " selected"}>${opts.none}</option>`;
+  const listed = time ? fits.map((h) => opt(h.entity)).join("") : (fits.length ? `<optgroup label="In ${LINK_UNIT_NAME[kind]}">${fits.map((h) => opt(h.entity)).join("")}</optgroup>` : "") + (rest.length ? `<optgroup label="Other helpers">${rest.map((h) => opt(h.entity)).join("")}</optgroup>` : "");
+  return `<label class="field" for="${id}">${label}<select id="${id}" ${time ? `data-msched="${key}"` : `data-mlink="${key}"`}${opts.aria ? ` aria-label="${esc(opts.aria)}"` : ""}>${first}${cur && !all.some((h) => h.entity === cur) ? opt(cur) : ""}${listed}</select>${cur ? `<span class="linkis">${esc(helperText(cur))}</span>` : ""}</label>`;
+}
+/* Links that count as things stand: Emerson unless day is detected, limits only while the zone uses its helpers. */
+const linksInUse = (m) => linkNames().filter((n) => m.links[n] && (linkKind(n) === "emerson" ? m.period !== "detected" : m.band === "helpers"));
+function linkIssues(m) {
+  const out = [], add = (text, target) => out.push({ text, step: 3, target });
+  if (m.period === "helper") {
+    if (!m.onHelper || !m.offHelper) add("Pick the helpers that hold lights on and lights off.", m.onHelper ? "map-offHelper" : "map-onHelper");
+    else if (m.onHelper === m.offHelper) add("Lights on and lights off need two different helpers.", "map-offHelper");
+    for (const k of ["onHelper", "offHelper"]) if (helperCatalog && m[k] && !helperFound(m[k])) add(`${m[k]} isn't a time helper in Home Assistant. Pick another.`, `map-${k}`);
+  }
+  if (m.period !== "detected") {
+    const gap = EMERSON_KEYS.find((k) => !m.links[k]);
+    if (gap && EMERSON_KEYS.some((k) => m.links[k])) add("Emerson effect: pick all three helpers, or none.", linkTarget(gap));
+  }
+  if (m.band === "helpers" && !linkNames().some((n) => linkKind(n) !== "emerson" && m.links[n])) add("Link at least one limit to a helper, or choose Set here with the VPD chart.", linkTarget("bands.day.temperature.min"));
+  const seen = {};
+  for (const n of linksInUse(m)) {
+    const e = m.links[n], h = helperFound(e), u = helperUnit(h), kind = linkKind(n);
+    if (helperCatalog && !h) add(`${linkLabel(n)}: ${e} isn't in Home Assistant. Pick another helper.`, linkTarget(n));
+    else if (u && !LINK_UNITS[kind].includes(u)) add(`${linkLabel(n)}: ${e} is in ${u}, not ${LINK_UNIT_NAME[kind]}.`, linkTarget(n));
+    if (seen[e]) add(`${e} is linked to both ${linkLabel(seen[e])} and ${linkLabel(n)}. Pick one helper for each.`, linkTarget(n));
+    else seen[e] = n;
+  }
+  return out;
+}
 function mapIssues(m) {
   const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
   for (const s of chosen) for (const n of needsChoice(m, s)) out.push({ text: `${s.name}: pick which ${n} entity to use.`, step: 1, target: `ms-${s.id}` });
@@ -1010,6 +1084,7 @@ function mapIssues(m) {
   if (!chosen.some((s) => classOf(m, s) === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
   if (m.period === "detected" && !Object.keys(m.lights).length) out.push({ text: "Pick at least one light switch, so this zone can detect day and night.", step: 3, target: "map-lq" });
   if (m.period === "fixed" && (!m.fixedOn || !m.fixedOff || m.fixedOn === m.fixedOff)) out.push({ text: "Lights on and lights off need two different times.", step: 3, target: "map-fixedOn" });
+  out.push(...linkIssues(m));
   return out;
 }
 function renderMap() {
@@ -1024,24 +1099,28 @@ function renderMap() {
   }
   if (m.step === 2) body = `<p class="muted">Pick what runs in ${esc(z.name)}. Shared hardware can be added to several zones.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>`;
   if (m.step === 3) {
-    const helper = (k, label, val, suffix) => `<label class="field" for="map-${k}">${label}<select id="map-${k}" data-msched="${k}">${helperOptions(z).map((p) => `input_datetime.${p}_${suffix}`).map((e) => `<option value="${e}"${m[k] === e ? " selected" : ""}>${e} (${val})</option>`).join("")}</select></label>`;
     const fixed = (k, label) => `<label class="field" for="map-${k}">${label}<input id="map-${k}" type="time" data-msched="${k}" value="${m[k]}"></label>`;
     const lit = isDay(z, NOW), count = Object.keys(m.lights).length;
     const perBody = {
-      helper: `<div class="fields">${helper("onHelper", "Lights on", hhmm(z.dayAt), "day_time")}${helper("offHelper", "Lights off", hhmm(z.nightAt), "night_time")}</div><p class="small muted">Change the times on Day and night, or in Home Assistant, and this zone follows.</p>`,
+      helper: `<div class="fields links">${linkSelect(m, "onHelper", "Lights on")}${linkSelect(m, "offHelper", "Lights off")}</div><p class="small muted">Any time helper in Home Assistant. Change the times on Day and night, or in Home Assistant, and this zone follows.</p>`,
       fixed: `<div class="fields">${fixed("fixedOn", "Lights on")}${fixed("fixedOff", "Lights off")}</div><p class="small muted">Stored in Environment Control and changed here.</p>`,
       detected: `<label class="field" for="map-lq">Search Home Assistant<input id="map-lq" type="search" value="${esc(m.lq || "")}" placeholder="Light controller, plug or switch"></label><div class="picklist" id="map-lights">${lightRows(m, z)}</div>${count > 1 ? `<div class="row"><span class="small muted">It's day when</span><div class="seg" role="group" aria-label="Day rule"><button data-mrule="any" aria-pressed="${m.rule === "any"}">Any light is on</button><button data-mrule="all" aria-pressed="${m.rule === "all"}">All lights are on</button></div></div>` : ""}<p class="small muted">${count ? `Lights are ${lit ? "on" : "off"} now, so the ${lit ? "day" : "night"} band applies. ` : ""}Day and night follow the switch, so there's no countdown to the next change.</p>`,
     };
     body = `<div><p class="muted">How does this zone know when it's day or night?</p><div class="seg" role="group" aria-label="Day and night source">${[["helper", "From a helper"], ["fixed", "Set here"], ["detected", "Detected"]].map(([k, l]) => `<button data-mperiod="${k}" aria-pressed="${m.period === k}">${l}</button>`).join("")}</div></div>
       ${perBody[m.period]}
+      ${m.period === "detected" ? "" : `<div><p class="muted">Red lights either side of the day (Emerson effect)</p><div class="fields links">${EMERSON_KEYS.map((k) => linkSelect(m, k, EMERSON_NAME[k], { none: "Not used" })).join("")}</div><p class="small muted">Pick all three helpers, or none. Day and night works out the red light windows from them.</p></div>`}
       <div><p class="muted">Where do this zone's limits come from?</p><div class="seg" role="group" aria-label="Limits"><button data-mband="helpers" aria-pressed="${m.band === "helpers"}">My helpers</button><button data-mband="here" aria-pressed="${m.band === "here"}">Set here with the VPD chart</button></div></div>
-      <p class="small muted">${m.band === "helpers" ? "Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>`;
+      <p class="small muted">${m.band === "helpers" ? "Pick the helper behind each limit. Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>
+      ${m.band !== "helpers" ? "" : `<div class="seg" role="group" aria-label="Limits for"><button data-mlp="day" aria-pressed="${m.lp === "day"}">Day</button><button data-mlp="night" aria-pressed="${m.lp === "night"}">Night</button></div>
+      ${Object.keys(VNAME).map((k) => `<div><p class="small">${VNAME[k]}</p><div class="fields links">${["min", "target", "max"].map((s) => linkSelect(m, `bands.${m.lp}.${k}.${s}`, SLOT_WORD[s], { none: "Set here", aria: linkLabel(`bands.${m.lp}.${k}.${s}`) })).join("")}</div></div>`).join("")}
+      <div><p class="small">Light</p><div class="fields links">${linkSelect(m, `light.${LIGHT_LIMIT[m.lp][0]}`, LIGHT_LIMIT[m.lp][1], { none: "Set here", aria: linkLabel(`light.${LIGHT_LIMIT[m.lp][0]}`) })}</div></div>
+      <p class="small muted">Helpers in the right unit are listed first. Anything on Set here is stored in Environment Control, as Low and High always are.</p>`}`;
   }
   if (m.step === 4) {
     const ds = devices.filter((d) => m.pickD[d.id]), issues = mapIssues(m), unplaced = chosen.filter((s) => { const had = z.sensors.find((x) => x.id === s.id); return !had || had.kind !== classOf(m, s); }).length;
     body = `<div class="review"><div><strong>${chosen.length} sensors</strong><p class="small muted">${esc(chosen.map((s) => s.name).join(", ")) || "None"}</p></div>
       <div><strong>${ds.length} devices</strong><p class="small muted">${esc(ds.map((d) => `${d.name} (${m.roles[d.id] || "not set"})`).join(", ")) || "None"}</p></div>
-      <div><strong>Day, night and limits</strong><p class="small muted">${esc(periodSummary(m.period, z, m.period === "fixed" ? m.fixedOn : hhmm(z.dayAt), m.period === "fixed" ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule))}. Limits ${m.band === "helpers" ? "from your helpers" : "set here"}.</p></div></div>
+      <div><strong>Day, night and limits</strong><p class="small muted">${esc(periodSummary(m.period, z, m.period === "fixed" ? m.fixedOn : hhmm(z.dayAt), m.period === "fixed" ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule))}. Limits ${m.band === "helpers" ? `from your helpers, ${linksInUse(m).filter((n) => linkKind(n) !== "emerson").length} linked` : "set here"}.</p></div></div>
       ${issues.map((i) => `<button class="notice fix" data-mfix="${i.step}" data-target="${i.target}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("")}
       ${unplaced ? `<p class="small muted">${unplaced} new sensor${unplaced > 1 ? "s" : ""} will need placing next.</p>` : ""}
       <p class="small muted">Applying only changes Environment Control. Nothing in Home Assistant changes.</p>`;
@@ -1073,7 +1152,27 @@ function saveMap(m) {
   }
   z.linked = m.band === "helpers";
   z.periodMode = m.period; z.lights = m.period === "detected" ? Object.keys(m.lights) : []; z.rule = m.rule;
-  if (m.period === "helper") z.helpers = { ...(z.helpers || {}), day: m.onHelper, night: m.offHelper };
+  const h = (z.helpers = { ...(z.helpers || {}) }), hadEmerson = EMERSON_KEYS.some((k) => h[k]), bands = {}, light = {};
+  if (m.period === "helper") { h.day = m.onHelper; h.night = m.offHelper; }
+  for (const k of EMERSON_KEYS) if (m.links[k]) h[k] = m.links[k]; else delete h[k];
+  for (const n of linkNames()) {
+    const e = m.links[n], [a, p, k, s] = n.split(".");
+    if (e && a === "bands") ((bands[p] ||= {})[k] ||= {})[s] = e;
+    if (e && a === "light") light[p] = e;
+  }
+  if (Object.keys(bands).length) h.bands = bands; else delete h.bands;
+  if (Object.keys(light).length) h.light = light; else delete h.light;
+  /* Values a new link reads take what the helper holds now, so nothing shows the old number until HA next reports. */
+  const now = (e) => (helperFound(e) || {}).state;
+  if (EMERSON_KEYS.every((k) => h[k])) { z.emerson = z.emerson || {}; for (const k of EMERSON_KEYS) z.emerson[k] = Number.isFinite(Number(now(h[k]))) ? Number(now(h[k])) : z.emerson[k] || 0; }
+  else if (hadEmerson) delete z.emerson;
+  if (z.linked) for (const n of linkNames()) {
+    const v = Number(now(m.links[n])), [a, p, k, s] = n.split(".");
+    if (!m.links[n] || !Number.isFinite(v)) continue;
+    if (a === "bands") z.bands[p][k][SLOT_INDEX[s]] = v;
+    if (a === "light") z.lightLimits[p] = v;
+  }
+  if (m.period === "helper") for (const [k, e] of [["dayAt", m.onHelper], ["nightAt", m.offHelper]]) { const st = now(e); if (st && /^\d\d:\d\d/.test(st)) z[k] = toMin(st.slice(0, 5)); }
   if (m.period === "fixed") { z.dayAt = toMin(m.fixedOn); z.nightAt = toMin(m.fixedOff); }
 }
 
@@ -1863,7 +1962,7 @@ function leafDraft(l) {
 const BAND_SLOT = { 0: "min", 2: "target", 4: "max" };
 const bandSetting = (p, k, i) => `bands.${p}.${k}.${BAND_SLOT[i]}`;
 const lightSetting = (p) => `light.${LIGHT_LIMIT[p][0]}`;
-const settingLink = (z, name) => (z.linked || !/^(bands|light)\./.test(name) ? name.split(".").reduce((o, key) => (o && typeof o === "object" ? o[key] : undefined), z.helpers || {}) : undefined);
+const settingLink = (z, name) => (z.linked || !/^(bands|light)\./.test(name) ? linkAtName(z, name) : undefined);
 function vHelperIssues(v, p, b) {
   const z = zoneById(v.id), out = [];
   const check = (name, x, label, edit, slot) => {
@@ -1937,9 +2036,15 @@ function mapDraft(m) {
   const fixed = m.period === "fixed";
   add("Day and night", zonePeriod(z), periodSummary(m.period, z, fixed ? m.fixedOn : hhmm(z.dayAt), fixed ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule));
   if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
+  const linkWas = (e, none) => (e ? helperText(e) : none);
+  if (m.period === "helper") for (const [k, label, key] of [["day", "Lights on helper", "onHelper"], ["night", "Lights off helper", "offHelper"]]) add(label, linkWas(onHelpers(z) && linkOf(z, k), "None"), linkWas(m[key], "None"));
+  if (m.period !== "detected") for (const k of EMERSON_KEYS) add(linkLabel(k), linkWas(linkOf(z, k), "Not used"), linkWas(m.links[k], "Not used"));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
+  if (m.band === "helpers") for (const n of linkNames()) if (linkKind(n) !== "emerson") add(linkLabel(n), linkWas(linkAtName(z, n), "Set here"), linkWas(m.links[n], "Set here"));
   for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
-  return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved.").then(done); } };
+  const known = new Set(zones.flatMap((o) => [...Object.values(linksOf(o)), linkOf(o, "day"), linkOf(o, "night")]));
+  const fresh = [...linksInUse(m).map((n) => m.links[n]), ...(m.period === "helper" ? [m.onHelper, m.offHelper] : [])].some((e) => e && !known.has(e));
+  return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: `This only changes Environment Control. Nothing in Home Assistant changes.${fresh ? " Home Assistant asks you to allow each helper this panel hasn't linked before, and the zone then reads what it holds." : ""}`, apply: (done) => { finishMap(m, "Mapping saved.").then(done); } };
 }
 async function finishMap(m, said) {
   const r = await saveConfig(() => saveMap(m));
@@ -2049,6 +2154,7 @@ function render() {
   draftSync();
 }
 /* Every warning lands on the thing that fixes it. */
+const refocus = (id) => { const t = document.getElementById(id); if (t) t.focus({ preventScroll: true }); };
 function jumpTo(id) {
   const t = id && document.querySelector(`#${id}`);
   if (t && t.scrollIntoView) { t.scrollIntoView({ block: "center" }); if (t.focus) t.focus({ preventScroll: true }); }
@@ -2131,7 +2237,8 @@ document.addEventListener("click", (e) => {
   if (m) {
     if ((el = q("[data-msensor]"))) { toggleSensor(m, catalog().find((s) => s.id === el.dataset.msensor)); render(); return; }
     if ((el = q("[data-mdevice]"))) { const id = el.dataset.mdevice; if (m.pickD[id]) delete m.pickD[id]; else m.pickD[id] = true; render(); return; }
-    if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; const t = el.dataset.target; render(); jumpTo(t); return; }
+    if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; const t = el.dataset.target, lp = /^map-l-(?:bands-|light-)(day|night)/.exec(t || ""); if (lp) m.lp = lp[1]; render(); jumpTo(t); return; }
+    if ((el = q("[data-mlp]"))) { m.lp = el.dataset.mlp; render(); return; }
     if ((el = q("[data-mband]"))) { m.band = el.dataset.mband; render(); return; }
     if ((el = q("[data-mperiod]"))) { m.period = el.dataset.mperiod; render(); return; }
     if ((el = q("[data-mrule]"))) { m.rule = el.dataset.mrule; render(); return; }
@@ -2243,7 +2350,9 @@ document.addEventListener("change", (e) => {
       render();
     }
     if (t.mcombine) m.combine[t.mcombine] = e.target.value;
-    if (t.msched) { const was = mapIssues(m).length; m[t.msched] = e.target.value; if (mapIssues(m).length !== was) render(); }
+    if (t.msched) { const was = mapIssues(m).length; m[t.msched] = e.target.value; if (mapIssues(m).length !== was || t.msched.endsWith("Helper")) { render(); refocus(e.target.id); } }
+    /* Redrawn so issues and the other pickers follow, with focus put back on this one for keyboard use. */
+    if (t.mlink) { const id = e.target.id; if (e.target.value) m.links[t.mlink] = e.target.value; else delete m.links[t.mlink]; render(); refocus(id); }
     return;
   }
   const w = ui.wiz; if (!w || e.target.id === "wiz-name") return; const v = e.target.value;
