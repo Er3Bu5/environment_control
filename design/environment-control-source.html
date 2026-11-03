@@ -1,0 +1,2256 @@
+<title>Environment Control</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+/* Layout: Home Assistant's own shape. A top bar with view tabs, then tinted-icon tiles, each reading set on a line-and-dot band track. */
+:root {
+  --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --muted: #727272;
+  --primary: #03A9F4; --on-primary: #FFFFFF;
+  --temp: #FF9800; --hum: #2196F3; --vpd: #4CAF50; --sun: #FBC02D; --off: #BDBDBD;
+  --above: #FF9800; --in: #4CAF50; --under: #7E57C2;
+  --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A;
+  --day: #FBC02D; --night: #DDE1EA; --band: #9E9E9E2E; --ideal: #4CAF5059; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --shade: #5C6BC014;
+  --lhigh: #F1C40F; --llow: #000000; --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --off: #616161;
+  --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --llow: #616161; --night: #2A2F3A; --band: #FFFFFF14; --ideal: #66BB6A55; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --shade: #9FA8DA14;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --off: #616161;
+  --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --llow: #616161; --night: #2A2F3A; --band: #FFFFFF14; --ideal: #66BB6A55; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --shade: #9FA8DA14;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 24px; font-weight: 500; text-wrap: balance; }
+h2 { font-size: 18px; font-weight: 500; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.bar { display: flex; align-items: center; gap: 12px; padding-block: 10px 4px; font-size: 19px; }
+.bar svg { width: 22px; height: 22px; fill: var(--muted); flex: none; }
+.bar .sample { margin-left: auto; font-size: 12px; color: var(--muted); border: 1px dashed var(--off); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
+.tabs { display: flex; gap: 20px; overflow-x: auto; scrollbar-width: none; }
+.tabs button { flex: none; border: 0; border-bottom: 2px solid transparent; background: none; padding: 8px 0; font-size: 14px; color: var(--muted); }
+.tabs button:hover { color: var(--fg); }
+.tabs button[aria-current="page"] { color: var(--primary); border-bottom-color: var(--primary); }
+
+main { padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); gap: 12px; align-items: start; }
+.zone-card { text-align: left; color: inherit; font: inherit; }
+.zone-card:hover { border-color: var(--primary); }
+
+.ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--c) 20%, transparent); }
+.ic svg { width: 21px; height: 21px; fill: var(--c); }
+.pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
+.pill.ok { color: var(--ok); } .pill.low, .pill.high { color: var(--ramp-text); }
+.pill.critlow, .pill.crithigh { color: #FFFFFF; background: var(--crit); border-color: var(--crit); }
+.pill.dead { color: var(--dead); border-style: dashed; }
+.pill.plain { color: var(--muted); border-color: var(--line); }
+.pill.preview { color: var(--muted); border-style: dashed; }
+.notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
+.notice.critical { background: color-mix(in srgb, var(--crit) 16%, var(--card)); }
+.notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.notice.fix:hover { outline: 1px solid var(--warn); }
+.fixgo { flex: none; font-weight: 500; color: var(--primary); }
+.fixlink[hidden] { display: none; }
+.fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
+.fixlink:hover { text-decoration: underline; }
+.fixlink.small { font-size: 13px; }
+.fixpill { background: none; cursor: pointer; font-family: inherit; }
+.notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+
+.period { display: flex; flex-direction: column; gap: 5px; }
+.period-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; font-size: 13px; }
+.period-top strong { font-weight: 500; }
+.lux { margin-left: 8px; color: var(--muted); }
+.strip { position: relative; height: 8px; border-radius: 4px; background: var(--night); overflow: hidden; }
+.strip i { position: absolute; top: 0; bottom: 0; background: var(--day); }
+.strip b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--fg); }
+
+.track { position: relative; height: 14px; border-bottom: 1px solid var(--off); min-width: 0; }
+.track .bandc { position: absolute; top: 3px; bottom: 0; left: 0; right: 0; background: var(--tcrit); }
+.track .bandr { position: absolute; top: 3px; bottom: 0; background: var(--tramp); }
+.track .tick { position: absolute; top: 3px; bottom: 0; width: 1px; background: var(--fg); }
+.track .dot { position: absolute; bottom: -5px; width: 9px; height: 9px; margin-left: -6px; border-radius: 50%; border: 2px solid var(--card); box-sizing: content-box; background: var(--fg); }
+.track .bandi { position: absolute; top: 3px; bottom: 0; background: var(--tnom); }
+.track .dot.ok { background: var(--tnom); } .track .dot.low, .track .dot.high { background: var(--tramp); } .track .dot.critlow, .track .dot.crithigh { background: var(--crit); }
+
+.rows { display: flex; flex-direction: column; gap: 12px; }
+.mrow { display: grid; grid-template-columns: 36px 78px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.mrow .t1 { font-size: 12px; color: var(--muted); }
+.mrow .t2 { font-size: 17px; font-weight: 500; line-height: 1.15; white-space: nowrap; }
+.mrow .t2 span { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+.mrow .pillcell { justify-self: end; }
+.mrow .lspark { grid-column: 3 / -1; display: block; width: 100%; height: 34px; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.lcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.lname { padding: 10px 12px 0; font-size: 13px; color: var(--muted); }
+.lval { padding: 0 12px 4px; font-size: 22px; font-weight: 500; line-height: 1.2; }
+.lval small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.lcard svg { display: block; width: 100%; flex: 1 1 60px; min-height: 60px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tile-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tile-top > div { min-width: 0; }
+.tile .name { font-size: 13px; color: var(--muted); }
+.tile .val { font-size: 22px; font-weight: 500; line-height: 1.1; }
+.tile .val small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.tavg { font-size: 12px; color: var(--muted); }
+.combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
+.inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
+.range { display: flex; justify-content: space-between; gap: 2px; color: var(--muted); }
+.range span { display: flex; flex-direction: column; align-items: center; font-size: 10px; }
+.range b { font-size: 12px; font-weight: 500; color: var(--fg); }
+
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.seg button { border: 1px solid var(--line); background: none; padding: 3px 10px; border-radius: 14px; font-size: 13px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 18%, transparent); border-color: var(--primary); color: var(--fg); }
+
+.map svg { display: block; width: 100%; height: auto; max-height: 460px; }
+.map text { font-size: 15px; font-family: inherit; }
+.map g[role="button"] { cursor: pointer; }
+.key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 5px; }
+.key i { width: 11px; height: 11px; display: inline-block; }
+.detail { padding: 10px 12px; border-radius: 8px; background: var(--tile); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { font-size: 11px; fill: var(--muted); }
+.chart svg { touch-action: pan-y; outline-offset: 2px; }
+.chart-note { font-size: 13px; color: var(--muted); }
+.chart-note:empty { display: none; }
+table.cstats { font-size: 14px; font-variant-numeric: tabular-nums; }
+.cstats th, .cstats td { padding: 5px 0 5px 10px; text-align: right; vertical-align: top; white-space: nowrap; }
+.cstats th:first-child, .cstats td:first-child { padding-left: 0; text-align: left; font-size: 13px; }
+.cstats td:first-child { white-space: normal; }
+.cstats td:first-child i { display: inline-block; width: 11px; height: 2px; margin-right: 6px; vertical-align: middle; }
+.cstats td .sub { font-size: 11px; }
+.cstats tbody tr:last-child td { border-bottom: 0; }
+
+.dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); }
+.dev-text { flex: 1 1 150px; min-width: 0; }
+.dev-name { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 14px; font-weight: 500; }
+.dev-sub { font-size: 12px; color: var(--muted); }
+.dev-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+.devs { display: flex; flex-direction: column; gap: 8px; }
+.mock { border: 1px dashed var(--off); border-radius: 8px; background: none; padding: 3px 8px; font-size: 12px; color: var(--muted); min-height: 28px; }
+.mock:hover { color: var(--fg); border-color: var(--muted); }
+.sw { width: 46px; display: inline-flex; align-items: center; justify-content: flex-start; }
+.sw i { width: 16px; height: 16px; border-radius: 50%; background: var(--off); }
+.sw.on { justify-content: flex-end; }
+.sw.on i { background: var(--primary); }
+.mock:disabled { opacity: .45; cursor: not-allowed; }
+.mock:disabled:hover { color: var(--muted); border-color: var(--off); }
+.cgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+h3 { font-size: 15px; font-weight: 500; }
+.ctl-reading { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+
+.lrows { display: flex; flex-direction: column; gap: 8px; }
+.lrow { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--tile); min-width: 0; }
+.lrow-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.lrow strong { font-weight: 500; }
+.lfield { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.lcell { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.lcell input { width: 72px; padding: 7px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; font-size: 14px; font-weight: 500; text-align: center; }
+.lcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.lcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
+.lid { overflow-wrap: anywhere; }
+.lstatus { font-size: 13px; color: var(--warn); }
+.cal-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.lbasis { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--tile); min-width: 0; }
+.lbasis strong { font-weight: 500; }
+.lstatus:empty { display: none; }
+
+.act { display: flex; flex-direction: column; }
+.act-row { display: grid; grid-template-columns: 46px 36px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.act-row:first-child { border-top: 0; }
+.act-time { font-size: 13px; color: var(--muted); }
+.act-text { font-size: 14px; }
+.act-by { font-size: 12px; color: var(--muted); }
+
+.tbl-wrap { overflow-x: auto; }
+.tbl-wrap th:last-child, .tbl-wrap td:last-child { padding-right: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td .sub { display: block; font-size: 12px; color: var(--muted); }
+.tv { border: 1px dashed var(--off); border-radius: 6px; background: none; padding: 1px 6px; font-size: 13px; }
+
+.task { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+.task:first-child { border-top: 0; padding-top: 0; }
+.task > div:first-child { flex: 1 1 240px; min-width: 0; }
+.btn { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 7px 12px; font-size: 14px; }
+.btn:hover { border-color: var(--primary); }
+.btn.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); font-weight: 500; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.steps { display: flex; flex-wrap: wrap; gap: 4px 18px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
+.steps li[aria-current="step"] { color: var(--primary); font-weight: 500; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.field input, .field select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
+.stepper { display: inline-flex; align-items: center; gap: 8px; }
+.stepper button { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.sensor-opt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); text-align: left; }
+.sensor-opt[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.sensor-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; min-width: 0; }
+.now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
+.now strong { font-weight: 500; }
+.picklist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pickwrap { border: 1px solid var(--line); border-radius: 8px; background: var(--tile); min-width: 0; }
+.pickrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; background: none; text-align: left; }
+.pickwrap:has(.pickrow[aria-pressed="true"]) { border-color: var(--primary); }
+.tick { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid var(--off); border-radius: 6px; font-size: 14px; }
+.pickrow[aria-pressed="true"] .tick { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pick-text strong { font-weight: 500; }
+.ents { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px 42px; }
+.ent { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.ent select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font-size: 13px; }
+.review { display: flex; flex-direction: column; gap: 10px; }
+.review strong { font-weight: 500; }
+@media (max-width: 460px) { .ents { padding-left: 10px; } .ent { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.vgrid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 1fr); gap: 14px; align-items: start; }
+.vchart svg { max-height: none; }
+.vchart svg text { font-size: 12px; }
+#vwrap { touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.vmain, .vside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.vtabs { display: flex; }
+.vtabs button { flex: 1 1 auto; }
+.vrow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); text-align: center; }
+.vrow[data-on="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.vrow-name { grid-column: 1 / -1; padding: 0; border: 0; background: none; color: var(--fg); text-align: left; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.vcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10px; color: var(--muted); }
+.vcell input { width: 100%; min-width: 0; padding: 6px 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; font-size: 14px; font-weight: 500; text-align: center; }
+.vcell.vt input { color: var(--primary); }
+.vcell.vlast { grid-column: 5; }
+span.vrow-name { cursor: default; }
+.vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
+/* iOS zooms the page when a focused field is under 16px. */
+@media (pointer: coarse) { .vcell input, .lcell input { font-size: 16px; } }
+/* Room to scroll the last row up while the keyboard is open. */
+body.vtyping { padding-bottom: 70vh; }
+@media (max-height: 500px) { body.vtyping .topbar { position: static; } }
+/* The draft: pinned to the foot of the window, with what it holds and the way to apply it. Fixed, so it arriving mid tap can't move anything under a finger. */
+.draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
+.draftbar[hidden] { display: none; }
+body.drafting:not(.vtyping) { padding-bottom: 96px; }
+body.drafting .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+/* The box being typed in sits just above the keyboard, which is where this would land. */
+body.vtyping .draftbar { display: none; }
+.draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
+.draft-text { flex: 1; min-width: 0; font-size: 14px; }
+.draft-text strong { font-weight: 500; }
+#draft-why { opacity: .8; }
+.draft-discard, .draft-review { flex: none; height: 44px; padding: 0 14px; border-radius: 10px; font-size: 14px; white-space: nowrap; }
+.draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
+.draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
+.draft-review:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 640px) {
+  .draftbar { flex-wrap: wrap; gap: 8px 10px; padding: 10px; }
+  .draft-text { flex: 1 1 calc(100% - 36px); }
+  .draftbar:not([data-blocked]) #draft-why { display: none; }
+  .draft-discard { flex: 1; }
+  .draft-review { flex: 2; }
+  body.drafting:not(.vtyping) { padding-bottom: 136px; }
+  body.drafting .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+}
+.modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
+.modal[hidden] { display: none; }
+.dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+.dialog h2 { font-size: 18px; font-weight: 500; outline: none; }
+.dialog .row { justify-content: flex-end; }
+.review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.review-list { flex: none; border: 1px solid var(--line); border-radius: 8px; }
+.review-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 10px; font-size: 14px; }
+.review-row + .review-row { border-top: 1px solid var(--line); }
+.review-row strong { font-weight: 400; }
+.review-row b { font-weight: 500; }
+.review-list.preview .review-row { color: var(--muted); }
+.btn.danger { background: var(--crit); border-color: var(--crit); color: #FFFFFF; font-weight: 500; }
+.btn.remove { background: transparent; border-color: transparent; color: var(--crit); }
+.sched-len { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.sched-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.vissues { display: flex; flex-direction: column; gap: 10px; }
+.vissues:empty { display: none; }
+.stepper[hidden] { display: none; }
+@media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
+
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 30; }
+
+@media (max-width: 960px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 400px) { .mrow { grid-template-columns: 36px 72px minmax(0, 1fr) 62px; gap: 6px; } }
+</style>
+
+<header class="topbar">
+  <div class="bar" id="bar"></div>
+  <nav class="tabs" id="tabs" aria-label="Views"></nav>
+</header>
+<main id="main"></main>
+<div class="draftbar" id="draftbar" role="region" aria-label="Unsaved changes" hidden><span class="draft-count" id="draft-count"></span><span class="draft-text"><strong id="draft-what"></strong><span id="draft-why"></span></span><button class="draft-discard" data-ddiscard>Discard</button><button class="draft-review" data-dreview>Review and apply</button></div>
+<div class="modal" id="modal" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+"use strict";
+const NOW = 14 * 60 + 20;
+const DATA_LABEL = "Sample data", BASE_DATE = "2026-11-03", HISTORY = {}, HISTORY_LONG = {};
+const RANGES = [[6, "6h"], [24, "24h"], [72, "72h"], [168, "7d"]];
+const helperOptions = (z) => [z.id === "nursery" ? "veg" : slug(z.name), "shared"];
+const SENT = "Controls aren't active yet. Nothing was sent.";
+const M = {
+  temperature: { label: "Temperature", short: "Temp", unit: "°C", dp: 1, icon: "thermo", c: "--temp" },
+  humidity: { label: "Humidity", short: "RH", unit: "%", dp: 1, icon: "drop", c: "--hum" },
+  vpd: { label: "VPD", short: "VPD", unit: "kPa", dp: 2, icon: "gauge", c: "--vpd" },
+  light: { label: "Light", short: "Light", unit: "lx", dp: 0, icon: "sun", c: "--sun" },
+};
+const LEVELS = { above: "Above canopy", in: "In canopy", under: "Under canopy", substrate: "Substrate" };
+const LEVEL_COLOR = { above: "var(--above)", in: "var(--in)", under: "var(--under)" };
+const ICON = {
+  thermo: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0Zm-3 7a3 3 0 0 1-1-5.8V5a1 1 0 0 1 2 0v9.2A3 3 0 0 1 12 20Z",
+  drop: "M12 2s7 7.6 7 12.5A7 7 0 0 1 5 14.5C5 9.6 12 2 12 2Z",
+  gauge: "M12 4a9 9 0 0 0-8 13.2l1.8-1A7 7 0 1 1 18.2 16l1.8 1A9 9 0 0 0 12 4Zm3.5 4.5-4.6 5.1a1.8 1.8 0 1 0 2.5 2.5l2.1-7.6Z",
+  sun: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM11 1h2v3h-2zm0 19h2v3h-2zM1 11h3v2H1zm19 0h3v2h-3zM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1zm15 15 2.1 2.1-1.4 1.4-2.1-2.1zM2.8 19.8l2.1-2.1 1.4 1.4-2.1 2.1zm15-15 2.1-2.1 1.4 1.4-2.1 2.1z",
+  fan: "M12 11a3.5 3.5 0 0 0-1-7c-3 0-3.5 3-1 5l2 2Zm1 1a3.5 3.5 0 0 0 7 1c0-3-3-3.5-5-1l-2 0Zm-1 1a3.5 3.5 0 0 0 1 7c3 0 3.5-3 1-5l-2-2Zm-1-1a3.5 3.5 0 0 0-7-1c0 3 3 3.5 5 1l2 0Z",
+  plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
+  menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
+};
+const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
+const ic = (n, c) => `<span class="ic" style="--c:${c}">${icon(n)}</span>`;
+
+/* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */
+const bandsA = { day: { temperature: [23, 24, 25, 27, 28], humidity: [55, 60, 64, 67, 70], vpd: [0.8, 0.95, 1.1, 1.2, 1.3] }, night: { temperature: [16, 20, 23, 25, 26], humidity: [55, 58, 62, 65, 68], vpd: [0.7, 0.85, 1.0, 1.1, 1.2] } };
+const bandsB = () => ({ day: { temperature: [22, 23, 25, 27, 28], humidity: [55, 58, 62, 67, 70], vpd: [0.7, 0.8, 0.9, 1.05, 1.2] }, night: { temperature: [18, 19, 21, 23, 25], humidity: [55, 58, 62, 67, 70], vpd: [0.7, 0.75, 0.85, 1.0, 1.1] } });
+const zones = [
+  { id: "garden", name: "Garden", dayAt: 7 * 60, nightAt: 19 * 60, now: { temperature: 26.8, humidity: 63.4, vpd: 1.06, light: 41200 }, bands: bandsA, linked: true, lightLimits: { dayMin: 2000, nightMax: 200 }, emerson: { morning: 5, daylight: 10, evening: 5 },
+    layout: { w: 2.4, d: 1.2, units: 12, rows: 3, cols: 4 },
+    sensors: [
+      { id: "g-left", name: "Environment left", short: "Env left", kind: "env", pos: [0.5, 0], level: "in", t: 26.6, h: 64.2, link: "Ethernet", leafEntity: "number.environment_left_leaf_temperature_offset", leafLive: -1 },
+      { id: "g-right", name: "Environment right", short: "Env right", kind: "env", pos: [0.5, 3], level: "above", t: 27.0, h: 62.6, link: "Ethernet", leafEntity: "number.environment_right_leaf_temperature_offset", leafLive: -1 },
+      { id: "g-under", name: "Environment under", short: "Env under", kind: "env", pos: [1.5, 1.5], level: "under", t: 24.9, h: 71.0, link: "Ethernet", leaf: -0.5 },
+      { id: "g-s1", name: "Soil 1", short: "Soil 1", kind: "soil", pos: [0, 1], level: "substrate", vwc: 58.2, ec: 3.4, link: "Ethernet", fsEntity: "number.soil_1_full_saturation", fcEntity: "number.soil_1_field_capacity", fsLive: 90, fcLive: 72, rateS: 1, sampleCeil: 92.6 },
+      { id: "g-s2", name: "Soil 2", short: "Soil 2", kind: "soil", pos: [2, 1], level: "substrate", vwc: null, ec: null, link: "Ethernet", fsEntity: "number.soil_2_full_saturation", fcEntity: "number.soil_2_field_capacity", fsLive: 90, fcLive: 72, rateS: 10, sampleCeil: 91.2 },
+      { id: "g-s3", name: "Soil 3", short: "Soil 3", kind: "soil", pos: [1, 2], level: "substrate", vwc: 61.0, ec: 3.1, link: "Ethernet", fsEntity: "number.soil_3_full_saturation", fcEntity: "number.soil_3_field_capacity", fsLive: 90, fcLive: 72, rateS: 10, sampleCeil: 92.0 },
+    ] },
+  { id: "veg", name: "Veg", dayAt: 16 * 60, nightAt: 10 * 60, now: { temperature: 20.4, humidity: 72.1, vpd: 0.59, light: 0 }, bands: bandsB(), linked: true, lightLimits: { dayMin: 800, nightMax: 200 },
+    layout: { w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2 },
+    sensors: [{ id: "v-env", name: "Veg environment", short: "Veg env", kind: "env", pos: [0.5, 0.5], level: "above", t: 20.4, h: 72.1, link: "Not known yet", leafEntity: "number.veg_environment_leaf_temperature_offset", leafLive: -1 }] },
+  { id: "nursery", name: "Nursery", dayAt: 16 * 60, nightAt: 10 * 60, now: { temperature: 21.1, humidity: 66.0, vpd: 0.74, light: 0 }, bands: bandsB(), linked: false, lightLimits: { dayMin: 300, nightMax: 200 },
+    layout: { w: 1.2, d: 0.6, units: 8, rows: 2, cols: 4 },
+    sensors: [{ id: "n-env", name: "Nursery environment", short: "Nursery env", kind: "env", pos: [0.5, 1.5], level: "in", t: 21.1, h: 66.0, link: "Ethernet", leafEntity: "number.nursery_environment_leaf_temperature_offset", leafLive: -1 }] },
+];
+const tuya = { integration: "tuya_local", family: "Tuya", link: "wifi", source: "detected", path: "Local", hub: "" };
+const devices = [
+  { id: "dehu", name: "Dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden"], on: true, state: "On, Normal mode", mode: "Normal", note: "Normal is not in this device's mode list", setpoint: 55, unitRh: 56 },
+  { id: "aux", name: "Auxiliary dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden", "veg", "nursery"], on: true, state: "On, Laundry mode", mode: "Laundry", note: "Unit sensor, not room RH", setpoint: 50, unitRh: 41 },
+  { id: "ac", name: "Air conditioner", type: "Air conditioner", icon: "gauge", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
+  { id: "heater", name: "Heater", type: "Heater", icon: "thermo", ctl: "switch", ...tuya, zones: ["garden", "veg", "nursery"], on: false, state: "Off" },
+  { id: "intake", name: "Intake fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
+  { id: "acfan", name: "Air conditioner exhaust fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Unavailable" },
+  { id: "plug", name: "Plug 7", type: null, icon: "plug", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Off" },
+  { id: "fans", name: "Oscillating fans", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["veg", "nursery"], on: true, state: "On" },
+  { id: "lc-over", name: "Overhead light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], on: true, state: "On, 80%", brightness: 80 },
+  { id: "lp-1", name: "Overhead lights 1", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
+  { id: "lp-2", name: "Overhead lights 2", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: true, state: "On" },
+  { id: "lc-under", name: "Under canopy light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], on: true, state: "On, 45%", brightness: 45 },
+  { id: "lp-red", name: "Red lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], on: false, state: "Off" },
+  { id: "lc-tent", name: "Tent light controller", type: "Light", icon: "sun", ctl: "dimmer", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["veg", "nursery"], on: false, state: "Off", brightness: null },
+  { id: "lp-tent", name: "Tent lights", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["veg", "nursery"], on: false, state: "Off" },
+  { id: "b-left", name: "Environment left", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "", zones: ["garden"], state: "Online" },
+  { id: "b-soil", name: "Soil bus", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "unknown", source: "unknown", path: "Local", hub: "", zones: ["garden"], state: "Online" },
+  { id: "b-veg", name: "Veg environment", type: "Sensor board", integration: "esphome", family: "ESPHome", link: "unknown", source: "unknown", path: "Local", hub: "", zones: ["veg"], state: "Online" },
+  { id: "pulse", name: "Air monitor", type: "Sensor", integration: "pulselabs", family: "Pulse", link: "wifi", source: "detected", path: "Cloud", hub: "", zones: ["veg"], state: "Stale, 9 min old", stale: true },
+  { id: "door", name: "Door contact", type: "Sensor", integration: "hue", family: "Hue", link: "zigbee", source: "detected", path: "Local", hub: "Hue Bridge", zones: ["garden"], state: "Online" },
+  { id: "vpd", name: "Average VPD", type: "Calculated", integration: "template", family: "Template", link: "derived", source: "detected", path: "Local", hub: "", zones: ["garden"], state: "Online" },
+];
+const LINK = { ethernet: "Ethernet", wifi: "WiFi", zigbee: "Zigbee", derived: "Calculated", unknown: "Not known yet" };
+const ACTIVITY = {
+  garden: [
+    ["14:12", "device", "Air conditioner turned on", "You, Home Assistant app"],
+    ["13:40", "device", "Dehumidifier changed to Normal mode", "You, Home Assistant app"],
+    ["13:05", "sensor", "Soil 2 stopped reporting", "Sensor"],
+    ["11:22", "climate", "Humidity back in ideal zone at 66.8%", "Reading"],
+    ["10:58", "climate", "Humidity above ideal zone at 67.4%", "Reading"],
+    ["08:00", "device", "Heater turned off", "Automation"],
+    ["07:00", "lights", "Lights on", "Schedule"],
+  ],
+  veg: [
+    ["13:31", "climate", "Humidity critical high at 70.3%", "Reading"],
+    ["13:02", "climate", "VPD critical low at 0.68 kPa", "Reading"],
+    ["10:00", "lights", "Lights off", "Schedule"],
+    ["08:00", "device", "Heater turned off", "Automation"],
+    ["06:40", "device", "Oscillating fans turned back on", "Failsafe"],
+  ],
+  nursery: [
+    ["10:00", "lights", "Lights off", "Schedule"],
+    ["08:00", "device", "Heater turned off", "Automation"],
+    ["06:40", "device", "Oscillating fans turned back on", "Failsafe"],
+  ],
+};
+const ACT_KIND = { device: ["plug", "var(--primary)", "Devices"], lights: ["sun", "var(--sun)", "Lights"], climate: ["gauge", "var(--vpd)", "Climate"], sensor: ["thermo", "var(--dead)", "Sensors"] };
+const ui = { screen: "overview", zone: "garden", metric: "vpd", range: 24, level: "all", picked: null, linkFilter: "all", activity: "all", wiz: null };
+
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const zoneById = (id) => zones.find((z) => z.id === id);
+const inAZone = (d) => d.zones.length > 0;
+const hhmm = (m) => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
+const fmt = (k, v) => v === null || v === undefined ? "--" : k === "light" ? Math.round(v).toLocaleString("en-NZ") : Number(v).toFixed(M[k].dp);
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const envOf = (z) => z.sensors.filter((s) => s.kind === "env");
+/* A board's offset lives on the board, and this panel changes it there, so the panel and the board's own VPD can't disagree. Only a sensor with nowhere to hold one is stored here. */
+const hasLeafEntity = (s) => !!s.leafEntity && !s.leafUnused;
+const leafOf = (s) => (hasLeafEntity(s) ? s.leafLive : s.leaf === undefined ? -1 : s.leaf);
+const leafWords = (x) => (x === 0 ? "Leaf same as air" : `Leaf ${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`);
+const leafPhrase = (x) => `l${leafWords(x).slice(1)}`;
+const sensorValue = (z, s, k) => (s.t === null || s.t === undefined ? null : k === "temperature" ? s.t : k === "humidity" ? s.h : (s.vpd ?? calcVpd(s.t, s.h, leafOf(s))));
+/* A zone's reading is the mean of its live sensors. A dead sensor, or one left out by choice, never counts. */
+const METHODS = { mean: "Average", median: "Median", highest: "Highest", lowest: "Lowest" };
+const methodOf = (z, k) => (z.combine && z.combine[k]) || "mean";
+function combine(method, xs) {
+  if (!xs.length) return null;
+  if (method === "highest") return Math.max(...xs);
+  if (method === "lowest") return Math.min(...xs);
+  if (method === "median") { const s = [...xs].sort((a, b) => a - b), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; }
+  return mean(xs);
+}
+function zoneAverage(z, k) { return combine(methodOf(z, k), envOf(z).filter((s) => s.avg !== false).map((s) => sensorValue(z, s, k)).filter((v) => v !== null)); }
+function refreshReadings() {
+  for (const z of zones) {
+    for (const k of ["temperature", "humidity", "vpd"]) z.now[k] = zoneAverage(z, k);
+    const counted = envOf(z).map((s, i) => [s, i]).filter(([s]) => s.avg !== false && s.t !== null);
+    z.now.light = combine(methodOf(z, "light"), counted.map(([, i]) => lightSeries(z, i)[48]));
+  }
+}
+/* The chart draws one VPD per cell, so it needs one offset: the average of the sensors counted in the zone's reading, or one sensor's if the zone picked one. Each sensor's own VPD always keeps its own offset. */
+const countedEnv = (z) => envOf(z).filter((s) => s.avg !== false);
+function chartLeaf(z, basis, offsetOf) {
+  const envs = envOf(z), used = countedEnv(z), picked = used.find((s) => s.id === basis);
+  if (picked) return offsetOf(picked);
+  const m = mean((used.length ? used : envs).map(offsetOf));
+  return m === null ? -1 : Math.round(m * 10) / 10;
+}
+const zoneLeaf = (z) => chartLeaf(z, z.leafBasis, leafOf);
+function leafLine(z) {
+  const vals = new Set(envOf(z).map(leafOf));
+  return vals.size === 1 ? leafWords([...vals][0]) : "Leaf offset per sensor";
+}
+const sideName = (s) => s.short.replace(/^Env /, "").replace(/^[a-z]/, (c) => c.toUpperCase());
+function combinedNote(z) {
+  const n = countedEnv(z).filter((s) => s.t !== null && s.t !== undefined).length;
+  if (n < 2) return "";
+  const methods = new Set(Object.keys(M).map((k) => methodOf(z, k)));
+  return `<p class="small muted">${methods.size === 1 ? METHODS[[...methods][0]] : "Combined from"}${methods.size === 1 ? " of" : ""} ${n} sensors.</p>`;
+}
+function avgNote(z, k) {
+  const envs = envOf(z); if (envs.length < 2) return "";
+  const live = envs.filter((s) => s.avg !== false && sensorValue(z, s, k) !== null);
+  const parts = live.map((s) => `${sideName(s)} ${fmt(k, sensorValue(z, s, k))}`);
+  const dead = envs.filter((s) => s.avg !== false && sensorValue(z, s, k) === null).map(sideName), out = envs.filter((s) => s.avg === false).map(sideName);
+  return `<div class="tavg">${METHODS[methodOf(z, k)]} of ${live.length}: ${esc(parts.join(", "))}${dead.length ? `. ${esc(dead.join(", "))} has no data, left out` : ""}${out.length ? `. ${esc(out.join(", "))} not counted` : ""}</div>`;
+}
+const span = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+
+/* Wrap-safe: the veg runs 16:00 to 10:00, across midnight. */
+function isDay(z, t) {
+  t = ((t % 1440) + 1440) % 1440;
+  return z.dayAt < z.nightAt ? t >= z.dayAt && t < z.nightAt : t >= z.dayAt || t < z.nightAt;
+}
+const period = (z) => isDay(z, NOW) ? "day" : "night";
+function bandState(z, k) {
+  if (k === "light") return "none";
+  const [mn, lo, , hi, mx] = z.bands[period(z)][k], v = z.now[k];
+  if (v === null || v === undefined) return "dead";
+  return v < mn ? "critlow" : v > mx ? "crithigh" : v < lo ? "low" : v > hi ? "high" : "ok";
+}
+const STATE = { ok: "Ideal", low: "Low", high: "High", critlow: "Critical", crithigh: "Critical", dead: "No data" };
+const ISSUE = { low: "low", high: "high", critlow: "critical low", crithigh: "critical high", dead: "no data" };
+const statePill = (s) => s === "none" ? "" : `<span class="pill ${s}">${STATE[s]}</span>`;
+const edge = (z) => (((isDay(z, NOW) ? z.nightAt : z.dayAt) - NOW) % 1440 + 1440) % 1440;
+
+function periodBlock(z) {
+  const seg = (a, b) => `<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
+  const lit = z.dayAt < z.nightAt ? seg(z.dayAt, z.nightAt) : seg(z.dayAt, 1440) + seg(0, z.nightAt);
+  const when = z.periodMode === "detected" ? `Detected from ${z.lights.length} switch${z.lights.length > 1 ? "es" : ""}` : `${hhmm(z.dayAt)} - ${hhmm(z.nightAt)}, ${span(edge(z))} left`;
+  return `<div class="period"><div class="period-top"><span><strong>${isDay(z, NOW) ? "Lights on" : "Lights off"}</strong>${z.now.light === null || z.now.light === undefined ? "" : `<span class="lux">${fmt("light", z.now.light)} lx</span>`}</span><span class="muted">${when}</span></div>
+    <div class="strip" role="img" aria-label="Lights on ${hhmm(z.dayAt)} to ${hhmm(z.nightAt)}, time now ${hhmm(NOW)}">${lit}<b style="left:${NOW / 14.4}%"></b></div></div>`;
+}
+function track(z, k) {
+  const [mn, lo, tg, hi, mx] = z.bands[period(z)][k], v = z.now[k], pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad;
+  const x = (n) => Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
+  /* Green is the ideal zone, grey either side is where devices ramp up, and red beyond the grey is critical. */
+  return `<div class="track" aria-hidden="true"><span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="tick" style="left:${x(tg)}%"></span>${v === null ? "" : `<span class="dot ${bandState(z, k)}" style="left:${x(v)}%"></span>`}</div>`;
+}
+
+function renderChrome() {
+  $("#bar").innerHTML = `${icon("menu")}<span>Environment Control</span><span class="sample">${DATA_LABEL}, ${hhmm(NOW)}</span>`;
+  const cur = (test) => (test ? ' aria-current="page"' : "");
+  $("#tabs").innerHTML = `<button data-go="overview"${cur(ui.screen === "overview")}>Overview</button>` +
+    zones.map((z) => `<button data-go="zone" data-zone="${z.id}"${cur(ui.screen === "zone" && ui.zone === z.id)}>${esc(z.name)}</button>`).join("") +
+    `<button data-go="devices"${cur(ui.screen === "devices")}>Devices</button><button data-go="setup"${cur(ui.screen === "setup")}>Setup</button>`;
+  const tabs = $("#tabs"), now = tabs.querySelector("[aria-current]");
+  if (now) tabs.scrollLeft = now.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - now.offsetWidth) / 2;
+}
+
+function renderOverview() {
+  if (!zones.length) return `<div class="wrap"><section class="card"><h2>No zones yet</h2><p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p><div class="row"><button class="btn primary" data-addzone>Add a zone</button></div></section></div>`;
+  const states = zones.filter((z) => envOf(z).length).flatMap((z) => ["temperature", "humidity", "vpd"].filter((k) => bandState(z, k) !== "ok").map((k) => [`${z.name} ${M[k].short} ${ISSUE[bandState(z, k)]}`, bandState(z, k).startsWith("crit"), z.id, k]));
+  const link = ([text, , id, k]) => `<button class="fixlink" data-go="zone" data-zone="${id}" data-gometric="${k}">${esc(text)} &rsaquo;</button>`;
+  const group = (list, title, cls) => (list.length ? `<div class="notice ${cls}"><strong>${title}</strong>${list.map(link).join("")}</div>` : "");
+  const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : `<div class="notice calm"><strong>All zones ideal</strong></div>`;
+  const card = (z) => {
+    const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id)), on = ds.filter((d) => d.on).length;
+    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2><span class="pill plain">${period(z) === "day" ? "Day" : "Night"} band</span></div>
+      ${periodBlock(z)}
+      <div class="rows">${["temperature", "humidity", "vpd"].map((k) => `<div class="mrow">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="t1">${M[k].label}</div><div class="t2">${fmt(k, z.now[k])}<span>${M[k].unit}</span></div></div>${track(z, k)}<div class="pillcell">${statePill(bandState(z, k))}</div></div>`).join("")}
+        <div class="mrow">${ic(M.light.icon, `var(${M.light.c})`)}<div><div class="t1">${M.light.label}</div><div class="t2">${fmt("light", z.now.light)}<span>${M.light.unit}</span></div></div>${lightSpark(z)}</div></div>
+      ${combinedNote(z)}<p class="small muted">${on} of ${ds.length} devices on. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed.</p></button>`;
+  };
+  return `<div class="wrap">${banner}<div class="cards">${zones.map(card).join("")}</div></div>`;
+}
+
+function tile(z, k) {
+  const b = k === "light" ? null : z.bands[period(z)][k];
+  return `<div class="tile"><div class="tile-top">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="name">${M[k].label}</div><div class="val">${fmt(k, z.now[k])} <small>${M[k].unit}</small></div></div></div>
+    ${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}${b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
+}
+
+/* Light as the HA dashboard shows it: name, value, then a 4 hour line running black to yellow between 1210 and 2120 lx. */
+function lightSeries(z, ix) {
+  const real = envOf(z)[ix] && HISTORY[envOf(z)[ix].id];
+  if (real) return [...real.light.slice(-49, -1), envOf(z)[ix].lux];
+  const r = rng(zones.indexOf(z) * 53 + ix * 17 + 3), top = [41200, 40300, 11000][ix] || 30000, out = [];
+  for (let i = 0; i <= 48; i++) { const t = NOW - (48 - i) * 5; out.push(isDay(z, t) ? top + (r() - 0.5) * 500 : 0); }
+  return out;
+}
+function lightSvg(id, name, pts, H, cls) {
+  const W = 300, max = Math.max(...pts, 2120) * 1.05;
+  const X = (i) => (i / 48) * W, Y = (v) => H - 3 - (v / max) * (H - 6);
+  const line = pts.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join("");
+  return `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(name)} over the last 4 hours">
+      <defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="${Y(2120)}" y2="${Y(1210)}"><stop offset="0" style="stop-color:var(--lhigh)"/><stop offset="1" style="stop-color:var(--llow)"/></linearGradient></defs>
+      <path d="${line}L${W} ${H}L0 ${H}Z" fill="url(#${id})" opacity=".22"/><path d="${line}" fill="none" stroke="url(#${id})" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function lightCard(id, name, pts) {
+  return `<div class="lcard"><div class="lname">${esc(name)}</div><div class="lval">${Math.round(pts[48]).toLocaleString("en-NZ")} <small>lx</small></div>
+    ${lightSvg(id, name, pts, 60, "")}</div>`;
+}
+/* The zone's combined light over 4 hours, the one line both the zone's light card and Overview draw. */
+function lightLine(z) {
+  const envs = envOf(z), used = envs.map((s, i) => ({ s, pts: lightSeries(z, i) })).filter((x) => x.s.avg !== false && x.s.t !== null);
+  if (!used.length) return null;
+  if (envs.length < 2) return { name: "Light", pts: used[0].pts };
+  const method = methodOf(z, "light");
+  return { name: `Light (${METHODS[method]})`, pts: used[0].pts.map((_, i) => combine(method, used.map((x) => x.pts[i]))) };
+}
+function lightCards(z) {
+  const l = lightLine(z);
+  return l ? lightCard(`lg-${z.id}`, l.name, l.pts) : `<div class="lcard"><div class="lname">Light</div><div class="lval">-- <small>lx</small></div></div>`;
+}
+function lightSpark(z) {
+  const l = lightLine(z);
+  return l ? lightSvg(`ls-${z.id}`, l.name, l.pts, 34, "lspark") : "";
+}
+
+/* The placement map. Positions are half-steps, so 0.5 is the gap between the first two rows. */
+const geom = (L) => { const cw = 130, ch = 112, px = 70, py = 42; return { R: 32, W: px * 2 + (L.cols - 1) * cw, H: py * 2 + (L.rows - 1) * ch, X: (c) => px + c * cw, Y: (r) => py + r * ch }; };
+const planted = (L, r, c) => Number.isInteger(r) && Number.isInteger(c) && r * L.cols + c < L.units;
+function baseMap(L, g) {
+  let s = "";
+  for (let r = 0.5; r < L.rows - 0.5; r++) s += `<line x1="16" x2="${g.W - 16}" y1="${g.Y(r)}" y2="${g.Y(r)}" stroke="var(--line)" stroke-dasharray="4 5"/>`;
+  for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) s += `<circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${g.X(c)}" y="${g.Y(r) + 5}" text-anchor="middle" fill="var(--muted)">${r * L.cols + c + 1}</text>`;
+  return s;
+}
+function mark(s, g, text, opts) {
+  const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0);
+  if (s.kind === "soil") {
+    const dead = text === "No data", col = dead ? "var(--dead)" : "var(--primary)";
+    const side = g.R + 6;
+    return `<g ${opts.attrs}><rect x="${x - side}" y="${y - side}" width="${side * 2}" height="${side * 2}" rx="8" fill="var(--card)" stroke="${opts.selected ? "var(--fg)" : col}" stroke-width="${opts.selected ? 3 : 2}"${dead ? ' stroke-dasharray="5 4"' : ""}/><circle cx="${x}" cy="${y}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${col}" style="font-size:${dead ? 12 : 14}px">${esc(text)}</text></g>`;
+  }
+  const sel = opts.selected ? ` stroke="var(--fg)" stroke-width="2"` : "";
+  return `<g ${opts.attrs}><rect x="${x - 52}" y="${y - 14}" width="104" height="28" rx="6" fill="${LEVEL_COLOR[s.level]}"${sel}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="#FFFFFF">${esc(text)}</text></g>`;
+}
+const reading = (s) => s.kind === "env" ? (s.t === null ? "No data" : `${s.t.toFixed(1)}° ${Math.round(s.h)}%`) : s.vwc === null ? "No data" : `${s.vwc.toFixed(1)}%`;
+function drawMarks(sensors, g, textFor, attrsFor, picked) {
+  const seen = {}, placed = sensors.filter((s) => s.pos);
+  return [...placed.filter((s) => s.kind === "soil"), ...placed.filter((s) => s.kind === "env")].map((s) => {
+    const k = s.pos.join(","); seen[k] = (seen[k] || 0) + (s.kind === "env" ? 1 : 0);
+    return mark(s, g, textFor(s), { attrs: attrsFor(s), selected: picked === s.id, offset: s.kind === "env" ? (seen[k] - 1) * 32 : 0 });
+  }).join("");
+}
+const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="border:2px solid var(--primary);border-radius:2px"></i>Unit with soil probe</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span></div>`;
+function mapHtml(z) {
+  const g = geom(z.layout), shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level);
+  const attrsFor = (s) => `role="button" tabindex="0" data-sensor="${s.id}" aria-label="${esc(s.name)}, ${LEVELS[s.level]}, ${esc(reading(s))}"`;
+  return `<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Units and sensors in ${esc(z.name)}">${baseMap(z.layout, g)}${drawMarks(shown, g, reading, attrsFor, ui.picked)}</svg></div>`;
+}
+const posText = (p, L) => Number.isInteger(p[0]) ? `Unit ${p[0] * L.cols + p[1] + 1}` : `Aisle between rows ${p[0] + 0.5} and ${p[0] + 1.5}`;
+function sensorDetail(z) {
+  const s = z.sensors.find((x) => x.id === ui.picked);
+  if (!s) return `<div class="detail muted">Tap a sensor to see where it is and how it reports.</div>`;
+  const r = s.kind === "env" ? (s.t === null ? "No data. Left out of averages." : `${s.t.toFixed(1)} °C, ${s.h.toFixed(1)} % RH${s.avg === false ? ". Not counted in the zone average" : ""}`) : s.vwc === null ? "No data. Left out of averages." : `${s.vwc.toFixed(1)} % VWC, ${s.ec.toFixed(1)} mS/cm`;
+  return `<div class="detail"><strong>${esc(s.name)}</strong><span>${esc(posText(s.pos, z.layout))}. ${LEVELS[s.level]}.</span><span>${esc(r)}</span><span class="muted">${esc(s.link)}, reported 8 seconds ago</span>${s.kind === "env" ? `<button class="fixlink" data-calw="${z.id}" data-ljump="lr-${s.id}">${esc(leafWords(leafOf(s)))} &rsaquo;</button>` : ""}</div>`;
+}
+
+const isDown = (d) => d.state === "Unavailable";
+function deviceHead(d, z, tag = "") {
+  const others = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
+  const shared = others.length ? ` Shared with ${others.join(" and ")}.` : "";
+  const unit = d.ctl === "humidifier" && !isDown(d) ? ` Unit RH ${d.unitRh}%. ${esc(d.note)}.` : "";
+  const state = isDown(d) ? `<span class="pill dead">${esc(d.state)}</span>` : `${esc(d.state)}.`;
+  return `${ic(d.icon, d.on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(d.name)}</span>${tag}</div><div class="dev-sub">${state}${unit}${esc(shared)}</div><div class="dev-sub">${esc(d.family)}, ${esc(LINK[d.link])}</div></div>`;
+}
+/* Mock only. A control never moves on a tap: only a real state change would, and an unavailable device can't be tapped at all. */
+function deviceRow(d, z) {
+  const down = isDown(d), act = down ? "disabled" : "data-preview", what = down ? "unavailable" : `preview only, currently ${d.on ? "on" : "off"}`;
+  const sw = `<button class="mock sw ${d.on ? "on" : ""}" ${act} aria-label="${esc(d.name)} switch, ${what}"><i></i></button>`;
+  const extra = d.ctl === "humidifier" ? `<button class="mock" ${act}>Mode ${esc(d.mode)}</button><button class="mock" ${act}>Target ${d.setpoint}%</button>` : d.ctl === "dimmer" ? `<button class="mock" ${act}>Brightness${d.brightness === null ? "" : ` ${d.brightness}%`}</button>` : "";
+  return `<div class="dev">${deviceHead(d, z, '<span class="pill preview">Preview</span>')}<div class="dev-ctl">${extra}${sw}</div></div>`;
+}
+function targetsTable(z) {
+  const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td><button class="tv" data-preview aria-label="${name} ${p} ${v}, preview only">${v}</button></td>`).join("")}</tr>`;
+  const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? `<button class="tv" data-preview aria-label="Light ${p} ${slot} ${v}, preview only">${v}</button>` : ""}</td>`).join("")}</tr>`; };
+  const table = (p, title) => `<div class="tbl-wrap"><table><thead><tr><th>${title}</th><th>Min</th><th>Low</th><th>Target</th><th>High</th><th>Max</th></tr></thead><tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody></table></div>`;
+  return `${table("day", "Day")}${table("night", "Night")}
+  <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Min, Target and Max are linked to your helpers, so your alerts read the same numbers. Low and High are stored here." : "All stored here. Link them to helpers in Setup."}</p>`;
+}
+function activityList(z) {
+  const rows = ACTIVITY[z.id].filter((a) => ui.activity === "all" || a[1] === ui.activity);
+  if (!rows.length) return `<p class="small muted">Nothing of this kind today.</p>`;
+  return `<div class="act">${rows.map(([t, k, text, by]) => `<div class="act-row"><span class="act-time">${t}</span>${ic(ACT_KIND[k][0], ACT_KIND[k][1])}<div><div class="act-text">${esc(text)}</div><div class="act-by">${esc(by)}</div></div></div>`).join("")}</div>`;
+}
+function renderZone() {
+  const z = zoneById(ui.zone);
+  const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
+  return `<div class="wrap"><div><h1>${esc(z.name)}</h1><p class="muted small">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units</p></div>
+    ${periodBlock(z)}
+    <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
+    <div class="split">
+      ${controlsCard(z)}
+      <section class="card"><div class="card-head"><h2>Sensor placement</h2>${seg("data-level", ui.level, [["all", "All"], ...Object.entries(LEVELS)], "Height")}</div>${mapHtml(z)}${keyHtml}${sensorDetail(z)}</section>
+    </div>
+    <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
+      <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div></section>
+    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div>${activityList(z)}</section>
+    <section class="card"><div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" data-vpd="${z.id}">Set targets</button><span class="pill preview">Preview</span></div></div>${targetsTable(z)}</section></div>`;
+}
+
+/* Seeded so a redraw keeps the same line. */
+function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+function series(z, k, hours, ix) {
+  const sensor = envOf(z)[ix], real = sensor && HISTORY[sensor.id];
+  if (real) {
+    const from = hours > 24 ? HISTORY_LONG[sensor.id] : real, step = hours > 24 ? 15 : 5, count = hours * 60 / step + 1;
+    const part = from[k].slice(-count), low = from.lo[k].slice(-count), high = from.hi[k].slice(-count), last = part.length - 1;
+    const live = k === "light" ? sensor.lux : sensorValue(z, sensor, k);
+    return part.map((v, i) => (i < last ? { t: NOW - (last - i) * step, v, lo: low[i], hi: high[i] } : { t: NOW, v: live, lo: live, hi: live }));
+  }
+  const step = hours <= 24 ? 5 : hours <= 72 ? 15 : hours <= 168 ? 30 : 60, n = Math.round(hours * 60 / step);
+  const r = rng(zones.indexOf(z) * 97 + Object.keys(M).indexOf(k) * 31 + ix * 13 + 7);
+  const base = { temperature: [25.6, 21.5], humidity: [64, 66], vpd: [1.04, 0.74], light: [41000, 0] }[k];
+  const diff = { temperature: [0, 0.5, -1.8], humidity: [0, -0.8, 6], vpd: [0, 0.03, -0.2], light: [0, 900, -30000] }[k][ix] ?? 0;
+  const noise = { temperature: 0.1, humidity: 0.5, vpd: 0.012, light: 0 }[k];
+  const lv = k === "light" ? lightSeries(z, ix) : null, lightTop = lv ? (isDay(z, NOW) ? lv[48] : [41200, 40300, 11000][ix] || 30000) : 0;
+  let y = base[1], out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = NOW - (n - i) * step, d = isDay(z, t), target = (d ? base[0] : base[1]) + diff;
+    y = k === "light" ? (d ? lightTop : 0) : y + (target - y) * Math.min(1, step / 50) + (r() - 0.5) * noise * 2;
+    const v = ix === 1 && i > n * 0.6 && i < n * 0.65 ? null : y;
+    out.push({ t, v, lo: v === null ? null : v - noise, hi: v === null ? null : v + noise });
+  }
+  /* The last point is now, so a chart always ends on the same value the tiles show. */
+  const s = envOf(z)[ix], cur = k === "light" || !s ? null : sensorValue(z, s, k);
+  if (cur !== null) { const delta = cur - out[n].v; for (const p of out) if (p.v !== null) { p.v += delta; p.lo += delta; p.hi += delta; } }
+  const end = out[n]; end.lo = end.v; end.hi = end.v;
+  if (s && s.t === null) { end.v = null; end.lo = null; end.hi = null; }
+  return out;
+}
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dayWords(t) {
+  const d = new Date(`${BASE_DATE}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Math.floor(t / 1440));
+  return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+}
+const whenWords = (t, hours) => (hours <= 24 ? hhmm(t) : `${dayWords(t).replace(/ \w+$/, "")} ${hhmm(t)}`);
+/* Each point's own low and high, so a spike inside a bucket still counts on the long ranges. */
+function chartStats(line) {
+  let min = null, max = null;
+  for (const p of line) {
+    if (p.v === null) continue;
+    if (!min || p.lo < min.v) min = { v: p.lo, t: p.t };
+    if (!max || p.hi > max.v) max = { v: p.hi, t: p.t };
+  }
+  return { min, max };
+}
+const LINE = ["var(--primary)", "var(--temp)", "var(--under)"];
+let chartNow = null;
+function drawChart() {
+  const el = $("#chart"); chartNow = null; if (!el) return;
+  const z = zoneById(ui.zone), k = ui.metric, W = Math.max(300, el.clientWidth), H = W < 520 ? 210 : 260;
+  if (!envOf(z).length) { el.innerHTML = `<p class="small muted">No environment sensors in ${esc(z.name)} yet.</p>`; $("#chart-key").innerHTML = ""; $("#chart-stats").innerHTML = ""; $("#chart-note").textContent = ""; return; }
+  const L = 46, R = 8, T = 8, B = 22, PW = W - L - R, PH = H - T - B;
+  const envs = envOf(z), lines = envs.map((_, i) => series(z, k, ui.range, i)), pts = lines[0], n = pts.length - 1;
+  const counted = lines.filter((_, c) => envs[c].avg !== false), method = methodOf(z, k);
+  const merged = envs.length < 2 ? null : pts.map((p, ix) => {
+    const live = counted.map((l) => l[ix]).filter((x) => x.v !== null), pick = (f) => combine(method, live.map(f));
+    return { t: p.t, v: pick((x) => x.v), lo: pick((x) => x.lo), hi: pick((x) => x.hi) };
+  });
+  const vals = lines.flat().map((p) => p.v).filter((v) => v !== null), hasBand = k !== "light";
+  if (hasBand) for (const p of ["day", "night"]) vals.push(z.bands[p][k][0], z.bands[p][k][4]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo = Math.max(0, lo - pad); hi += pad;
+  const X = (i) => L + (i / n) * PW, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * PH;
+  const axis = (v) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString("en-NZ") : `${Math.round(v / 1000)}k`) : v.toFixed(k === "vpd" ? 2 : 0));
+  let s = "", i = 0;
+  while (i < n) {
+    let j = i; const d = isDay(z, pts[i].t);
+    while (j < n && isDay(z, pts[j].t) === d) j++;
+    const x = X(i), w = X(j) - x;
+    if (!d) s += `<rect x="${x}" y="${T}" width="${w}" height="${PH}" fill="var(--shade)"/>`;
+    if (hasBand) { const [mn, lo2, tg, hi2, mx] = z.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/><line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`; }
+    i = j;
+  }
+  for (let t = 0; t <= 4; t++) { const v = lo + ((hi - lo) * t) / 4, y = Y(v); s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${axis(v)}</text>`; }
+  const ticks = W < 520 ? 3 : 6;
+  for (let t = 0; t <= ticks; t++) {
+    const ix = Math.round((t / ticks) * n);
+    s += `<text x="${X(ix)}" y="${H - 6}" text-anchor="${t === 0 ? "start" : t === ticks ? "end" : "middle"}">${ui.range <= 24 ? hhmm(pts[ix].t) : dayWords(pts[ix].t).replace(/^\w+ /, "")}</text>`;
+  }
+  const path = (ln) => { let d = "", pen = false; ln.forEach((p, ix) => { if (p.v === null) { pen = false; return; } d += `${pen ? "L" : "M"}${X(ix).toFixed(1)} ${Y(p.v).toFixed(1)}`; pen = true; }); return d; };
+  lines.forEach((ln, c) => { s += `<path d="${path(ln)}" fill="none" stroke="${LINE[c % LINE.length]}" stroke-width="1" stroke-opacity="${envs.length > 1 ? 0.55 : 1}"/>`; });
+  if (merged) s += `<path d="${path(merged)}" fill="none" stroke="var(--fg)" stroke-width="1.5"/>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" tabindex="0" role="img" aria-label="${esc(M[k].label)} over the last ${ui.range} hours for ${esc(z.name)}. Move across it, or use the left and right arrows, to read a point in time.">${s}<g id="chart-hover"></g></svg>`;
+  const rows = [...(merged ? [{ name: METHODS[method], line: merged, color: "var(--fg)" }] : []), ...envs.map((e, c) => ({ name: e.short, line: lines[c], color: LINE[c % LINE.length] }))];
+  const cell = (m) => (m ? `${fmt(k, m.v)}<span class="sub">${whenWords(m.t, ui.range)}</span>` : "--");
+  const extremes = k !== "light";
+  $("#chart-stats").innerHTML = `<table class="cstats"><thead><tr><th>${M[k].unit}</th><th id="cs-at">Now</th>${extremes ? "<th>Min</th><th>Max</th>" : ""}</tr></thead><tbody>${rows.map((r, c) => { const st = chartStats(r.line); return `<tr><td><i style="background:${r.color}"></i>${esc(r.name)}</td><td id="cs-v${c}">${fmt(k, r.line[n].v)}</td>${extremes ? `<td data-cs="min">${cell(st.min)}</td><td data-cs="max">${cell(st.max)}</td>` : ""}</tr>`; }).join("")}</tbody></table>`;
+  const held = pts[n].t - pts[0].t;
+  $("#chart-note").textContent = held < ui.range * 60 - 60 ? `Home Assistant has kept ${Math.round(held / 1440)} days, back to ${dayWords(pts[0].t)}.` : "";
+  $("#chart-key").innerHTML = (hasBand ? `<span><i style="background:var(--ideal)"></i>Ideal zone</span><span><i style="background:var(--band);outline:1px solid var(--line)"></i>Min to max</span>` : "") + `<span><i style="background:var(--shade);outline:1px solid var(--line)"></i>Lights off</span>`;
+  chartNow = { k, n, W, L, PW, X, Y, T, PH, rows, at: null };
+}
+/* Reads a point in place, so moving across the chart redraws nothing. null goes back to now. */
+function chartAt(ix) {
+  const c = chartNow; if (!c) return;
+  c.at = ix;
+  const shown = ix === null ? c.n : ix;
+  c.rows.forEach((r, i) => { $(`#cs-v${i}`).textContent = fmt(c.k, r.line[shown].v); });
+  $("#cs-at").textContent = ix === null ? "Now" : whenWords(c.rows[0].line[ix].t, ui.range);
+  const dots = c.rows.filter((r) => r.line[shown].v !== null).map((r) => `<circle cx="${c.X(shown)}" cy="${c.Y(r.line[shown].v)}" r="3" fill="${r.color}"/>`).join("");
+  $("#chart-hover").innerHTML = ix === null ? "" : `<line x1="${c.X(ix)}" x2="${c.X(ix)}" y1="${c.T}" y2="${c.T + c.PH}" stroke="var(--muted)"/>${dots}`;
+}
+function chartPointer(e) {
+  const svg = e.target.closest && e.target.closest("#chart svg");
+  if (!chartNow) return;
+  if (!svg) { if (chartNow.at !== null && (e.type === "pointerdown" || e.pointerType === "mouse")) chartAt(null); return; }
+  const box = svg.getBoundingClientRect(), x = (e.clientX - box.left) * (chartNow.W / box.width);
+  chartAt(Math.round(clamp((x - chartNow.L) / chartNow.PW, 0, 1) * chartNow.n));
+}
+
+function renderDevices() {
+  const filters = [["all", "All"], ["ethernet", "Ethernet"], ["wifi", "WiFi"], ["zigbee", "Zigbee"], ["cloud", "Cloud"], ["unknown", "Not known"]];
+  const list = devices.filter(inAZone).filter((d) => ui.linkFilter === "all" || (ui.linkFilter === "cloud" ? d.path === "Cloud" : d.link === ui.linkFilter));
+  const src = { detected: "Detected", confirmed: "You confirmed", unknown: "Setup will ask" };
+  const rows = list.map((d) => `<tr><td>${esc(d.name)}<span class="sub">${esc(d.zones.map((id) => zoneById(id).name).join(", "))}</span></td>
+    <td>${d.type ? esc(d.type) : '<button class="pill dead fixpill" data-go="setup">Not known yet &rsaquo;</button>'}</td><td>${esc(d.family)}<span class="sub">${esc(d.integration)}</span></td>
+    <td>${d.link === "unknown" ? `<button class="pill dead fixpill" data-go="setup">${esc(LINK[d.link])} &rsaquo;</button>` : `<span class="pill plain">${esc(LINK[d.link])}</span>`}<span class="sub">${src[d.source]}</span></td>
+    <td>${esc(d.path)}${d.hub ? `<span class="sub">via ${esc(d.hub)}</span>` : ""}</td><td>${d.stale ? `<span class="pill dead">${esc(d.state)}</span>` : esc(d.state)}</td></tr>`).join("");
+  return `<div class="wrap"><div><h1>Devices</h1><p class="muted small">What each device is and how it reaches Home Assistant</p></div>
+    <section class="card"><div class="seg" role="group" aria-label="Filter by link">${filters.map(([k, l]) => `<button data-link="${k}" aria-pressed="${ui.linkFilter === k}">${l}</button>`).join("")}</div>
+    <div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Device</th><th>Type</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${ui.linkFilter === "all" ? "No devices are in a zone yet." : "Nothing on this link."}</td></tr>`}</tbody></table></div></section></div>`;
+}
+
+/* Climate hardware and lights. Anything else mapped to a zone, such as a plug marked Other, stays on Devices. */
+const CONTROL_GROUPS = [
+  { title: "Humidity", metric: "humidity", types: ["Dehumidifier", "Humidifier"] },
+  { title: "Temperature", metric: "temperature", types: ["Air conditioner", "Heater"] },
+  { title: "Airflow", types: ["Fan"] },
+  { title: "Lights", metric: "light", types: ["Light"] },
+];
+function controlsCard(z) {
+  const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id));
+  const unknown = ds.filter((d) => !d.type).map((d) => `<button class="notice fix" data-go="setup" data-gotarget="task-${d.id}"><span>${esc(d.name)} isn't shown until you say what's plugged into it.</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
+  const reading = (k) => `<span class="ctl-reading">${fmt(k, z.now[k])} ${M[k].unit}${statePill(bandState(z, k))}</span>`;
+  const groups = CONTROL_GROUPS.map((g) => {
+    const list = ds.filter((d) => g.types.includes(d.type));
+    return list.length ? `<div class="cgroup" data-cgroup="${g.title}"><div class="card-head"><h3>${g.title}</h3>${g.metric ? reading(g.metric) : ""}</div><div class="devs">${list.map((d) => deviceRow(d, z)).join("")}</div></div>` : "";
+  }).join("");
+  const empty = `<p class="small muted">No devices in ${esc(z.name)} yet.</p><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button></div>`;
+  return `<section class="card" id="controls"><div><h2>Controls</h2><p class="muted small">States are real, but nothing here works yet, so a tap sends nothing.</p></div>${unknown}${groups || empty}</section>`;
+}
+
+/* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+const METRIC_NAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture", ec: "EC", soiltemp: "Temperature", leaf: "Leaf offset", fullsat: "Full saturation", fieldcap: "Field capacity" };
+const EXTRA_SENSORS = [
+  { id: "x-pulse", name: "Air monitor", short: "Air monitor", kind: "env", level: "above", t: 21.4, h: 69.0, link: "WiFi", area: "Veg", family: "Pulse" },
+  { id: "x-spare", name: "Spare sensor", short: "Spare", kind: "env", level: "in", t: 22.0, h: 60.0, link: "Not known yet", area: "", family: "ESPHome" },
+];
+function catalog() {
+  const seen = {}, out = [];
+  for (const z of zones) for (const s of z.sensors) if (!seen[s.id]) { seen[s.id] = 1; out.push({ ...s, area: z.name, family: "ESPHome" }); }
+  for (const s of EXTRA_SENSORS) if (!seen[s.id]) out.push({ ...s });
+  return out;
+}
+function entitiesOf(s) {
+  const n = s.slug || slug(s.name), sub = s.slug ? `${s.slug}_substrate` : n;
+  const lux = s.lux === undefined ? "41,200 lx" : `${Math.round(s.lux).toLocaleString("en-NZ")} lx`;
+  if (s.kind === "env") return {
+    temperature: [[`sensor.${n}_air_temp`, `${s.t.toFixed(1)} °C`]], humidity: [[`sensor.${n}_humidity`, `${s.h.toFixed(1)} %`]],
+    vpd: [[`sensor.${n}_vpd`, `${(s.vpd ?? calcVpd(s.t, s.h, leafOf(s))).toFixed(2)} kPa`]], light: [[`sensor.${n}_light`, lux]],
+    ...(s.leafEntity ? { leaf: [[s.leafEntity, `${s.leafLive.toFixed(1)} °C`]] } : {}),
+  };
+  const raw = s.vwc === null ? "No data" : `${(s.raw ?? s.vwc * (s.fsLive || 90) / 100).toFixed(1)} %`, norm = s.vwc === null ? "No data" : `${s.vwc.toFixed(1)} %`, ec = s.ec === null ? "No data" : `${s.ec.toFixed(1)} mS/cm`;
+  return {
+    moisture: [[`sensor.${n}_substrate_humidity`, raw], [`sensor.${sub}_normalised_vwc`, norm]],
+    ec: [[`sensor.${sub}_pore_water_ec`, ec], [`sensor.${sub}_bulk_ec`, s.bulk === undefined ? ec : `${s.bulk.toFixed(1)} mS/cm`]],
+    soiltemp: [[`sensor.${n}_substrate_temperature`, `${(s.soilT ?? 22.4).toFixed(1)} °C`]],
+    ...(s.fsEntity ? { fullsat: [[s.fsEntity, `${s.fsLive.toFixed(1)} %`]], fieldcap: [[s.fcEntity, `${s.fcLive.toFixed(1)} %`]] } : {}),
+  };
+}
+const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"];
+const MAP_STEPS = ["Sensors", "Devices", "Day, night and limits", "Check"];
+const LIGHTS = {
+  garden: [["switch.lights_1", "Lights 1"], ["switch.lights_2", "Lights 2"], ["switch.lights_3", "Lights 3"], ["switch.lights_4", "Lights 4"]],
+  veg: [["switch.tent_lights", "Tent lights"]], nursery: [["switch.tent_lights", "Tent lights"]],
+};
+const toMin = (s) => { const [h, n] = s.split(":").map(Number); return h * 60 + n; };
+function periodSummary(mode, z, on, off, lights, rule) {
+  if (mode === "detected") { const n = lights.length; return n ? `Detected from ${n} light switch${n > 1 ? "es" : ""}${n > 1 ? (rule === "all" ? ", when all are on" : ", when any is on") : ""}` : "Detected, no switch picked"; }
+  return `${mode === "fixed" ? "Set here" : "From a helper"}, ${on} - ${off}`;
+}
+const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
+function openMap(id) {
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: `input_datetime.${helperOptions(z)[0]}_day_time`, offHelper: `input_datetime.${helperOptions(z)[0]}_night_time`, fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { ...(z.combine || {}) } };
+  for (const s of z.sensors) {
+    m.pickS[s.id] = true; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
+    for (const [k, opts] of Object.entries(entitiesOf(s))) m.choice[s.id][k] = opts[opts.length - 1][0];
+    if (s.leafUnused) m.choice[s.id].leaf = "none";
+  }
+  for (const d of devices) if (d.ctl) { m.roles[d.id] = d.type || ""; if (d.zones.includes(id)) m.pickD[d.id] = true; }
+  ui.mapw = m; ui.wiz = null; ui.vpdw = null; ui.leafw = null; ui.sched = null; ui.screen = "setup";
+}
+function needsChoice(m, s) { return Object.entries(entitiesOf(s)).filter(([k, o]) => o.length > 1 && !(m.choice[s.id] || {})[k]).map(([k]) => METRIC_NAME[k]); }
+function toggleSensor(m, s) {
+  if (m.pickS[s.id]) { delete m.pickS[s.id]; return; }
+  m.pickS[s.id] = true; m.choice[s.id] = m.choice[s.id] || {};
+  for (const [k, o] of Object.entries(entitiesOf(s))) if (o.length === 1) m.choice[s.id][k] = o[0][0];
+}
+const metricsLine = (s) => Object.keys(entitiesOf(s)).map((k) => METRIC_NAME[k]).join(", ");
+function sensorRow(m, z, s) {
+  const on = !!m.pickS[s.id], ask = on ? needsChoice(m, s) : [];
+  const where = zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
+  const pill = ask.length ? '<span class="pill high">Pick one</span>' : s.area === z.name ? '<span class="pill plain">Suggested</span>' : where.length ? `<span class="pill plain">In ${esc(where[0])}</span>` : "";
+  const detail = !on ? "" : `<div class="ents">${Object.entries(entitiesOf(s)).map(([k, opts]) => `<label class="ent"><span>${METRIC_NAME[k]}</span><select data-mmetric="${s.id}:${k}" aria-label="${esc(s.name)} ${METRIC_NAME[k]}">${opts.length > 1 ? `<option value=""${(m.choice[s.id] || {})[k] ? "" : " selected"}>Pick one</option>` : ""}${opts.map(([e, v]) => `<option value="${e}"${(m.choice[s.id] || {})[k] === e ? " selected" : ""}>${esc(e)} (${esc(v)})</option>`).join("")}<option value="none">Not used</option></select></label>`).join("")}${s.kind === "env" ? `<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? "" : " checked"}> Count in the zone average</label>` : ""}</div>`;
+  return `<div class="pickwrap" id="ms-${s.id}"><button class="pickrow" data-msensor="${s.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(s.name)}</strong><span class="dev-sub">${esc(s.family)}, ${esc(s.link)}. ${esc(metricsLine(s))}</span></span>${pill}</button>${detail}</div>`;
+}
+function deviceMapRow(m, z, d) {
+  const on = !!m.pickD[d.id], other = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
+  const pill = on && !m.roles[d.id] ? '<span class="pill high">What is it?</span>' : d.zones.includes(z.id) ? '<span class="pill plain">Suggested</span>' : "";
+  const role = !on ? "" : `<div class="ents"><label class="ent"><span>This is a</span><select data-mrole="${d.id}" aria-label="What ${esc(d.name)} is"><option value=""${m.roles[d.id] ? "" : " selected"}>Pick one</option>${ROLES.map((r) => `<option${m.roles[d.id] === r ? " selected" : ""}>${r}</option>`).join("")}</select></label>${other.length ? `<p class="dev-sub">Shared. Also in ${esc(other.join(", "))}.</p>` : ""}</div>`;
+  return `<div class="pickwrap" id="md-${d.id}"><button class="pickrow" data-mdevice="${d.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(d.name)}</strong><span class="dev-sub">${esc(d.family)}, ${esc(LINK[d.link])}. ${esc(d.integration)}</span></span>${pill}</button>${role}</div>`;
+}
+function mapList(m) {
+  const z = zoneById(m.id), q = m.q.trim().toLowerCase(), hit = (t) => !q || t.toLowerCase().includes(q);
+  const items = m.step === 1
+    ? catalog().filter((s) => hit(s.name + " " + s.family)).map((s) => ({ near: s.area === z.name || !!m.pickS[s.id], html: sensorRow(m, z, s) }))
+    : devices.filter((d) => d.ctl && hit(d.name + " " + d.family)).map((d) => ({ near: d.zones.includes(z.id) || !!m.pickD[d.id], html: deviceMapRow(m, z, d) }));
+  const near = items.filter((i) => i.near), rest = items.filter((i) => !i.near);
+  if (!items.length) return `<p class="small muted">Nothing matches that search.</p>`;
+  return near.map((i) => i.html).join("") + (rest.length ? `<p class="small muted">Everything else in Home Assistant</p>${rest.map((i) => i.html).join("")}` : "");
+}
+/* Anything that reports on or off can mark day. Detection only ever reads these. */
+const ALL_ON_OFF = [
+  ["light.light_controller_overhead", "Light controller overhead", "On, 80%"], ["light.light_controller_under_canopy", "Light controller under canopy", "On, 45%"],
+  ["switch.lights_under_canopy", "Lights under canopy", "On"], ["switch.lights_red", "Red lights", "Off"], ["light.tent_light_controller", "Tent light controller", "Off"],
+  ["input_boolean.lights_on_override", "Lights on override", "Off"],
+];
+function lightRows(m, z) {
+  const lit = isDay(z, NOW), q = (m.lq || "").trim().toLowerCase();
+  const near = LIGHTS[z.id].map(([e, n]) => [e, n, lit ? "On" : "Off"]), nearIds = near.map((x) => x[0]);
+  const row = ([e, n, st]) => { const on = !!m.lights[e]; return `<div class="pickwrap"><button class="pickrow" data-mlight="${e}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(n)}</strong><span class="dev-sub">${esc(e)}</span></span><span class="pill plain">${esc(st)}</span></button></div>`; };
+  const hit = (x) => !q || (x[0] + " " + x[1]).toLowerCase().includes(q);
+  const others = ALL_ON_OFF.filter((x) => !nearIds.includes(x[0]));
+  const shownNear = near.filter(hit), shownRest = others.filter((x) => (q ? hit(x) : m.lights[x[0]]));
+  if (!shownNear.length && !shownRest.length) return `<p class="small muted">Nothing matches that search.</p>`;
+  return shownNear.map(row).join("") + (shownRest.length ? `<p class="small muted">Everything else in Home Assistant</p>${shownRest.map(row).join("")}` : "");
+}
+function mapIssues(m) {
+  const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
+  for (const s of chosen) for (const n of needsChoice(m, s)) out.push({ text: `${s.name}: pick which ${n} entity to use.`, step: 1, target: `ms-${s.id}` });
+  for (const d of devices) if (m.pickD[d.id] && !m.roles[d.id]) out.push({ text: `${d.name}: say what it is.`, step: 2, target: `md-${d.id}` });
+  if (!chosen.some((s) => s.kind === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
+  if (m.period === "detected" && !Object.keys(m.lights).length) out.push({ text: "Pick at least one light switch, so this zone can detect day and night.", step: 3, target: "map-lq" });
+  if (m.period === "fixed" && (!m.fixedOn || !m.fixedOff || m.fixedOn === m.fixedOff)) out.push({ text: "Lights on and lights off need two different times.", step: 3, target: "map-fixedOn" });
+  return out;
+}
+function renderMap() {
+  const m = ui.mapw, z = zoneById(m.id), cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]);
+  const steps = `<ol class="steps">${MAP_STEPS.map((n, i) => `<li${m.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
+  const search = `<label class="field" for="map-q">Search Home Assistant<input id="map-q" type="search" value="${esc(m.q)}" placeholder="Name or integration"></label>`;
+  let body = "";
+  if (m.step === 1) {
+    const envCount = chosen.filter((s) => s.kind === "env" && m.avg[s.id] !== false).length;
+    const combineBox = envCount < 2 ? "" : `<div class="combine"><p class="muted">With ${envCount} sensors counted, how should each reading combine?</p><div class="fields">${["temperature", "humidity", "vpd", "light"].map((k) => `<label class="field" for="map-c-${k}">${M[k].label}<select id="map-c-${k}" data-mcombine="${k}">${Object.entries(METHODS).map(([id, l]) => `<option value="${id}"${(m.combine[k] || "mean") === id ? " selected" : ""}>${l}</option>`).join("")}</select></label>`).join("")}</div></div>`;
+    body = `<p class="muted">Pick the sensors in ${esc(z.name)}. Each one is a physical device, and its readings are matched for you.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>${combineBox}`;
+  }
+  if (m.step === 2) body = `<p class="muted">Pick what runs in ${esc(z.name)}. Shared hardware can be added to several zones.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>`;
+  if (m.step === 3) {
+    const helper = (k, label, val, suffix) => `<label class="field" for="map-${k}">${label}<select id="map-${k}" data-msched="${k}">${helperOptions(z).map((p) => `input_datetime.${p}_${suffix}`).map((e) => `<option value="${e}"${m[k] === e ? " selected" : ""}>${e} (${val})</option>`).join("")}</select></label>`;
+    const fixed = (k, label) => `<label class="field" for="map-${k}">${label}<input id="map-${k}" type="time" data-msched="${k}" value="${m[k]}"></label>`;
+    const lit = isDay(z, NOW), count = Object.keys(m.lights).length;
+    const perBody = {
+      helper: `<div class="fields">${helper("onHelper", "Lights on", hhmm(z.dayAt), "day_time")}${helper("offHelper", "Lights off", hhmm(z.nightAt), "night_time")}</div><p class="small muted">Change the times on Day and night, or in Home Assistant, and this zone follows.</p>`,
+      fixed: `<div class="fields">${fixed("fixedOn", "Lights on")}${fixed("fixedOff", "Lights off")}</div><p class="small muted">Stored in Environment Control and changed here.</p>`,
+      detected: `<label class="field" for="map-lq">Search Home Assistant<input id="map-lq" type="search" value="${esc(m.lq || "")}" placeholder="Light controller, plug or switch"></label><div class="picklist" id="map-lights">${lightRows(m, z)}</div>${count > 1 ? `<div class="row"><span class="small muted">It's day when</span><div class="seg" role="group" aria-label="Day rule"><button data-mrule="any" aria-pressed="${m.rule === "any"}">Any light is on</button><button data-mrule="all" aria-pressed="${m.rule === "all"}">All lights are on</button></div></div>` : ""}<p class="small muted">${count ? `Lights are ${lit ? "on" : "off"} now, so the ${lit ? "day" : "night"} band applies. ` : ""}Day and night follow the switch, so there's no countdown to the next change.</p>`,
+    };
+    body = `<div><p class="muted">How does this zone know when it's day or night?</p><div class="seg" role="group" aria-label="Day and night source">${[["helper", "From a helper"], ["fixed", "Set here"], ["detected", "Detected"]].map(([k, l]) => `<button data-mperiod="${k}" aria-pressed="${m.period === k}">${l}</button>`).join("")}</div></div>
+      ${perBody[m.period]}
+      <div><p class="muted">Where do this zone's limits come from?</p><div class="seg" role="group" aria-label="Limits"><button data-mband="helpers" aria-pressed="${m.band === "helpers"}">My helpers</button><button data-mband="here" aria-pressed="${m.band === "here"}">Set here with the VPD chart</button></div></div>
+      <p class="small muted">${m.band === "helpers" ? "Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>`;
+  }
+  if (m.step === 4) {
+    const ds = devices.filter((d) => m.pickD[d.id]), issues = mapIssues(m), unplaced = chosen.filter((s) => !z.sensors.some((x) => x.id === s.id)).length;
+    body = `<div class="review"><div><strong>${chosen.length} sensors</strong><p class="small muted">${esc(chosen.map((s) => s.name).join(", ")) || "None"}</p></div>
+      <div><strong>${ds.length} devices</strong><p class="small muted">${esc(ds.map((d) => `${d.name} (${m.roles[d.id] || "not set"})`).join(", ")) || "None"}</p></div>
+      <div><strong>Day, night and limits</strong><p class="small muted">${esc(periodSummary(m.period, z, m.period === "fixed" ? m.fixedOn : hhmm(z.dayAt), m.period === "fixed" ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule))}. Limits ${m.band === "helpers" ? "from your helpers" : "set here"}.</p></div></div>
+      ${issues.map((i) => `<button class="notice fix" data-mfix="${i.step}" data-target="${i.target}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("")}
+      ${unplaced ? `<p class="small muted">${unplaced} new sensor${unplaced > 1 ? "s" : ""} will need placing next.</p>` : ""}
+      <p class="small muted">Applying only changes Environment Control. Nothing in Home Assistant changes.</p>`;
+  }
+  const here = mapIssues(m).filter((i) => i.step === m.step), blocked = here.length > 0 || (m.step === 4 && mapIssues(m).length > 0);
+  return `<div class="wrap"><div><h1>Map devices: ${esc(z.name)}</h1></div><section class="card">${steps}${body}
+    <div class="row"><button class="btn" data-mstep="back">${m.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-mstep="next"${blocked ? " disabled" : ""}>${m.step === 4 ? (mapDraft(m).items.length ? "Review and apply" : "Finish") : "Next"}</button>${here.length ? `<button class="fixlink" data-mfix="${here[0].step}" data-target="${here[0].target}">${esc(here[0].text)} &rsaquo;</button>` : ""}</div></section></div>`;
+}
+function saveMap(m) {
+  const z = zoneById(m.id), cat = catalog();
+  z.sensors = cat.filter((s) => m.pickS[s.id]).map((s) => { const had = z.sensors.find((x) => x.id === s.id); return had || { ...s, pos: null, level: s.kind === "soil" ? "substrate" : s.level }; });
+  for (const s of z.sensors) s.avg = m.avg[s.id] !== false;
+  for (const s of z.sensors) if (s.leafEntity) {
+    const was = s.leafUnused;
+    s.leafUnused = (m.choice[s.id] || {}).leaf === "none";
+    if (s.leafUnused && !was) s.leaf = s.leafLive;
+  }
+  z.combine = m.combine;
+  for (const d of devices) if (d.ctl) {
+    const has = d.zones.includes(z.id);
+    if (m.pickD[d.id] && !has) d.zones = [...d.zones, z.id];
+    if (!m.pickD[d.id] && has) d.zones = d.zones.filter((id) => id !== z.id);
+    if (m.pickD[d.id]) d.type = m.roles[d.id];
+  }
+  z.linked = m.band === "helpers";
+  z.periodMode = m.period; z.lights = m.period === "detected" ? Object.keys(m.lights) : []; z.rule = m.rule;
+  if (m.period === "fixed") { z.dayAt = toMin(m.fixedOn); z.nightAt = toMin(m.fixedOff); }
+}
+
+/* Leaf VPD by Tetens, the same sum the zone's sensors use. */
+const svp = (t) => 0.6108 * Math.exp((17.27 * t) / (t + 237.3));
+const calcVpd = (t, rh, off) => svp(t + off) - (rh / 100) * svp(t);
+/* Athena's Optimal Environment table: veg 0.8-1.0, flower stretch and bulk 1.0-1.2, flower finish 1.2-1.4 kPa. */
+const VZONES = [["--v0", "Under 0.8, outside Athena's ranges"], ["--v1", "0.8 - 1.0, veg"], ["--v2", "1.0 - 1.2, flower stretch and bulk"], ["--v3", "1.2 - 1.4, flower finish"], ["--v0", "Over 1.4, outside Athena's ranges"]];
+const vzone = (v) => v < 0.8 ? 0 : v < 1.0 ? 1 : v < 1.2 ? 2 : v < 1.4 ? 3 : 4;
+const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
+const VNAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD" };
+const VUNIT = { temperature: "°", humidity: "%", vpd: " kPa" };
+const VSNAP = { temperature: 0.5, humidity: 1, vpd: 0.05 };
+/* Wider than the chart: a Max of 36° is a sensible limit even though the axis stops at 34. */
+const VRANGE = { temperature: [0, 50], humidity: [0, 100], vpd: [0, 5] };
+const VDECIMALS = { temperature: 1, humidity: 1, vpd: 2, light: 0 };
+const SLOT_NAME = ["Min", "Low", "Target", "High", "Max"];
+const HANDLES = [0, 1, 3, 4];
+/* Athena's Optimal Environment table sets Low and High. Athena gives no critical limits, so Min and Max start a margin outside. */
+const STAGES = {
+  veg: { label: "Veg", temperature: [22.2, 27.7], humidity: [58, 75], vpd: [0.8, 1.0] },
+  stretch: { label: "Flower stretch", temperature: [25.5, 27.7], humidity: [60, 72], vpd: [1.0, 1.2] },
+  bulk: { label: "Flower bulk", temperature: [23.8, 26.6], humidity: [60, 70], vpd: [1.0, 1.2] },
+  finish: { label: "Flower finish", temperature: [18.3, 22.2], humidity: [50, 60], vpd: [1.2, 1.4] },
+};
+const STAGE_MARGIN = { temperature: 2, humidity: 5, vpd: 0.15 };
+const round2 = (x) => Math.round(x * 100) / 100;
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const snapTo = (x, step) => round2(Math.round(x / step) * step);
+function applyStage(v, id) {
+  const b = v.bands[v.period], s = STAGES[id];
+  for (const k of ["temperature", "humidity", "vpd"]) {
+    const [lo, hi] = s[k], m = STAGE_MARGIN[k];
+    b[k] = [round2(lo - m), lo, round2((lo + hi) / 2), hi, round2(hi + m)];
+  }
+  b.humidity[2] = Math.round(b.humidity[2]);
+  b.vpd[2] = stepped(b.vpd[2]);
+  v.stage = id; v.sel = null;
+}
+/* Target is one point, so a new offset gives it a new VPD. If that leaves the VPD ideal range, moving only the VPD would break humidity instead, so the point moves to the nearest place that fits every range. */
+function vFollowLeaf(v, b) {
+  const T = b.temperature[2], RH = b.humidity[2], here = stepped(calcVpd(T, RH, v.leaf));
+  b.vpd[2] = here;
+  if (here >= b.vpd[1] && here <= b.vpd[3]) return false;
+  let best = null, gap = Infinity;
+  for (let t = b.temperature[1]; t <= b.temperature[3] + 1e-9; t += 0.1) for (let rh = b.humidity[1]; rh <= b.humidity[3] + 1e-9; rh += 0.5) {
+    const p = stepped(calcVpd(t, rh, v.leaf)), d = (t - T) ** 2 + (rh - RH) ** 2;
+    if (p >= b.vpd[1] && p <= b.vpd[3] && d < gap) { gap = d; best = [Number(t.toFixed(1)), Number(rh.toFixed(1)), p]; }
+  }
+  if (!best) return false;
+  [b.temperature[2], b.humidity[2], b.vpd[2]] = best;
+  return true;
+}
+/* What the zone's light sensor is held to, one number a period: a floor by day, a ceiling by night. Lux, and nothing on the light controller reads them. */
+const LIGHT_LIMIT = { day: ["dayMin", "Min", 0], night: ["nightMax", "Max", 4] }, LIGHT_RANGE = [0, 10000, 10];
+const vDraftBands = (z) => { const b = JSON.parse(JSON.stringify(z.bands)); for (const p of Object.keys(LIGHT_LIMIT)) b[p].light = [z.lightLimits[LIGHT_LIMIT[p][0]]]; return b; };
+function vProblems(b) {
+  const out = [], [lightLo, lightHi, lightStep] = LIGHT_RANGE;
+  for (const k of ["temperature", "humidity", "vpd"]) {
+    const [lo, hi] = VRANGE[k], outside = b[k].findIndex((x) => x < lo || x > hi), early = b[k].findIndex((x, n) => n > 0 && x < b[k][n - 1]);
+    if (outside >= 0) out.push({ text: `${VNAME[k]} ${SLOT_NAME[outside]} has to be between ${lo} and ${hi}${VUNIT[k]}.`, edit: k, slot: outside });
+    else if (early > 0) out.push({ text: `${VNAME[k]} ${SLOT_NAME[early]} can't be below ${SLOT_NAME[early - 1]}. They run Min, Low, Target, High, Max.`, edit: k, slot: early });
+    else if (b[k][0] >= b[k][4]) out.push({ text: `${VNAME[k]} Max has to be above Min.`, edit: k, slot: 4 });
+  }
+  if (b.light[0] < lightLo || b.light[0] > lightHi) out.push({ text: `Light limit has to be between ${lightLo} and ${fmt("light", lightHi)} lx.`, edit: "light", slot: 0 });
+  else if (b.light[0] % lightStep) out.push({ text: `Light limit goes in steps of ${lightStep} lx.`, edit: "light", slot: 0 });
+  return out;
+}
+function vIssues(v, b) {
+  const issues = vProblems(b);
+  if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf offset. Change the offset or widen a limit.`, leaf: v.id });
+  return issues;
+}
+const vIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" ${i.leaf ? `data-calw="${i.leaf}"` : `data-vfix="${i.edit}"`}${i.slot === undefined ? "" : ` data-vslot="${i.slot}"`}><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
+const PERIODS = [["day", "Day"], ["night", "Night"]];
+/* The period not on show still goes in the review, so a problem there has to be reachable from here. */
+function vIssueBox(v, issues) {
+  const other = PERIODS.find(([p]) => p !== v.period && vPeriodBad(v, p));
+  return vIssueHtml(issues) + (other ? `<button class="notice fix" data-vperiod="${other[0]}"><span>${other[1]} has a value to fix.</span><span class="fixgo">Fix &rsaquo;</span></button>` : "");
+}
+const vPeriodChanged = (v, p) => { const z = zoneById(v.id), was = z.bands[p]; return differs(v.bands[p].light[0], z.lightLimits[LIGHT_LIMIT[p][0]]) || Object.keys(VNAME).some((k) => v.bands[p][k].some((x, i) => differs(x, was[k][i]))); };
+const vPeriodBad = (v, p) => (p === v.period || vPeriodChanged(v, p)) && vIssues(v, v.bands[p]).length > 0;
+function vGeom() {
+  const cw = 34, ch = 30, L = 38, T = 46, cols = T_MAX - T_MIN + 1, rows = (RH_TOP - RH_LOW) / 5 + 1;
+  return {
+    cw, ch, L, T, cols, rows, W: L + cols * cw + 8, H: T + rows * ch + 22, right: L + cols * cw, bottom: T + rows * ch,
+    X: (t) => L + (t - T_MIN) * cw + cw / 2, Y: (rh) => T + ((RH_TOP - rh) / 5) * ch + ch / 2,
+    invX: (px) => (px - L - cw / 2) / cw + T_MIN, invY: (py) => RH_TOP - ((py - T - ch / 2) / ch) * 5,
+  };
+}
+const rhAt = (t, vp, leaf) => ((svp(t + leaf) - vp) / svp(t)) * 100;
+function idealCount(v, b) {
+  let n = 0;
+  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 1) for (let t = T_MIN; t <= T_MAX; t += 0.5) {
+    const p = calcVpd(t, rh, v.leaf);
+    if (t >= b.temperature[1] && t <= b.temperature[3] && rh >= b.humidity[1] && rh <= b.humidity[3] && p >= b.vpd[1] && p <= b.vpd[3]) n++;
+  }
+  return n;
+}
+function chip(x, y, text, on) {
+  const w = 52, h = 18, cx = Math.round(x);
+  return `<g pointer-events="none"><rect x="${cx - w / 2}" y="${y}" width="${w}" height="${h}" rx="4" fill="${on ? "var(--vink)" : "var(--primary)"}"/><text x="${cx}" y="${y + 13}" text-anchor="middle" fill="#FFFFFF" style="font-size:11px">${esc(text)}</text></g>`;
+}
+function vChartInner(v, b) {
+  const g = vGeom(), { X, Y } = g, showText = window.innerWidth >= 760;
+  const edit = v.edit, on = (k) => edit === k;
+  let s = "";
+  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 5) {
+    s += `<text x="${g.L - 6}" y="${Y(rh) + 4}" text-anchor="end" fill="var(--muted)">${rh}%</text>`;
+    for (let t = T_MIN; t <= T_MAX; t++) {
+      const p = calcVpd(t, rh, v.leaf), within = (i, j) => t >= b.temperature[i] && t <= b.temperature[j] && rh >= b.humidity[i] && rh <= b.humidity[j] && p >= b.vpd[i] && p <= b.vpd[j];
+      const opacity = within(1, 3) ? 1 : within(0, 4) ? 0.55 : 0.18;
+      s += `<g opacity="${opacity}"><rect x="${X(t) - g.cw / 2}" y="${Y(rh) - g.ch / 2}" width="${g.cw - 1}" height="${g.ch - 1}" fill="var(${VZONES[vzone(p)][0]})"/>${showText ? `<text x="${X(t) - 0.5}" y="${Y(rh) + 3.5}" text-anchor="middle" fill="var(--vink)" style="font-size:10px">${p.toFixed(1)}</text>` : ""}</g>`;
+    }
+  }
+  for (let t = T_MIN; t <= T_MAX; t += 2) s += `<text x="${X(t)}" y="${g.H - 7}" text-anchor="middle" fill="var(--muted)">${t}°</text>`;
+  const stroke = (k, i) => (on(k) ? (v.sel === i ? 4 : 2.5) : 1);
+  const faded = (k) => (on(k) ? 1 : 0.3);
+  const ln = (x1, y1, x2, y2, k, i) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--vink)" stroke-width="${stroke(k, i)}" opacity="${faded(k)}"/>`;
+  let flags = "";
+  for (const i of HANDLES) {
+    const t = clamp(b.temperature[i], T_MIN, T_MAX), rh = clamp(b.humidity[i], RH_LOW, RH_TOP), vp = b.vpd[i];
+    s += ln(X(t), g.T, X(t), g.bottom, "temperature", i) + ln(g.L, Y(rh), g.right, Y(rh), "humidity", i);
+    let d = "", pen = false;
+    for (let c = T_MIN; c <= T_MAX; c += 0.25) {
+      const r = rhAt(c, vp, v.leaf);
+      if (r > RH_TOP || r < RH_LOW) { pen = false; continue; }
+      d += `${pen ? "L" : "M"}${X(c).toFixed(1)} ${Y(r).toFixed(1)}`; pen = true;
+    }
+    if (d) s += `<path d="${d}" fill="none" stroke="var(--vink)" stroke-width="${stroke("vpd", i)}" stroke-dasharray="6 4" opacity="${faded("vpd")}"/>`;
+    const label = `${SLOT_NAME[i]} ${b[on("vpd") ? "vpd" : on("humidity") ? "humidity" : "temperature"][i]}`;
+    if (on("temperature")) flags += chip(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24, label, v.sel === i);
+    if (on("humidity")) flags += chip(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9, label, v.sel === i);
+    if (on("vpd")) {
+      let c = { 0: 33, 1: 30, 3: 27, 4: 24 }[i];
+      while (c > T_MIN && (rhAt(c, vp, v.leaf) > RH_TOP || rhAt(c, vp, v.leaf) < RH_LOW)) c -= 0.5;
+      const r = clamp(rhAt(c, vp, v.leaf), RH_LOW, RH_TOP);
+      flags += chip(X(c), Y(r) - 9, label, v.sel === i);
+    }
+  }
+  const tx = X(clamp(b.temperature[2], T_MIN, T_MAX)), ty = Y(clamp(b.humidity[2], RH_LOW, RH_TOP)), big = on("target");
+  s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="var(--vink)" stroke-width="2.5"/></g>`;
+  return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${flags}</svg>`;
+}
+function vReadout(v, b) {
+  if (v.edit === "target") return `Target ${b.temperature[2]}°, ${b.humidity[2]}%, ${b.vpd[2]} kPa. Drag the circle to where you want to aim.`;
+  if (v.sel !== null) return `${VNAME[v.edit]} ${SLOT_NAME[v.sel]} ${b[v.edit][v.sel]}${VUNIT[v.edit]}`;
+  return `Drag a ${VNAME[v.edit].toLowerCase()} line, or tap near one to move it there.`;
+}
+function placeHandle(b, k, i, val) {
+  const lo = i > 0 ? b[k][i - 1] : VRANGE[k][0], hi = i < 4 ? b[k][i + 1] : VRANGE[k][1];
+  b[k][i] = round2(clamp(val, lo, hi));
+}
+/* Picks the nearest line on press, then moves it. A line stops at its neighbours, so the order can't break. */
+function vMove(v, b, g, px, py, start) {
+  const t = clamp(g.invX(px), T_MIN, T_MAX), rh = clamp(g.invY(py), RH_LOW, RH_TOP);
+  if (v.edit === "target") {
+    b.temperature[2] = round2(clamp(snapTo(t, VSNAP.temperature), b.temperature[1], b.temperature[3]));
+    b.humidity[2] = round2(clamp(snapTo(rh, VSNAP.humidity), b.humidity[1], b.humidity[3]));
+    b.vpd[2] = stepped(calcVpd(b.temperature[2], b.humidity[2], v.leaf));
+    return;
+  }
+  const k = v.edit;
+  const dist = (i) => k === "temperature" ? Math.abs(g.X(b[k][i]) - px) : k === "humidity" ? Math.abs(g.Y(b[k][i]) - py) : Math.abs(g.Y(rhAt(t, b[k][i], v.leaf)) - py);
+  if (start || v.sel === null) v.sel = HANDLES.reduce((a, c) => (dist(c) < dist(a) ? c : a));
+  const raw = k === "temperature" ? t : k === "humidity" ? rh : calcVpd(t, rh, v.leaf);
+  placeHandle(b, k, v.sel, snapTo(raw, VSNAP[k]));
+}
+function vPointer(e, start) {
+  const v = ui.vpdw, b = v.bands[v.period], g = vGeom(), wrap = document.querySelector("#vwrap"), r = wrap.querySelector("svg").getBoundingClientRect(), scale = g.W / r.width;
+  vMove(v, b, g, (e.clientX - r.left) * scale, (e.clientY - r.top) * scale, start);
+  vSync();
+}
+const vCanNudge = (v) => v.edit !== "target" && v.sel !== null;
+/* Updates what changed in place. A full render here would replace the box being typed in and drop the phone keyboard. */
+function vSync() {
+  const v = ui.vpdw, b = v.bands[v.period], issues = vIssues(v, b), active = document.activeElement;
+  $("#vwrap").innerHTML = vChartInner(v, b);
+  $("#vread").textContent = vReadout(v, b);
+  $("#vnudge").hidden = !vCanNudge(v);
+  document.querySelectorAll(".vtabs [data-vedit]").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.vedit === v.edit)));
+  document.querySelectorAll("[data-vrow]").forEach((el) => { el.dataset.on = String(el.dataset.vrow === v.edit); });
+  document.querySelectorAll("[data-vin]").forEach((el) => {
+    const [k, i] = el.dataset.vin.split(":");
+    if (el !== active) el.value = b[k][i];
+    el.setAttribute("aria-invalid", String(issues.some((p) => p.edit === k && p.slot === Number(i))));
+  });
+  const box = $("#v-issues"), html = vIssueBox(v, issues);
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+  draftSync();
+}
+const vTouch = () => window.matchMedia("(pointer: coarse)").matches;
+const typedBox = (el) => !!(el && el.dataset && (el.dataset.vin || el.dataset.lin || el.dataset.cin || el.dataset.wbox || (el.dataset.sin && el.type === "text")));
+/* Tallest height seen at this width, so a shrink can be told from a rotation. */
+let vFull = { w: 0, h: 0 };
+function vViewHeight() {
+  const vv = window.visualViewport, h = vv ? Math.min(vv.height, window.innerHeight) : window.innerHeight;
+  if (window.innerWidth !== vFull.w || h > vFull.h) vFull = { w: window.innerWidth, h };
+  return h;
+}
+/* Pushes the row up to sit just above the keyboard, keeping the chart in view. When the host resizes for the keyboard that edge is measured. When it doesn't, as in an app that lays the keyboard over the frame, nothing can be measured, so assume the keyboard's largest usual share of the screen. */
+function vReveal() {
+  const a = document.activeElement, bar = $(".topbar");
+  if (!vTouch() || !typedBox(a)) return;
+  const row = a.closest(".vrow, .lfield, .field").getBoundingClientRect(), h = vViewHeight();
+  const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
+  const edge = h < vFull.h * 0.8 ? h : assumed;
+  const head = getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
+  window.scrollBy(0, row.top - Math.max(head + 8, edge - row.height - 8));
+}
+function vSelect(input) {
+  const v = ui.vpdw, [k, i] = input.dataset.vin.split(":");
+  if (k !== "light") { v.edit = i === "2" ? "target" : k; v.sel = i === "2" ? null : Number(i); }
+  boxFocused(input, () => { if (ui.vpdw) vSync(); });
+}
+function boxFocused(input, sync) {
+  input.select();
+  if (!vTouch()) { sync(); return; }
+  vViewHeight();
+  const keyboardOpen = document.body.classList.contains("vtyping");
+  document.body.classList.add("vtyping");
+  /* Delayed past the end of the tap: this changes the height of the text above, and a box that moves mid tap sends the tap to whatever slid under the finger. */
+  setTimeout(() => { if (document.activeElement === input) sync(); }, 60);
+  setTimeout(vReveal, keyboardOpen ? 60 : 350);
+}
+/* Typed numbers are kept as typed, not snapped to the drag steps, because exact values like 22.2 are why you'd type. Anything out of order stays visible and stops the save. */
+function vCommit(input) {
+  const v = ui.vpdw;
+  if (!v) return;
+  const [k, slot] = input.dataset.vin.split(":"), i = Number(slot), b = v.bands[v.period];
+  const typed = input.value.trim().replace(",", "."), n = typed === "" ? NaN : Number(typed);
+  const val = Number.isFinite(n) ? Number(n.toFixed(VDECIMALS[k])) : b[k][i];
+  input.value = val;
+  if (val === b[k][i]) return;
+  b[k][i] = val;
+  /* Target temperature, humidity and VPD are one point on the chart, so changing one has to move another. */
+  if (i === 2 && k === "vpd") {
+    b.humidity[2] = Number(rhAt(b.temperature[2], val, v.leaf).toFixed(VDECIMALS.humidity));
+    toast(`Humidity Target moved to ${b.humidity[2]}% to give that VPD at ${b.temperature[2]}°.`);
+  } else if (i === 2) b.vpd[2] = round2(calcVpd(b.temperature[2], b.humidity[2], v.leaf));
+  vSync();
+}
+/* Blur as well as commit: a focused box fires a late change while a render removes it, which would write its number into whatever the button just switched to. */
+function vCommitActive() {
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.vin) { vCommit(a); a.blur(); }
+}
+function renderVpd() {
+  const v = ui.vpdw, z = zoneById(v.id), b = v.bands[v.period], issues = vIssues(v, b);
+  const tabs = [["target", "Target"], ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
+  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}">${SLOT_NAME[i]}</label>`).join("")}</div>`;
+  const [, lightSlot, lightColumn] = LIGHT_LIMIT[v.period];
+  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-invalid="${issues.some((p) => p.edit === "light")}">${lightSlot}</label></div>`;
+  const counted = countedEnv(z), mixed = new Set(counted.map(leafOf)).size > 1, picked = counted.find((s) => s.id === z.leafBasis);
+  const leafText = `${leafWords(v.leaf)}${!mixed ? "" : picked ? `, from ${picked.name}` : `, the average of ${counted.length} sensors`}`;
+  const nudge = `<span class="stepper" id="vnudge"${vCanNudge(v) ? "" : " hidden"}><button data-vnudge="-1" aria-label="Lower">-</button><button data-vnudge="1" aria-label="Higher">+</button></span>`;
+  return `<div class="wrap"><div><h1>Targets: ${esc(z.name)}</h1><p class="muted small">Pick this zone's limits on the VPD chart, or type them.</p></div>
+  <section class="card">
+    <div class="card-head"><div class="seg" role="group" aria-label="Period">${[["day", "Day"], ["night", "Night"]].map(([k, l]) => `<button data-vperiod="${k}" aria-pressed="${v.period === k}">${l}</button>`).join("")}</div>
+      <div class="row"><span class="small muted">${esc(leafText)}</span><button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div></div>
+    <div><p class="small muted">Start from an Athena stage</p><div class="seg" role="group" aria-label="Athena stage">${Object.entries(STAGES).map(([k, s]) => `<button data-vstage="${k}" aria-pressed="${v.stage === k}">${s.label}</button>`).join("")}</div></div>
+    <div class="vgrid"><div class="vmain">
+      <div class="seg vtabs" role="group" aria-label="What to edit">${tabs.map(([k, l]) => `<button data-vedit="${k}" aria-pressed="${v.edit === k}">${l}</button>`).join("")}</div>
+      <div class="now" id="v-now"><strong id="vread">${esc(vReadout(v, b))}</strong>${nudge}</div>
+      <div class="map vchart" id="vwrap" tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value.">${vChartInner(v, b)}</div>
+      <div class="key">${VZONES.slice(1, 4).map(([c, l]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("")}<span><i style="background:var(--v0)"></i>Outside Athena's ranges</span></div>
+    </div>
+    <div class="vside">${summary("temperature", "Temperature °C")}${summary("humidity", "Humidity %")}${summary("vpd", "VPD kPa")}${lightRow}
+      <p class="small muted">Drag on the chart or type a number here. Bright cells are your ideal zone. Faded cells are outside it but not critical. Dark cells are past Min or Max. Light is what your sensors read, not the % set on the lights, so it isn't on the chart.</p></div></div>
+    <div class="vissues" id="v-issues" data-html="${esc(vIssueBox(v, issues))}">${vIssueBox(v, issues)}</div>
+    ${z.linked ? `<p class="small muted">${esc(z.name)}'s Min, Target, Max and light limit are linked to your helpers, so those are a preview and applying won't change them. Low and High are saved here.</p>` : ""}
+    <div class="row"><button class="btn" data-vexit>Back</button></div>
+  </section></div>`;
+}
+function openVpd(id) {
+  const z = zoneById(id);
+  ui.vpdw = { id, period: period(z), leaf: zoneLeaf(z), edit: "target", sel: null, stage: null, drag: false, bands: vDraftBands(z) };
+  ui.wiz = null; ui.screen = "setup";
+}
+const stepped = (v) => Math.round(v * 20) / 20;
+
+/* The boards' offset range. */
+const LEAF_MAX = { below: 5, above: 2 };
+/* Stands in for the board reporting back. The mock's boards answer after LEAF_ACK_MS, or never if leafStuck is set. */
+const LEAF_ACK_MS = 500, LEAF_GIVE_UP_MS = 1500;
+const leafSends = [];
+function leafRows(z) {
+  const rows = {};
+  for (const s of envOf(z)) { const o = leafOf(s); rows[s.id] = { mag: Math.abs(o), dir: o > 0 ? 1 : -1, status: "" }; }
+  return rows;
+}
+function openCalibration(id) {
+  const z = zoneById(id);
+  ui.leafw = { id, rows: leafRows(z), basis: z.leafBasis || "", back: { screen: ui.screen, zone: ui.zone } };
+  ui.screen = "setup";
+}
+const lValue = (r) => (r.mag === 0 ? 0 : r.mag * r.dir);
+const boardOffline = (s) => hasLeafEntity(s) && (s.t === null || s.t === undefined);
+const previewVpd = (s, o) => (s.vpd !== undefined && o === leafOf(s) ? s.vpd : calcVpd(s.t, s.h, o));
+function lPreview(s, r) {
+  const o = lValue(r);
+  const now = s.t === null || s.t === undefined ? "No data from this sensor right now." : `Air ${s.t.toFixed(1)} °C, leaf ${(s.t + o).toFixed(1)} °C, VPD ${previewVpd(s, o).toFixed(2)} kPa.`;
+  const left = s.avg === false ? " Not counted in the zone reading." : "";
+  return now + left;
+}
+function lProblems(l, z) {
+  const out = [];
+  for (const s of envOf(z)) {
+    const r = l.rows[s.id], max = r.dir < 0 ? LEAF_MAX.below : LEAF_MAX.above;
+    if (r.mag > max) out.push({ id: s.id, text: `${s.name} can be at most ${max} °C ${r.dir < 0 ? "below" : "above"} air.` });
+  }
+  return out;
+}
+const lIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" data-lfix="${i.id}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
+const lZoneVpd = (l, z) => combine(methodOf(z, "vpd"), envOf(z).filter((s) => s.avg !== false && s.t !== null).map((s) => previewVpd(s, lValue(l.rows[s.id]))));
+function lZoneHtml(l, z) {
+  const v = lZoneVpd(l, z), saved = fmt("vpd", z.now.vpd);
+  if (v === null) return `<strong>${esc(z.name)} VPD --</strong>`;
+  return `<strong>${esc(z.name)} VPD ${fmt("vpd", v)} kPa</strong>${fmt("vpd", v) === saved ? "" : `<span class="small muted">Now ${saved} kPa</span>`}`;
+}
+const lStatus = (s, r) => (boardOffline(s) ? "This board is offline, so its offset can't change until it's back."
+  : r.status === "sending" ? "Sending to the board..."
+  : r.status === "stuck" ? `Not confirmed. The board still reports ${leafPhrase(s.leafLive)}.` : "");
+function lRow(s, r, sending) {
+  const locked = sending || boardOffline(s) ? " disabled" : "";
+  const dir = (d, label) => `<button data-ldir="${s.id}:${d}" aria-pressed="${r.dir === d}"${locked}>${label}</button>`;
+  /* Phone number pads often have no minus key, so the box holds the size and the direction is a button. */
+  const field = `<div class="lfield"><label class="lcell"><input id="lin-${s.id}" data-lin="${s.id}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${r.mag.toFixed(1)}" aria-label="${esc(s.name)} degrees from air" aria-invalid="false"${locked}><span>°C</span></label><div class="seg" role="group" aria-label="${esc(s.name)} leaf against air">${dir(-1, "Below air")}${dir(1, "Above air")}</div></div>`;
+  const home = hasLeafEntity(s) ? `On the board: ${esc(s.leafEntity)}` : "This sensor has nowhere to hold an offset, so it's kept in Environment Control.";
+  return `<div class="lrow" id="lr-${s.id}"><div class="lrow-top"><strong>${esc(s.name)}</strong><span class="pill plain">${LEVELS[s.level]}</span></div>${field}<div class="dev-sub" id="lp-${s.id}">${esc(lPreview(s, r))}</div><div class="dev-sub lid">${home}</div><div class="lstatus" id="ls-${s.id}" role="status">${esc(lStatus(s, r))}</div></div>`;
+}
+function lBasisNote(l, z) {
+  const offsetOf = (s) => lValue(l.rows[s.id]), used = countedEnv(z), at = leafPhrase(chartLeaf(z, l.basis, offsetOf));
+  return new Set(used.map(offsetOf)).size === 1 ? `Every sensor matches, so the chart is drawn at ${at}.` : `Drawn at ${at}. Each sensor's own VPD still uses its own offset.`;
+}
+/* Stays on screen when sensors match, so Back can't move under a finger the moment two boxes differ. */
+function lBasisHtml(l, z) {
+  const used = countedEnv(z);
+  if (used.length < 2) return "";
+  const on = used.some((s) => s.id === l.basis) ? l.basis : "";
+  const btn = (id, label) => `<button data-lbasis="${id}" aria-pressed="${on === id}"${l.sending ? " disabled" : ""}>${esc(label)}</button>`;
+  return `<div class="lbasis" id="l-basis"><strong>VPD chart uses</strong><div class="seg" role="group" aria-label="Which offset the VPD chart uses">${btn("", "Average")}${used.map((s) => btn(s.id, s.short)).join("")}</div><div class="dev-sub" id="l-basis-note">${esc(lBasisNote(l, z))}</div></div>`;
+}
+const soilOf = (z) => z.sensors.filter((s) => s.kind === "soil");
+const soilBusy = (run) => !!run && (run.step > 2 || run.fsRun.stage !== "ready");
+function soilRow(x, locked) {
+  const run = soilRuns[x.id], busy = soilBusy(run);
+  const why = !x.fsEntity ? "This probe has no calibration settings of its own." : x.vwc === null ? "Not reporting, so it can't be calibrated right now." : "";
+  const where = busy ? (run.fcRun.stage === "draining" ? "Waiting for field capacity." : "Calibration started.") : "";
+  return `<div class="task"><div><strong>${esc(x.name)}</strong><p class="small muted">${x.fsEntity ? `Full saturation ${x.fsLive.toFixed(1)}%, field capacity ${x.fcLive.toFixed(1)}%. Reports every ${x.rateS} s.` : ""} ${why} ${where}</p></div><div class="row"><button class="btn" data-cprobe="${x.id}"${why || locked ? " disabled" : ""}>${busy ? "Continue" : "Calibrate"}</button></div></div>`;
+}
+function renderCalibration() {
+  const l = ui.leafw, z = zoneById(l.id), envs = envOf(z), soils = soilOf(z), issues = lProblems(l, z);
+  const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1></div>`, back = `<button class="btn" data-lexit${l.sending ? " disabled" : ""}>Back</button>`;
+  if (!envs.length && !soils.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no sensors yet.</p><div class="row">${back}<button class="btn" data-mapw="${z.id}">Map devices</button></div></section></div>`;
+  const note = envs.some(hasLeafEntity) ? `<p class="small muted">Offsets are changed on the board itself. Its VPD, and anything reading it like your alerts, follow straight away.</p>` : "";
+  const leaf = !envs.length ? "" : `<section class="card" id="cal-leaf"><div><h2>Leaf offset</h2><p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p></div>
+    <div class="now" id="l-zone">${lZoneHtml(l, z)}</div>
+    <div class="lrows">${envs.map((s) => lRow(s, l.rows[s.id], l.sending)).join("")}</div>
+    <div class="vissues" id="l-issues" data-html="${esc(lIssueHtml(issues))}">${lIssueHtml(issues)}</div>
+    ${lBasisHtml(l, z)}${note}
+    </section>`;
+  /* Reached from the chart only to change an offset, and a flood doesn't belong in the middle of that. */
+  const soil = !soils.length || ui.vpdw ? "" : `<section class="card" id="cal-soil"><div><h2>Soil probes</h2><p class="muted small">Works out each probe's full saturation and field capacity from its own readings.</p></div>
+    <div>${soils.map((x) => soilRow(x, l.sending)).join("")}</div>
+    <p class="small muted">Calibrate one at a time, because each needs its own unit flooded. This never runs a pump. You water by hand, so turn off any automatic irrigation for this unit first.</p></section>`;
+  return `<div class="wrap">${head}${leaf}${soil}<div class="row">${back}</div></div>`;
+}
+/* Updates what changed in place, so moving from one box to the next keeps the phone keyboard open. */
+function lSync() {
+  const l = ui.leafw, z = zoneById(l.id), issues = lProblems(l, z), active = document.activeElement;
+  for (const s of envOf(z)) {
+    const r = l.rows[s.id], input = $(`#lin-${s.id}`);
+    $(`#lp-${s.id}`).textContent = lPreview(s, r);
+    if (input) { if (input !== active) input.value = r.mag.toFixed(1); input.setAttribute("aria-invalid", String(issues.some((i) => i.id === s.id))); }
+    document.querySelectorAll(`[data-ldir^="${s.id}:"]`).forEach((el) => el.setAttribute("aria-pressed", String(Number(el.dataset.ldir.split(":")[1]) === r.dir)));
+  }
+  $("#l-zone").innerHTML = lZoneHtml(l, z);
+  /* In place: a tap that blurs a box syncs here, and replacing the button under it would lose the click. */
+  if ($("#l-basis")) {
+    const on = countedEnv(z).some((s) => s.id === l.basis) ? l.basis : "";
+    document.querySelectorAll("[data-lbasis]").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.lbasis === on)));
+    $("#l-basis-note").textContent = lBasisNote(l, z);
+  }
+  const box = $("#l-issues"), html = lIssueHtml(issues);
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+  draftSync();
+}
+/* A minus or plus typed by anyone with those keys still sets the direction. Blank or not a number keeps the old value. */
+function lCommit(input) {
+  const l = ui.leafw;
+  if (!l || !l.rows[input.dataset.lin]) return;
+  const r = l.rows[input.dataset.lin], typed = input.value.trim().replace(",", "."), n = typed === "" ? NaN : Number(typed);
+  if (Number.isFinite(n)) {
+    r.mag = Number(Math.abs(n).toFixed(1));
+    if (typed.startsWith("-")) r.dir = -1;
+    if (typed.startsWith("+")) r.dir = 1;
+  }
+  input.value = r.mag.toFixed(1);
+  lSync();
+}
+function lCommitActive() {
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.lin) { lCommit(a); a.blur(); }
+}
+function leaveLeaf() {
+  const { screen, zone } = ui.leafw.back;
+  ui.leafw = null; ui.screen = screen; ui.zone = zone;
+  render(); window.scrollTo(0, 0);
+}
+function lFollowChart(z) {
+  const v = ui.vpdw, next = zoneLeaf(z);
+  let moved = false;
+  if (v && next !== v.leaf) {
+    v.leaf = next;
+    for (const p of ["day", "night"]) moved = vFollowLeaf(v, v.bands[p]) || moved;
+  }
+  return moved;
+}
+/* A board's value only counts once the board reports it, so nothing here assumes the write landed. */
+function saveLeaf(l, done) {
+  const z = zoneById(l.id), sends = [];
+  z.leafBasis = l.basis;
+  for (const s of envOf(z)) {
+    const r = l.rows[s.id];
+    r.status = "";
+    if (!hasLeafEntity(s)) { if (s.leaf !== lValue(r)) delete s.vpd; s.leaf = lValue(r); }
+    else if (!boardOffline(s) && lValue(r) !== s.leafLive) { sends.push(s); r.status = "sending"; }
+  }
+  const finish = () => {
+    l.sending = false;
+    refreshReadings();
+    const stuck = sends.filter((s) => l.rows[s.id].status === "stuck"), moved = lFollowChart(z);
+    if (ui.leafw !== l) { done(); return; }
+    if (stuck.length) { render(); done(stuck.map((s) => `${s.name}: not confirmed. The board still reports ${leafPhrase(s.leafLive)}.`)); return; }
+    /* Stays here unless the chart sent you, because the soil probes are on this page too. */
+    if (ui.vpdw) leaveLeaf(); else render();
+    done();
+    const said = sends.length ? "Leaf offsets saved on the boards in this mock." : "Leaf offsets saved in this mock.";
+    toast(moved ? `${said} Target moved to stay in the ideal zone.` : said);
+  };
+  if (!sends.length) { finish(); return; }
+  l.sending = true;
+  render();
+  for (const s of sends) {
+    leafSends.push({ entity_id: s.leafEntity, value: lValue(l.rows[s.id]) });
+    const answers = !s.leafStuck;
+    setTimeout(() => {
+      if (answers) { s.leafLive = lValue(l.rows[s.id]); delete s.vpd; }
+      l.rows[s.id].status = answers ? "" : "stuck";
+    }, answers ? LEAF_ACK_MS : LEAF_GIVE_UP_MS);
+  }
+  setTimeout(finish, sends.some((s) => s.leafStuck) ? LEAF_GIVE_UP_MS + 20 : LEAF_ACK_MS + 20);
+}
+
+/* Day and night. Where a zone is linked to helpers these change on the helper, so whatever reads it follows straight away. */
+const SCHED_NAME = { day: "Lights on", night: "Lights off", morning: "Morning extension", daylight: "Daylight time", evening: "Evening extension" };
+const SCHED_RANGE = { morning: [0, 59, 1, "min"], daylight: [0, 59, 1, "min"], evening: [0, 59, 1, "min"] };
+const schedSends = [];
+const dayLength = (on, off) => span(((off - on) % 1440 + 1440) % 1440);
+const timesHere = (z) => z.periodMode !== "detected";
+const onHelpers = (z) => (z.periodMode || "helper") === "helper";
+const sharesHelpers = (z) => (onHelpers(z) ? zones.filter((o) => o !== z && onHelpers(o) && helperOptions(o)[0] === helperOptions(z)[0]) : []);
+const schedValues = (z) => ({ day: hhmm(z.dayAt), night: hhmm(z.nightAt), ...(z.emerson || {}) });
+const schedText = (k, v) => (SCHED_RANGE[k] ? `${v} ${SCHED_RANGE[k][3]}` : v);
+const schedHeld = (z, k) => (k === "day" || k === "night" ? onHelpers(z) : true);
+function schedEntity(z, k) {
+  if (k === "day" || k === "night") return `input_datetime.${helperOptions(z)[0]}_${k}_time`;
+  return `input_number.emerson_effect_${k === "daylight" ? "daylight_time" : `${k}_extension`}`;
+}
+function openSched(id) {
+  ui.sched = { id, vals: schedValues(zoneById(id)), status: "", back: { screen: ui.screen, zone: ui.zone } };
+  ui.screen = "setup";
+}
+function sProblems(s, z) {
+  const out = [], v = s.vals;
+  if (timesHere(z) && v.day === v.night) out.push({ id: "night", text: "Lights on and lights off need two different times." });
+  for (const k of Object.keys(SCHED_RANGE)) {
+    if (v[k] === undefined) continue;
+    const [lo, hi, step, unit] = SCHED_RANGE[k];
+    if (v[k] < lo || v[k] > hi) out.push({ id: k, text: `${SCHED_NAME[k]} has to be between ${lo} and ${hi} ${unit}.` });
+    else if (v[k] % step) out.push({ id: k, text: `${SCHED_NAME[k]} goes in steps of ${step} ${unit}.` });
+  }
+  return out;
+}
+const sIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" data-sfix="${i.id}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
+const emersonLine = (v) => { const on = toMin(v.day), off = toMin(v.night); return `Red lights ${hhmm(on - v.morning)} - ${hhmm(on + v.daylight)} and ${hhmm(off - v.daylight)} - ${hhmm(off + v.evening)}`; };
+function sStrip(v) {
+  const on = toMin(v.day), off = toMin(v.night), seg = (a, b) => `<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
+  return `<div class="strip" role="img" aria-label="Lights on ${v.day} to ${v.night}">${on < off ? seg(on, off) : seg(on, 1440) + seg(0, off)}</div>`;
+}
+const sLength = (v) => { const on = toMin(v.day), off = toMin(v.night); return `<strong>${dayLength(on, off)} of light, ${dayLength(off, on)} of dark</strong>`; };
+function renderSched() {
+  const s = ui.sched, z = zoneById(s.id), v = s.vals, lock = s.sending ? " disabled" : "", issues = sProblems(s, z), others = sharesHelpers(z);
+  const time = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]}<input id="sin-${k}" data-sin="${k}" type="time" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
+  const box = (k, name) => `<label class="field" for="sin-${k}">${name} (${SCHED_RANGE[k][3]})<input id="sin-${k}" data-sin="${k}" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
+  const shared = others.length ? ` ${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.` : "";
+  const where = !timesHere(z) ? "" : onHelpers(z) ? `These are your helpers, ${schedEntity(z, "day")} and ${schedEntity(z, "night")}. Anything reading them, like your light schedule, follows straight away.${shared}` : "Stored in Environment Control.";
+  const times = timesHere(z) ? `<div class="fields">${time("day")}${time("night")}</div><div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div><p class="small muted">${esc(where)}</p>` : `<p class="muted">${esc(z.name)} follows its light switches, so there are no times to set.</p><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button></div>`;
+  const emerson = z.emerson ? `<section class="card" id="s-emerson"><div><h2>Emerson effect</h2><p class="muted small">Red lights either side of the white lights.</p></div><div class="fields">${box("morning", "Morning extension")}${box("daylight", "Daylight time")}${box("evening", "Evening extension")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div><p class="small muted">Your automations still switch the red lights. This only sets the numbers they read.</p></section>` : "";
+  return `<div class="wrap"><div class="sched-title"><h1>Day and night: ${esc(z.name)}</h1><span class="pill preview">Coming in v2</span></div>
+    <section class="card" id="s-times"><div><h2>Schedule</h2><p class="muted small">When this zone's day starts and ends.</p></div>${times}</section>
+    ${emerson}
+    <div class="vissues" id="s-issues" data-html="${esc(sIssueHtml(issues))}">${sIssueHtml(issues)}</div>
+    <div class="lstatus" id="s-status" role="status">${esc(s.status)}</div>
+    <div class="row"><button class="btn" data-sexit${lock}>Back</button></div></div>`;
+}
+/* Updates what changed in place, so moving from one box to the next keeps the phone keyboard open. */
+function sSync() {
+  const s = ui.sched, z = zoneById(s.id), v = s.vals, issues = sProblems(s, z);
+  if ($("#s-len")) { $("#s-len").innerHTML = sLength(v); $("#s-strip").innerHTML = sStrip(v); }
+  if ($("#s-em")) $("#s-em").innerHTML = `<strong>${esc(emersonLine(v))}</strong>`;
+  document.querySelectorAll("[data-sin]").forEach((el) => el.setAttribute("aria-invalid", String(issues.some((i) => i.id === el.dataset.sin))));
+  const box = $("#s-issues"), html = sIssueHtml(issues);
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+  draftSync();
+}
+/* Blank or not a number keeps the old value. A number outside the limits stays in its box and stops the save. */
+function sCommit(input) {
+  const s = ui.sched; if (!s) return;
+  const k = input.dataset.sin;
+  if (SCHED_RANGE[k]) { const typed = input.value.trim(), n = typed === "" ? NaN : Number(typed); if (Number.isFinite(n)) s.vals[k] = n; input.value = s.vals[k]; }
+  else if (input.value) s.vals[k] = input.value;
+  else input.value = s.vals[k];
+  sSync();
+}
+function sCommitActive() {
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.sin) { sCommit(a); a.blur(); }
+}
+function leaveSched() {
+  const { screen, zone } = ui.sched.back;
+  ui.sched = null; ui.screen = screen; ui.zone = zone;
+  render(); window.scrollTo(0, 0);
+}
+function schedCommit(z, k, val) {
+  if (k === "day" || k === "night") for (const o of [z, ...sharesHelpers(z)]) o[k === "day" ? "dayAt" : "nightAt"] = toMin(val);
+  else z.emerson[k] = val;
+}
+/* A helper's value only counts once Home Assistant reports it, the same as a board's. */
+function saveSched(s, done) {
+  const z = zoneById(s.id), was = schedValues(z), changed = Object.keys(s.vals).filter((k) => s.vals[k] !== was[k]), sends = changed.filter((k) => schedHeld(z, k));
+  for (const k of changed) if (!sends.includes(k)) schedCommit(z, k, s.vals[k]);
+  const finish = () => {
+    s.sending = false;
+    const stuck = sends.filter(() => z.helperStuck);
+    if (ui.sched !== s) { done(); return; }
+    if (stuck.length) {
+      s.status = stuck.map((k) => `${SCHED_NAME[k]}: not confirmed. Home Assistant still reports ${schedText(k, was[k])}.`).join(" ");
+      render(); done([s.status]); return;
+    }
+    s.status = "";
+    leaveSched(); done();
+    toast(sends.length ? "Saved on your helpers in this mock." : "Saved in this mock.");
+  };
+  if (!sends.length) { finish(); return; }
+  s.sending = true; s.status = "Sending to Home Assistant...";
+  render();
+  for (const k of sends) schedSends.push({ entity_id: schedEntity(z, k), value: s.vals[k] });
+  const answers = !z.helperStuck;
+  setTimeout(() => { if (answers) for (const k of sends) schedCommit(z, k, s.vals[k]); finish(); }, answers ? LEAF_ACK_MS : LEAF_GIVE_UP_MS);
+}
+function schedDraft(s) {
+  const z = zoneById(s.id), was = schedValues(z), v = s.vals, [items, add] = changeList(), others = sharesHelpers(z);
+  for (const k of Object.keys(v)) add(SCHED_NAME[k], schedText(k, was[k]), schedText(k, v[k]));
+  const moved = v.day !== was.day || v.night !== was.night, emersonMoved = !!z.emerson && (moved || ["morning", "daylight", "evening"].some((k) => v[k] !== was[k]));
+  const parts = [];
+  if (moved) parts.push(`Light goes from ${dayLength(toMin(was.day), toMin(was.night))} to ${dayLength(toMin(v.day), toMin(v.night))} a day.`);
+  if (emersonMoved) parts.push(`${emersonLine(v)}.`);
+  if (moved && others.length) parts.push(`${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
+  if (Object.keys(v).some((k) => v[k] !== was[k] && schedHeld(z, k))) parts.push("These change on your helpers, and anything reading them, like your light schedule and alerts, follows straight away.");
+  const blocked = sProblems(s, z).length ? "fix the problems before review" : "";
+  return { zone: moved && others.length ? [z, ...others].map((o) => o.name).join(" and ") : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
+    apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
+}
+
+/* Soil calibration. Both values live on the probe as raw %, on the same scale as its reading. */
+const SOIL_TRUST = { count: 5, se: 0.1 }, SOIL_SHELF_S = 10, SOIL_GAP_S = 20, SOIL_HOLD_MIN = 30;
+const soilRuns = {}, soilSends = [];
+const rawOf = (s) => s.raw ?? s.vwc * s.fsLive / 100;
+const cProbe = (c) => zoneById(c.id).sensors.find((s) => s.id === c.probe);
+const pstdev = (xs) => { const m = mean(xs); return Math.sqrt(mean(xs.map((x) => (x - m) ** 2))); };
+const steps1 = (xs) => xs.slice(1).map((x, i) => x - xs[i]);
+/* Sample flood at the probe's report rate: climbing, a noisy hover at the ceiling, then a flat drainage shelf below it. */
+function soilCurve(s) {
+  if (s.trace) return s.trace;
+  const pts = [], top = s.sampleCeil, r = (v) => Math.round(v * 10) / 10;
+  for (let t = 0; t <= 170; t += s.rateS) {
+    const v = t < 60 ? 72 + (top - 72.3) * (t / 60) ** 2 : t < 73 ? top + 0.25 * Math.sin(t * 2.3) : t < 110 ? top - 1.1 : top - 1.1 - (t - 110) * 0.02;
+    pts.push([t, r(v)]);
+  }
+  return pts;
+}
+/* The same reading as ha_history.py --plateau. The ceiling is the mean over the noisy hover, never a flat stretch: a flat stretch is drainage. */
+function soilCeiling(pts) {
+  if (pts.length < 8) return null;
+  const vals = pts.map((p) => p[1]), noise = pstdev(steps1(vals)) / Math.SQRT2, top = Math.max(...vals);
+  const seed = steps1(vals.filter((v) => v >= top - 0.5)), ceilNoise = seed.length > 1 ? pstdev(seed) / Math.SQRT2 : noise;
+  const tol = Math.max(0.5, 3 * ceilNoise), band = vals.filter((v) => v >= top - tol), m = mean(band);
+  const se = band.length > 1 ? pstdev(band) / Math.sqrt(band.length) : null;
+  const gaps = pts.slice(1).filter((p, i) => p[0] - pts[i][0] > SOIL_GAP_S).length;
+  const runs = [];
+  let cur = [pts[0]];
+  for (const p of pts.slice(1)) {
+    if (Math.abs(p[1] - cur[0][1]) <= Math.max(0.1, noise)) cur.push(p);
+    else { runs.push(cur); cur = [p]; }
+  }
+  runs.push(cur);
+  const shelves = runs.filter((run) => run.at(-1)[0] - run[0][0] >= SOIL_SHELF_S && mean(run.map((p) => p[1])) < top - tol)
+    .sort((a, b) => (b.at(-1)[0] - b[0][0]) - (a.at(-1)[0] - a[0][0]));
+  const shelf = shelves[0] ? { level: mean(shelves[0].map((p) => p[1])), from: shelves[0][0][0], to: shelves[0].at(-1)[0] } : null;
+  return { value: Math.round(m * 10) / 10, mean: m, count: band.length, se, gaps, shelf, trusted: band.length >= SOIL_TRUST.count && se !== null && se < SOIL_TRUST.se };
+}
+function soilChart(pts, res) {
+  /* Zoomed to the top: the whole climb would squash the gap between the ceiling and the flat stretch, which is what this chart is for. */
+  const W = 640, H = 200, L = 44, R = 12, T = 12, B = 26, lo = Math.floor(res.mean - 5), shown = pts.filter((p) => p[1] >= lo);
+  const t0 = shown[0][0], t1 = shown.at(-1)[0], hi = Math.ceil(Math.max(...shown.map((p) => p[1]))) + 1;
+  const X = (t) => L + ((t - t0) / (t1 - t0 || 1)) * (W - L - R), Y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+  const shelf = res.shelf ? `<rect x="${X(res.shelf.from)}" y="${T}" width="${X(res.shelf.to) - X(res.shelf.from)}" height="${H - T - B}" fill="var(--warn)" opacity="0.14"/>` : "";
+  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Flood reading with the ceiling marked at ${res.value}%">${shelf}
+    <line x1="${L}" x2="${W - R}" y1="${Y(res.mean)}" y2="${Y(res.mean)}" stroke="var(--ok)" stroke-width="1" stroke-dasharray="5 4"/>
+    <polyline fill="none" stroke="var(--primary)" stroke-width="2" points="${shown.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ")}"/>
+    <text x="${L - 6}" y="${Y(hi) + 10}" text-anchor="end">${hi}%</text><text x="${L - 6}" y="${Y(lo)}" text-anchor="end">${lo}%</text><text x="${L}" y="${H - 8}">0 s</text><text x="${W - R}" y="${H - 8}" text-anchor="end">${t1 - t0} s</text></svg></div>`;
+}
+function openSoil(id, probe) {
+  ui.soilw = soilRuns[probe] || (soilRuns[probe] = { id, step: 2, probe, fsRun: { stage: "ready" }, fcRun: { stage: "ready" }, vals: null, status: { fs: "", fc: "" }, sending: false });
+}
+function leaveSoil() {
+  ui.soilw = null;
+  render(); window.scrollTo(0, 0);
+}
+function cToCheck(c) {
+  const s = cProbe(c), fs = c.fsRun.result, fc = c.fcRun;
+  c.vals = { fs: fs ? fs.value : s.fsLive, fc: fc.stage === "done" ? fc.value : s.fcLive };
+  c.status = { fs: "", fc: "" };
+  c.step = 4;
+}
+function cProblems(c) {
+  const { fs, fc } = c.vals, out = [];
+  if (fs < 50 || fs > 100) out.push({ id: "fs", text: "Full saturation has to be between 50 and 100%. Under 50 usually means a dropped digit." });
+  if (fc < 0 || fc > 100) out.push({ id: "fc", text: "Field capacity has to be between 0 and 100%." });
+  else if (fc >= fs) out.push({ id: "fc", text: "Field capacity has to be below full saturation." });
+  return out;
+}
+const cSends = (c, s) => [["fs", s.fsEntity, s.fsLive], ["fc", s.fcEntity, s.fcLive]].filter(([k, , live]) => c.vals[k] !== live);
+const cIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" data-cfix="${i.id}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
+function cPreview(c, s, k) {
+  if (k === "fc") return "Doesn't change VWC. Anything worked out from it, like a reference line on a chart, follows.";
+  return s.vwc === null ? "No data from this probe right now." : `Normalised VWC ${s.vwc.toFixed(1)}% now, ${(rawOf(s) / c.vals.fs * 100).toFixed(1)}% with this value.`;
+}
+function cRow(c, s, k, name, live, entity) {
+  const status = c.status[k] === "sending" ? "Sending to the probe..." : c.status[k] === "stuck" ? `Not confirmed. The probe still reports ${live.toFixed(1)}%.` : "";
+  return `<div class="lrow" id="cr-${k}"><div class="lrow-top"><strong>${name}</strong><span class="pill plain">Now ${live.toFixed(1)}%</span></div>
+    <div class="lfield"><label class="lcell"><input id="cin-${k}" data-cin="${k}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${c.vals[k].toFixed(1)}" aria-label="${name}" aria-invalid="false"${c.sending ? " disabled" : ""}><span>%</span></label></div>
+    <div class="dev-sub" id="cp-${k}">${esc(cPreview(c, s, k))}</div><div class="dev-sub lid">On the probe: ${esc(entity)}</div><div class="lstatus" role="status">${esc(status)}</div></div>`;
+}
+function renderSoil() {
+  const c = ui.soilw, z = zoneById(c.id), s = cProbe(c);
+  const steps = `<ol class="steps">${["Full saturation", "Field capacity", "Check"].map((n, i) => `<li${c.step === i + 2 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
+  const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1><p class="muted small">${esc(s.name)}</p></div>`;
+  const nav = (next) => `<div class="row"><button class="btn" data-cexit${c.sending ? " disabled" : ""}>Cancel</button>${c.step > 2 ? `<button class="btn" data-cback${c.sending ? " disabled" : ""}>Back</button>` : ""}${next}</div>`;
+  let body = "";
+  if (c.step === 2) {
+    const run = c.fsRun, res = run.result, skip = `<button class="btn" data-cskipfs>Skip, keep ${s.fsLive.toFixed(1)}%</button>`;
+    const slow = s.rateS > 2 ? `<div class="notice">${esc(s.name)} reports every ${s.rateS} s. The ceiling can last under 15 s, so you may only catch 1 or 2 readings. For a good result set the probe to report every second first. This panel can't change that for you.</div>` : "";
+    const how = `<ol class="small muted cal-how"><li>Turn off any automatic irrigation for this unit.</li><li>Keep the probe connected the whole time. A gap can hide the peak.</li><li>Tap Start, then flood the unit until water runs freely from the bottom. Past about 5 L into wet medium only leaches EC.</li><li>Tap Finished once the reading has started to fall.</li></ol>`;
+    if (run.stage === "ready") body = `<p class="muted">Full saturation is the most ${esc(s.name)}'s unit can hold.</p>${slow}${how}${nav(`${skip}<button class="btn primary" data-cstart>Start</button>`)}`;
+    if (run.stage === "recording") body = `<div class="now"><strong>Recording ${esc(s.name)}</strong><span class="small muted">Flood the unit now</span></div>${how}${nav(`<button class="btn primary" data-cfinish>Finished</button>`)}`;
+    if (run.stage === "done") {
+      const flags = !res ? `<div class="notice">Not enough readings to work anything out.</div>` : [
+        !res.trusted ? `<div class="notice">Too few readings close to the peak to trust this. It can read a point or more low. Run it again with the probe reporting every second, or check the value yourself on the last step.</div>` : "",
+        res.gaps ? `<div class="notice">The probe went quiet for over ${SOIL_GAP_S} s during this, and the peak may have been in that gap.</div>` : "",
+        res.shelf ? `<p class="small muted">Flat at ${res.shelf.level.toFixed(1)}% for ${res.shelf.to - res.shelf.from} s, shaded on the chart. That's water draining, so it isn't used.</p>` : "",
+      ].join("");
+      const replay = s.traceNote ? `<p class="small muted">${esc(s.traceNote)}</p>` : "";
+      body = `${replay}${res ? `<div class="now"><strong>Full saturation ${res.value.toFixed(1)}%</strong><span class="small muted">${res.trusted ? `Average of ${res.count} ${res.count === 1 ? "reading" : "readings"} at the ceiling, within ${res.se.toFixed(2)} points` : "Rough figure"}</span></div>${soilChart(run.pts, res)}` : ""}${flags}${nav(`<button class="btn" data-cagain>Run again</button><button class="btn primary" data-cnextfs${res ? "" : " disabled"}>Next</button>`)}`;
+    }
+  }
+  if (c.step === 3) {
+    const run = c.fcRun, skip = `<button class="btn" data-cskipfc>Skip, keep ${s.fcLive.toFixed(1)}%</button>`;
+    const about = `<p class="muted">Field capacity is what the unit holds once it has finished draining, so this one does wait for a flat line: within 0.1 points for ${SOIL_HOLD_MIN} minutes with no water added.</p>`;
+    if (run.stage === "ready") body = `${about}${nav(`${skip}<button class="btn primary" data-cdrain>Start waiting</button>`)}`;
+    if (run.stage === "draining") body = `${about}<div class="now"><strong>Draining</strong><span class="small muted">Still falling. You can leave this screen, and it picks up where it was.</span></div>${nav(`${skip}<button class="btn" data-cjump>Mock: jump ahead 40 minutes</button>`)}`;
+    if (run.stage === "done") body = `<div class="now"><strong>Field capacity ${run.value.toFixed(1)}%</strong><span class="small muted">Held for ${run.held} minutes</span></div>${nav(`<button class="btn primary" data-cnextfc>Next</button>`)}`;
+  }
+  if (c.step === 4) {
+    const issues = cProblems(c), nothing = !cSends(c, s).length;
+    const back = s.rateS < 5 ? `<p class="small muted">${esc(s.name)} is reporting every ${s.rateS} s. Set it back to 10 s when you're done, because that rate writes far more to your database.</p>` : "";
+    body = `<p class="muted">Check these before they go to ${esc(s.name)}.</p><div class="lrows">${cRow(c, s, "fs", "Full saturation", s.fsLive, s.fsEntity)}${cRow(c, s, "fc", "Field capacity", s.fcLive, s.fcEntity)}</div>
+      <div class="vissues" id="c-issues" data-html="${esc(cIssueHtml(issues))}">${cIssueHtml(issues)}</div>
+      <p class="small muted">Applying changes these on the probe. Normalised VWC, and anything reading it like an irrigation controller, follows straight away. Raw readings aren't touched.</p>${back}
+      ${nav(`<button class="btn primary" data-csave${issues.length || nothing || c.sending ? " disabled" : ""}>Review and apply</button>`)}`;
+  }
+  return `<div class="wrap">${head}<section class="card">${steps}${body}</section></div>`;
+}
+/* Updates in place, so the phone keyboard stays open. */
+function cSync() {
+  const c = ui.soilw, s = cProbe(c), issues = cProblems(c), active = document.activeElement;
+  for (const k of ["fs", "fc"]) {
+    const input = $(`#cin-${k}`);
+    if (input !== active) input.value = c.vals[k].toFixed(1);
+    input.setAttribute("aria-invalid", String(issues.some((i) => i.id === k)));
+    $(`#cp-${k}`).textContent = cPreview(c, s, k);
+  }
+  const box = $("#c-issues"), html = cIssueHtml(issues);
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+  $("[data-csave]").disabled = issues.length > 0 || !cSends(c, s).length || c.sending;
+}
+function cCommit(input) {
+  const c = ui.soilw;
+  if (!c || !c.vals) return;
+  const typed = input.value.trim().replace(",", "."), n = typed === "" ? NaN : Number(typed);
+  if (Number.isFinite(n)) c.vals[input.dataset.cin] = Number(n.toFixed(1));
+  input.value = c.vals[input.dataset.cin].toFixed(1);
+  cSync();
+}
+function cCommitActive() {
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.cin) { cCommit(a); a.blur(); }
+}
+/* Same rule as a leaf offset: a value only counts once the probe reports it. */
+function saveSoil(c, done) {
+  const s = cProbe(c), sends = cSends(c, s), stuck = !!s.calStuck;
+  c.sending = true;
+  c.status = { fs: "", fc: "" };
+  for (const [k] of sends) c.status[k] = "sending";
+  render();
+  for (const [k, entity_id] of sends) soilSends.push({ entity_id, value: c.vals[k] });
+  setTimeout(() => {
+    for (const [k] of sends) {
+      c.status[k] = stuck ? "stuck" : "";
+      if (stuck) continue;
+      if (k === "fc") { s.fcLive = c.vals.fc; continue; }
+      if (s.vwc !== null) s.vwc = Number((rawOf(s) / c.vals.fs * 100).toFixed(1));
+      s.fsLive = c.vals.fs;
+    }
+    c.sending = false;
+    if (!stuck) delete soilRuns[c.probe];
+    if (ui.soilw !== c) { done(); return; }
+    if (stuck) { render(); done(sends.map(([k, , live]) => `${SOIL_VALUE[k]}: not confirmed. The probe still reports ${live.toFixed(1)}%.`)); return; }
+    leaveSoil();
+    done();
+    toast("Calibration saved on the probe in this mock.");
+  }, stuck ? LEAF_GIVE_UP_MS : LEAF_ACK_MS);
+}
+
+function renderSetup() {
+  if (ui.soilw) return renderSoil();
+  if (ui.leafw) return renderCalibration();
+  if (ui.sched) return renderSched();
+  if (ui.mapw) return renderMap();
+  if (ui.vpdw) return renderVpd();
+  if (ui.wiz) return renderWizard();
+  const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">ESPHome doesn't say whether a board is wired or on WiFi. How is this one connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("") +
+    devices.filter((d) => inAZone(d) && !d.type).map((d) => `<div class="task" id="task-${d.id}"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant only sees a smart plug. What is plugged into it?</p></div><div class="row"><button class="btn" data-role="${d.id}" data-val="Heater">Heater</button><button class="btn" data-role="${d.id}" data-val="Fan">Fan</button><button class="btn" data-role="${d.id}" data-val="Light">Light</button><button class="btn" data-role="${d.id}" data-val="Other">Other</button></div></div>`).join("") +
+    zones.filter((z) => z.sensors.some((s) => !s.pos)).map((z) => { const n = z.sensors.filter((s) => !s.pos).length; return `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${n} sensor${n > 1 ? "s" : ""} still need${n > 1 ? "" : "s"} placing on the map.</p></div><div class="row"><button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button></div></div>`; }).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-wizard="${z.id}">Placement</button><button class="btn" data-schedw="${z.id}">Day and night</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
+  return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Day and night only to the helpers it's linked to.</p></div>
+    ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
+    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn" data-addzone>Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
+}
+
+function suggestGrid(n, w, d) {
+  let best = [1, n], score = Infinity;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols), s = Math.abs(Math.log((cols / rows) / (w / d))) + ((cols * rows - n) / n) * 2;
+    if (s < score - 1e-9) { score = s; best = [rows, cols]; }
+  }
+  return best;
+}
+const wizLayout = (w) => ({ w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols });
+/* Soil probes go in a unit. Environment sensors go on a unit or in the aisle between two rows. */
+function allowed(s, L, r, c) {
+  if (r < 0 || c < 0 || r > L.rows - 1 || c > L.cols - 1) return false;
+  return s.kind === "env" && !Number.isInteger(r) ? true : planted(L, r, c);
+}
+const stranded = (w) => w.sensors.filter((s) => !s.pos || !allowed(s, w, s.pos[0], s.pos[1]));
+function openWizard(id) {
+  const z = zoneById(id);
+  ui.wiz = { id, name: z.name, step: 1, ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })), pick: null };
+}
+function openNewZone() {
+  ui.wiz = { id: null, name: "", step: 1, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], pick: null };
+}
+function zoneNameIssue(w) {
+  const name = w.name.trim();
+  if (!name) return "Name this zone to continue";
+  return zones.some((z) => z.id !== w.id && z.name.toLowerCase() === name.toLowerCase()) ? `There's already a zone called ${name}` : "";
+}
+/* A new zone starts on Athena's veg numbers until Targets says otherwise. */
+function stageBands(id) {
+  const out = {};
+  for (const k of ["temperature", "humidity", "vpd"]) {
+    const [lo, hi] = STAGES[id][k], m = STAGE_MARGIN[k];
+    out[k] = [round2(lo - m), lo, round2((lo + hi) / 2), hi, round2(hi + m)];
+  }
+  return { day: out, night: JSON.parse(JSON.stringify(out)) };
+}
+function createZone(w) {
+  const base = slug(w.name.trim()).replace(/^_+|_+$/g, "") || "zone";
+  let id = base;
+  for (let n = 2; zoneById(id); n++) id = `${base}_${n}`;
+  const z = { id, name: w.name.trim(), dayAt: 6 * 60, nightAt: 18 * 60, periodMode: "fixed", now: { temperature: null, humidity: null, vpd: null, light: null }, bands: stageBands("veg"), linked: false, lightLimits: { dayMin: 1000, nightMax: 200 }, layout: wizLayout(w), sensors: [] };
+  zones.push(z); ACTIVITY[id] = []; LIGHTS[id] = [];
+  return z;
+}
+/* Only Environment Control's own record of a zone goes. Its sensors and devices are still in Home Assistant, so Map devices can still find them, and shared hardware stays in its other zones. */
+function removeRows(z) {
+  const ctl = devices.filter((d) => d.ctl && d.zones.includes(z.id)), alone = ctl.filter((d) => d.zones.length === 1), shared = ctl.filter((d) => d.zones.length > 1);
+  const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
+  const offsets = z.sensors.filter((s) => s.kind === "env" && !hasLeafEntity(s) && s.leaf !== undefined), runs = Object.values(soilRuns).filter((r) => r.id === z.id && soilBusy(r));
+  const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
+  return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
+    ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
+    ["Leaf offset kept here", offsets.map((s) => s.name).join(", ")], ["Soil calibration", runs.length && `${runs.map((r) => cProbe(r).name).join(", ")} part way through`]].filter(([, text]) => text);
+}
+function askRemoveZone(id) {
+  const z = zoneById(id);
+  ui.guard = { action: () => removeZone(id), title: `Remove ${z.name}?`, text: "This removes the zone from Environment Control and can't be undone. Nothing in Home Assistant changes.",
+    rows: removeRows(z), note: "Its sensors and devices can be mapped to another zone. Anything set on a board or probe stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
+  renderModal();
+}
+function removeZone(id) {
+  const z = zoneById(id), mapped = catalog().filter((s) => z.sensors.some((x) => x.id === s.id));
+  zones.splice(zones.indexOf(z), 1);
+  for (const s of mapped) if (!catalog().some((x) => x.id === s.id)) EXTRA_SENSORS.push({ ...s, pos: null, avg: true, leaf: undefined, leafUnused: false });
+  for (const d of devices) d.zones = d.zones.filter((x) => x !== id);
+  for (const r of Object.values(soilRuns)) if (r.id === id) delete soilRuns[r.probe];
+  delete ACTIVITY[id]; delete LIGHTS[id];
+  if (ui.zone === id) ui.zone = zones.length ? zones[0].id : null;
+  render();
+  $("[data-addzone]").focus({ preventScroll: true });
+  toast(`${z.name} removed in this mock.`);
+}
+function renderWizard() {
+  const w = ui.wiz, lost = stranded(w), nameIssue = zoneNameIssue(w), called = w.name.trim();
+  const steps = `<ol class="steps">${["Zone", "Units", "Sensors"].map((n, i) => `<li${w.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
+  let body = "";
+  if (w.step === 1) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}"></label></div>
+    <p class="muted">Measure the inside of the zone.</p><div class="fields">
+    <label class="field" for="wiz-w">Width in metres<input id="wiz-w" data-wbox="w" type="number" min="0.1" max="100" step="0.1" value="${w.w}"></label>
+    <label class="field" for="wiz-d">Depth in metres<input id="wiz-d" data-wbox="d" type="number" min="0.1" max="100" step="0.1" value="${w.d}"></label></div>`;
+  if (w.step === 2) body = `<div class="fields"><label class="field" for="wiz-u">Units<input id="wiz-u" data-wbox="u" type="number" min="1" max="200" step="1" value="${w.units}"></label></div>
+    <div class="row"><span class="small muted">Rows</span><span class="stepper"><button data-grid="rows" data-d="-1" aria-label="Fewer rows">-</button><span>${w.rows}</span><button data-grid="rows" data-d="1" aria-label="More rows">+</button></span>
+    <span class="small muted">Columns</span><span class="stepper"><button data-grid="cols" data-d="-1" aria-label="Fewer columns">-</button><span>${w.cols}</span><button data-grid="cols" data-d="1" aria-label="More columns">+</button></span>
+    <button class="btn" data-suggest>Suggest a grid</button></div>
+    <p class="small muted">Each circle is one unit. Units sit about ${(w.w / w.cols).toFixed(2)} x ${(w.d / w.rows).toFixed(2)} m apart.</p>
+    <div class="map"><svg viewBox="0 0 ${geom(w).W} ${geom(w).H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(wizLayout(w), geom(w))}</svg></div>
+    ${w.rows * w.cols >= w.units ? "" : `<div class="notice"><strong>Too few spaces</strong><span>This grid holds ${w.rows * w.cols} units, and you have ${w.units}.</span></div>`}
+    ${lost.length ? `<div class="notice"><strong>${lost.length} sensor${lost.length > 1 ? "s" : ""} no longer fit${lost.length > 1 ? "" : "s"}</strong><span>${esc(lost.map((s) => s.name).join(", "))}. You'll place ${lost.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}`;
+  if (w.step === 3) {
+    const L = wizLayout(w), g = geom(L), sel = w.sensors.find((s) => s.id === w.pick);
+    const placedOk = w.sensors.filter((s) => !lost.includes(s));
+    let spots = "";
+    if (sel) {
+      for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) spots += `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="transparent" stroke="var(--primary)" stroke-width="1.5"/></g>`;
+      if (sel.kind === "env") for (let r = 0.5; r < L.rows - 0.5; r++) for (let c = 0; c <= L.cols - 1; c += 0.5) {
+        if (placedOk.some((s) => s.kind === "env" && s.pos[0] === r && s.pos[1] === c)) continue;
+        const x = g.X(c), y = g.Y(r);
+        spots += `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${x}" cy="${y}" r="20" fill="transparent"/><path d="M${x - 7} ${y}h14M${x} ${y - 7}v14" stroke="var(--primary)" stroke-width="2"/></g>`;
+      }
+    }
+    const attrsFor = (s) => s.kind === "soil" && sel && sel.kind === "env" ? 'pointer-events="none"' : `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
+    const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${lost.includes(s) ? '<span class="pill high">Needs placing</span>' : `<span class="small muted">${esc(posText(s.pos, L))}</span>`}</button>`).join("");
+    const prompt = !sel ? "Pick a sensor." : sel.kind === "soil" ? `Tap the unit ${esc(sel.name)} is in.` : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
+    const height = !sel ? "" : sel.kind === "soil" ? `<span class="small muted">Always at substrate height</span>` :
+      `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
+    body = !w.sensors.length ? `<div class="notice"><strong>No sensors to place yet</strong><span>Apply this, then Map devices picks ${esc(called)}'s sensors from Home Assistant and brings you back here to place them.</span></div>
+      <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(L, g)}</svg></div>` : `<div class="sensor-list">${list}</div><div class="now"><strong>${prompt}</strong></div>
+      <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, (s) => s.short, attrsFor, w.pick)}</svg></div>
+      ${sel ? `<div class="now"><strong>Height</strong>${height}</div>` : ""}${keyHtml}`;
+  }
+  const blocked = (w.step === 3 && lost.length > 0) || (w.step === 1 && !!nameIssue);
+  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.sensors.length ? "Finish" : "Map devices";
+  const fix = w.step === 1 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
+  return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `Placement: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
+    <div class="row"><button class="btn" data-wiz="back">${w.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${w.step === 3 ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
+}
+/* Updates in place, so typing a name keeps the phone keyboard open. */
+function wizNameSync(input) {
+  const w = ui.wiz, issue = zoneNameIssue(w), fix = $("#wiz-name-fix");
+  input.setAttribute("aria-invalid", String(!!issue && !!w.name.trim()));
+  fix.hidden = !issue; fix.textContent = `${issue} \u203a`;
+  $('[data-wiz="next"]').disabled = !!issue;
+}
+
+/* Edits are a draft until reviewed and applied, as PHASE does it. Each draft lists what it would change, worked out against what's saved, so the review always shows exactly what will be sent and nothing else. */
+const differs = (a, b) => Math.abs(a - b) > 1e-9;
+const changeList = () => { const items = []; return [items, (label, before, after) => { if (before !== after) items.push({ label, before, after }); }]; };
+const offsetWords = (x) => (x === 0 ? "Same as air" : `${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`);
+function leafDraft(l) {
+  const z = zoneById(l.id), [items, add] = changeList(), named = (id) => (envOf(z).find((s) => s.id === id) || { name: "Average" }).name;
+  for (const s of envOf(z)) if (!boardOffline(s)) add(`${s.name} leaf offset`, offsetWords(leafOf(s)), offsetWords(lValue(l.rows[s.id])));
+  const boards = envOf(z).some((s) => !boardOffline(s) && hasLeafEntity(s) && lValue(l.rows[s.id]) !== leafOf(s)), next = lZoneVpd(l, z);
+  add("VPD chart uses", named(z.leafBasis), named(l.basis));
+  const moves = next !== null && fmt("vpd", next) !== fmt("vpd", z.now.vpd) ? `${z.name} VPD goes from ${fmt("vpd", z.now.vpd)} to ${fmt("vpd", next)} kPa. ` : "";
+  return { zone: z.name, items, skipped: [], bar: true, busy: !!l.sending, blocked: lProblems(l, z).length ? "fix the problems before review" : "", note: boards ? `${moves}Offsets change on the board itself, and anything reading its VPD, like your alerts, follows straight away.` : moves,
+    apply: (done) => saveLeaf(l, done), discard: () => { l.rows = leafRows(z); l.basis = z.leafBasis || ""; render(); } };
+}
+function vpdDraft(v) {
+  const z = zoneById(v.id), items = [], skipped = [];
+  for (const [p, day] of PERIODS) for (const k of Object.keys(VNAME)) v.bands[p][k].forEach((x, i) => {
+    const was = z.bands[p][k][i];
+    if (differs(x, was)) (z.linked && i !== 1 && i !== 3 ? skipped : items).push({ label: `${day} ${VNAME[k]} ${SLOT_NAME[i]}`, before: `${round2(was)}${VUNIT[k]}`, after: `${round2(x)}${VUNIT[k]}` });
+  });
+  for (const [p, day] of PERIODS) {
+    const [key, slot] = LIGHT_LIMIT[p], was = z.lightLimits[key], x = v.bands[p].light[0];
+    if (differs(x, was)) (z.linked ? skipped : items).push({ label: `${day} Light ${slot}`, before: `${fmt("light", was)} lx`, after: `${fmt("light", x)} lx` });
+  }
+  const bad = PERIODS.filter(([p]) => vPeriodBad(v, p)).map(([, name]) => name);
+  return { zone: z.name, items, skipped, bar: true, busy: false, blocked: bad.length ? `fix ${bad.join(" and ")} before review` : "", note: "", apply: (done) => { saveVpd(v); done(); },
+    discard: () => { v.bands = vDraftBands(z); v.stage = null; v.sel = null; render(); } };
+}
+function saveVpd(v) {
+  const z = zoneById(v.id);
+  if (z.linked) {
+    for (const [p] of PERIODS) for (const k of Object.keys(VNAME)) for (const i of [1, 3]) z.bands[p][k][i] = v.bands[p][k][i];
+    toast("Ideal zone saved in this mock. Your helpers weren't changed.");
+  } else {
+    for (const [p] of PERIODS) { z.lightLimits[LIGHT_LIMIT[p][0]] = v.bands[p].light[0]; delete v.bands[p].light; }
+    z.bands = v.bands; toast("Targets saved in this mock.");
+  }
+  ui.vpdw = null; ui.screen = "zone"; ui.zone = z.id; render();
+}
+const SOIL_VALUE = { fs: "Full saturation", fc: "Field capacity" };
+function soilDraft(c) {
+  const s = cProbe(c), z = zoneById(c.id), sends = c.step === 4 && c.vals ? cSends(c, s) : [];
+  const items = sends.map(([k, , live]) => ({ label: `${s.name} ${SOIL_VALUE[k].toLowerCase()}`, before: `${live.toFixed(1)}%`, after: `${c.vals[k].toFixed(1)}%` }));
+  const vwc = sends.some(([k]) => k === "fs") ? `${cPreview(c, s, "fs")} ` : "";
+  return { zone: z.name, items, skipped: [], bar: false, busy: !!c.sending, blocked: "", note: `${vwc}This changes on the probe, and anything reading normalised VWC, like an irrigation controller, follows straight away.`, apply: (done) => saveSoil(c, done) };
+}
+function mapDraft(m) {
+  const z = zoneById(m.id), [items, add] = changeList(), yes = (on, a, b) => (on ? a : b), names = (list) => [...list].sort().join(", ") || "None";
+  for (const s of catalog()) {
+    const had = z.sensors.some((x) => x.id === s.id), on = !!m.pickS[s.id];
+    add(s.name, yes(had, "Mapped", "Not mapped"), yes(on, "Mapped", "Not mapped"));
+    if (!had || !on) continue;
+    add(`${s.name} in the zone reading`, yes(s.avg !== false, "Counted", "Left out"), yes(m.avg[s.id] !== false, "Counted", "Left out"));
+    if (s.leafEntity) add(`${s.name} leaf offset`, yes(!!s.leafUnused, "Kept here", "On the board"), yes((m.choice[s.id] || {}).leaf === "none", "Kept here", "On the board"));
+  }
+  for (const d of devices) if (d.ctl) {
+    const had = d.zones.includes(z.id), on = !!m.pickD[d.id];
+    add(d.name, yes(had, "In this zone", "Not in this zone"), yes(on, "In this zone", "Not in this zone"));
+    if (on) add(`${d.name} type`, d.type || "Not set", m.roles[d.id] || "Not set");
+  }
+  const fixed = m.period === "fixed";
+  add("Day and night", zonePeriod(z), periodSummary(m.period, z, fixed ? m.fixedOn : hhmm(z.dayAt), fixed ? m.fixedOff : hhmm(z.nightAt), Object.keys(m.lights), m.rule));
+  if (m.period === "detected") add("Switches it follows", names(z.lights || []), names(Object.keys(m.lights)));
+  add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
+  for (const k of ["temperature", "humidity", "vpd", "light"]) add(`${M[k].label} combines by`, METHODS[(z.combine || {})[k] || "mean"], METHODS[m.combine[k] || "mean"]);
+  return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved in this mock."); done(); } };
+}
+function finishMap(m, said) {
+  saveMap(m); ui.mapw = null; toast(said);
+  const z = zoneById(m.id);
+  if (m.thenPlace && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
+  render(); window.scrollTo(0, 0);
+}
+function wizDraft(w) {
+  const z = w.id && zoneById(w.id), L = wizLayout(w), [items, add] = changeList(), was = (f) => (z ? f(z.layout) : "Not set");
+  const size = (x) => `${x.w} x ${x.d} m`, units = (x) => String(x.units), grid = (x) => `${x.rows} rows, ${x.cols} columns`;
+  add("Zone name", z ? z.name : "New zone", w.name.trim());
+  add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L));
+  for (const s of w.sensors) {
+    const old = z && z.sensors.find((x) => x.id === s.id), where = (p, g) => (p ? posText(p, g) : "Not placed");
+    if (old) { add(`${s.name} position`, where(old.pos, z.layout), where(s.pos, L)); add(`${s.name} height`, LEVELS[old.level], LEVELS[s.level]); }
+  }
+  return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note: "", apply: (done) => { saveWizard(w, "Placement saved in this mock."); done(); } };
+}
+function saveWizard(w, said) {
+  const z = w.id ? zoneById(w.id) : createZone(w);
+  z.name = w.name.trim(); z.layout = wizLayout(w); z.sensors = w.sensors;
+  ui.wiz = null; ui.zone = z.id; ui.picked = null;
+  if (!z.sensors.length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return; }
+  ui.screen = "zone"; toast(said); render();
+}
+/* The soil wizard's work is kept in its run, so a tab can leave it without losing anything. */
+const openDrafts = () => [ui.leafw && leafDraft(ui.leafw), ui.sched && schedDraft(ui.sched), ui.mapw && mapDraft(ui.mapw), ui.vpdw && vpdDraft(ui.vpdw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
+const topDraft = () => (ui.soilw ? soilDraft(ui.soilw) : ui.leafw ? leafDraft(ui.leafw) : ui.sched ? schedDraft(ui.sched) : ui.mapw ? mapDraft(ui.mapw) : ui.vpdw ? vpdDraft(ui.vpdw) : ui.wiz ? wizDraft(ui.wiz) : null);
+const draftCount = (d) => d.items.length + d.skipped.length;
+/* Updates in place: a tap that blurs a box syncs here, and replacing the button under it would lose the click. */
+function draftSync() {
+  const d = topDraft(), n = d ? draftCount(d) : 0, bar = $("#draftbar"), on = !!d && d.bar && n > 0;
+  bar.hidden = !on;
+  document.body.classList.toggle("drafting", on);
+  $("[data-dreview]").disabled = on && (!!d.blocked || d.busy);
+  if (!on) return;
+  const only = d.items[0] || d.skipped[0];
+  $("#draft-count").textContent = n;
+  $("#draft-what").textContent = n === 1 ? `${d.zone} · ${only.label}` : `${n} unsaved changes`;
+  $("#draft-why").textContent = ` · ${d.blocked || (d.items.length ? "nothing changes until you apply" : "preview only, nothing to apply")}`;
+  bar.toggleAttribute("data-blocked", !!d.blocked);
+}
+function openReview() {
+  const d = topDraft();
+  if (!d || !draftCount(d) || d.blocked || d.busy) return;
+  ui.review = { d, busy: false, errors: [] };
+  renderModal();
+}
+function applyReview() {
+  const r = ui.review;
+  if (r.busy || !r.d.items.length) return;
+  r.busy = true;
+  renderModal();
+  r.d.apply((errors = []) => { ui.review = errors.length ? { d: topDraft(), busy: false, errors } : null; renderModal(); });
+}
+/* Leaving drops a draft, so it asks first. Pass the drafts this exit would lose when it isn't all of them. */
+function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes?", text = "") {
+  const held = drafts.filter((d) => draftCount(d) > 0);
+  if (!held.length && !text) { action(); return; }
+  const n = held.reduce((total, d) => total + draftCount(d), 0);
+  ui.guard = { action, title, text: text || `You have ${n} unsaved ${n === 1 ? "change" : "changes"} in ${held[0].zone}. Leaving will discard ${n === 1 ? "it" : "them"}.` };
+  renderModal();
+}
+function modalHtml() {
+  const g = ui.guard;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}<div class="row"><button class="btn" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="btn danger" data-gdiscard>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  const { d, busy, errors } = ui.review, n = d.items.length;
+  const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
+  const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
+  const failed = errors.length ? `<div class="notice critical" role="alert"><strong>Some changes were not applied.</strong>${errors.map((e) => `<span>${esc(e)}</span>`).join("")}<span>Anything that went through is saved. What's left is still here to try again.</span></div>` : "";
+  return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">Review changes</h2>
+    <p class="muted small" id="dlg-text">These changes affect ${esc(d.zone)} only. Confirm each value before applying. This mock sends nothing to Home Assistant.</p>
+    <div class="review-scroll">${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
+    <div class="row"><button class="btn" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="btn primary" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
+}
+let modalOpener = null;
+function renderModal() {
+  const box = $("#modal"), open = !!(ui.guard || ui.review), wasOpen = !box.hidden;
+  if (open && !wasOpen) modalOpener = document.activeElement;
+  box.hidden = !open;
+  box.innerHTML = open ? modalHtml() : "";
+  document.querySelectorAll(".topbar, #main, #draftbar").forEach((el) => { el.inert = open; });
+  if (open) $("#dlg-title").focus({ preventScroll: true });
+  else if (wasOpen && modalOpener && modalOpener.isConnected) modalOpener.focus({ preventScroll: true });
+}
+function closeModal() {
+  if (ui.review && ui.review.busy) return;
+  ui.guard = null; ui.review = null;
+  renderModal();
+}
+
+function render() {
+  refreshReadings();
+  renderChrome();
+  document.body.classList.remove("vtyping");
+  $("#main").innerHTML = { overview: renderOverview, zone: renderZone, devices: renderDevices, setup: renderSetup }[ui.screen]();
+  drawChart();
+  draftSync();
+}
+/* Every warning lands on the thing that fixes it. */
+function jumpTo(id) {
+  const t = id && document.querySelector(`#${id}`);
+  if (t && t.scrollIntoView) { t.scrollIntoView({ block: "center" }); if (t.focus) t.focus({ preventScroll: true }); }
+  else window.scrollTo(0, 0);
+}
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+}
+document.addEventListener("click", (e) => {
+  const q = (sel) => e.target.closest(sel);
+  let el;
+  /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
+  if (ui.leafw && q("button")) lCommitActive();
+  if (ui.soilw && q("button")) cCommitActive();
+  if (ui.sched && q("button")) sCommitActive();
+  /* iOS can leave a box focused when a button is tapped, so its change event never comes. Commit it before acting on the button. */
+  if (ui.vpdw && q("button")) vCommitActive();
+  if (ui.wiz && q("button") && typedBox(document.activeElement)) document.activeElement.blur();
+  if (ui.guard || ui.review) {
+    if (q("[data-gdiscard]")) { const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
+    if (q("[data-rapply]")) { applyReview(); return; }
+    if (q("[data-gkeep], [data-rback]") || !q(".dialog")) closeModal();
+    return;
+  }
+  if (q("[data-ddiscard]")) { const d = topDraft(); if (d) { d.discard(); toast("Changes discarded."); } return; }
+  if (q("[data-dreview]")) { openReview(); return; }
+  if (q("[data-preview]")) { toast(SENT); return; }
+  if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
+  if ((el = q("[data-go]"))) {
+    const { go, zone, gometric, gotarget } = el.dataset;
+    guarded(() => { ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.soilw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    return;
+  }
+  if ((el = q("[data-metric]"))) { ui.metric = el.dataset.metric; render(); return; }
+  if ((el = q("[data-range]"))) { ui.range = Number(el.dataset.range); render(); return; }
+  if ((el = q("[data-level]"))) { ui.level = el.dataset.level; render(); return; }
+  if ((el = q("[data-link]"))) { ui.linkFilter = el.dataset.link; render(); return; }
+  if ((el = q("[data-activity]"))) { ui.activity = el.dataset.activity; render(); return; }
+  if ((el = q("[data-answer]"))) { const d = devices.find((x) => x.id === el.dataset.answer); d.link = el.dataset.val; d.source = "confirmed"; toast(`Saved ${d.name} as ${LINK[d.link]}.`); render(); return; }
+  if ((el = q("[data-role]"))) { const d = devices.find((x) => x.id === el.dataset.role); d.type = el.dataset.val; toast(`Saved ${d.name} as ${d.type}.`); render(); return; }
+  if ((el = q("[data-wizard]"))) {
+    openWizard(el.dataset.wizard);
+    if (el.dataset.wstep) { ui.wiz.step = 3; const first = stranded(ui.wiz)[0]; ui.wiz.pick = first ? first.id : null; }
+    render(); window.scrollTo(0, 0); return;
+  }
+  if ((el = q("[data-mapw]"))) { const id = el.dataset.mapw; guarded(() => { openMap(id); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []); return; }
+  if (q("[data-addzone]")) { ui.screen = "setup"; openNewZone(); render(); window.scrollTo(0, 0); return; }
+  if ((el = q("[data-rmzone]"))) { askRemoveZone(el.dataset.rmzone); return; }
+  const c = ui.soilw;
+  if (c) {
+    const step = (n) => { c.step = n; render(); window.scrollTo(0, 0); };
+    if (q(".lcell")) { vReveal(); return; }
+    if ((el = q("[data-cfix]"))) { jumpTo(`cin-${el.dataset.cfix}`); return; }
+    if (q("[data-cstart]")) { c.fsRun = { stage: "recording" }; render(); return; }
+    if (q("[data-cfinish]")) { const pts = soilCurve(cProbe(c)); c.fsRun = { stage: "done", pts, result: soilCeiling(pts) }; render(); window.scrollTo(0, 0); return; }
+    if (q("[data-cagain]")) { c.fsRun = { stage: "ready" }; render(); return; }
+    if (q("[data-cskipfs]")) { c.fsRun = { stage: "ready" }; step(3); return; }
+    if (q("[data-cnextfs]")) { if (c.fcRun.stage === "ready") c.fcRun = { stage: "draining" }; step(3); return; }
+    if (q("[data-cdrain]")) { c.fcRun = { stage: "draining" }; render(); return; }
+    if (q("[data-cjump]")) { c.fcRun = { stage: "done", value: cProbe(c).sampleFc ?? Number((cProbe(c).sampleCeil - 14.2).toFixed(1)), held: SOIL_HOLD_MIN + 2 }; render(); return; }
+    if (q("[data-cskipfc]")) { c.fcRun = { stage: "ready" }; cToCheck(c); render(); window.scrollTo(0, 0); return; }
+    if (q("[data-cnextfc]")) { cToCheck(c); render(); window.scrollTo(0, 0); return; }
+    if (q("[data-cback]")) { step(c.step - 1); return; }
+    if (q("[data-cexit]")) {
+      const quit = () => { delete soilRuns[c.probe]; leaveSoil(); };
+      /* A flood can't be run again on a whim, so its readings get the same question as a typed value. */
+      if (c.fsRun.stage !== "ready" || c.fcRun.stage !== "ready") guarded(quit, [], "Discard this calibration?", `The readings taken for ${cProbe(c).name} so far go with it.`);
+      else quit();
+      return;
+    }
+    if (q("[data-csave]")) { if (!cProblems(c).length) openReview(); return; }
+    return;
+  }
+  if ((el = q("[data-calw]"))) {
+    if (ui.vpdw) vCommitActive();
+    openCalibration(el.dataset.calw); render();
+    if (el.dataset.ljump) jumpTo(el.dataset.ljump); else window.scrollTo(0, 0);
+    return;
+  }
+  if ((el = q("[data-schedw]"))) { openSched(el.dataset.schedw); render(); window.scrollTo(0, 0); return; }
+  const sw = ui.sched;
+  if (sw) {
+    if ((el = q("[data-sfix]"))) { jumpTo(`sin-${el.dataset.sfix}`); return; }
+    if (q("[data-sexit]")) { guarded(leaveSched, [schedDraft(sw)]); return; }
+    return;
+  }
+  const l = ui.leafw;
+  if (l) {
+    if (q(".lcell")) { vReveal(); return; }
+    if ((el = q("[data-cprobe]"))) { openSoil(l.id, el.dataset.cprobe); render(); window.scrollTo(0, 0); return; }
+    if ((el = q("[data-lfix]"))) { jumpTo(`lin-${el.dataset.lfix}`); return; }
+    if ((el = q("[data-lbasis]"))) { l.basis = el.dataset.lbasis; lSync(); return; }
+    if ((el = q("[data-ldir]"))) { const [id, dir] = el.dataset.ldir.split(":"); l.rows[id].dir = Number(dir); lSync(); return; }
+    if (q("[data-lexit]")) { guarded(leaveLeaf, [leafDraft(l)]); return; }
+    return;
+  }
+  const m = ui.mapw;
+  if (m) {
+    if ((el = q("[data-msensor]"))) { toggleSensor(m, catalog().find((s) => s.id === el.dataset.msensor)); render(); return; }
+    if ((el = q("[data-mdevice]"))) { const id = el.dataset.mdevice; if (m.pickD[id]) delete m.pickD[id]; else m.pickD[id] = true; render(); return; }
+    if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; const t = el.dataset.target; render(); jumpTo(t); return; }
+    if ((el = q("[data-mband]"))) { m.band = el.dataset.mband; render(); return; }
+    if ((el = q("[data-mperiod]"))) { m.period = el.dataset.mperiod; render(); return; }
+    if ((el = q("[data-mrule]"))) { m.rule = el.dataset.mrule; render(); return; }
+    if ((el = q("[data-mlight]"))) { const e2 = el.dataset.mlight; if (m.lights[e2]) delete m.lights[e2]; else m.lights[e2] = true; render(); return; }
+    if ((el = q("[data-mstep]"))) {
+      const leaveMap = () => { ui.mapw = null; render(); window.scrollTo(0, 0); };
+      if (el.dataset.mstep === "back") { if (m.step === 1) guarded(leaveMap); else { m.step--; m.q = ""; render(); window.scrollTo(0, 0); } return; }
+      if (m.step < 4) { m.step++; m.q = ""; render(); window.scrollTo(0, 0); return; }
+      if (mapDraft(m).items.length) openReview(); else finishMap(m, "Nothing changed.");
+    }
+    return;
+  }
+  if ((el = q("[data-vpd]"))) { openVpd(el.dataset.vpd); render(); window.scrollTo(0, 0); return; }
+  const v = ui.vpdw;
+  if (v) {
+    /* Android can close the keyboard without a blur, so a second tap on the same box gets no focus event. */
+    if (q(".vcell")) { vReveal(); return; }
+    const b = v.bands[v.period];
+    if ((el = q("[data-vfix]"))) { const slot = el.dataset.vslot, k = el.dataset.vfix; if (k !== "light") v.edit = k; v.sel = null; render(); jumpTo(slot === undefined ? "v-now" : `vin-${k}-${slot}`); return; }
+    if ((el = q("[data-vperiod]"))) { v.period = el.dataset.vperiod; v.sel = null; v.stage = null; render(); return; }
+    if ((el = q("[data-vedit]"))) { v.edit = el.dataset.vedit; v.sel = null; render(); return; }
+    if ((el = q("[data-vstage]"))) { applyStage(v, el.dataset.vstage); render(); return; }
+    if ((el = q("[data-vnudge]"))) { placeHandle(b, v.edit, v.sel, b[v.edit][v.sel] + Number(el.dataset.vnudge) * VSNAP[v.edit]); render(); return; }
+    if (q("[data-vexit]")) { guarded(() => { ui.vpdw = null; render(); }); return; }
+    return;
+  }
+  const w = ui.wiz; if (!w) return;
+  if (q("[data-wfixname]")) { jumpTo("wiz-name"); return; }
+  if ((el = q("[data-grid]"))) { w[el.dataset.grid] = Math.min(20, Math.max(1, w[el.dataset.grid] + Number(el.dataset.d))); render(); return; }
+  if (q("[data-suggest]")) { [w.rows, w.cols] = suggestGrid(w.units, w.w, w.d); render(); return; }
+  if ((el = q("[data-pick]"))) { w.pick = el.dataset.pick; render(); return; }
+  if ((el = q("[data-wizlevel]"))) { const s = w.sensors.find((x) => x.id === w.pick); if (s) { s.level = el.dataset.wizlevel; render(); } return; }
+  if ((el = q("[data-spot]"))) {
+    const s = w.sensors.find((x) => x.id === w.pick); if (!s) return;
+    s.pos = el.dataset.spot.split(",").map(Number);
+    /* Stay on an environment sensor, because its height is the next thing to set. */
+    if (s.kind === "soil") { const next = stranded(w)[0]; if (next) w.pick = next.id; }
+    render(); return;
+  }
+  if ((el = q("[data-wiz]"))) {
+    if (el.dataset.wiz === "back") { if (w.step === 1) guarded(() => { ui.wiz = null; render(); }); else { w.step--; render(); } return; }
+    if (w.step === 1) { w.step = 2; render(); return; }
+    if (w.step === 2) { w.step = 3; const first = stranded(w)[0] || w.sensors[0]; w.pick = first ? first.id : null; render(); return; }
+    if (wizDraft(w).items.length) openReview(); else saveWizard(w, "Nothing changed.");
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (ui.guard || ui.review) { if (e.key === "Escape") closeModal(); return; }
+  const dir = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key], v = ui.vpdw;
+  if (chartNow && e.target.closest && e.target.closest("#chart svg")) {
+    if (e.key === "Escape") chartAt(null);
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); chartAt(clamp((chartNow.at ?? chartNow.n) + dir, 0, chartNow.n)); }
+    return;
+  }
+  if (ui.sched && e.target.dataset && e.target.dataset.sin) {
+    if (e.key === "Enter") { sCommit(e.target); e.target.blur(); }
+    if (e.key === "Escape") { e.target.value = ui.sched.vals[e.target.dataset.sin]; e.target.blur(); }
+    return;
+  }
+  if (ui.soilw && e.target.dataset && e.target.dataset.cin) {
+    if (e.key === "Enter") { cCommit(e.target); e.target.blur(); }
+    if (e.key === "Escape") { e.target.value = ui.soilw.vals[e.target.dataset.cin].toFixed(1); e.target.blur(); }
+    return;
+  }
+  if (ui.leafw && e.target.dataset && e.target.dataset.lin) {
+    if (e.key === "Enter") { lCommit(e.target); e.target.blur(); }
+    if (e.key === "Escape") { e.target.value = ui.leafw.rows[e.target.dataset.lin].mag.toFixed(1); e.target.blur(); }
+    return;
+  }
+  if (v && e.target.dataset && e.target.dataset.vin) {
+    if (e.key === "Enter") { vCommit(e.target); e.target.blur(); }
+    if (e.key === "Escape") { const [k, i] = e.target.dataset.vin.split(":"); e.target.value = v.bands[v.period][k][i]; e.target.blur(); }
+    return;
+  }
+  if (dir && v && e.target.id === "vwrap" && v.edit !== "target" && v.sel !== null) {
+    e.preventDefault(); const b = v.bands[v.period];
+    placeHandle(b, v.edit, v.sel, b[v.edit][v.sel] + dir * VSNAP[v.edit]); render(); document.querySelector("#vwrap").focus(); return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches('g[role="button"]')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+});
+document.addEventListener("focusin", (e) => {
+  if (ui.wiz && e.target.dataset && e.target.dataset.wbox) boxFocused(e.target, () => {});
+  if (ui.leafw && e.target.dataset && e.target.dataset.lin) boxFocused(e.target, () => {});
+  if (ui.sched && typedBox(e.target)) boxFocused(e.target, () => {});
+  if (ui.soilw && e.target.dataset && e.target.dataset.cin) boxFocused(e.target, () => {});
+  else if (ui.vpdw && e.target.dataset && e.target.dataset.vin) vSelect(e.target);
+});
+/* Dropping the keyboard room shortens the page, so doing it on finger down would slide the tapped button away before the tap ends. */
+let pressing = false;
+const dropKeyboardRoom = () => { if (!typedBox(document.activeElement)) document.body.classList.remove("vtyping"); };
+document.addEventListener("pointerdown", () => { pressing = true; }, true);
+for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => { pressing = false; setTimeout(dropKeyboardRoom, 50); }, true);
+document.addEventListener("focusout", (e) => {
+  if (!pressing && typedBox(e.target) && !typedBox(e.relatedTarget)) document.body.classList.remove("vtyping");
+});
+document.addEventListener("change", (e) => {
+  if (e.target.dataset.vin) { vCommit(e.target); return; }
+  if (e.target.dataset.lin) { lCommit(e.target); return; }
+  if (e.target.dataset.cin) { cCommit(e.target); return; }
+  if (e.target.dataset.sin) { sCommit(e.target); return; }
+  const m = ui.mapw;
+  if (m) {
+    const t = e.target.dataset;
+    if (t.mmetric) { const [id, k] = t.mmetric.split(":"); m.choice[id] = m.choice[id] || {}; m.choice[id][k] = e.target.value; render(); }
+    if (t.mrole) { m.roles[t.mrole] = e.target.value; render(); }
+    if (t.mavg) { m.avg[t.mavg] = e.target.checked; render(); }
+    if (t.mcombine) m.combine[t.mcombine] = e.target.value;
+    if (t.msched) { const was = mapIssues(m).length; m[t.msched] = e.target.value; if (mapIssues(m).length !== was) render(); }
+    return;
+  }
+  const w = ui.wiz; if (!w || e.target.id === "wiz-name") return; const v = e.target.value;
+  const n = Number(v); if (!Number.isFinite(n) || n <= 0) return;
+  if (e.target.id === "wiz-w") w.w = Math.min(100, n);
+  if (e.target.id === "wiz-d") w.d = Math.min(100, n);
+  if (e.target.id === "wiz-u") w.units = Math.min(200, Math.round(n));
+  [w.rows, w.cols] = suggestGrid(w.units, w.w, w.d);
+  if (e.target.id === "wiz-u") render();
+});
+document.addEventListener("pointerdown", (e) => {
+  const wrap = e.target.closest && e.target.closest("#vwrap");
+  if (!wrap || !ui.vpdw) return;
+  vCommitActive();
+  e.preventDefault(); wrap.setPointerCapture(e.pointerId); ui.vpdw.drag = true; vPointer(e, true);
+});
+document.addEventListener("pointermove", (e) => { if (ui.vpdw && ui.vpdw.drag) vPointer(e, false); chartPointer(e); });
+document.addEventListener("pointerdown", chartPointer);
+const endDrag = () => { if (ui.vpdw && ui.vpdw.drag) { ui.vpdw.drag = false; render(); } };
+document.addEventListener("pointerup", endDrag);
+document.addEventListener("pointercancel", endDrag);
+document.addEventListener("input", (e) => {
+  if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
+  if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
+  if (e.target.id === "map-lq" && ui.mapw) { ui.mapw.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.mapw, zoneById(ui.mapw.id)); }
+});
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
+window.addEventListener("resize", vReveal);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", vReveal);
+render();
+</script>
