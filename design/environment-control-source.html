@@ -805,7 +805,7 @@ function controlsCard(z) {
 
 /* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-const METRIC_NAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture", ec: "EC", soiltemp: "Temperature", leaf: "Leaf offset", fullsat: "Full saturation", fieldcap: "Field capacity" };
+const METRIC_NAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture", ec: "EC", soiltemp: "Temperature", leaf: "Leaf temperature offset", fullsat: "Full saturation", fieldcap: "Field capacity" };
 const EXTRA_SENSORS = [
   { id: "x-pulse", name: "Air monitor", short: "Air monitor", kind: "env", level: "above", t: 21.4, h: 69.0, link: "WiFi", area: "Veg", family: "Pulse" },
   { id: "x-spare", name: "Spare sensor", short: "Spare", kind: "env", level: "in", t: 22.0, h: 60.0, link: "Not known yet", area: "", family: "ESPHome" },
@@ -1034,7 +1034,7 @@ function vProblems(b) {
 }
 function vIssues(v, b) {
   const issues = vProblems(b);
-  if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf offset. Change the offset or widen a limit.`, leaf: v.id });
+  if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
   return issues;
 }
 const vIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" ${i.leaf ? `data-calw="${i.leaf}"` : `data-vfix="${i.edit}"`}${i.slot === undefined ? "" : ` data-vslot="${i.slot}"`}><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
@@ -1320,7 +1320,7 @@ function renderCalibration() {
   const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1></div>`, back = `<button class="btn" data-lexit${l.sending ? " disabled" : ""}>Back</button>`;
   if (!envs.length && !soils.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no sensors yet.</p><div class="row">${back}<button class="btn" data-mapw="${z.id}">Map devices</button></div></section></div>`;
   const note = envs.some(hasLeafEntity) ? `<p class="small muted">Offsets are changed on the board itself. Its VPD, and anything reading it like your alerts, follow straight away.</p>` : "";
-  const leaf = !envs.length ? "" : `<section class="card" id="cal-leaf"><div><h2>Leaf offset</h2><p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p></div>
+  const leaf = !envs.length ? "" : `<section class="card" id="cal-leaf"><div><h2>Leaf temperature offset</h2><p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p></div>
     <div class="now" id="l-zone">${lZoneHtml(l, z)}</div>
     <div class="lrows">${envs.map((s) => lRow(s, l.rows[s.id], l.sending)).join("")}</div>
     <div class="vissues" id="l-issues" data-html="${esc(lIssueHtml(issues))}">${lIssueHtml(issues)}</div>
@@ -1402,7 +1402,7 @@ function saveLeaf(l, done) {
     /* Stays here unless the chart sent you, because the soil probes are on this page too. */
     if (ui.vpdw) leaveLeaf(); else render();
     done();
-    const said = sends.length ? "Leaf offsets saved on the boards in this mock." : "Leaf offsets saved in this mock.";
+    const said = sends.length ? "Leaf temperature offsets saved on the boards in this mock." : "Leaf temperature offsets saved in this mock.";
     toast(moved ? `${said} Target moved to stay in the ideal zone.` : said);
   };
   if (!sends.length) { finish(); return; }
@@ -1684,7 +1684,7 @@ function cCommitActive() {
   const a = document.activeElement;
   if (a && a.dataset && a.dataset.cin) { cCommit(a); a.blur(); }
 }
-/* Same rule as a leaf offset: a value only counts once the probe reports it. */
+/* Same rule as a leaf temperature offset: a value only counts once the probe reports it. */
 function saveSoil(c, done) {
   const s = cProbe(c), sends = cSends(c, s), stuck = !!s.calStuck;
   c.sending = true;
@@ -1778,7 +1778,7 @@ function removeRows(z) {
   const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
-    ["Leaf offset kept here", offsets.map((s) => s.name).join(", ")], ["Soil calibration", runs.length && `${runs.map((r) => cProbe(r).name).join(", ")} part way through`]].filter(([, text]) => text);
+    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Soil calibration", runs.length && `${runs.map((r) => cProbe(r).name).join(", ")} part way through`]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -1856,7 +1856,7 @@ const changeList = () => { const items = []; return [items, (label, before, afte
 const offsetWords = (x) => (x === 0 ? "Same as air" : `${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`);
 function leafDraft(l) {
   const z = zoneById(l.id), [items, add] = changeList(), named = (id) => (envOf(z).find((s) => s.id === id) || { name: "Average" }).name;
-  for (const s of envOf(z)) if (!boardOffline(s)) add(`${s.name} leaf offset`, offsetWords(leafOf(s)), offsetWords(lValue(l.rows[s.id])));
+  for (const s of envOf(z)) if (!boardOffline(s)) add(`${s.name} leaf temperature offset`, offsetWords(leafOf(s)), offsetWords(lValue(l.rows[s.id])));
   const boards = envOf(z).some((s) => !boardOffline(s) && hasLeafEntity(s) && lValue(l.rows[s.id]) !== leafOf(s)), next = lZoneVpd(l, z);
   add("VPD chart uses", named(z.leafBasis), named(l.basis));
   const moves = next !== null && fmt("vpd", next) !== fmt("vpd", z.now.vpd) ? `${z.name} VPD goes from ${fmt("vpd", z.now.vpd)} to ${fmt("vpd", next)} kPa. ` : "";
@@ -1902,7 +1902,7 @@ function mapDraft(m) {
     add(s.name, yes(had, "Mapped", "Not mapped"), yes(on, "Mapped", "Not mapped"));
     if (!had || !on) continue;
     add(`${s.name} in the zone reading`, yes(s.avg !== false, "Counted", "Left out"), yes(m.avg[s.id] !== false, "Counted", "Left out"));
-    if (s.leafEntity) add(`${s.name} leaf offset`, yes(!!s.leafUnused, "Kept here", "On the board"), yes((m.choice[s.id] || {}).leaf === "none", "Kept here", "On the board"));
+    if (s.leafEntity) add(`${s.name} leaf temperature offset`, yes(!!s.leafUnused, "Kept here", "On the board"), yes((m.choice[s.id] || {}).leaf === "none", "Kept here", "On the board"));
   }
   for (const d of devices) if (d.ctl) {
     const had = d.zones.includes(z.id), on = !!m.pickD[d.id];

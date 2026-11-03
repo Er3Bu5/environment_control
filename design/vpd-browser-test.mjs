@@ -361,7 +361,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
   check(`Setup ${w}px: the last tab is on screen`, await ev(`(()=>{const c=document.querySelector("#tabs [aria-current]").getBoundingClientRect();return c.left>=0&&c.right<=innerWidth})()`));
 }
 
-// ---------- Leaf offset
+// ---------- Leaf temperature offset
 await phone(390, 844); await reset();
 const L = { rows: (id) => `ui.leafw.rows["${id}"]` };
 const openL = async (zone = "garden") => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openCalibration("${zone}");render();window.scrollTo(0,0)`); await sleep(50); };
@@ -475,7 +475,7 @@ await ev(`document.querySelector("[data-gdiscard]")?.click()`); await sleep(40);
 check("Leaf: leaving by a tab drops the screen and saves nothing", (await ev(`!ui.leafw && ui.screen==="overview"`)) === true && (await saved("g-under")) === -0.5);
 await ev(`document.activeElement&&document.activeElement.blur()`);
 
-// Sensor Calibration comes before Targets and holds the leaf offset
+// Sensor Calibration comes before Targets and holds the leaf temperature offset
 const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.soilw=null;ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
 const setupButtons = (zone) => ev(`[...document.querySelector('[data-mapw="${zone}"]').parentElement.children].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
@@ -483,10 +483,10 @@ await setupNow();
 check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons("garden"));
 check("Order: and it's there for zones with no soil probes", same(await setupButtons("veg"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]) && same(await setupButtons("nursery"), ["Map devices", "Placement", "Day and night", "Sensor Calibration", "Targets", "Remove zone"]), await setupButtons("veg"));
 await calibrate();
-check("Order: one page, leaf offset first, then soil", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf offset", "Soil probes"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
+check("Order: one page, leaf temperature offset first, then soil", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset", "Soil probes"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
 check("Order: the page is called Sensor Calibration", (await ev(`document.querySelector("#main h1").textContent`)) === "Sensor Calibration: Garden");
 await calibrate("veg");
-check("Order: a zone with no probes shows only the offsets", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf offset"]));
+check("Order: a zone with no probes shows only the offsets", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset"]));
 await ev(`(document.querySelector("[data-lexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
 check("Order: Back returns to Setup", (await ev(`!ui.leafw && ui.screen==="setup" && !!document.querySelector("[data-addzone]")`)) === true);
 await setupNow(); await ev(`document.querySelector('[data-vpd="garden"]').click()`); await sleep(50);
@@ -577,7 +577,7 @@ await ev(`zones[2].sensors[0].leafLive=-1;leafSends.length=0`);
 
 // Mapping decides whether a sensor has an offset on the device
 await ev(`ui.vpdw=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
-check("Map: the leaf offset entity is matched with the rest", (await ev(`!!document.querySelector('[data-mmetric="v-env:leaf"]')`)) === true);
+check("Map: the leaf temperature offset entity is matched with the rest", (await ev(`!!document.querySelector('[data-mmetric="v-env:leaf"]')`)) === true);
 await ev(`(()=>{const e=document.querySelector('[data-mmetric="v-env:leaf"]');e.value="none";e.dispatchEvent(new Event("change",{bubbles:true}));saveMap(ui.mapw);ui.mapw=null;render()})()`); await sleep(50);
 await openL("veg");
 check("Map: Not used stores the offset here, starting from the board's last value", (await ev(`document.querySelector("#lin-v-env").value==="1.0" && document.querySelector("#lr-v-env").textContent.includes("kept in Environment Control")`)) === true);
@@ -855,7 +855,7 @@ await ev(`leafSends.length=0;zones[0].sensors.forEach(s=>{delete s.leafStuck});z
 await openL();
 check("Confirm: no bar until something changes", (await barOn()) === false);
 await tap("#lin-g-left"); await type("1.6"); await key("Enter", 13); await sleep(80);
-check("Confirm: one change names itself", (await barOn()) === true && (await barText()).includes("Garden · Environment left leaf offset"), await barText());
+check("Confirm: one change names itself", (await barOn()) === true && (await barText()).includes("Garden · Environment left leaf temperature offset"), await barText());
 check("Confirm: it says nothing changes until you apply", (await barText()).includes("nothing changes until you apply"), await barText());
 await shot("confirm-bar-phone");
 await tap("#lin-g-right"); await type("2"); await key("Enter", 13); await sleep(80);
@@ -863,7 +863,7 @@ check("Confirm: more changes are counted", (await barText()).includes("2 unsaved
 check("Confirm: nothing has moved yet", (await board("g-left")) === -1 && (await sends()).length === 0);
 await clickIt("[data-dreview]");
 const review = await modalText();
-check("Confirm: the review shows before and after", review.includes("Review changes") && review.includes("Environment left leaf offset") && review.includes("1.0 °C below air") && review.includes("1.6 °C below air"), review);
+check("Confirm: the review shows before and after", review.includes("Review changes") && review.includes("Environment left leaf temperature offset") && review.includes("1.0 °C below air") && review.includes("1.6 °C below air"), review);
 check("Confirm: it counts what it will apply", (await ev(`document.querySelector("[data-rapply]").textContent`)) === "Apply 2 changes");
 check("Confirm: it says what follows", review.includes("follows straight away"), review);
 check("Confirm: opening it sends nothing", (await sends()).length === 0);
