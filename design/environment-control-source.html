@@ -244,6 +244,9 @@ td .sub { display: block; font-size: 12px; color: var(--muted); }
 .vcell.vt input { color: var(--primary); }
 .vcell.vlast { grid-column: 5; }
 span.vrow-name { cursor: default; }
+.vrow[data-vrow="light"] .vcell { grid-row: 2; }
+.vnote { grid-row: 2; grid-column: 2 / -1; align-self: center; padding: 0 4px; font-size: 11px; line-height: 1.35; color: var(--muted); text-align: left; }
+.vnote.vleft { grid-column: 1 / 5; }
 .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
 /* iOS zooms the page when a focused field is under 16px. */
@@ -1241,7 +1244,7 @@ function renderVpd() {
   const tabs = [["target", "Target"], ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
   const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}">${SLOT_NAME[i]}</label>`).join("")}</div>`;
   const [, lightSlot, lightColumn] = LIGHT_LIMIT[v.period];
-  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-invalid="${issues.some((p) => p.edit === "light")}">${lightSlot}</label></div>`;
+  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Lights should be off at night, so only a maximum applies. Above it, a light is on." : "Lights should be on by day, so only a minimum applies. Below it, they aren't."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}">${lightSlot}</label></div>`;
   const counted = countedEnv(z), mixed = new Set(counted.map(leafOf)).size > 1, picked = counted.find((s) => s.id === z.leafBasis);
   const leafText = `${leafWords(v.leaf)}${!mixed ? "" : picked ? `, from ${picked.name}` : `, the average of ${counted.length} sensors`}`;
   const nudge = `<span class="stepper" id="vnudge"${vCanNudge(v) ? "" : " hidden"}><button data-vnudge="-1" aria-label="Lower">-</button><button data-vnudge="1" aria-label="Higher">+</button></span>`;
