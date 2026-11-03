@@ -298,6 +298,9 @@ body.vtyping .draftbar { display: none; }
 .btn.danger { background: var(--crit); border-color: var(--crit); color: #FFFFFF; font-weight: 500; }
 .btn.remove { background: transparent; border-color: transparent; color: var(--crit); }
 .sched-len { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.tracked { display: flex; flex-direction: column; gap: 6px; }
+.trow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--tile); }
+.trow code { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .sched-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .vissues { display: flex; flex-direction: column; gap: 10px; }
 .vissues:empty { display: none; }
@@ -946,15 +949,23 @@ const ALL_ON_OFF = [
   ["switch.lights_under_canopy", "Lights under canopy", "On"], ["switch.lights_red", "Red lights", "Off"], ["light.tent_light_controller", "Tent light controller", "Off"],
   ["input_boolean.lights_on_override", "Lights on override", "Off"],
 ];
+/* Every on/off entity the mock knows: each zone's likely switches, then everything else. */
+function onOffCatalog() {
+  const out = [];
+  for (const [id, list] of Object.entries(LIGHTS)) { const z = zoneById(id); for (const [e, n] of list) if (!out.some((x) => x[0] === e)) out.push([e, n, z && isDay(z, NOW) ? "On" : "Off"]); }
+  for (const x of ALL_ON_OFF) if (!out.some((y) => y[0] === x[0])) out.push(x);
+  return out;
+}
 function lightRows(m, z) {
   const lit = isDay(z, NOW), q = (m.lq || "").trim().toLowerCase();
-  const near = LIGHTS[z.id].map(([e, n]) => [e, n, lit ? "On" : "Off"]), nearIds = near.map((x) => x[0]);
+  const near = (LIGHTS[z.id] || []).map(([e, n]) => [e, n, lit ? "On" : "Off"]), nearIds = near.map((x) => x[0]);
   const row = ([e, n, st]) => { const on = !!m.lights[e]; return `<div class="pickwrap"><button class="pickrow" data-mlight="${e}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(n)}</strong><span class="dev-sub">${esc(e)}</span></span><span class="pill plain">${esc(st)}</span></button></div>`; };
   const hit = (x) => !q || (x[0] + " " + x[1]).toLowerCase().includes(q);
-  const others = ALL_ON_OFF.filter((x) => !nearIds.includes(x[0]));
-  const shownNear = near.filter(hit), shownRest = others.filter((x) => (q ? hit(x) : m.lights[x[0]]));
-  if (!shownNear.length && !shownRest.length) return `<p class="small muted">Nothing matches that search.</p>`;
-  return shownNear.map(row).join("") + (shownRest.length ? `<p class="small muted">Everything else in Home Assistant</p>${shownRest.map(row).join("")}` : "");
+  const others = onOffCatalog().filter((x) => !nearIds.includes(x[0]));
+  /* With nothing suggested, as for a zone just added, everything is listed rather than an empty search. */
+  const shownNear = near.filter(hit), shownRest = others.filter((x) => (q || !near.length ? hit(x) : m.lights[x[0]]));
+  if (!shownNear.length && !shownRest.length) return `<p class="small muted">${q ? "Nothing matches that search." : "Home Assistant has no light switches to follow."}</p>`;
+  return shownNear.map(row).join("") + (shownRest.length ? `<p class="small muted">${near.length ? "Everything else in Home Assistant" : "Everything in Home Assistant"}</p>${shownRest.map(row).join("")}` : "");
 }
 function mapIssues(m) {
   const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
@@ -1002,7 +1013,7 @@ function renderMap() {
   }
   const here = mapIssues(m).filter((i) => i.step === m.step), blocked = here.length > 0 || (m.step === 4 && mapIssues(m).length > 0);
   return `<div class="wrap"><div><h1>Map devices: ${esc(z.name)}</h1></div><section class="card">${steps}${body}
-    <div class="row"><button class="btn" data-mstep="back">${m.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-mstep="next"${blocked ? " disabled" : ""}>${m.step === 4 ? (mapDraft(m).items.length ? "Review and apply" : "Finish") : "Next"}</button>${here.length ? `<button class="fixlink" data-mfix="${here[0].step}" data-target="${here[0].target}">${esc(here[0].text)} &rsaquo;</button>` : ""}</div></section></div>`;
+    <div class="row"><button class="btn" data-mstep="back">${m.step === (m.entry || 1) ? "Cancel" : "Back"}</button><button class="btn primary" data-mstep="next"${blocked ? " disabled" : ""}>${m.step === 4 ? (mapDraft(m).items.length ? "Review and apply" : "Finish") : "Next"}</button>${here.length ? `<button class="fixlink" data-mfix="${here[0].step}" data-target="${here[0].target}">${esc(here[0].text)} &rsaquo;</button>` : ""}</div></section></div>`;
 }
 function saveMap(m) {
   const z = zoneById(m.id), cat = catalog();
@@ -1521,8 +1532,16 @@ function renderSched() {
   const time = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]}<input id="sin-${k}" data-sin="${k}" type="time" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
   const box = (k, name) => `<label class="field" for="sin-${k}">${name} (${SCHED_RANGE[k][3]})<input id="sin-${k}" data-sin="${k}" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
   const shared = others.length ? ` ${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.` : "";
-  const where = !timesHere(z) ? "" : onHelpers(z) ? `These are your helpers, ${schedEntity(z, "day")} and ${schedEntity(z, "night")}. Anything reading them, like your light schedule, follows straight away.${shared}` : "Stored in Environment Control.";
-  const times = timesHere(z) ? `<div class="fields">${time("day")}${time("night")}</div><div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div><p class="small muted">${esc(where)}</p>` : `<p class="muted">${esc(z.name)} follows its light switches, so there are no times to set.</p><div class="row"><button class="btn" data-mapw="${z.id}">Map devices</button></div>`;
+  const where = !timesHere(z) ? "" : onHelpers(z) ? `These are your helpers. Anything reading them, like your light schedule, follows straight away.${shared}` : "Stored in Environment Control.";
+  const tracked = (rows) => `<div class="tracked">${rows.map(([name, entity, state]) => `<div class="trow"><div><strong>${esc(name)}</strong><code>${esc(entity)}</code></div>${state ? `<span class="pill plain">${esc(state)}</span>` : ""}</div>`).join("")}</div>`;
+  const edit = (label, cls) => `<div class="row"><button class="${cls}" data-mapw="${z.id}" data-mapstep="3">${label}</button></div>`;
+  const followed = (z.lights || []).map((e) => onOffCatalog().find((x) => x[0] === e) || [e, e, "Not in Home Assistant"]);
+  const rule = followed.length > 1 ? (z.rule === "all" ? "all of these are on" : "any of these is on") : "this is on";
+  const detected = followed.length ? `<p class="muted">${esc(z.name)} is in its day while ${rule}, so there are no times to set.</p>${tracked(followed.map(([e, n, st]) => [n, e, `${st} now`]))}`
+    : `<div class="notice"><strong>No light switch picked</strong><span>${esc(z.name)} can't tell day from night until it follows one.</span></div>`;
+  const helpers = onHelpers(z) ? tracked([["Lights on", schedEntity(z, "day")], ["Lights off", schedEntity(z, "night")]]) : "";
+  const times = timesHere(z) ? `<div class="fields">${time("day")}${time("night")}</div><div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div>${helpers}<p class="small muted">${esc(where)}</p>${edit(`Change how ${esc(z.name)} knows day and night &rsaquo;`, "fixlink")}`
+    : `${detected}${edit("Edit schedule", "btn")}`;
   const emerson = z.emerson ? `<section class="card" id="s-emerson"><div><h2>Emerson effect</h2><p class="muted small">Red lights either side of the white lights.</p></div><div class="fields">${box("morning", "Morning extension")}${box("daylight", "Daylight time")}${box("evening", "Evening extension")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div><p class="small muted">Your automations still switch the red lights. This only sets the numbers they read.</p></section>` : "";
   return `<div class="wrap"><div class="sched-title"><h1>Day and night: ${esc(z.name)}</h1></div>
     <section class="card" id="s-times"><div><h2>Schedule</h2><p class="muted small">When this zone's day starts and ends.</p></div>${times}</section>
@@ -1855,6 +1874,7 @@ async function finishMap(m, said) {
   if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
   if (ui.mapw === m) ui.mapw = null;
   toast(said);
+  if (m.backToSched) { openSched(m.id); render(); window.scrollTo(0, 0); return []; }
   if (guideReturn(m.id, "devices")) { render(); window.scrollTo(0, 0); return []; }
   const z = zoneById(m.id);
   if (m.thenPlace && z && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
@@ -2007,7 +2027,11 @@ document.addEventListener("click", (e) => {
     if (el.dataset.wstep) { ui.wiz.step = 3; const first = stranded(ui.wiz)[0]; ui.wiz.pick = first ? first.id : null; }
     render(); window.scrollTo(0, 0); return;
   }
-  if ((el = q("[data-mapw]"))) { const id = el.dataset.mapw; guarded(() => { openMap(id); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []); return; }
+  if ((el = q("[data-mapw]"))) {
+    const id = el.dataset.mapw, step = Number(el.dataset.mapstep) || 1, fromSched = !!ui.sched;
+    guarded(() => { openMap(id); Object.assign(ui.mapw, { step, entry: step, backToSched: fromSched }); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []);
+    return;
+  }
   if (q("[data-addzone]")) { ui.screen = "setup"; ui.guide = null; openNewZone(); render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-rmzone]"))) { askRemoveZone(el.dataset.rmzone); return; }
   if ((el = q("[data-calw]"))) {
@@ -2042,8 +2066,8 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-mrule]"))) { m.rule = el.dataset.mrule; render(); return; }
     if ((el = q("[data-mlight]"))) { const e2 = el.dataset.mlight; if (m.lights[e2]) delete m.lights[e2]; else m.lights[e2] = true; render(); return; }
     if ((el = q("[data-mstep]"))) {
-      const leaveMap = () => { ui.mapw = null; render(); window.scrollTo(0, 0); };
-      if (el.dataset.mstep === "back") { if (m.step === 1) guarded(leaveMap); else { m.step--; m.q = ""; render(); window.scrollTo(0, 0); } return; }
+      const leaveMap = () => { ui.mapw = null; if (m.backToSched) openSched(m.id); render(); window.scrollTo(0, 0); };
+      if (el.dataset.mstep === "back") { if (m.step === (m.entry || 1)) guarded(leaveMap); else { m.step--; m.q = ""; render(); window.scrollTo(0, 0); } return; }
       if (m.step < 4) { m.step++; m.q = ""; render(); window.scrollTo(0, 0); return; }
       if (mapDraft(m).items.length) openReview(); else finishMap(m, "Nothing changed.");
     }
