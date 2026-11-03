@@ -103,7 +103,10 @@ main { padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-lef
 .lval { padding: 0 12px 4px; font-size: 22px; font-weight: 500; line-height: 1.2; }
 .lval small { font-size: 13px; font-weight: 400; color: var(--muted); }
 .lcard svg { display: block; width: 100%; flex: 1 1 60px; min-height: 60px; }
-.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* Tiles in one row share their row heights, so a longer note in one tile moves every track in the row down together. */
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; grid-row: span 5; grid-template-rows: subgrid; gap: 8px; min-width: 0; align-items: start; }
+.tiles > .lcard { grid-row: span 5; }
+.tnotes { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
 .tile-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tile-top > div { min-width: 0; }
 .tile .name { font-size: 13px; color: var(--muted); }
@@ -532,7 +535,7 @@ function renderOverview() {
 function tile(z, k) {
   const b = k === "light" ? null : z.bands[period(z)][k];
   return `<div class="tile"><div class="tile-top">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="name">${M[k].label}</div><div class="val">${fmt(k, z.now[k])} <small>${M[k].unit}</small></div></div></div>
-    ${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}${b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
+    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}</div>${b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
 }
 
 /* Light as the HA dashboard shows it: name, value, then a 4 hour line running black to yellow between 1210 and 2120 lx. */

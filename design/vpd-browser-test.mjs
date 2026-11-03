@@ -605,6 +605,15 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
 await phone(320, 640); await openL(); await sleep(60);
 check("Leaf 320px: a long entity id wraps instead of widening the page", await ev(`document.documentElement.scrollWidth<=innerWidth`));
 check("Leaf: box text is 16px on touch", (await ev(`getComputedStyle(document.querySelector("[data-lin]")).fontSize`)) === "16px");
+// ---------- Tiles: tracks in one row line up
+const trackTops = (id) => ev(`(()=>{ui.screen="zone";ui.zone="${id}";render();return [...document.querySelectorAll("#main .tiles .tile")].map(t=>{const r=t.getBoundingClientRect(),k=t.querySelector(".track");return {row:Math.round(r.top),top:k?Math.round(k.getBoundingClientRect().top*10)/10:null}}).filter(x=>x.top!==null)})()`);
+const rowsLineUp = (tops) => Object.values(tops.reduce((a, x) => ((a[x.row] ||= []).push(x.top), a), {})).every((r) => r.every((t) => Math.abs(t - r[0]) < 0.6));
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await reset(); await sleep(60);
+for (const i of [0, 1]) { const id = await ev(`zones[${i}].id`), tops = await trackTops(id); check(`Tiles desktop, zone ${i + 1}: all three tracks on one line`, tops.length === 3 && new Set(tops.map((x) => x.row)).size === 1 && rowsLineUp(tops), tops); }
+await ev(`ui.screen="zone";ui.zone=zones[0].id;render()`); await sleep(60); await shot("tiles-aligned-desktop");
+await phone(390, 844); await sleep(60);
+for (const i of [0, 1]) { const id = await ev(`zones[${i}].id`), tops = await trackTops(id); check(`Tiles phone, zone ${i + 1}: tracks side by side line up`, tops.length === 3 && rowsLineUp(tops), tops); }
+await ev(`ui.screen="zone";ui.zone=zones[0].id;render()`); await sleep(60); await shot("tiles-aligned-phone");
 // ---------- The track
 await phone(390, 844); await reset(); await sleep(60);
 const parts = await ev(`(()=>{const t=document.querySelector("#main .zone-card .track"),box=(c)=>{const e=t.querySelector(c),r=e.getBoundingClientRect();return {l:r.left,r:r.right,bg:getComputedStyle(e).backgroundColor}};return {c:box(".bandc"),g:box(".bandr"),n:box(".bandi"),green:getComputedStyle(document.documentElement).getPropertyValue("--tnom"),w:{left:t.getBoundingClientRect().left,right:t.getBoundingClientRect().right}}})()`);
