@@ -250,6 +250,7 @@ td .sub { display: block; font-size: 12px; color: var(--muted); }
 .vcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10px; color: var(--muted); }
 .vcell input { width: 100%; min-width: 0; padding: 6px 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; font-size: 14px; font-weight: 500; text-align: center; }
 .vcell.vt input { color: var(--primary); }
+.vcell .vdash { padding: 6px 2px; border: 1px dashed var(--line); border-radius: 6px; font-size: 14px; text-align: center; }
 .vcell.vlast { grid-column: 5; }
 span.vrow-name { cursor: default; }
 .vrow[data-vrow="light"] .vcell { grid-row: 2; }
@@ -475,7 +476,7 @@ function track(z, k) {
   const [mn, lo, tg, hi, mx] = z.bands[period(z)][k], v = z.now[k], pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad;
   const x = (n) => Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
   /* Green is the ideal zone, grey either side is where devices ramp up, and red beyond the grey is critical. */
-  return `<div class="track" aria-hidden="true"><span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="tick" style="left:${x(tg)}%"></span>${v === null ? "" : `<span class="dot ${bandState(z, k)}" style="left:${x(v)}%"></span>`}</div>`;
+  return `<div class="track" aria-hidden="true"><span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span>${tg === null ? "" : `<span class="tick" style="left:${x(tg)}%"></span>`}${v === null ? "" : `<span class="dot ${bandState(z, k)}" style="left:${x(v)}%"></span>`}</div>`;
 }
 
 function renderChrome() {
@@ -508,7 +509,7 @@ function renderOverview() {
 function tile(z, k) {
   const b = k === "light" ? null : z.bands[period(z)][k];
   return `<div class="tile"><div class="tile-top">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="name">${M[k].label}</div><div class="val">${fmt(k, z.now[k])} <small>${M[k].unit}</small></div></div></div>
-    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}</div>${b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
+    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}</div>${b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i] === null ? "-" : b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
 }
 
 /* Light as the HA dashboard shows it: name, value, then a 4 hour line running black to yellow between 1210 and 2120 lx. */
@@ -717,7 +718,7 @@ function statesChanged(states) {
   }
 }
 function targetsTable(z) {
-  const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td>${v}</td>`).join("")}</tr>`;
+  const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td>${v === null ? "-" : v}</td>`).join("")}</tr>`;
   const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? v : ""}</td>`).join("")}</tr>`; };
   const table = (p, title) => `<div class="tbl-wrap"><table><thead><tr><th>${title}</th><th>Min</th><th>Low</th><th>Target</th><th>High</th><th>Max</th></tr></thead><tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody></table></div>`;
   return `${table("day", "Day")}${table("night", "Night")}
@@ -817,7 +818,7 @@ function drawChart() {
     while (j < n && isDay(z, pts[j].t) === d) j++;
     const x = X(i), w = X(j) - x;
     if (!d) s += `<rect x="${x}" y="${T}" width="${w}" height="${PH}" fill="var(--shade)"/>`;
-    if (hasBand) { const [mn, lo2, tg, hi2, mx] = z.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/><line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`; }
+    if (hasBand) { const [mn, lo2, tg, hi2, mx] = z.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/>${tg === null ? "" : `<line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`}`; }
     i = j;
   }
   for (let t = 0; t <= 4; t++) { const v = lo + ((hi - lo) * t) / 4, y = Y(v); s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${axis(v)}</text>`; }
@@ -938,7 +939,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || "", offHelper: linkOf(z, "night") || "", links: linksOf(z), lp: "day", fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, band: z.linked ? "helpers" : "here", period: z.periodMode || "helper", onHelper: linkOf(z, "day") || "", offHelper: linkOf(z, "night") || "", links: linksOf(z), lp: "day", target: hasTarget(z.bands), fixedOn: hhmm(z.dayAt), fixedOff: hhmm(z.nightAt), lights: Object.fromEntries((z.lights || []).map((e) => [e, true])), rule: z.rule || "any", avg: {}, combine: { env: methodOf(z) } };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
@@ -1053,7 +1054,8 @@ function linkSelect(m, key, label, opts = {}) {
   return `<label class="field" for="${id}">${label}<select id="${id}" ${time ? `data-msched="${key}"` : `data-mlink="${key}"`}${opts.aria ? ` aria-label="${esc(opts.aria)}"` : ""}>${first}${cur && !all.some((h) => h.entity === cur) ? opt(cur) : ""}${listed}</select>${cur ? `<span class="linkis">${esc(helperText(cur))}</span>` : ""}</label>`;
 }
 /* Links that count as things stand: Emerson unless day is detected, limits only while the zone uses its helpers. */
-const linksInUse = (m) => linkNames().filter((n) => m.links[n] && (linkKind(n) === "emerson" ? m.period !== "detected" : m.band === "helpers"));
+const isTargetLink = (n) => n.endsWith(".target");
+const linksInUse = (m) => linkNames().filter((n) => m.links[n] && (linkKind(n) === "emerson" ? m.period !== "detected" : m.band === "helpers" && (m.target || !isTargetLink(n))));
 function linkIssues(m) {
   const out = [], add = (text, target) => out.push({ text, step: 3, target });
   if (m.period === "helper") {
@@ -1065,7 +1067,7 @@ function linkIssues(m) {
     const gap = EMERSON_KEYS.find((k) => !m.links[k]);
     if (gap && EMERSON_KEYS.some((k) => m.links[k])) add("Emerson effect: pick all three helpers, or none.", linkTarget(gap));
   }
-  if (m.band === "helpers" && !linkNames().some((n) => linkKind(n) !== "emerson" && m.links[n])) add("Link at least one limit to a helper, or choose Set here with the VPD chart.", linkTarget("bands.day.temperature.min"));
+  if (m.band === "helpers" && !linksInUse(m).some((n) => linkKind(n) !== "emerson")) add("Link at least one limit to a helper, or choose Set here with the VPD chart.", linkTarget("bands.day.temperature.min"));
   const seen = {};
   for (const n of linksInUse(m)) {
     const e = m.links[n], h = helperFound(e), u = helperUnit(h), kind = linkKind(n);
@@ -1111,8 +1113,9 @@ function renderMap() {
       ${m.period === "detected" ? "" : `<div><p class="muted">Red lights either side of the day (Emerson effect)</p><div class="fields links">${EMERSON_KEYS.map((k) => linkSelect(m, k, EMERSON_NAME[k], { none: "Not used" })).join("")}</div><p class="small muted">Pick all three helpers, or none. Day and night works out the red light windows from them.</p></div>`}
       <div><p class="muted">Where do this zone's limits come from?</p><div class="seg" role="group" aria-label="Limits"><button data-mband="helpers" aria-pressed="${m.band === "helpers"}">My helpers</button><button data-mband="here" aria-pressed="${m.band === "here"}">Set here with the VPD chart</button></div></div>
       <p class="small muted">${m.band === "helpers" ? "Pick the helper behind each limit. Environment Control reads them and your alerts keep using them." : "Stored in Environment Control. Your helpers aren't touched."}</p>
+      <div><p class="muted">Does this zone aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-mtarget="on" aria-pressed="${m.target}">Aim for a target</button><button data-mtarget="off" aria-pressed="${!m.target}">No target</button></div></div>
       ${m.band !== "helpers" ? "" : `<div class="seg" role="group" aria-label="Limits for"><button data-mlp="day" aria-pressed="${m.lp === "day"}">Day</button><button data-mlp="night" aria-pressed="${m.lp === "night"}">Night</button></div>
-      ${Object.keys(VNAME).map((k) => `<div><p class="small">${VNAME[k]}</p><div class="fields links">${["min", "target", "max"].map((s) => linkSelect(m, `bands.${m.lp}.${k}.${s}`, SLOT_WORD[s], { none: "Set here", aria: linkLabel(`bands.${m.lp}.${k}.${s}`) })).join("")}</div></div>`).join("")}
+      ${Object.keys(VNAME).map((k) => `<div><p class="small">${VNAME[k]}</p><div class="fields links">${["min", ...(m.target ? ["target"] : []), "max"].map((s) => linkSelect(m, `bands.${m.lp}.${k}.${s}`, SLOT_WORD[s], { none: "Set here", aria: linkLabel(`bands.${m.lp}.${k}.${s}`) })).join("")}</div></div>`).join("")}
       <div><p class="small">Light</p><div class="fields links">${linkSelect(m, `light.${LIGHT_LIMIT[m.lp][0]}`, LIGHT_LIMIT[m.lp][1], { none: "Set here", aria: linkLabel(`light.${LIGHT_LIMIT[m.lp][0]}`) })}</div></div>
       <p class="small muted">Helpers in the right unit are listed first. Anything on Set here is stored in Environment Control, as Low and High always are.</p>`}`;
   }
@@ -1157,7 +1160,7 @@ function saveMap(m) {
   for (const k of EMERSON_KEYS) if (m.links[k]) h[k] = m.links[k]; else delete h[k];
   for (const n of linkNames()) {
     const e = m.links[n], [a, p, k, s] = n.split(".");
-    if (e && a === "bands") ((bands[p] ||= {})[k] ||= {})[s] = e;
+    if (e && a === "bands" && (m.target || s !== "target")) ((bands[p] ||= {})[k] ||= {})[s] = e;
     if (e && a === "light") light[p] = e;
   }
   if (Object.keys(bands).length) h.bands = bands; else delete h.bands;
@@ -1166,9 +1169,10 @@ function saveMap(m) {
   const now = (e) => (helperFound(e) || {}).state;
   if (EMERSON_KEYS.every((k) => h[k])) { z.emerson = z.emerson || {}; for (const k of EMERSON_KEYS) z.emerson[k] = Number.isFinite(Number(now(h[k]))) ? Number(now(h[k])) : z.emerson[k] || 0; }
   else if (hadEmerson) delete z.emerson;
+  if (m.target !== hasTarget(z.bands)) setTarget(z.bands, m.target);
   if (z.linked) for (const n of linkNames()) {
     const v = Number(now(m.links[n])), [a, p, k, s] = n.split(".");
-    if (!m.links[n] || !Number.isFinite(v)) continue;
+    if (!m.links[n] || !Number.isFinite(v) || (s === "target" && !m.target)) continue;
     if (a === "bands") z.bands[p][k][SLOT_INDEX[s]] = v;
     if (a === "light") z.lightLimits[p] = v;
   }
@@ -1203,17 +1207,27 @@ const round2 = (x) => Math.round(x * 100) / 100;
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const snapTo = (x, step) => round2(Math.round(x / step) * step);
 function applyStage(v, id) {
-  const b = v.bands[v.period], s = STAGES[id];
+  const b = v.bands[v.period], s = STAGES[id], aim = hasTarget(v.bands);
   for (const k of ["temperature", "humidity", "vpd"]) {
     const [lo, hi] = s[k], m = STAGE_MARGIN[k];
-    b[k] = [round2(lo - m), lo, round2((lo + hi) / 2), hi, round2(hi + m)];
+    b[k] = [round2(lo - m), lo, null, hi, round2(hi + m)];
   }
-  b.humidity[2] = Math.round(b.humidity[2]);
-  b.vpd[2] = stepped(b.vpd[2]);
+  if (aim) midTarget(b);
   v.stage = id; v.sel = null;
+}
+/* A target is optional, one choice per zone: a zone with no target holds none in any period, and nothing is judged against one. */
+const hasTarget = (bands) => ["day", "night"].some((p) => ["temperature", "humidity", "vpd"].some((k) => bands[p][k][2] !== null));
+function midTarget(b) {
+  b.temperature[2] = round2((b.temperature[1] + b.temperature[3]) / 2);
+  b.humidity[2] = Math.round((b.humidity[1] + b.humidity[3]) / 2);
+  b.vpd[2] = stepped((b.vpd[1] + b.vpd[3]) / 2);
+}
+function setTarget(bands, aim) {
+  for (const p of ["day", "night"]) { if (aim) midTarget(bands[p]); else for (const k of ["temperature", "humidity", "vpd"]) bands[p][k][2] = null; }
 }
 /* Target is one point, so a new offset gives it a new VPD. If that leaves the VPD ideal range, moving only the VPD would break humidity instead, so the point moves to the nearest place that fits every range. */
 function vFollowLeaf(v, b) {
+  if (b.temperature[2] === null) return false;
   const T = b.temperature[2], RH = b.humidity[2], here = stepped(calcVpd(T, RH, v.leaf));
   b.vpd[2] = here;
   if (here >= b.vpd[1] && here <= b.vpd[3]) return false;
@@ -1232,7 +1246,8 @@ const vDraftBands = (z) => { const b = JSON.parse(JSON.stringify(z.bands)); for 
 function vProblems(b) {
   const out = [], [lightLo, lightHi, lightStep] = LIGHT_RANGE;
   for (const k of ["temperature", "humidity", "vpd"]) {
-    const [lo, hi] = VRANGE[k], outside = b[k].findIndex((x) => x < lo || x > hi), early = b[k].findIndex((x, n) => n > 0 && x < b[k][n - 1]);
+    const [lo, hi] = VRANGE[k], prev = (n) => (b[k][n - 1] === null ? b[k][n - 2] : b[k][n - 1]);
+    const outside = b[k].findIndex((x) => x !== null && (x < lo || x > hi)), early = b[k].findIndex((x, n) => n > 0 && x !== null && x < prev(n));
     if (outside >= 0) out.push({ text: `${VNAME[k]} ${SLOT_NAME[outside]} has to be between ${lo} and ${hi}${VUNIT[k]}.`, edit: k, slot: outside });
     else if (early > 0) out.push({ text: `${VNAME[k]} ${SLOT_NAME[early]} can't be below ${SLOT_NAME[early - 1]}. They run Min, Low, Target, High, Max.`, edit: k, slot: early });
     else if (b[k][0] >= b[k][4]) out.push({ text: `${VNAME[k]} Max has to be above Min.`, edit: k, slot: 4 });
@@ -1315,7 +1330,7 @@ function vChartInner(v, b) {
     }
   }
   const tx = X(clamp(b.temperature[2], T_MIN, T_MAX)), ty = Y(clamp(b.humidity[2], RH_LOW, RH_TOP)), big = on("target");
-  s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="var(--vink)" stroke-width="2.5"/></g>`;
+  if (b.temperature[2] !== null) s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="var(--vink)" stroke-width="2.5"/></g>`;
   return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${flags}</svg>`;
 }
 function vReadout(v, b) {
@@ -1423,8 +1438,8 @@ function vCommitActive() {
 }
 function renderVpd() {
   const v = ui.vpdw, z = zoneById(v.id), b = v.bands[v.period], issues = vIssues(v, b);
-  const tabs = [["target", "Target"], ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
-  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}">${SLOT_NAME[i]}</label>`).join("")}</div>`;
+  const aim = hasTarget(v.bands), tabs = [...(aim ? [["target", "Target"]] : []), ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
+  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => x === null ? `<span class="vcell vt vnone"><span class="vdash" role="img" aria-label="${VNAME[k]} Target, none">-</span>${SLOT_NAME[i]}</span>` : `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}">${SLOT_NAME[i]}</label>`).join("")}</div>`;
   const [, lightSlot, lightColumn] = LIGHT_LIMIT[v.period];
   const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}">${lightSlot}</label></div>`;
   const counted = countedEnv(z), mixed = new Set(counted.map(leafOf)).size > 1, picked = counted.find((s) => s.id === z.leafBasis);
@@ -1434,6 +1449,7 @@ function renderVpd() {
   <section class="card">
     <div class="card-head"><div class="seg" role="group" aria-label="Period">${[["day", "Day"], ["night", "Night"]].map(([k, l]) => `<button data-vperiod="${k}" aria-pressed="${v.period === k}">${l}</button>`).join("")}</div>
       <div class="row"><span class="small muted">${esc(leafText)}</span><button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div></div>
+    <div><p class="small muted">Does ${esc(z.name)} aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-vtarget="on" aria-pressed="${aim}">Aim for a target</button><button data-vtarget="off" aria-pressed="${!aim}">No target</button></div>${aim ? "" : `<p class="small muted">Only its limits are judged. Nothing aims for a point inside them.</p>`}</div>
     <div><p class="small muted">Start from an Athena stage</p><div class="seg" role="group" aria-label="Athena stage">${Object.entries(STAGES).map(([k, s]) => `<button data-vstage="${k}" aria-pressed="${v.stage === k}">${s.label}</button>`).join("")}</div></div>
     <div class="vgrid"><div class="vmain">
       <div class="seg vtabs" role="group" aria-label="What to edit">${tabs.map(([k, l]) => `<button data-vedit="${k}" aria-pressed="${v.edit === k}">${l}</button>`).join("")}</div>
@@ -1450,7 +1466,7 @@ function renderVpd() {
 }
 function openVpd(id) {
   const z = zoneById(id);
-  ui.vpdw = { id, period: period(z), leaf: zoneLeaf(z), edit: "target", sel: null, stage: null, drag: false, bands: vDraftBands(z) };
+  ui.vpdw = { id, period: period(z), leaf: zoneLeaf(z), edit: hasTarget(z.bands) ? "target" : "temperature", sel: null, stage: null, drag: false, bands: vDraftBands(z) };
   ui.wiz = null; ui.screen = "setup";
 }
 const stepped = (v) => Math.round(v * 20) / 20;
@@ -1946,7 +1962,7 @@ function wizNameSync(input) {
 }
 
 /* Edits are a draft until reviewed and applied, as PHASE does it. Each draft lists what it would change, worked out against what's saved, so the review always shows exactly what will be sent and nothing else. */
-const differs = (a, b) => Math.abs(a - b) > 1e-9;
+const differs = (a, b) => (a === null || b === null ? a !== b : Math.abs(a - b) > 1e-9);
 const changeList = () => { const items = []; return [items, (label, before, after) => { if (before !== after) items.push({ label, before, after }); }]; };
 const offsetWords = (x) => (x === 0 ? "Same as air" : `${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`);
 function leafDraft(l) {
@@ -1967,7 +1983,7 @@ function vHelperIssues(v, p, b) {
   const z = zoneById(v.id), out = [];
   const check = (name, x, label, edit, slot) => {
     const e = settingLink(z, name), a = e && haStates[e] && haStates[e].attributes;
-    if (!a || !Number.isFinite(a.min)) return;
+    if (!a || !Number.isFinite(a.min) || x === null) return;
     const steps = (x - a.min) / a.step;
     if (x < a.min || x > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) out.push({ text: `${label} goes to your helper, which takes ${a.min} to ${a.max} in steps of ${a.step}.`, edit, slot });
   };
@@ -1979,7 +1995,8 @@ function vpdDraft(v) {
   const z = zoneById(v.id), items = [];
   for (const [p, day] of PERIODS) for (const k of Object.keys(VNAME)) v.bands[p][k].forEach((x, i) => {
     const was = z.bands[p][k][i], helper = !!settingLink(z, bandSetting(p, k, i) || "");
-    if (differs(x, was)) items.push({ label: `${day} ${VNAME[k]} ${SLOT_NAME[i]}${helper ? ", on your helper" : ""}`, before: `${round2(was)}${VUNIT[k]}`, after: `${round2(x)}${VUNIT[k]}`, helper });
+    const said = (n) => (n === null ? "None" : `${round2(n)}${VUNIT[k]}`);
+    if (differs(x, was)) items.push({ label: `${day} ${VNAME[k]} ${SLOT_NAME[i]}${helper && x !== null ? ", on your helper" : ""}`, before: said(was), after: said(x), helper: helper && x !== null });
   });
   for (const [p, day] of PERIODS) {
     const [key, slot] = LIGHT_LIMIT[p], was = z.lightLimits[key], x = v.bands[p].light[0], helper = !!settingLink(z, lightSetting(p));
@@ -1993,12 +2010,14 @@ function vpdDraft(v) {
 async function saveVpd(v) {
   const z0 = zoneById(v.id), sends = [];
   for (const [p] of PERIODS) {
-    for (const k of Object.keys(VNAME)) for (const i of [0, 2, 4]) if (settingLink(z0, bandSetting(p, k, i)) && differs(v.bands[p][k][i], z0.bands[p][k][i])) sends.push([bandSetting(p, k, i), v.bands[p][k][i], `${p} ${VNAME[k]} ${SLOT_NAME[i]}`, () => zoneById(v.id).bands[p][k][i]]);
+    for (const k of Object.keys(VNAME)) for (const i of [0, 2, 4]) if (settingLink(z0, bandSetting(p, k, i)) && v.bands[p][k][i] !== null && differs(v.bands[p][k][i], z0.bands[p][k][i])) sends.push([bandSetting(p, k, i), v.bands[p][k][i], `${p} ${VNAME[k]} ${SLOT_NAME[i]}`, () => zoneById(v.id).bands[p][k][i]]);
     if (settingLink(z0, lightSetting(p)) && differs(v.bands[p].light[0], z0.lightLimits[LIGHT_LIMIT[p][0]])) sends.push([lightSetting(p), v.bands[p].light[0], `${p} Light ${LIGHT_LIMIT[p][1]}`, () => zoneById(v.id).lightLimits[LIGHT_LIMIT[p][0]]]);
   }
   /* What's kept here is saved by the backend first. Helpers are written after. */
   const r = await saveConfig(() => {
     const z = zoneById(v.id), b = clone(v.bands);
+    /* With no target, a target helper is no longer read or written, so its link goes. */
+    if (!hasTarget(b) && z.helpers && z.helpers.bands) for (const p of Object.values(z.helpers.bands)) for (const slots of Object.values(p)) delete slots.target;
     for (const [p] of PERIODS) {
       for (const k of Object.keys(VNAME)) for (let i = 0; i < 5; i++) if (!settingLink(z, bandSetting(p, k, i) || "")) z.bands[p][k][i] = b[p][k][i];
       if (!settingLink(z, lightSetting(p))) z.lightLimits[LIGHT_LIMIT[p][0]] = b[p].light[0];
@@ -2040,7 +2059,8 @@ function mapDraft(m) {
   if (m.period === "helper") for (const [k, label, key] of [["day", "Lights on helper", "onHelper"], ["night", "Lights off helper", "offHelper"]]) add(label, linkWas(onHelpers(z) && linkOf(z, k), "None"), linkWas(m[key], "None"));
   if (m.period !== "detected") for (const k of EMERSON_KEYS) add(linkLabel(k), linkWas(linkOf(z, k), "Not used"), linkWas(m.links[k], "Not used"));
   add("Limits", yes(z.linked, "From your helpers", "Set here"), yes(m.band === "helpers", "From your helpers", "Set here"));
-  if (m.band === "helpers") for (const n of linkNames()) if (linkKind(n) !== "emerson") add(linkLabel(n), linkWas(linkAtName(z, n), "Set here"), linkWas(m.links[n], "Set here"));
+  add("Target", yes(hasTarget(z.bands), "Aim for a target", "No target"), yes(m.target, "Aim for a target", "No target"));
+  if (m.band === "helpers") for (const n of linkNames()) if (linkKind(n) !== "emerson" && (m.target || !isTargetLink(n))) add(linkLabel(n), linkWas(linkAtName(z, n), "Set here"), linkWas(m.links[n], "Set here"));
   for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
   const known = new Set(zones.flatMap((o) => [...Object.values(linksOf(o)), linkOf(o, "day"), linkOf(o, "night")]));
   const fresh = [...linksInUse(m).map((n) => m.links[n]), ...(m.period === "helper" ? [m.onHelper, m.offHelper] : [])].some((e) => e && !known.has(e));
@@ -2239,6 +2259,7 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-mdevice]"))) { const id = el.dataset.mdevice; if (m.pickD[id]) delete m.pickD[id]; else m.pickD[id] = true; render(); return; }
     if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; const t = el.dataset.target, lp = /^map-l-(?:bands-|light-)(day|night)/.exec(t || ""); if (lp) m.lp = lp[1]; render(); jumpTo(t); return; }
     if ((el = q("[data-mlp]"))) { m.lp = el.dataset.mlp; render(); return; }
+    if ((el = q("[data-mtarget]"))) { m.target = el.dataset.mtarget === "on"; render(); return; }
     if ((el = q("[data-mband]"))) { m.band = el.dataset.mband; render(); return; }
     if ((el = q("[data-mperiod]"))) { m.period = el.dataset.mperiod; render(); return; }
     if ((el = q("[data-mrule]"))) { m.rule = el.dataset.mrule; render(); return; }
@@ -2261,6 +2282,7 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-vperiod]"))) { v.period = el.dataset.vperiod; v.sel = null; v.stage = null; render(); return; }
     if ((el = q("[data-vedit]"))) { v.edit = el.dataset.vedit; v.sel = null; render(); return; }
     if ((el = q("[data-vstage]"))) { applyStage(v, el.dataset.vstage); render(); return; }
+    if ((el = q("[data-vtarget]"))) { setTarget(v.bands, el.dataset.vtarget === "on"); if (v.edit === "target" && el.dataset.vtarget === "off") v.edit = "temperature"; v.sel = null; render(); return; }
     if ((el = q("[data-vnudge]"))) { placeHandle(b, v.edit, v.sel, b[v.edit][v.sel] + Number(el.dataset.vnudge) * VSNAP[v.edit]); render(); return; }
     if (q("[data-vexit]")) { guarded(() => { const id = ui.vpdw.id; ui.vpdw = null; guideReturn(id, "targets"); render(); }); return; }
     return;

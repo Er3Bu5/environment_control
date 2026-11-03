@@ -1,6 +1,7 @@
 # Builds the published mock: the tested source with its fixture swapped for what Home Assistant reported.
 # Bands: Min, Target and Max are the user's HA helpers. HA has no Low or High, so day Low and High come from the
-# Athena stage assumed for each zone, held inside Min and Max, and night ones are midpoints.
+# Athena stage assumed for each zone, held inside Min and Max, and night ones are midpoints. A zone with no target
+# helpers (Veg, Nursery) has no target.
 import datetime as dt, json, os, re, statistics, sys
 
 root = sys.argv[1]
@@ -26,13 +27,13 @@ def band(zone, period, metric, stage):
     mn = num(f"input_number.{zone}_{period}_{name}_min_threshold")
     mx = num(f"input_number.{zone}_{period}_{name}_max_threshold")
     tkey = f"input_number.{zone}_{period}_{name}_target"
+    # No target helper means no target for that zone, never one made up here.
     tg = num(tkey) if tkey in S else None
     if period == "day":
         lo, hi = [min(mx, max(mn, x)) for x in ATHENA[stage][metric]]
-        tg = r2((lo + hi) / 2) if tg is None else tg
     else:
-        tg = r2((mn + mx) / 2) if tg is None else tg
-        lo, hi = r2((mn + tg) / 2), r2((tg + mx) / 2)
+        mid = r2((mn + mx) / 2) if tg is None else tg
+        lo, hi = r2((mn + mid) / 2), r2((mid + mx) / 2)
     return [mn, r2(lo), tg, r2(hi), mx]
 
 def bands(zone, stage):

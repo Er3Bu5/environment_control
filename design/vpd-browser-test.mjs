@@ -134,6 +134,11 @@ if (process.env.SMOKE) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
+  check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false]));
+  for (const id of ["veg", "nursery"]) {
+    await go(`ui.screen="zone";ui.zone="${id}";render()`);
+    check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`document.querySelector("#main .tbl-wrap tbody tr").textContent`)).includes("-"));
+  }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
   for (const id of ["garden", "veg", "nursery"]) {
     await go(`ui.screen="setup";openMap("${id}");ui.mapw.step=3;render()`); await sleep(150); await clean(`${id} Map devices helpers`);
@@ -1450,6 +1455,51 @@ await ev(`openSched("veg");render()`); await sleep(40);
 check("Picker: and Day and night shows it", (await ev(`!!document.querySelector("#s-emerson")`)) === true);
 const wrongKind = await evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.humidity.min="input_datetime.veg_day_time"}).then(r=>[r.ok,r.error])`);
 check("Picker: the backend refuses a limit linked to a time helper", wrongKind[0] === false && wrongKind[1].includes("isn't a number helper"), wrongKind);
+
+// ---------- No target: any zone can have limits and nothing to aim for
+await reset(); await ev(`openVpd("nursery");render()`); await sleep(40);
+await clickIt('[data-vtarget="off"]');
+const noAim = await ev(`({tab:document.querySelectorAll('.vtabs [data-vedit="target"]').length,dash:document.querySelectorAll(".vdash").length,box:!!document.querySelector("#vin-temperature-2"),circle:document.querySelectorAll("#vwrap circle").length,issues:vIssues(ui.vpdw,ui.vpdw.bands.day).length+vIssues(ui.vpdw,ui.vpdw.bands.night).length})`);
+check("No target: the Target tab, boxes and chart point go, and no order problem appears", noAim.tab === 0 && noAim.dash === 3 && !noAim.box && noAim.circle === 0 && noAim.issues === 0, noAim);
+await clickIt('[data-vstage="veg"]');
+check("No target: an Athena stage fills the limits and leaves the target off", (await ev(`ui.vpdw.bands[ui.vpdw.period].temperature[2]`)) === null && (await ev(`ui.vpdw.bands[ui.vpdw.period].temperature[1]`)) === 22.2);
+await clickIt("[data-dreview]");
+const noAimReview = await modalText();
+check("No target: the review lists each target going to None", /Day Temperature Target[^]*None/.test(noAimReview) && noAimReview.includes("Night VPD Target"), noAimReview);
+await clickIt("[data-rapply]"); await sleep(300);
+const noAimDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").bands`);
+check("No target: saved as no value in both periods", ["day", "night"].every((p) => ["temperature", "humidity", "vpd"].every((k) => noAimDisk[p][k][2] === null)), noAimDisk);
+await ev(`ui.screen="zone";ui.zone="nursery";render()`); await sleep(60);
+const noAimPage = await ev(`({ticks:document.querySelectorAll("#main .track .tick").length,tracks:document.querySelectorAll("#main .track").length,range:document.querySelector("#main .tile .range").textContent,table:document.querySelector("#main .tbl-wrap tbody tr").textContent,bad:/NaN|undefined|null/.test(document.querySelector("#main").textContent)})`);
+check("No target: the zone page draws its tracks without a Target tick, and shows - for it", noAimPage.ticks === 0 && noAimPage.tracks > 0 && noAimPage.range.includes("-Target") && noAimPage.table.includes("-") && !noAimPage.bad, noAimPage);
+check("No target: readings are still judged against the limits", ["ok", "low", "high", "critlow", "crithigh"].includes(await ev(`bandState(zoneById("nursery"),"temperature")`)));
+await reset(); await ev(`openVpd("nursery");render()`); await sleep(40);
+await clickIt('[data-vtarget="on"]');
+const backOn = await ev(`(()=>{const b=ui.vpdw.bands.day.temperature;return [b[2],round2((b[1]+b[3])/2)]})()`);
+check("No target: turning it back on starts it midway between Low and High", backOn[0] !== null && backOn[0] === backOn[1], backOn);
+await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(300);
+check("No target: and that saves", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").bands.day.temperature[2]`)) === backOn[0]);
+const callsBefore = (await helperCalls()).length, vegTarget = await onHA(`fakeHA.states["input_number.veg_day_temperature_target"].state`);
+await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
+check("No target: Map devices shows Target pickers while the zone aims for one", (await ev(`!!document.querySelector("#map-l-bands-day-temperature-target")`)) === true);
+await clickIt('[data-mtarget="off"]');
+check("No target: and hides them once it doesn't", (await ev(`!!document.querySelector("#map-l-bands-day-temperature-target")`)) === false && (await mapNextOff()) === false);
+await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
+check("No target: the Map devices review says so", /Target[^]*Aim for a target[^]*No target/.test(await modalText()), await modalText());
+await clickIt("[data-rapply]"); await sleep(400);
+const vegDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg")`);
+check("No target: the target helpers are unlinked and the zone holds no target", vegDisk.helpers.bands.day.temperature.target === undefined && vegDisk.helpers.bands.day.temperature.min === "input_number.veg_day_temperature_min_threshold" && vegDisk.bands.day.temperature[2] === null, vegDisk.helpers.bands.day);
+check("No target: nothing is written to the helpers, which keep their values", (await helperCalls()).length === callsBefore && (await onHA(`fakeHA.states["input_number.veg_day_temperature_target"].state`)) === vegTarget);
+const lateSet = await evp(`ask("setting",{zone:"veg",name:"bands.day.temperature.target",value:24}).then(r=>r.ok)`);
+check("No target: and the host refuses to write one", lateSet === false && (await helperCalls()).length === callsBefore);
+await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
+await clickIt('[data-mtarget="on"]');
+check("No target: turning it on offers Set here or a helper", (await ev(`document.querySelector("#map-l-bands-day-temperature-target").selectedOptions[0].textContent`)) === "Set here");
+await pick("map-l-bands-day-temperature-target", "input_number.veg_day_temperature_target");
+await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]'); await clickIt("[data-rapply]"); await sleep(300);
+await sleep(1100); await hostClick("allow"); await sleep(400);
+const vegBack = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg")`);
+check("No target: relinking asks again, then reads the helper, with the rest midway", vegBack.helpers.bands.day.temperature.target === "input_number.veg_day_temperature_target" && vegBack.bands.day.temperature[2] === Number(vegTarget) && vegBack.bands.night.temperature[2] !== null, [vegBack.helpers.bands.day.temperature, vegBack.bands.day.temperature, vegBack.bands.night.temperature]);
 await reset();
 
 // Removing a zone. Last, because it takes the fixture's zones with it, so nothing here can call reset().
