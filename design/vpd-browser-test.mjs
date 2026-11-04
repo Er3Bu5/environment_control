@@ -1604,6 +1604,15 @@ check("Placement: a device can go between two units in a row", (await spotLabel(
 check("Placement: and outside the wall, all the way round", (await spotLabel("-1,-1")) === "Outside the wall, by unit 1" && (await spotLabel("3,2")) === "Outside the wall, by unit 11" && (await spotLabel("1,4")) === "Outside the wall, by unit 8", [await spotLabel("-1,-1"), await spotLabel("3,2"), await spotLabel("1,4")]);
 check("Placement: outside the wall is a +, never a unit", (await ev(`["-1,-1","-1,0","3,0","1,-1","1,4"].every(k=>{const g=document.querySelector('[data-spot="'+k+'"]');return g && g.querySelector("path") && !g.querySelector('circle[r="32"]')})`)) === true);
 check("Placement: shortened names keep what tells them apart", same(await ev(`["Air conditioner","Air conditioner exhaust fan","Under canopy light controller","Overhead light controller"].map(n=>devShort({name:n}))`), ["Air conditioner", "Air\u2026exhaust fan", "Under\u2026controller", "Overhead light\u2026"]), await ev(`["Air conditioner","Air conditioner exhaust fan","Under canopy light controller","Overhead light controller"].map(n=>devShort({name:n}))`));
+const steps = await ev(`(()=>{const L=wizLayout(ui.wiz),g=geom(L,true),d=(f,n)=>{const v=[];for(let k=-1;k<n;k+=0.5)v.push(Math.round(f(k+0.5)-f(k)));return [...new Set(v)]};return [d(g.X,L.cols),d(g.Y,L.rows)]})()`);
+check("Placement: the spots are evenly spaced right out past the wall, with no gap either side of it", same(steps, [[65], [56]]), steps);
+const crossing = await ev(`(()=>{const w=ui.wiz,keep=w.devs.map(d=>d.pos),at={"d:plug":[1,-1],"d:acfan":[1,-0.5],"d:aux":[1,3.5],"d:dehu":[1,4]};
+  w.devs.forEach(d=>{if(at[d.id])d.pos=at[d.id]});render();
+  const wall=document.querySelector("#main .map svg rect title").parentNode,wl=+wall.getAttribute("x"),wr=wl+ +wall.getAttribute("width");
+  const bad=[...document.querySelectorAll("#main .map svg [data-pick]")].filter(m=>{const r=m.querySelector("rect");if(!r)return false;const a=+r.getAttribute("x"),b=a+ +r.getAttribute("width");return (a<wl&&b>wl)||(a<wr&&b>wr)}).map(m=>m.dataset.pick);
+  const placed=Object.keys(at).filter(id=>document.querySelector('#main .map svg [data-pick="'+id+'"] rect'));
+  w.devs.forEach((d,i)=>d.pos=keep[i]);render();return [placed.length,bad]})()`);
+check("Placement: a mark beside the wall, inside or out, never crosses it", crossing[0] === 4 && crossing[1].length === 0, crossing);
 await ev(`ui.wiz.units=11;render()`); await sleep(40);
 check("Placement: and on the spot an empty unit would have", (await spotLabel("2,3")) === "Where unit 12 would be", await spotLabel("2,3"));
 await clickIt('[data-pick="g-left"]');

@@ -553,9 +553,12 @@ function lightSpark(z) {
    between the outer units and the zone's wall, and -1 or rows is outside the wall. Those two bands aren't on the half-step
    spacing, so each is placed by its own offset: far enough from the wall that a mark there stays on its own side. The band
    outside the wall is drawn only when something can go there or sits there. */
+/* Spots are evenly spaced right out to the band beyond the wall, with the wall midway between the last two. A device mark
+   is wider than that gap, so mark() slides one sideways off the wall rather than spacing the spots for it, and the margin
+   past the outside band is what a slid mark needs. */
 const geom = (L, outer) => {
-  const cw = 130, ch = 112, toWallX = 65 + 62, toWallY = 56 + 26, outX = 64, outY = 36;
-  const px = toWallX + (outer ? outX * 2 : 8), py = toWallY + (outer ? outY + 24 : 8);
+  const cw = 130, ch = 112, toWallX = 65 + 32, toWallY = 56 + 28, outX = 33, outY = 28;
+  const px = toWallX + (outer ? 136 : 8), py = toWallY + (outer ? outY + 24 : 8);
   const W = px * 2 + (L.cols - 1) * cw, H = py * 2 + (L.rows - 1) * ch, wx = px - toWallX, wy = py - toWallY;
   const X = (c) => (c < -0.5 ? wx - outX : c > L.cols - 0.5 ? W - wx + outX : px + c * cw);
   const Y = (r) => (r < -0.5 ? wy - outY : r > L.rows - 0.5 ? H - wy + outY : py + r * ch);
@@ -573,8 +576,11 @@ function baseMap(L, g) {
    outline is dashed, because Home Assistant doesn't know it. */
 const onMapOnly = (s) => s.kind === "device" || s.kind === "virtual";
 function mark(s, g, text, opts) {
-  const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), dev = onMapOnly(s);
+  const cx = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), dev = onMapOnly(s);
   const half = dev ? Math.max(30, text.length * 3.5 + 8) : 52, dash = s.kind === "virtual" ? ` stroke-dasharray="5 4"` : "";
+  /* A mark never crosses the wall, or it would read as being on the wrong side of it. */
+  const left = g.wx, right = g.W - g.wx;
+  const x = cx < left ? Math.min(cx, left - 4 - half) : cx > right ? Math.max(cx, right + 4 + half) : Math.min(Math.max(cx, left + 4 + half), right - 4 - half);
   const edge = opts.selected ? ` stroke="var(--fg)" stroke-width="2"${dash}` : dev ? ` stroke="var(--muted)" stroke-width="1.5"${dash}` : "";
   return `<g ${opts.attrs}><rect x="${x - half}" y="${y - 14}" width="${half * 2}" height="28" rx="6" fill="${dev ? "var(--card)" : LEVEL_COLOR[s.level]}"${edge}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${dev ? "var(--fg)" : "#FFFFFF"}"${dev ? ' style="font-size:13px"' : ""}>${esc(text)}</text></g>`;
 }
