@@ -7,7 +7,7 @@
 :root {
   --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --muted: #727272;
   --primary: #03A9F4; --on-primary: #FFFFFF;
-  --temp: #FF9800; --hum: #2196F3; --vpd: #4CAF50; --sun: #FBC02D; --off: #BDBDBD;
+  --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --off: #BDBDBD;
   --above: #FF9800; --in: #4CAF50; --under: #7E57C2;
   --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A;
   --day: #FBC02D; --night: #DDE1EA; --band: #9E9E9E2E; --ideal: #4CAF5059; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --shade: #5C6BC014;
@@ -129,6 +129,14 @@ main { padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-lef
 .key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
 .key span { display: inline-flex; align-items: center; gap: 5px; }
 .key i { width: 11px; height: 11px; display: inline-block; }
+.mk { width: 22px; height: 22px; border: 2px solid var(--c); border-radius: 6px; display: inline-grid; place-items: center; flex: none; background: var(--card); }
+.mk svg { width: 14px; height: 14px; fill: var(--c); }
+.mk.fill { background: var(--c); }
+.mk.fill svg { fill: #FFFFFF; }
+.mk.dash { border-style: dashed; }
+.key .mk { width: 16px; height: 16px; border-width: 1.5px; border-radius: 4px; }
+.key .mk svg { width: 11px; height: 11px; }
+.opt-name { display: inline-flex; align-items: center; gap: 8px; }
 .detail { padding: 10px 12px; border-radius: 8px; background: var(--tile); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 
 .chart svg { display: block; width: 100%; height: auto; }
@@ -350,6 +358,8 @@ const ICON = {
   fan: "M12 11a3.5 3.5 0 0 0-1-7c-3 0-3.5 3-1 5l2 2Zm1 1a3.5 3.5 0 0 0 7 1c0-3-3-3.5-5-1l-2 0Zm-1 1a3.5 3.5 0 0 0 1 7c3 0 3.5-3 1-5l-2-2Zm-1-1a3.5 3.5 0 0 0-7-1c0 3 3 3.5 5 1l2 0Z",
   plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
   menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
+  chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
+  cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
 };
 const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
 const ic = (n, c) => `<span class="ic" style="--c:${c}">${icon(n)}</span>`;
@@ -553,12 +563,11 @@ function lightSpark(z) {
    between the outer units and the zone's wall, and -1 or rows is outside the wall. Those two bands aren't on the half-step
    spacing, so each is placed by its own offset: far enough from the wall that a mark there stays on its own side. The band
    outside the wall is drawn only when something can go there or sits there. */
-/* Spots are evenly spaced right out to the band beyond the wall, with the wall midway between the last two. A device mark
-   is wider than that gap, so mark() slides one sideways off the wall rather than spacing the spots for it, and the margin
-   past the outside band is what a slid mark needs. */
+/* Spots are evenly spaced right out to the band beyond the wall, with the wall midway between the last two. A mark is an
+   icon small enough to sit in that gap without touching the wall. */
 const geom = (L, outer) => {
   const cw = 130, ch = 112, toWallX = 65 + 32, toWallY = 56 + 28, outX = 33, outY = 28;
-  const px = toWallX + (outer ? 136 : 8), py = toWallY + (outer ? outY + 24 : 8);
+  const px = toWallX + (outer ? 60 : 8), py = toWallY + (outer ? outY + 24 : 8);
   const W = px * 2 + (L.cols - 1) * cw, H = py * 2 + (L.rows - 1) * ch, wx = px - toWallX, wy = py - toWallY;
   const X = (c) => (c < -0.5 ? wx - outX : c > L.cols - 0.5 ? W - wx + outX : px + c * cw);
   const Y = (r) => (r < -0.5 ? wy - outY : r > L.rows - 0.5 ? H - wy + outY : py + r * ch);
@@ -575,27 +584,28 @@ function baseMap(L, g) {
 /* A device mark is outlined rather than filled, because fill colour on the map means a sensor's height. A virtual device's
    outline is dashed, because Home Assistant doesn't know it. */
 const onMapOnly = (s) => s.kind === "device" || s.kind === "virtual";
-function mark(s, g, text, opts) {
-  const cx = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), dev = onMapOnly(s);
-  const half = dev ? Math.max(30, text.length * 3.5 + 8) : 52, dash = s.kind === "virtual" ? ` stroke-dasharray="5 4"` : "";
-  /* A mark never crosses the wall, or it would read as being on the wrong side of it. */
-  const left = g.wx, right = g.W - g.wx;
-  const x = cx < left ? Math.min(cx, left - 4 - half) : cx > right ? Math.max(cx, right + 4 + half) : Math.min(Math.max(cx, left + 4 + half), right - 4 - half);
-  const edge = opts.selected ? ` stroke="var(--fg)" stroke-width="2"${dash}` : dev ? ` stroke="var(--muted)" stroke-width="1.5"${dash}` : "";
-  return `<g ${opts.attrs}><rect x="${x - half}" y="${y - 14}" width="${half * 2}" height="28" rx="6" fill="${dev ? "var(--card)" : LEVEL_COLOR[s.level]}"${edge}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${dev ? "var(--fg)" : "#FFFFFF"}"${dev ? ' style="font-size:13px"' : ""}>${esc(text)}</text></g>`;
+/* Each device class has its own icon. A sensor is filled with its height's colour, as the key has always shown height. A
+   control device is outlined in its class colour, the colour its readings have elsewhere. A virtual device is dashed,
+   because nothing in Home Assistant stands behind it. Names stay off the map, so marks never collide: the selector and
+   the detail carry them. */
+const CLASS_LOOK = {
+  humidity: { icon: "drop", c: "var(--hum)", label: "Humidity" },
+  temperature: { icon: "thermo", c: "var(--temp)", label: "Temperature" },
+  airflow: { icon: "fan", c: "var(--air)", label: "Airflow" },
+  lights: { icon: "sun", c: "var(--sun)", label: "Lights" },
+};
+const deviceClass = (d) => (d && CONTROL_GROUPS.find((g) => g.types.includes(d.type))?.cls) || null;
+function look(s) {
+  if (s.kind === "virtual") return { icon: "cube", c: "var(--muted)", dash: true };
+  if (s.kind === "device") { const k = CLASS_LOOK[deviceClass(s.dev || devices.find((d) => d.id === s.device))]; return k ? { icon: k.icon, c: k.c } : { icon: "plug", c: "var(--muted)" }; }
+  return { icon: "chip", c: LEVEL_COLOR[s.level] || "var(--muted)", fill: true };
 }
-/* Long names are shortened so a mark stays inside one unit's width, keeping the last words where they fit, because that's
-   usually what tells two devices apart: Air conditioner and Air conditioner exhaust fan. The full name is in its label. */
-const MARK_CHARS = 16;
-function devShort(d) {
-  const name = d.name;
-  if (name.length <= MARK_CHARS) return name;
-  const words = name.split(/\s+/);
-  for (let k = words.length - 2; k >= 1; k--) {
-    const tail = `${words[0]}…${words.slice(-k).join(" ")}`;
-    if (tail.length <= MARK_CHARS) return tail;
-  }
-  return `${name.slice(0, MARK_CHARS - 1).trimEnd()}…`;
+const mk = (k) => `<span class="mk${k.fill ? " fill" : ""}${k.dash ? " dash" : ""}" style="--c:${k.c}">${icon(k.icon)}</span>`;
+const MARK = 36;
+function mark(s, g, opts) {
+  const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), k = look(s), h = MARK / 2;
+  const ring = opts.selected ? `<rect x="${x - h - 4}" y="${y - h - 4}" width="${MARK + 8}" height="${MARK + 8}" rx="10" fill="none" stroke="var(--fg)" stroke-width="2"/>` : "";
+  return `<g ${opts.attrs}><title>${esc(s.name)}</title>${ring}<rect x="${x - h}" y="${y - h}" width="${MARK}" height="${MARK}" rx="7" fill="${k.fill ? k.c : "var(--card)"}" stroke="${k.c}" stroke-width="2"${k.dash ? ' stroke-dasharray="4 3"' : ""}/><svg x="${x - 11}" y="${y - 11}" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[k.icon]}" fill="${k.fill ? "#FFFFFF" : k.c}"/></svg></g>`;
 }
 /* Climate hardware and lights are what can be placed. Sensor boards are placed as sensors. */
 const placeable = (z) => devices.filter((d) => d.ctl && d.zones.includes(z.id));
@@ -603,19 +613,20 @@ const placedAt = (d, z) => (d.place && d.place[z.id]) || null;
 /* Virtual devices are things worth seeing on the map that Home Assistant doesn't have, like a drain tank. They belong to
    one zone, are only ever drawn, and nothing reads or sends anything for them. */
 const virtualOf = (z) => z.virtual || [];
-const devMarks = (z) => [...placeable(z).filter((d) => placedAt(d, z)).map((d) => ({ id: `d:${d.id}`, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z), dev: d })),
-  ...virtualOf(z).map((v) => ({ id: v.id, name: v.name, short: devShort(v), kind: "virtual", pos: v.pos }))];
+const devMarks = (z) => [...placeable(z).filter((d) => placedAt(d, z)).map((d) => ({ id: `d:${d.id}`, name: d.name, kind: "device", pos: placedAt(d, z), dev: d })),
+  ...virtualOf(z).map((v) => ({ id: v.id, name: v.name, kind: "virtual", pos: v.pos }))];
 const unplaced = (z) => placeable(z).filter((d) => !placedAt(d, z));
 function forgetPlace(d, zoneId) { if (!d.place) return; delete d.place[zoneId]; if (!Object.keys(d.place).length) delete d.place; }
 const reading = (s) => (s.t === null ? "No data" : `${s.t.toFixed(1)}° ${Math.round(s.h)}%`);
-function drawMarks(sensors, g, textFor, attrsFor, picked) {
+function drawMarks(sensors, g, attrsFor, picked) {
   const seen = {}, placed = sensors.filter((s) => s.pos);
   return placed.map((s) => {
     const k = s.pos.join(","); seen[k] = (seen[k] || 0) + 1;
-    return mark(s, g, textFor(s), { attrs: attrsFor(s), selected: picked === s.id, offset: (seen[k] - 1) * 32 });
+    return mark(s, g, { attrs: attrsFor(s), selected: picked === s.id, offset: (seen[k] - 1) * 40 });
   }).join("");
 }
-const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span><span><i style="border:1.5px solid var(--muted);border-radius:3px;background:var(--card)"></i>Device</span><span><i style="border:1.5px dashed var(--muted);border-radius:3px;background:var(--card)"></i>Virtual device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
+/* The key shows every class, so a mark can be read without tapping it. */
+const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span>${Object.entries(LEVELS).map(([k, n]) => `<span>${mk({ icon: "chip", c: LEVEL_COLOR[k], fill: true })}Sensor, ${n.toLowerCase()}</span>`).join("")}${Object.values(CLASS_LOOK).map((k) => `<span>${mk(k)}${k.label}</span>`).join("")}<span>${mk({ icon: "plug", c: "var(--muted)" })}Not said what it is</span><span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
 /* Devices have no height, so the height filter shows them only under All. */
 function mapHtml(z) {
   const shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level), devs = ui.level === "all" ? devMarks(z) : [];
@@ -623,7 +634,7 @@ function mapHtml(z) {
   const attrsFor = (s) => s.kind === "device" ? `role="button" tabindex="0" data-mapdev="${s.dev.id}" aria-label="${esc(s.name)}, ${esc(s.dev.state)}"`
     : s.kind === "virtual" ? `role="button" tabindex="0" data-mapvirt="${s.id}" aria-label="${esc(s.name)}, virtual device"`
     : `role="button" tabindex="0" data-sensor="${s.id}" aria-label="${esc(s.name)}, ${LEVELS[s.level]}, ${esc(reading(s))}"`;
-  return `<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Units, sensors and devices in ${esc(z.name)}">${baseMap(z.layout, g)}${drawMarks([...shown, ...devs], g, (s) => (onMapOnly(s) ? s.short : reading(s)), attrsFor, ui.picked)}</svg></div>`;
+  return `<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Units, sensors and devices in ${esc(z.name)}">${baseMap(z.layout, g)}${drawMarks([...shown, ...devs], g, attrsFor, ui.picked)}</svg></div>`;
 }
 const outside = (p, L) => [p[0] < 0 || p[0] > L.rows - 1, p[1] < 0 || p[1] > L.cols - 1];
 function posText(p, L) {
@@ -947,15 +958,15 @@ function renderDevices() {
     <td>${esc(d.path)}${d.hub ? `<span class="sub">via ${esc(d.hub)}</span>` : ""}</td><td>${d.stale ? `<span class="pill dead">${esc(d.state)}</span>` : esc(d.state)}</td></tr>`).join("");
   return `<div class="wrap"><div><h1>Devices</h1><p class="muted small">What each device is and how it reaches Home Assistant</p></div>
     <section class="card"><div class="seg" role="group" aria-label="Filter by link">${filters.map(([k, l]) => `<button data-link="${k}" aria-pressed="${ui.linkFilter === k}">${l}</button>`).join("")}</div>
-    <div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Device</th><th>Type</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${ui.linkFilter === "all" ? "No devices are in a zone yet." : "Nothing on this link."}</td></tr>`}</tbody></table></div></section></div>`;
+    <div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Device</th><th>Role</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${ui.linkFilter === "all" ? "No devices are in a zone yet." : "Nothing on this link."}</td></tr>`}</tbody></table></div></section></div>`;
 }
 
 /* Climate hardware and lights. Anything else mapped to a zone, such as a plug marked Other, stays on Devices. */
 const CONTROL_GROUPS = [
-  { title: "Humidity", metric: "humidity", types: ["Dehumidifier", "Humidifier"] },
-  { title: "Temperature", metric: "temperature", types: ["Air conditioner", "Heater"] },
-  { title: "Airflow", types: ["Fan"] },
-  { title: "Lights", metric: "light", types: ["Light"] },
+  { title: "Humidity", cls: "humidity", metric: "humidity", types: ["Dehumidifier", "Humidifier"] },
+  { title: "Temperature", cls: "temperature", metric: "temperature", types: ["Air conditioner", "Heater"] },
+  { title: "Airflow", cls: "airflow", types: ["Fan"] },
+  { title: "Lights", cls: "lights", metric: "light", types: ["Light"] },
 ];
 function controlsCard(z) {
   const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id));
@@ -1968,7 +1979,7 @@ function addVirtual(w) {
   const base = `v-${slug(name).replace(/^_+|_+$/g, "") || "device"}`;
   let id = base;
   for (let n = 2; w.virt.some((v) => v.id === id); n++) id = `${base}_${n}`;
-  w.virt.push({ id, name, short: devShort({ name }), kind: "virtual", pos: null });
+  w.virt.push({ id, name, kind: "virtual", pos: null });
   w.vname = ""; w.pick = id;
   render(); const map = $("#main .map"); if (map) map.scrollIntoView({ block: "nearest" });
 }
@@ -1976,8 +1987,8 @@ const wizItem = (w, id) => w.sensors.find((s) => s.id === id) || w.devs.find((d)
 function openWizard(id) {
   const z = zoneById(id);
   ui.wiz = { id, name: z.name, step: 1, ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
-    devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
-    virt: virtualOf(z).map((v) => ({ ...v, short: devShort(v), kind: "virtual", pos: [...v.pos] })), vname: "", vissue: "", pick: null };
+    devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
+    virt: virtualOf(z).map((v) => ({ ...v, kind: "virtual", pos: [...v.pos] })), vname: "", vissue: "", pick: null };
 }
 function openNewZone() {
   ui.wiz = { id: null, name: "", step: 1, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
@@ -2066,9 +2077,9 @@ function renderWizard() {
     if (sel) { const e = reach(sel); for (let r = -e; r <= L.rows - 1 + e; r += 0.5) for (let c = -e; c <= L.cols - 1 + e; c += 0.5) spots += planted(L, r, c) ? unitSpot(r, c) : plus(r, c); }
     const attrsFor = (s) => `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
     const where = (s, missing) => (fits(s, L) ? `<span class="small muted">${esc(posText(s.pos, L))}</span>` : missing);
-    const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${where(s, '<span class="pill high">Needs placing</span>')}</button>`).join("");
-    const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span>${esc(d.name)}</span>${where(d, '<span class="pill plain">Not placed</span>')}</button>`).join("");
-    const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span>${esc(v.name)}</span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
+    const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span class="opt-name">${mk(look(s))}${esc(s.name)}</span>${where(s, '<span class="pill high">Needs placing</span>')}</button>`).join("");
+    const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span class="opt-name">${mk(look(d))}${esc(d.name)}</span>${where(d, '<span class="pill plain">Not placed</span>')}</button>`).join("");
+    const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span class="opt-name">${mk(look(v))}${esc(v.name)}</span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const left = devsOff(w);
     const prompt = !sel ? "Pick a sensor or device." : free ? `Tap a unit or any +, inside the wall or outside it, for ${esc(sel.name)}.` : `Tap a unit or any + inside the wall for ${esc(sel.name)}.`;
     const height = !sel || free ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
@@ -2082,7 +2093,7 @@ function renderWizard() {
     body = `${w.sensors.length ? `<div class="small muted">Sensors</div><div class="sensor-list">${list}</div>` : `<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${esc(called)}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
       ${w.devs.length ? `<div class="small muted">Devices, optional</div><div class="sensor-list">${devList}</div>` : ""}${addVirtual}
       <div class="now"><strong>${prompt}</strong></div>
-      <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor or device"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, (s) => s.short, attrsFor, w.pick)}</svg></div>
+      <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor or device"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, attrsFor, w.pick)}</svg></div>
       ${height ? `<div class="now"><strong>Height</strong>${height}</div>` : ""}${offMap}${keyHtml}${devNotice}`;
   }
   const blocked = (w.step === 3 && lost.length > 0) || (w.step === 1 && !!nameIssue);
