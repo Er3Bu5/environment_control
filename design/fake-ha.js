@@ -122,6 +122,8 @@ class FakeHA {
   }
   /* The real backend checks every field against a schema. This checks enough to catch a host that forwards junk. */
   checkConfig(c) {
+    /* A spot on a zone's map is on the half-steps, from outside the wall on one side to outside it on the other. */
+    const spotOk = (p, L) => !!L && Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -1 && p[0] <= L.rows && p[1] >= -1 && p[1] <= L.cols;
     const ok = c && Array.isArray(c.zones) && Array.isArray(c.devices) && c.zones.length <= 20 && c.devices.length <= 200;
     if (!ok) this.fail("Config isn't zones and devices");
     const ids = new Set(c.zones.map((z) => z.id));
@@ -150,8 +152,19 @@ class FakeHA {
       for (const [zid, p] of Object.entries(d.place)) {
         const z = c.zones.find((x) => x.id === zid), L = z && z.layout;
         if (!d.zones.includes(zid) || !L) this.fail(`${d.id} is placed in a zone it isn't in`);
-        const ok = Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -0.5 && p[0] <= L.rows - 0.5 && p[1] >= -0.5 && p[1] <= L.cols - 0.5;
-        if (!ok) this.fail(`${d.id} is placed outside ${zid}'s map`);
+        if (!spotOk(p, L)) this.fail(`${d.id} is placed outside ${zid}'s map`);
+      }
+    }
+    /* Virtual devices are only drawn: a name and a spot, nothing that names an entity. */
+    for (const z of c.zones) {
+      if (z.virtual === undefined) continue;
+      if (!Array.isArray(z.virtual) || z.virtual.length > 30) this.fail(`${z.id} has virtual devices that aren't a short list`);
+      const vids = new Set();
+      for (const v of z.virtual) {
+        const shape = v && typeof v === "object" && Object.keys(v).every((k) => ["id", "name", "pos"].includes(k));
+        if (!shape || typeof v.id !== "string" || !/^v-[a-z0-9_]{1,40}$/.test(v.id) || vids.has(v.id) || typeof v.name !== "string" || !v.name.trim() || v.name.length > 40) this.fail(`${z.id} has a virtual device that isn't a name and a spot`);
+        vids.add(v.id);
+        if (!spotOk(v.pos, z.layout)) this.fail(`${v.id} is placed outside ${z.id}'s map`);
       }
     }
   }

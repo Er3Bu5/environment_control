@@ -549,29 +549,56 @@ function lightSpark(z) {
   return l ? lightSvg(`ls-${z.id}`, l.name, l.pts, 34, "lspark") : "";
 }
 
-/* The placement map. Positions are half-steps, so 0.5 is the gap between the first two rows, and -0.5 or rows - 0.5 is the
-   space between the outer units and the zone's wall. The wall is drawn far enough out that a mark there stays inside it. */
-const geom = (L) => { const cw = 130, ch = 112, px = 133, py = 90, m = 8; return { R: 32, W: px * 2 + (L.cols - 1) * cw, H: py * 2 + (L.rows - 1) * ch, X: (c) => px + c * cw, Y: (r) => py + r * ch, m }; };
-const planted = (L, r, c) => Number.isInteger(r) && Number.isInteger(c) && r * L.cols + c < L.units;
+/* The placement map. Positions are half-steps, so 0.5 is the gap between the first two rows, -0.5 or rows - 0.5 is the space
+   between the outer units and the zone's wall, and -1 or rows is outside the wall. Those two bands aren't on the half-step
+   spacing, so each is placed by its own offset: far enough from the wall that a mark there stays on its own side. The band
+   outside the wall is drawn only when something can go there or sits there. */
+const geom = (L, outer) => {
+  const cw = 130, ch = 112, toWallX = 65 + 62, toWallY = 56 + 26, outX = 64, outY = 36;
+  const px = toWallX + (outer ? outX * 2 : 8), py = toWallY + (outer ? outY + 24 : 8);
+  const W = px * 2 + (L.cols - 1) * cw, H = py * 2 + (L.rows - 1) * ch, wx = px - toWallX, wy = py - toWallY;
+  const X = (c) => (c < -0.5 ? wx - outX : c > L.cols - 0.5 ? W - wx + outX : px + c * cw);
+  const Y = (r) => (r < -0.5 ? wy - outY : r > L.rows - 0.5 ? H - wy + outY : py + r * ch);
+  return { R: 32, W, H, X, Y, wx, wy };
+};
+const planted = (L, r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0 && r < L.rows && c < L.cols && r * L.cols + c < L.units;
+const beyondWall = (p, L) => p[0] < -0.5 || p[0] > L.rows - 0.5 || p[1] < -0.5 || p[1] > L.cols - 0.5;
 function baseMap(L, g) {
-  let s = `<rect x="${g.m}" y="${g.m}" width="${g.W - g.m * 2}" height="${g.H - g.m * 2}" rx="4" fill="none" stroke="var(--muted)" stroke-width="2"><title>Wall</title></rect>`;
-  for (let r = 0.5; r < L.rows - 0.5; r++) s += `<line x1="${g.m}" x2="${g.W - g.m}" y1="${g.Y(r)}" y2="${g.Y(r)}" stroke="var(--line)" stroke-dasharray="4 5"/>`;
+  let s = `<rect x="${g.wx}" y="${g.wy}" width="${g.W - g.wx * 2}" height="${g.H - g.wy * 2}" rx="4" fill="none" stroke="var(--muted)" stroke-width="2"><title>Wall</title></rect>`;
+  for (let r = 0.5; r < L.rows - 0.5; r++) s += `<line x1="${g.wx}" x2="${g.W - g.wx}" y1="${g.Y(r)}" y2="${g.Y(r)}" stroke="var(--line)" stroke-dasharray="4 5"/>`;
   for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) s += `<circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${g.X(c)}" y="${g.Y(r) + 5}" text-anchor="middle" fill="var(--muted)">${r * L.cols + c + 1}</text>`;
   return s;
 }
-/* A device mark is outlined rather than filled, because fill colour on the map means a sensor's height. */
+/* A device mark is outlined rather than filled, because fill colour on the map means a sensor's height. A virtual device's
+   outline is dashed, because Home Assistant doesn't know it. */
+const onMapOnly = (s) => s.kind === "device" || s.kind === "virtual";
 function mark(s, g, text, opts) {
-  const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), dev = s.kind === "device";
-  const half = dev ? Math.max(30, text.length * 4 + 8) : 52;
-  const edge = opts.selected ? ` stroke="var(--fg)" stroke-width="2"` : dev ? ` stroke="var(--muted)" stroke-width="1.5"` : "";
-  return `<g ${opts.attrs}><rect x="${x - half}" y="${y - 14}" width="${half * 2}" height="28" rx="6" fill="${dev ? "var(--card)" : LEVEL_COLOR[s.level]}"${edge}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${dev ? "var(--fg)" : "#FFFFFF"}">${esc(text)}</text></g>`;
+  const x = g.X(s.pos[1]), y = g.Y(s.pos[0]) + (opts.offset || 0), dev = onMapOnly(s);
+  const half = dev ? Math.max(30, text.length * 3.5 + 8) : 52, dash = s.kind === "virtual" ? ` stroke-dasharray="5 4"` : "";
+  const edge = opts.selected ? ` stroke="var(--fg)" stroke-width="2"${dash}` : dev ? ` stroke="var(--muted)" stroke-width="1.5"${dash}` : "";
+  return `<g ${opts.attrs}><rect x="${x - half}" y="${y - 14}" width="${half * 2}" height="28" rx="6" fill="${dev ? "var(--card)" : LEVEL_COLOR[s.level]}"${edge}/><text x="${x}" y="${y + 5}" text-anchor="middle" fill="${dev ? "var(--fg)" : "#FFFFFF"}"${dev ? ' style="font-size:13px"' : ""}>${esc(text)}</text></g>`;
 }
-/* Long names are cut so a mark stays inside one unit's width. The full name is in its label. */
-const devShort = (d) => (d.name.length > 12 ? `${d.name.slice(0, 11).trimEnd()}…` : d.name);
+/* Long names are shortened so a mark stays inside one unit's width, keeping the last words where they fit, because that's
+   usually what tells two devices apart: Air conditioner and Air conditioner exhaust fan. The full name is in its label. */
+const MARK_CHARS = 16;
+function devShort(d) {
+  const name = d.name;
+  if (name.length <= MARK_CHARS) return name;
+  const words = name.split(/\s+/);
+  for (let k = words.length - 2; k >= 1; k--) {
+    const tail = `${words[0]}…${words.slice(-k).join(" ")}`;
+    if (tail.length <= MARK_CHARS) return tail;
+  }
+  return `${name.slice(0, MARK_CHARS - 1).trimEnd()}…`;
+}
 /* Climate hardware and lights are what can be placed. Sensor boards are placed as sensors. */
 const placeable = (z) => devices.filter((d) => d.ctl && d.zones.includes(z.id));
 const placedAt = (d, z) => (d.place && d.place[z.id]) || null;
-const devMarks = (z) => placeable(z).filter((d) => placedAt(d, z)).map((d) => ({ id: `d:${d.id}`, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z), dev: d }));
+/* Virtual devices are things worth seeing on the map that Home Assistant doesn't have, like a drain tank. They belong to
+   one zone, are only ever drawn, and nothing reads or sends anything for them. */
+const virtualOf = (z) => z.virtual || [];
+const devMarks = (z) => [...placeable(z).filter((d) => placedAt(d, z)).map((d) => ({ id: `d:${d.id}`, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z), dev: d })),
+  ...virtualOf(z).map((v) => ({ id: v.id, name: v.name, short: devShort(v), kind: "virtual", pos: v.pos }))];
 const unplaced = (z) => placeable(z).filter((d) => !placedAt(d, z));
 function forgetPlace(d, zoneId) { if (!d.place) return; delete d.place[zoneId]; if (!Object.keys(d.place).length) delete d.place; }
 const reading = (s) => (s.t === null ? "No data" : `${s.t.toFixed(1)}° ${Math.round(s.h)}%`);
@@ -582,18 +609,22 @@ function drawMarks(sensors, g, textFor, attrsFor, picked) {
     return mark(s, g, textFor(s), { attrs: attrsFor(s), selected: picked === s.id, offset: (seen[k] - 1) * 32 });
   }).join("");
 }
-const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span><span><i style="border:1.5px solid var(--muted);border-radius:3px;background:var(--card)"></i>Device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
+const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span><span><i style="background:var(--above)"></i>Above canopy</span><span><i style="background:var(--in)"></i>In canopy</span><span><i style="background:var(--under)"></i>Under canopy</span><span><i style="border:1.5px solid var(--muted);border-radius:3px;background:var(--card)"></i>Device</span><span><i style="border:1.5px dashed var(--muted);border-radius:3px;background:var(--card)"></i>Virtual device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
 /* Devices have no height, so the height filter shows them only under All. */
 function mapHtml(z) {
-  const g = geom(z.layout), shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level), devs = ui.level === "all" ? devMarks(z) : [];
-  const attrsFor = (s) => s.kind === "device" ? `role="button" tabindex="0" data-mapdev="${s.dev.id}" aria-label="${esc(s.name)}, ${esc(s.dev.state)}"` : `role="button" tabindex="0" data-sensor="${s.id}" aria-label="${esc(s.name)}, ${LEVELS[s.level]}, ${esc(reading(s))}"`;
-  return `<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Units, sensors and devices in ${esc(z.name)}">${baseMap(z.layout, g)}${drawMarks([...shown, ...devs], g, (s) => (s.kind === "device" ? s.short : reading(s)), attrsFor, ui.picked)}</svg></div>`;
+  const shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level), devs = ui.level === "all" ? devMarks(z) : [];
+  const g = geom(z.layout, devMarks(z).some((d) => beyondWall(d.pos, z.layout)));
+  const attrsFor = (s) => s.kind === "device" ? `role="button" tabindex="0" data-mapdev="${s.dev.id}" aria-label="${esc(s.name)}, ${esc(s.dev.state)}"`
+    : s.kind === "virtual" ? `role="button" tabindex="0" data-mapvirt="${s.id}" aria-label="${esc(s.name)}, virtual device"`
+    : `role="button" tabindex="0" data-sensor="${s.id}" aria-label="${esc(s.name)}, ${LEVELS[s.level]}, ${esc(reading(s))}"`;
+  return `<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Units, sensors and devices in ${esc(z.name)}">${baseMap(z.layout, g)}${drawMarks([...shown, ...devs], g, (s) => (onMapOnly(s) ? s.short : reading(s)), attrsFor, ui.picked)}</svg></div>`;
 }
 const outside = (p, L) => [p[0] < 0 || p[0] > L.rows - 1, p[1] < 0 || p[1] > L.cols - 1];
 function posText(p, L) {
   const [r, c] = p, [offR, offC] = outside(p, L), rr = clamp(r, 0, L.rows - 1), cc = clamp(c, 0, L.cols - 1);
   const unit = (ur, uc) => (planted(L, ur, uc) ? `unit ${ur * L.cols + uc + 1}` : "");
   const at = (u) => (u ? ` at ${u}` : "");
+  if (beyondWall(p, L)) { const u = unit(clamp(Math.round(r), 0, L.rows - 1), clamp(Math.round(c), 0, L.cols - 1)); return `Outside the wall${u ? `, by ${u}` : ""}`; }
   if (offR && offC) return `Corner${unit(rr, cc) ? ` by ${unit(rr, cc)}` : ""}`;
   if (offC) return Number.isInteger(r) ? `By the wall${at(unit(r, cc))}` : `By the wall at the end of the aisle between rows ${r + 0.5} and ${r + 1.5}`;
   if (offR) {
@@ -601,7 +632,9 @@ function posText(p, L) {
     const a = unit(rr, c - 0.5), b = unit(rr, c + 0.5);
     return a && b ? `By the wall between ${a} and ${b}` : `By the wall${at(a || b)}`;
   }
-  return Number.isInteger(r) ? `Unit ${r * L.cols + c + 1}` : `Aisle between rows ${r + 0.5} and ${r + 1.5}`;
+  if (!Number.isInteger(r)) return `Aisle between rows ${r + 0.5} and ${r + 1.5}`;
+  if (!Number.isInteger(c)) { const a = unit(r, c - 0.5), b = unit(r, c + 0.5); return a && b ? `Between ${a} and ${b}` : a || b ? `Beside ${a || b}` : "Between units"; }
+  return planted(L, r, c) ? `Unit ${r * L.cols + c + 1}` : `Where unit ${r * L.cols + c + 1} would be`;
 }
 /* Placing a device is optional, so this tells rather than warns, and it opens Placement on the first one left. */
 const unplacedWords = (list) => `${list.length} device${list.length > 1 ? "s" : ""} ${list.length > 1 ? "aren't" : "isn't"} on the map`;
@@ -615,6 +648,8 @@ function deviceDetail(z, d) {
   return `<div class="detail"><strong>${esc(d.name)}</strong><span>${esc(posText(placedAt(d, z), z.layout))}.</span><span>${esc(d.state)}${d.type && d.type.toLowerCase() !== d.name.toLowerCase() ? `. ${esc(d.type)}` : ""}</span>${others.length ? `<span class="muted">Shared with ${esc(others.join(" and "))}</span>` : ""}</div>`;
 }
 function sensorDetail(z) {
+  const v = virtualOf(z).find((x) => x.id === ui.picked);
+  if (v) return `<div class="detail"><strong>${esc(v.name)}</strong><span>${esc(posText(v.pos, z.layout))}.</span><span class="muted">Virtual device. Home Assistant doesn't have it, so it's only shown on the map.</span></div>`;
   const d = String(ui.picked || "").startsWith("d:") && placeable(z).find((x) => `d:${x.id}` === ui.picked && placedAt(x, z));
   if (d) return deviceDetail(z, d);
   const s = z.sensors.find((x) => x.id === ui.picked);
@@ -1905,30 +1940,41 @@ function suggestGrid(n, w, d) {
   return best;
 }
 const wizLayout = (w) => ({ w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols });
-/* Environment sensors go on a unit or in the aisle between two rows. Devices can also go between the outer units and the
-   wall, where fans and dehumidifiers usually stand. */
+/* Environment sensors go on a unit or in the aisle between two rows. Devices, real or virtual, can go on any spot: between
+   units, on an empty unit's spot, between the outer units and the wall, and outside the wall. */
 const halfStep = (x) => Number.isInteger(x * 2);
 function allowed(s, L, r, c) {
   if (!halfStep(r) || !halfStep(c)) return false;
-  if (s.kind === "device") {
-    if (r < -0.5 || c < -0.5 || r > L.rows - 0.5 || c > L.cols - 0.5) return false;
-    const [offR, offC] = outside([r, c], L);
-    if (offR || offC) return true;
-  } else if (r < 0 || c < 0 || r > L.rows - 1 || c > L.cols - 1) return false;
+  if (onMapOnly(s)) return r >= -1 && c >= -1 && r <= L.rows && c <= L.cols;
+  if (r < 0 || c < 0 || r > L.rows - 1 || c > L.cols - 1) return false;
   return !Number.isInteger(r) ? true : planted(L, r, c);
 }
 const fits = (s, w) => !!s.pos && allowed(s, w, s.pos[0], s.pos[1]);
-const stranded = (w) => w.sensors.filter((s) => !fits(s, w));
+/* A virtual device exists only to be drawn, so like a sensor it has to be placed before saving. */
+const stranded = (w) => [...w.sensors, ...w.virt].filter((s) => !fits(s, w));
 /* A device that no longer fits a resized grid comes off the map rather than stopping the save, since placing it is optional. */
 const devsOff = (w) => w.devs.filter((d) => !fits(d, w));
-const wizItem = (w, id) => w.sensors.find((s) => s.id === id) || w.devs.find((d) => d.id === id);
+/* A new virtual device is picked straight away, because placing it is the next thing to do and it can't be saved unplaced. */
+function addVirtual(w) {
+  const name = w.vname.trim();
+  w.vissue = !name ? "Name it to add it." : w.virt.some((v) => v.name.toLowerCase() === name.toLowerCase()) ? `There's already a virtual device called ${name}.` : w.virt.length >= 30 ? "A zone can have up to 30 virtual devices." : "";
+  if (w.vissue) { render(); refocus("wiz-vname"); return; }
+  const base = `v-${slug(name).replace(/^_+|_+$/g, "") || "device"}`;
+  let id = base;
+  for (let n = 2; w.virt.some((v) => v.id === id); n++) id = `${base}_${n}`;
+  w.virt.push({ id, name, short: devShort({ name }), kind: "virtual", pos: null });
+  w.vname = ""; w.pick = id;
+  render(); const map = $("#main .map"); if (map) map.scrollIntoView({ block: "nearest" });
+}
+const wizItem = (w, id) => w.sensors.find((s) => s.id === id) || w.devs.find((d) => d.id === id) || w.virt.find((v) => v.id === id);
 function openWizard(id) {
   const z = zoneById(id);
   ui.wiz = { id, name: z.name, step: 1, ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
-    devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })), pick: null };
+    devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, short: devShort(d), kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
+    virt: virtualOf(z).map((v) => ({ ...v, short: devShort(v), kind: "virtual", pos: [...v.pos] })), vname: "", vissue: "", pick: null };
 }
 function openNewZone() {
-  ui.wiz = { id: null, name: "", step: 1, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], pick: null };
+  ui.wiz = { id: null, name: "", step: 1, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
 }
 function zoneNameIssue(w) {
   const name = w.name.trim();
@@ -1961,7 +2007,7 @@ function removeRows(z) {
   const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
-    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")]].filter(([, text]) => text);
+    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -1981,7 +2027,7 @@ async function removeZone(id) {
   toast(`${name} removed.`);
 }
 function renderWizard() {
-  const w = ui.wiz, lost = stranded(w), movedOff = w.devs.filter((d) => d.pos && !fits(d, w)), nameIssue = zoneNameIssue(w), called = w.name.trim();
+  const w = ui.wiz, lost = stranded(w), lostS = lost.filter((s) => s.kind !== "virtual"), lostV = lost.filter((s) => s.kind === "virtual"), movedOff = w.devs.filter((d) => d.pos && !fits(d, w)), nameIssue = zoneNameIssue(w), called = w.name.trim();
   const names = w.id ? ["Zone", "Units", "Sensors and devices"] : ["Zone", "Units"], last = names.length;
   const steps = `<ol class="steps">${names.map((n, i) => `<li${w.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
   let body = "";
@@ -1996,43 +2042,49 @@ function renderWizard() {
     <p class="small muted">Each circle is one unit. Units sit about ${(w.w / w.cols).toFixed(2)} x ${(w.d / w.rows).toFixed(2)} m apart.</p>
     <div class="map"><svg viewBox="0 0 ${geom(w).W} ${geom(w).H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(wizLayout(w), geom(w))}</svg></div>
     ${w.rows * w.cols >= w.units ? "" : `<div class="notice"><strong>Too few spaces</strong><span>This grid holds ${w.rows * w.cols} units, and you have ${w.units}.</span></div>`}
-    ${lost.length ? `<div class="notice"><strong>${lost.length} sensor${lost.length > 1 ? "s" : ""} no longer fit${lost.length > 1 ? "" : "s"}</strong><span>${esc(lost.map((s) => s.name).join(", "))}. You'll place ${lost.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}
+    ${lostS.length ? `<div class="notice"><strong>${lostS.length} sensor${lostS.length > 1 ? "s" : ""} no longer fit${lostS.length > 1 ? "" : "s"}</strong><span>${esc(lostS.map((s) => s.name).join(", "))}. You'll place ${lostS.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}
+    ${lostV.length ? `<div class="notice"><strong>${lostV.length} virtual device${lostV.length > 1 ? "s" : ""} no longer fit${lostV.length > 1 ? "" : "s"}</strong><span>${esc(lostV.map((s) => s.name).join(", "))}. You'll place ${lostV.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}
     ${movedOff.length ? `<div class="notice"><strong>${movedOff.length} device${movedOff.length > 1 ? "s" : ""} no longer fit${movedOff.length > 1 ? "" : "s"}</strong><span>${esc(movedOff.map((d) => d.name).join(", "))}. ${movedOff.length > 1 ? "They come" : "It comes"} off the map unless you place ${movedOff.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}`;
   if (w.step === 3) {
-    const L = wizLayout(w), g = geom(L), sel = wizItem(w, w.pick), dev = !!sel && sel.kind === "device";
-    const placedOk = [...w.sensors, ...w.devs].filter((s) => fits(s, L));
+    /* The band outside the wall is always drawn here, so the map doesn't jump as the pick changes. */
+    const L = wizLayout(w), g = geom(L, true), sel = wizItem(w, w.pick), free = !!sel && onMapOnly(sel);
+    const placedOk = [...w.sensors, ...w.devs, ...w.virt].filter((s) => fits(s, L));
     /* A unit takes any number of marks. Anywhere else holds one, so a spot already taken isn't offered. */
     const plus = (r, c) => {
       if (placedOk.some((s) => s.pos[0] === r && s.pos[1] === c)) return "";
       const x = g.X(c), y = g.Y(r);
       return `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${x}" cy="${y}" r="20" fill="transparent"/><path d="M${x - 7} ${y}h14M${x} ${y - 7}v14" stroke="var(--primary)" stroke-width="2"/></g>`;
     };
+    const unitSpot = (r, c) => `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="transparent" stroke="var(--primary)" stroke-width="1.5"/></g>`;
     let spots = "";
-    if (sel) {
-      for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) spots += `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="transparent" stroke="var(--primary)" stroke-width="1.5"/></g>`;
+    if (free) for (let r = -1; r <= L.rows; r += 0.5) for (let c = -1; c <= L.cols; c += 0.5) spots += planted(L, r, c) ? unitSpot(r, c) : plus(r, c);
+    else if (sel) {
+      for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) spots += unitSpot(r, c);
       for (let r = 0.5; r < L.rows - 0.5; r++) for (let c = 0; c <= L.cols - 1; c += 0.5) spots += plus(r, c);
-      if (dev) {
-        for (const r of [-0.5, L.rows - 0.5]) for (let c = -0.5; c <= L.cols - 0.5; c += 0.5) spots += plus(r, c);
-        for (const c of [-0.5, L.cols - 0.5]) for (let r = 0; r <= L.rows - 1; r += 0.5) spots += plus(r, c);
-      }
     }
     const attrsFor = (s) => `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
-    const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${lost.includes(s) ? '<span class="pill high">Needs placing</span>' : `<span class="small muted">${esc(posText(s.pos, L))}</span>`}</button>`).join("");
-    const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span>${esc(d.name)}</span>${fits(d, L) ? `<span class="small muted">${esc(posText(d.pos, L))}</span>` : '<span class="pill plain">Not placed</span>'}</button>`).join("");
+    const where = (s, missing) => (fits(s, L) ? `<span class="small muted">${esc(posText(s.pos, L))}</span>` : missing);
+    const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${where(s, '<span class="pill high">Needs placing</span>')}</button>`).join("");
+    const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span>${esc(d.name)}</span>${where(d, '<span class="pill plain">Not placed</span>')}</button>`).join("");
+    const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span>${esc(v.name)}</span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const left = devsOff(w);
-    const prompt = !sel ? "Pick a sensor or device." : dev ? `Tap a unit, or a + in an aisle or by the wall, for ${esc(sel.name)}.` : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
-    const height = !sel || dev ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
-    const offMap = dev && fits(sel, L) ? `<div class="now"><strong>On the map</strong><button class="btn" data-wunplace>Take ${esc(sel.name)} off the map</button></div>` : "";
+    const prompt = !sel ? "Pick a sensor or device." : free ? `Tap a unit, or any +, for ${esc(sel.name)}.` : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
+    const height = !sel || free ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
+    const offMap = sel && sel.kind === "device" && fits(sel, L) ? `<div class="now"><strong>On the map</strong><button class="btn" data-wunplace>Take ${esc(sel.name)} off the map</button></div>`
+      : sel && sel.kind === "virtual" ? `<div class="now"><strong>Virtual device</strong><button class="btn" data-vremove>Remove ${esc(sel.name)}</button></div>` : "";
     const devNotice = left.length ? `<div class="notice" id="wiz-unplaced"><strong>${unplacedWords(left)}</strong><span>${esc(left.map((d) => d.name).join(", "))}. They don't need to be: placing a device is optional, and only placed devices show on ${esc(called)}'s map.</span></div>` : "";
-    const lists = `${w.sensors.length ? `<div class="small muted">Sensors</div><div class="sensor-list">${list}</div>` : `<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${esc(called)}'s sensors from Home Assistant. Its devices can be placed now.</span></div>`}
-      ${w.devs.length ? `<div class="small muted">Devices, optional</div><div class="sensor-list">${devList}</div>` : ""}`;
-    body = !w.sensors.length && !w.devs.length ? `<div class="notice"><strong>No sensors to place yet</strong><span>Apply this, then Map devices picks ${esc(called)}'s sensors from Home Assistant and brings you back here to place them.</span></div>
-      <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(L, g)}</svg></div>` : `${lists}<div class="now"><strong>${prompt}</strong></div>
+    const addVirtual = `<div class="small muted">Virtual devices, not in Home Assistant</div>${virtList ? `<div class="sensor-list">${virtList}</div>` : ""}
+      <p class="small muted">Something worth seeing on the map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
+      <div class="row vadd"><label class="field" for="wiz-vname">Add a virtual device<input id="wiz-vname" type="text" maxlength="40" enterkeyhint="done" autocomplete="off" placeholder="For example Drain tank" value="${esc(w.vname)}" aria-invalid="${!!w.vissue}" aria-describedby="wiz-vissue"></label><button class="btn" data-vadd>Add</button></div>
+      <p class="small" id="wiz-vissue" role="status">${esc(w.vissue)}</p>`;
+    body = `${w.sensors.length ? `<div class="small muted">Sensors</div><div class="sensor-list">${list}</div>` : `<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${esc(called)}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
+      ${w.devs.length ? `<div class="small muted">Devices, optional</div><div class="sensor-list">${devList}</div>` : ""}${addVirtual}
+      <div class="now"><strong>${prompt}</strong></div>
       <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor or device"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, (s) => s.short, attrsFor, w.pick)}</svg></div>
       ${height ? `<div class="now"><strong>Height</strong>${height}</div>` : ""}${offMap}${keyHtml}${devNotice}`;
   }
   const blocked = (w.step === 3 && lost.length > 0) || (w.step === 1 && !!nameIssue);
-  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.sensors.length || w.devs.length ? "Finish" : "Map devices";
+  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Map devices";
   const fix = w.step === 1 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
   return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `Placement: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
     <div class="row"><button class="btn" data-wiz="back">${w.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${w.step === last ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
@@ -2179,6 +2231,11 @@ function wizDraft(w) {
     const was = placedAt(devices.find((x) => x.id === d.device), z);
     add(`${d.name} position`, was ? posText(was, z.layout) : "Not placed", fits(d, L) ? posText(d.pos, L) : "Not placed");
   }
+  for (const v of w.virt) {
+    const was = z && virtualOf(z).find((x) => x.id === v.id);
+    add(`${v.name}, virtual`, was ? posText(was.pos, z.layout) : "Not added", fits(v, L) ? posText(v.pos, L) : "Not placed");
+  }
+  for (const v of z ? virtualOf(z) : []) if (!w.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, posText(v.pos, z.layout), "Removed");
   const left = devsOff(w);
   const note = left.length ? `Not on the map: ${left.map((d) => d.name).join(", ")}. Placing a device is optional.` : "";
   return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note, apply: (done) => { saveWizard(w, "Placement saved.").then(done); } };
@@ -2187,6 +2244,8 @@ async function saveWizard(w, said) {
   const r = await saveConfig(() => {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
+    const virt = w.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...v.pos] }));
+    if (virt.length) z.virtual = virt; else delete z.virtual;
     for (const wd of w.devs) {
       const d = devices.find((x) => x.id === wd.device); if (!d) continue;
       const place = { ...(d.place || {}) };
@@ -2200,7 +2259,7 @@ async function saveWizard(w, said) {
   ui.wiz = null; ui.zone = z.id; ui.picked = null;
   if (!w.id) { ui.guide = { id: z.id }; ui.screen = "setup"; toast(`${z.name} created.`); render(); window.scrollTo(0, 0); return []; }
   if (guideReturn(z.id, "place")) { toast(said); render(); window.scrollTo(0, 0); return []; }
-  if (!z.sensors.length && !placeable(z).length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
+  if (!z.sensors.length && !placeable(z).length && !virtualOf(z).length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
   ui.screen = "zone"; toast(said); render();
   return [];
 }
@@ -2309,6 +2368,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("button[data-dev]"))) { const d = devices.find((x) => x.id === el.dataset.dev); if (d) sendControl(d, el.dataset.act); return; }
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-mapdev]"))) { ui.picked = `d:${el.dataset.mapdev}`; render(); return; }
+  if ((el = q("[data-mapvirt]"))) { ui.picked = el.dataset.mapvirt; render(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
     guarded(() => { ui.guide = null; ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
@@ -2401,6 +2461,8 @@ document.addEventListener("click", (e) => {
   /* The list can be long, so a pick brings the map into view for the tap that places it. */
   if ((el = q("[data-pick]"))) { w.pick = el.dataset.pick; render(); const map = $("#main .map"); if (map) map.scrollIntoView({ block: "nearest" }); return; }
   if ((el = q("[data-wizlevel]"))) { const s = w.sensors.find((x) => x.id === w.pick); if (s) { s.level = el.dataset.wizlevel; render(); } return; }
+  if (q("[data-vadd]")) { addVirtual(w); return; }
+  if (q("[data-vremove]")) { w.virt = w.virt.filter((v) => v.id !== w.pick); w.pick = null; render(); return; }
   if (q("[data-wunplace]")) { const d = w.devs.find((x) => x.id === w.pick); if (d) { d.pos = null; render(); } return; }
   if ((el = q("[data-spot]"))) {
     const s = wizItem(w, w.pick); if (!s) return;
@@ -2438,6 +2500,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { const [k, i] = e.target.dataset.vin.split(":"); e.target.value = v.bands[v.period][k][i]; e.target.blur(); }
     return;
   }
+  if (ui.wiz && e.target.id === "wiz-vname" && e.key === "Enter") { e.preventDefault(); addVirtual(ui.wiz); return; }
   if (dir && v && e.target.id === "vwrap" && v.edit !== "target" && v.sel !== null) {
     e.preventDefault(); const b = v.bands[v.period];
     placeHandle(b, v.edit, v.sel, b[v.edit][v.sel] + dir * VSNAP[v.edit]); render(); document.querySelector("#vwrap").focus(); return;
@@ -2488,7 +2551,7 @@ document.addEventListener("change", (e) => {
     if (t.mlink) { const id = e.target.id; if (e.target.value) m.links[t.mlink] = e.target.value; else delete m.links[t.mlink]; render(); refocus(id); }
     return;
   }
-  const w = ui.wiz; if (!w || e.target.id === "wiz-name") return; const v = e.target.value;
+  const w = ui.wiz; if (!w || e.target.id === "wiz-name" || e.target.id === "wiz-vname") return; const v = e.target.value;
   const n = Number(v); if (!Number.isFinite(n) || n <= 0) return;
   if (e.target.id === "wiz-w") w.w = Math.min(100, n);
   if (e.target.id === "wiz-d") w.d = Math.min(100, n);
@@ -2509,6 +2572,7 @@ document.addEventListener("pointerup", endDrag);
 document.addEventListener("pointercancel", endDrag);
 document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
+  if (e.target.id === "wiz-vname" && ui.wiz) ui.wiz.vname = e.target.value;
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.mapw) { ui.mapw.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.mapw, zoneById(ui.mapw.id)); }
   if (e.target.id === "map-lq" && ui.mapw) { ui.mapw.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.mapw, zoneById(ui.mapw.id)); }
