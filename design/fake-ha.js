@@ -142,6 +142,7 @@ class FakeHA {
       if (z.emersonMode === "fixed" && !["morning", "daylight", "evening"].every((k) => { const n = (z.emerson || {})[k]; return Number.isInteger(n) && n >= 0 && n <= 59; })) this.fail(`${z.id} has red light extensions outside 0 to 59 minutes`);
       if (!onOff(z.lights) || !onOff(z.redLights)) this.fail(`${z.id} follows something that isn't an on or off entity`);
     }
+    for (const z of c.zones) if (z.description !== undefined && (typeof z.description !== "string" || !z.description.trim() || z.description.length > 200)) this.fail(`${z.id} has a description that isn't short text`);
     for (const z of c.zones) for (const x of z.sensors || []) if (x.leafEntity !== undefined && !/^number\.[a-z0-9_]+$/.test(x.leafEntity)) this.fail(`${x.id} has a leaf temperature offset that isn't a number entity`);
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || d.zones.some((z) => !ids.has(z))) this.fail(`${d.id} is in a zone that doesn't exist`);

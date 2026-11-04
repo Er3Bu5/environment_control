@@ -136,6 +136,8 @@ main { padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-lef
 .mk.dash { border-style: dashed; }
 .key .mk { width: 16px; height: 16px; border-width: 1.5px; border-radius: 4px; }
 .key .mk svg { width: 11px; height: 11px; }
+.zdesc { margin: 2px 0 0; }
+textarea { font: inherit; resize: vertical; }
 .opt-name { display: inline-flex; align-items: center; gap: 8px; }
 .detail { padding: 10px 12px; border-radius: 8px; background: var(--tile); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 
@@ -223,7 +225,7 @@ td .sub { display: block; font-size: 12px; color: var(--muted); }
 .fields.links { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .linkis { font-size: 12px; overflow-wrap: anywhere; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-.field input, .field select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
+.field input, .field select, .field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
 .stepper { display: inline-flex; align-items: center; gap: 8px; }
 .stepper button { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .sensor-opt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); text-align: left; }
@@ -507,7 +509,7 @@ function renderOverview() {
   const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : `<div class="notice calm"><strong>All zones ideal</strong></div>`;
   const card = (z) => {
     const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id)), on = ds.filter((d) => d.on).length;
-    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2><span class="pill plain">${period(z) === "day" ? "Day" : "Night"} band</span></div>
+    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2><span class="pill plain">${period(z) === "day" ? "Day" : "Night"} band</span></div>${z.description ? `<p class="small muted zdesc">${esc(z.description)}</p>` : ""}
       ${periodBlock(z)}
       <div class="rows">${["temperature", "humidity", "vpd"].map((k) => `<div class="mrow">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="t1">${M[k].label}</div><div class="t2">${fmt(k, z.now[k])}<span>${M[k].unit}</span></div></div>${track(z, k)}<div class="pillcell">${statePill(bandState(z, k))}</div></div>`).join("")}
         <div class="mrow">${ic(M.light.icon, `var(${M.light.c})`)}<div><div class="t1">${M.light.label}</div><div class="t2">${fmt("light", z.now.light)}<span>${M.light.unit}</span></div></div>${lightSpark(z)}</div></div>
@@ -815,7 +817,8 @@ function targetsTable(z) {
   <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Values on your helpers are read from them, so your alerts read the same numbers. Low and High, and anything without a helper, are stored here." : "All stored here. Link them to helpers in Map devices."}</p>`;
 }
 function activityList(z) {
-  const rows = ACTIVITY[z.id].filter((a) => ui.activity === "all" || a[1] === ui.activity);
+  /* A zone added since the panel loaded has no activity of its own in the mock. */
+  const rows = (ACTIVITY[z.id] || []).filter((a) => ui.activity === "all" || a[1] === ui.activity);
   if (!rows.length) return `<p class="small muted">Nothing of this kind today.</p>`;
   return `<div class="act">${rows.map(([t, k, text, by]) => `<div class="act-row"><span class="act-time">${t}</span>${ic(ACT_KIND[k][0], ACT_KIND[k][1])}<div><div class="act-text">${esc(text)}</div><div class="act-by">${esc(by)}</div></div></div>`).join("")}</div>`;
 }
@@ -824,7 +827,7 @@ function renderZone() {
   const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
   const left = setupLeft(z);
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Still to set up: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
-  return `<div class="wrap"><div><h1>${esc(z.name)}</h1><p class="muted small">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units</p></div>
+  return `<div class="wrap"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units</p></div>
     ${unfinished}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <div class="split">
@@ -1836,7 +1839,7 @@ function sCommitActive() {
 function leaveSched() {
   const { screen, zone } = ui.sched.back, id = ui.sched.id;
   ui.sched = null; ui.screen = screen; ui.zone = zone;
-  guideReturn(id, "schedule");
+  guideReturn(id, "targets");
   render(); window.scrollTo(0, 0);
 }
 function schedCommit(z, k, val) {
@@ -1895,11 +1898,12 @@ function schedDraft(s) {
 
 /* A new zone is set up a step at a time, and every step can wait. What's left shows on Setup and on the zone's page until it's done. */
 const SETUP_STEPS = [
-  ["devices", "Devices", "Pick its sensors and devices from Home Assistant.", (z) => `<button class="btn" data-mapw="${z.id}">Map devices</button>`, () => ""],
-  ["place", "Placement", "Put its sensors on the map at their height, and any devices you want to see there.", (z) => `<button class="btn" data-wizard="${z.id}" data-wstep="3">Placement</button>`, (z) => (z.sensors.length || placeable(z).length ? "" : "Needs sensors from Devices")],
-  ["schedule", "Day and night", "When its lights come on and go off.", (z) => `<button class="btn" data-schedw="${z.id}">Day and night</button>`, () => ""],
-  ["calibrate", "Sensor Calibration", "Each sensor's leaf temperature offset.", (z) => `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>`, (z) => (envOf(z).length ? "" : "Needs sensors from Devices")],
-  ["targets", "Targets", "The limits its readings are judged against.", (z) => `<button class="btn" data-vpd="${z.id}">Targets</button>`, () => ""],
+  ["details", "Zone details", "Its name, and a description if you want one.", (z) => `<button class="btn" data-details="${z.id}">Zone details</button>`, () => ""],
+  ["devices", "Map devices", "Pick its sensors and devices from Home Assistant.", (z) => `<button class="btn" data-mapw="${z.id}">Map devices</button>`, () => ""],
+  ["layout", "Zone layout", "Its size, and how many units it holds in what grid.", (z) => `<button class="btn" data-layout="${z.id}">Zone layout</button>`, () => ""],
+  ["place", "Placement", "Put its sensors on the map at their height, and any devices you want to see there.", (z) => `<button class="btn" data-wizard="${z.id}" data-wstep="3">Placement</button>`, (z) => (z.sensors.length || placeable(z).length ? "" : "Needs sensors from Map devices")],
+  ["calibrate", "Sensor Calibration", "Each sensor's leaf temperature offset.", (z) => `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>`, (z) => (envOf(z).length ? "" : "Needs sensors from Map devices")],
+  ["targets", "Targets, day and night", "When it's day, and the limits its readings are judged against.", (z) => `<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn" data-schedw="${z.id}">Day and night</button>`, () => ""],
 ];
 const setupLeft = (z) => (z && z.setup ? SETUP_STEPS.filter(([k]) => z.setup[k] !== "done") : []);
 function renderGuide() {
@@ -1942,7 +1946,7 @@ function renderSetup() {
   const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">ESPHome doesn't say whether a board is wired or on WiFi. How is this one connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("") +
     devices.filter((d) => inAZone(d) && !d.type).map((d) => `<div class="task" id="task-${d.id}"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant only sees a smart plug. What is plugged into it?</p></div><div class="row"><button class="btn" data-role="${d.id}" data-val="Heater">Heater</button><button class="btn" data-role="${d.id}" data-val="Fan">Fan</button><button class="btn" data-role="${d.id}" data-val="Light">Light</button><button class="btn" data-role="${d.id}" data-val="Other">Other</button></div></div>`).join("") +
     zones.filter((z) => z.sensors.some((s) => !s.pos)).map((z) => { const n = z.sensors.filter((s) => !s.pos).length; return `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${n} sensor${n > 1 ? "s" : ""} still need${n > 1 ? "" : "s"} placing on the map.</p></div><div class="row"><button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button></div></div>`; }).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-wizard="${z.id}">Placement</button><button class="btn" data-schedw="${z.id}">Day and night</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<button class="btn" data-details="${z.id}">Zone details</button><button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-layout="${z.id}">Zone layout</button><button class="btn" data-wizard="${z.id}">Placement</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets</button><button class="btn" data-schedw="${z.id}">Day and night</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Day and night only to the helpers it's linked to.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
     <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn" data-addzone>Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
@@ -1984,14 +1988,20 @@ function addVirtual(w) {
   render(); const map = $("#main .map"); if (map) map.scrollIntoView({ block: "nearest" });
 }
 const wizItem = (w, id) => w.sensors.find((s) => s.id === id) || w.devs.find((d) => d.id === id) || w.virt.find((v) => v.id === id);
-function openWizard(id) {
+/* Zone details, Zone layout and Placement are one wizard opened at different steps: 0 is the name and description, 1 the
+   size, 2 the units and grid, 3 the map. A layout that strands something carries on to the map, because it can't save
+   with a sensor or virtual device left off it. */
+const WIZ_STEP = { 0: "Zone details", 1: "Size", 2: "Units", 3: "Sensors and devices" };
+const WIZ_KEY = { 0: "details", 1: "layout", 3: "place" };
+const wizFlow = (w) => (w.flow.includes(2) && w.id && (w.step === 3 || [...w.sensors, ...w.virt].some((s) => s.pos && !fits(s, w))) ? [...w.flow, 3] : w.flow);
+function openWizard(id, flow = [3]) {
   const z = zoneById(id);
-  ui.wiz = { id, name: z.name, step: 1, ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
+  ui.wiz = { id, flow, name: z.name, desc: z.description || "", step: flow[0], ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
     devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
     virt: virtualOf(z).map((v) => ({ ...v, kind: "virtual", pos: [...v.pos] })), vname: "", vissue: "", pick: null };
 }
 function openNewZone() {
-  ui.wiz = { id: null, name: "", step: 1, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
+  ui.wiz = { id: null, flow: [0], name: "", desc: "", step: 0, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
 }
 function zoneNameIssue(w) {
   const name = w.name.trim();
@@ -2012,7 +2022,7 @@ function createZone(w) {
   let id = base;
   for (let n = 2; zoneById(id); n++) id = `${base}_${n}`;
   const z = { id, name: w.name.trim(), dayAt: 6 * 60, nightAt: 18 * 60, periodMode: "fixed", now: { temperature: null, humidity: null, vpd: null, light: null }, bands: stageBands("veg"), linked: false, lightLimits: { dayMin: 1000, nightMax: 200 }, layout: wizLayout(w), sensors: [],
-    setup: Object.fromEntries(SETUP_STEPS.map(([k]) => [k, "todo"])) };
+    setup: Object.fromEntries(SETUP_STEPS.map(([k]) => [k, k === "details" ? "done" : "todo"])) };
   zones.push(z); ACTIVITY[id] = []; LIGHTS[id] = [];
   return z;
 }
@@ -2045,11 +2055,13 @@ async function removeZone(id) {
 }
 function renderWizard() {
   const w = ui.wiz, lost = stranded(w), lostS = lost.filter((s) => s.kind !== "virtual"), lostV = lost.filter((s) => s.kind === "virtual"), movedOff = w.devs.filter((d) => d.pos && !fits(d, w)), nameIssue = zoneNameIssue(w), called = w.name.trim();
-  const names = w.id ? ["Zone", "Units", "Sensors and devices"] : ["Zone", "Units"], last = names.length;
-  const steps = `<ol class="steps">${names.map((n, i) => `<li${w.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
+  const flow = wizFlow(w), at = flow.indexOf(w.step), last = at === flow.length - 1;
+  const steps = flow.length > 1 ? `<ol class="steps">${flow.map((n, i) => `<li${i === at ? ' aria-current="step"' : ""}>${i + 1}. ${WIZ_STEP[n]}</li>`).join("")}</ol>` : "";
   let body = "";
-  if (w.step === 1) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}"></label></div>
-    <p class="muted">Measure the inside of the zone.</p><div class="fields">
+  if (w.step === 0) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}"></label></div>
+    <label class="field" for="wiz-desc">Description, optional<textarea id="wiz-desc" data-wbox="desc" rows="3" maxlength="200" enterkeyhint="done" placeholder="For example Flowering tent by the window">${esc(w.desc)}</textarea></label>
+    ${w.id ? "" : `<p class="small muted">Size and units come later, after its devices are mapped.</p>`}`;
+  if (w.step === 1) body = `<p class="muted">Measure the inside of the zone.</p><div class="fields">
     <label class="field" for="wiz-w">Width in metres<input id="wiz-w" data-wbox="w" type="number" min="0.1" max="100" step="0.1" value="${w.w}"></label>
     <label class="field" for="wiz-d">Depth in metres<input id="wiz-d" data-wbox="d" type="number" min="0.1" max="100" step="0.1" value="${w.d}"></label></div>`;
   if (w.step === 2) body = `<div class="fields"><label class="field" for="wiz-u">Units<input id="wiz-u" data-wbox="u" type="number" min="1" max="200" step="1" value="${w.units}"></label></div>
@@ -2096,11 +2108,11 @@ function renderWizard() {
       <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor or device"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, attrsFor, w.pick)}</svg></div>
       ${height ? `<div class="now"><strong>Height</strong>${height}</div>` : ""}${offMap}${keyHtml}${devNotice}`;
   }
-  const blocked = (w.step === 3 && lost.length > 0) || (w.step === 1 && !!nameIssue);
-  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Map devices";
-  const fix = w.step === 1 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
-  return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `Placement: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
-    <div class="row"><button class="btn" data-wiz="back">${w.step === 1 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${w.step === last ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
+  const blocked = (w.step === 3 && lost.length > 0) || (w.step === 0 && !!nameIssue);
+  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.flow[0] !== 3 || w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Map devices";
+  const fix = w.step === 0 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
+  return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `${{ 0: "Zone details", 1: "Zone layout", 3: "Placement" }[w.flow[0]]}: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
+    <div class="row"><button class="btn" data-wiz="back">${at === 0 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${last ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
 }
 /* Updates in place, so typing a name keeps the phone keyboard open. */
 function wizNameSync(input) {
@@ -2235,7 +2247,8 @@ function wizDraft(w) {
   const z = w.id && zoneById(w.id), L = wizLayout(w), [items, add] = changeList(), was = (f) => (z ? f(z.layout) : "Not set");
   const size = (x) => `${x.w} x ${x.d} m`, units = (x) => String(x.units), grid = (x) => `${x.rows} rows, ${x.cols} columns`;
   add("Zone name", z ? z.name : "New zone", w.name.trim());
-  add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L));
+  add("Description", (z && z.description) || "None", w.desc.trim() || "None");
+  if (z) { add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L)); }
   for (const s of w.sensors) {
     const old = z && z.sensors.find((x) => x.id === s.id), where = (p, g) => (p ? posText(p, g) : "Not placed");
     if (old) { add(`${s.name} position`, where(old.pos, z.layout), where(s.pos, L)); add(`${s.name} height`, LEVELS[old.level], LEVELS[s.level]); }
@@ -2250,13 +2263,15 @@ function wizDraft(w) {
   }
   for (const v of z ? virtualOf(z) : []) if (!w.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, posText(v.pos, z.layout), "Removed");
   const left = devsOff(w);
-  const note = left.length ? `Not on the map: ${left.map((d) => d.name).join(", ")}. Placing a device is optional.` : "";
-  return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note, apply: (done) => { saveWizard(w, "Placement saved.").then(done); } };
+  const note = !z ? `It starts at ${size(L)} with ${L.units} units until you set its layout.` : left.length ? `Not on the map: ${left.map((d) => d.name).join(", ")}. Placing a device is optional.` : "";
+  const said = { 0: "Zone details saved.", 1: "Zone layout saved.", 3: "Placement saved." }[w.flow[0]];
+  return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note, apply: (done) => { saveWizard(w, said).then(done); } };
 }
 async function saveWizard(w, said) {
   const r = await saveConfig(() => {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
+    if (w.desc.trim()) z.description = w.desc.trim(); else delete z.description;
     const virt = w.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...v.pos] }));
     if (virt.length) z.virtual = virt; else delete z.virtual;
     for (const wd of w.devs) {
@@ -2271,8 +2286,8 @@ async function saveWizard(w, said) {
   const z = zoneById(r.value);
   ui.wiz = null; ui.zone = z.id; ui.picked = null;
   if (!w.id) { ui.guide = { id: z.id }; ui.screen = "setup"; toast(`${z.name} created.`); render(); window.scrollTo(0, 0); return []; }
-  if (guideReturn(z.id, "place")) { toast(said); render(); window.scrollTo(0, 0); return []; }
-  if (!z.sensors.length && !placeable(z).length && !virtualOf(z).length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
+  if (guideReturn(z.id, WIZ_KEY[w.flow[0]])) { toast(said); render(); window.scrollTo(0, 0); return []; }
+  if (w.flow[0] === 3 && !z.sensors.length && !placeable(z).length && !virtualOf(z).length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
   ui.screen = "zone"; toast(said); render();
   return [];
 }
@@ -2399,9 +2414,11 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-role]"))) { const id = el.dataset.role, val = el.dataset.val; saveConfig(() => { const d = devices.find((x) => x.id === id); d.type = val; return d.name; }).then((r) => { toast(r.ok ? `Saved ${r.value} as ${val}.` : `Not saved. ${r.error}`); render(); }); return; }
   if ((el = q("[data-wizard]"))) {
     openWizard(el.dataset.wizard); ui.screen = "setup";
-    if (el.dataset.wstep) { ui.wiz.step = 3; const first = stranded(ui.wiz)[0] || (el.dataset.wpick && wizItem(ui.wiz, el.dataset.wpick)) || devsOff(ui.wiz)[0]; ui.wiz.pick = first ? first.id : null; }
+    const w = ui.wiz, first = stranded(w)[0] || (el.dataset.wpick && wizItem(w, el.dataset.wpick)) || (el.dataset.wstep ? devsOff(w)[0] : w.sensors[0] || devsOff(w)[0] || w.devs[0]);
+    w.pick = first ? first.id : null;
     render(); window.scrollTo(0, 0); return;
   }
+  if ((el = q("[data-details], [data-layout]"))) { openWizard(el.dataset.details || el.dataset.layout, el.dataset.details ? [0] : [1, 2]); ui.screen = "setup"; render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-mapw]"))) {
     const id = el.dataset.mapw, step = Number(el.dataset.mapstep) || 1, fromSched = !!ui.sched;
     guarded(() => { openMap(id); Object.assign(ui.mapw, { step, entry: step, backToSched: fromSched }); render(); window.scrollTo(0, 0); }, ui.sched ? [schedDraft(ui.sched)] : []);
@@ -2484,9 +2501,9 @@ document.addEventListener("click", (e) => {
     render(); return;
   }
   if ((el = q("[data-wiz]"))) {
-    if (el.dataset.wiz === "back") { if (w.step === 1) guarded(() => { ui.wiz = null; render(); }); else { w.step--; render(); } return; }
-    if (w.step === 1) { w.step = 2; render(); return; }
-    if (w.step === 2 && w.id) { w.step = 3; const first = stranded(w)[0] || w.sensors[0] || devsOff(w)[0] || w.devs[0]; w.pick = first ? first.id : null; render(); return; }
+    const flow = wizFlow(w), at = flow.indexOf(w.step);
+    if (el.dataset.wiz === "back") { if (at === 0) guarded(() => { ui.wiz = null; render(); }); else { w.step = flow[at - 1]; render(); } return; }
+    if (at < flow.length - 1) { w.step = flow[at + 1]; if (w.step === 3) { const first = stranded(w)[0] || w.sensors[0] || devsOff(w)[0] || w.devs[0]; w.pick = first ? first.id : null; } render(); return; }
     if (wizDraft(w).items.length) openReview(); else saveWizard(w, "Nothing changed.");
   }
 });
@@ -2564,7 +2581,7 @@ document.addEventListener("change", (e) => {
     if (t.mlink) { const id = e.target.id; if (e.target.value) m.links[t.mlink] = e.target.value; else delete m.links[t.mlink]; render(); refocus(id); }
     return;
   }
-  const w = ui.wiz; if (!w || e.target.id === "wiz-name" || e.target.id === "wiz-vname") return; const v = e.target.value;
+  const w = ui.wiz; if (!w || e.target.id === "wiz-name" || e.target.id === "wiz-vname" || e.target.id === "wiz-desc") return; const v = e.target.value;
   const n = Number(v); if (!Number.isFinite(n) || n <= 0) return;
   if (e.target.id === "wiz-w") w.w = Math.min(100, n);
   if (e.target.id === "wiz-d") w.d = Math.min(100, n);
@@ -2586,6 +2603,7 @@ document.addEventListener("pointercancel", endDrag);
 document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
   if (e.target.id === "wiz-vname" && ui.wiz) ui.wiz.vname = e.target.value;
+  if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.mapw) { ui.mapw.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.mapw, zoneById(ui.mapw.id)); }
   if (e.target.id === "map-lq" && ui.mapw) { ui.mapw.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.mapw, zoneById(ui.mapw.id)); }
