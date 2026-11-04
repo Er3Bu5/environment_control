@@ -109,11 +109,11 @@ if (process.env.SMOKE) {
   check("Lights: Garden lists its controllers and plugs", lit.length === 8, lit);
   check("Lights: the controllers show HA's brightness", (await ev(`document.querySelectorAll('[data-cgroup="Lights"] input[type=range]').length`)) === 2 && lit[0].includes(want.lights.overhead === null ? "Off." : `On, ${want.lights.overhead}%`), lit[0]);
   for (const [id, want2] of Object.entries(want.sched)) {
-    await go(`ui.screen="setup";render();document.querySelector('[data-schedw="${id}"]').click()`); await clean(`${id} Day and night`);
+    await go(`ui.screen="setup";render();document.querySelector('[data-vpd="${id}"]').click()`); await clean(`${id} Targets, day and night`);
     const v = await ev(`ui.sched.vals`);
     check(`${id} Day and night: the page holds HA's times, and no light limits`, v.day === want2.day && v.night === want2.night && v.dayMin === undefined && v.nightMax === undefined, v);
     await shot(`real-sched-${id}`);
-    await go(`document.querySelector("[data-sexit]").click()`);
+    await go(`document.querySelector("[data-tdexit]").click()`);
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
     const rows = await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[...t.querySelectorAll("tr")].pop().textContent)`);
     check(`${id} Targets: the zone page holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
@@ -122,16 +122,16 @@ if (process.env.SMOKE) {
     await go(`ui.vpdw.period="night";render()`);
     const night = await ev(`document.querySelector("#vin-light-0").value`);
     check(`${id} Targets: the boxes hold HA's light limits`, Number(day) === want2.dayMin && Number(night) === want2.nightMax, [day, night]);
-    await go(`document.querySelector("[data-vexit]").click()`);
+    await go(`document.querySelector("[data-tdexit]").click()`);
   }
-  await go(`document.querySelector('[data-schedw="garden"]').click()`);
+  await go(`ui.screen="setup";render();document.querySelector('[data-vpd="garden"]').click()`);
   check("Emerson: the red windows match HA's failsafe sum", (await ev(`document.querySelector("#s-em").textContent`)) === want.emerson, await ev(`document.querySelector("#s-em").textContent`));
-  await go(`document.querySelector("[data-sexit]").click()`);
-  await go(`document.querySelector('[data-schedw="veg"]').click()`);
+  await go(`document.querySelector("[data-tdexit]").click()`);
+  await go(`ui.screen="setup";render();document.querySelector('[data-vpd="veg"]').click()`);
   check("Schedule: Veg says Nursery shares its helpers", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
-  await go(`document.querySelector("[data-sexit]").click()`);
+  await go(`document.querySelector("[data-tdexit]").click()`);
   for (const z of ["garden", "veg", "nursery"]) for (const p of ["day", "night"]) {
-    const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;return i})()`);
+    const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;ui.td=null;ui.sched=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
   check("Red lights: Garden's come from its helpers, and Veg and Nursery don't use them", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none"]));
@@ -148,14 +148,14 @@ if (process.env.SMOKE) {
   }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
   for (const id of ["garden", "veg", "nursery"]) {
-    await go(`ui.screen="setup";openMap("${id}");ui.mapw.step=3;render()`); await sleep(150); await clean(`${id} Map devices helpers`);
-    const r = await ev(`({issues:mapIssues(ui.mapw).map(i=>i.text),changes:mapDraft(ui.mapw).items.length,numbers:helperCatalog.filter(h=>h.entity.startsWith("input_number.")).length})`);
-    check(`${id} Map devices: every helper it links is offered, in the right unit`, r.issues.length === 0, r.issues);
-    check(`${id} Map devices: opening it changes nothing`, r.changes === 0, r.changes);
-    check(`${id} Map devices: every number helper HA reported is offered`, r.numbers === snapIds.filter((e) => e.startsWith("input_number.")).length, r.numbers);
-    if (id === "garden") { await go(`ui.mapw.lp="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
+    await go(`ui.screen="setup";openTd("${id}");render()`); await sleep(150); await clean(`${id} Targets, day and night helpers`);
+    const r = await ev(`({issues:tdIssues().map(i=>i.text),changes:tdDraft(ui.td).items.length,numbers:helperCatalog.filter(h=>h.entity.startsWith("input_number.")).length})`);
+    check(`${id} Targets, day and night: every helper it links is offered, in the right unit`, r.issues.length === 0, r.issues);
+    check(`${id} Targets, day and night: opening it changes nothing`, r.changes === 0, r.changes);
+    check(`${id} Targets, day and night: every number helper HA reported is offered`, r.numbers === snapIds.filter((e) => e.startsWith("input_number.")).length, r.numbers);
+    if (id === "garden") { await go(`ui.vpdw.period="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
   }
-  await go(`ui.mapw=null;ui.screen="setup";render()`);
+  await go(`ui.td=null;ui.sched=null;ui.vpdw=null;ui.screen="setup";render()`);
   await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
   await go(`ui.leafw=null;ui.screen="setup";render()`);
   check("Setup: Sensor Calibration sits before Targets in every zone", (await ev(`["garden","veg","nursery"].every(z=>document.querySelector('[data-calw="'+z+'"]').nextElementSibling.dataset.vpd===z)`)) === true);
@@ -248,7 +248,7 @@ await send("Input.synthesizeTapGesture", { x: stageRect.x, y: stageRect.y }); aw
 console.log("CONTROL simulated touch tap on an old button produced clicks:", await ev(`__clicks`));
 
 // Nothing valid may be newly blocked by the wider checks
-const falseBlocks = await ev(`(()=>{const out=[];for(const z of zones){openVpd(z.id);const v=ui.vpdw;for(const p of ["day","night"]){v.period=p;const before=vProblems(v.bands[p]);if(before.length)out.push([z.id,p,"bands",before]);for(const s of Object.keys(STAGES)){applyStage(v,s);const pr=vProblems(v.bands[p]);if(pr.length)out.push([z.id,p,s,pr]);}}}ui.vpdw=null;return out})()`);
+const falseBlocks = await ev(`(()=>{const out=[];for(const z of zones){openVpd(z.id);const v=ui.vpdw;for(const p of ["day","night"]){v.period=p;const before=vProblems(v.bands[p]);if(before.length)out.push([z.id,p,"bands",before]);for(const s of Object.keys(STAGES)){applyStage(v,s);const pr=vProblems(v.bands[p]);if(pr.length)out.push([z.id,p,s,pr]);}}}ui.vpdw=null;ui.td=null;ui.sched=null;return out})()`);
 check("every zone band and Athena stage passes", falseBlocks.length === 0, falseBlocks);
 
 await open();
@@ -351,7 +351,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 }
 // ---------- Controls
 const goTab = async (name) => { await ev(`[...document.querySelectorAll("#tabs button")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
-const reset = () => ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.sched=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
+const reset = () => ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
 const groupNames = () => ev(`[...document.querySelectorAll("[data-cgroup] .dev-name span:first-child")].map(e=>e.textContent)`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 await phone(390, 844); await reset(); await goTab("Garden");
@@ -450,7 +450,7 @@ const spareMapped = () => ev(`devices.find(d=>d.id==="spare-plug").zones.join()`
 const addSpare = async () => {
   await ev(`ui.review=null;ui.guard=null;renderModal();ui.screen="setup";openMap("garden");ui.mapw.roles.plug="Heater";ui.mapw.step=2;render()`); await sleep(40);
   await ev(`document.querySelector('[data-mdevice="spare-plug"]').click()`); await sleep(40);
-  for (let i = 0; i < 2; i++) { await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50); }
+  await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50);
   await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(60);
   await ev(`document.querySelector("[data-rapply]").click()`); await sleep(200);
 };
@@ -518,7 +518,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 // ---------- Leaf temperature offset
 await phone(390, 844); await reset();
 const L = { rows: (id) => `ui.leafw.rows["${id}"]` };
-const openL = async (zone = "garden") => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openCalibration("${zone}");render();window.scrollTo(0,0)`); await sleep(50); };
+const openL = async (zone = "garden") => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";openCalibration("${zone}");render();window.scrollTo(0,0)`); await sleep(50); };
 const ACK = 900, GIVE_UP = 1620;
 /* A board's offset lives in the fake HA now, so resets and silent boards are set there. */
 const boardSet = async (pairs) => { await onHA(`(${JSON.stringify(pairs)}).forEach(([e,v])=>fakeHA.setState(e,Number(v).toFixed(1)))`); await sleep(60); };
@@ -647,12 +647,12 @@ check("Leaf: leaving by a tab drops the screen and saves nothing", (await ev(`!u
 await ev(`document.activeElement&&document.activeElement.blur()`);
 
 // Sensor Calibration comes before Targets and holds the leaf temperature offset
-const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
+const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
 const setupButtons = (zone) => ev(`[...document.querySelector('[data-mapw="${zone}"]').parentElement.children].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
 await setupNow();
-check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets", "Day and night", "Remove zone"]), await setupButtons("garden"));
-check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets", "Day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets", "Day and night", "Remove zone"]), await setupButtons("veg"));
+check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("garden"));
+check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("veg"));
 await calibrate();
 check("Order: one page, leaf temperature offset only, no soil until irrigation", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
 check("Order: the page is called Sensor Calibration", (await ev(`document.querySelector("#main h1").textContent`)) === "Sensor Calibration: Garden");
@@ -714,7 +714,7 @@ check("Basis: offsets starting to differ doesn't move Back", (await ev(`document
 await ev(`ui.leafw=null;zones[0].sensors.find(s=>s.id==="g-under").leaf=-0.5;render()`);
 await openL("veg");
 check("Basis: not offered with one sensor", (await ev(`!document.querySelector("#l-basis")`)) === true);
-await ev(`ui.leafw=null;ui.vpdw=null;render()`);
+await ev(`ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;render()`);
 
 // One offset for the chart
 await open();
@@ -743,11 +743,11 @@ check("Finish: Target lands inside every ideal range", fin.inside, fin);
 check("Finish: its temperature, humidity and VPD still agree", fin.agrees, fin);
 check("Finish: it can be saved", fin.saveOn, fin);
 check("Finish: and it says the Target moved", (await ev(`document.querySelector("#toast").textContent`)).includes("Target moved"), await ev(`document.querySelector("#toast").textContent`));
-await ev(`(document.querySelector("[data-vexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
+await ev(`(document.querySelector("[data-tdexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
 await boardSet([["number.nursery_environment_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
 
 // Mapping decides whether a sensor has an offset on the device
-await ev(`ui.vpdw=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
+await ev(`ui.vpdw=null;ui.td=null;ui.sched=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
 check("Map: the leaf temperature offset entity is matched with the rest", (await ev(`!!document.querySelector('[data-mmetric="v-env:leaf"]')`)) === true);
 await ev(`(()=>{const e=document.querySelector('[data-mmetric="v-env:leaf"]');e.value="none";e.dispatchEvent(new Event("change",{bubbles:true}));saveMap(ui.mapw);ui.mapw=null;render()})()`); await sleep(50);
 await openL("veg");
@@ -758,7 +758,7 @@ await ev(`zones[1].sensors[0].leafUnused=false;zones[1].sensors[0].leaf=undefine
 await ev(`zones[1].sensors[0].t=null;zones[1].sensors[0].h=null`); await openL("veg");
 check("Leaf: a dead sensor shows no data, never a number", await ev(`(()=>{const t=document.querySelector("#main").textContent;return t.includes("No data from this sensor")&&!t.includes("NaN")&&t.includes("VPD --")})()`), await ev(`document.querySelector("#l-zone").textContent`));
 await ev(`zones[1].sensors[0].t=20.4;zones[1].sensors[0].h=72.1;ui.leafw=null;render()`);
-await ev(`ui.vpdw=null;ui.screen="setup";render()`);
+await ev(`ui.vpdw=null;ui.td=null;ui.sched=null;ui.screen="setup";render()`);
 
 for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390, 844, "phone", KEYBOARD.portrait], [320, 640, "small phone", KEYBOARD.portrait], [844, 390, "landscape", KEYBOARD.landscape]]) {
   await phone(w, h); await openL(); await sleep(60);
@@ -854,7 +854,7 @@ await ev(`zones[1].sensors.forEach((s,i)=>{s.avg=window.__keep[i]});render()`);
 await shot("overview-light-graph");
 await phone(800, 1200); await sleep(60); await shot("overview-light-graph-foldable"); await phone(390, 844);
 
-const setupOnly = async () => { await ev(`ui.sched=null;ui.leafw=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
+const setupOnly = async () => { await ev(`ui.sched=null;ui.td=null;ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
 const cClick = async (sel) => { await ev(`document.querySelector('${sel}').click()`); await sleep(50); };
 
 // ---------- Adding and naming a zone
@@ -903,13 +903,13 @@ await cClick("[data-gfinish]");
 check("Zone: Finish for now lands on the zone, which says what's left", (await ev(`ui.screen==="zone" && ui.zone==="${newId}" && !ui.guide`)) === true && (await ev(`document.querySelector("#main [data-guide]").textContent`)).includes("Map devices, Zone layout, Placement, Sensor Calibration, Targets, day and night"), await ev(`document.querySelector("#main [data-guide]")?.textContent`));
 check("Zone: its page shows the description, as text", (await ev(`document.querySelector("#main .zdesc")?.textContent`)) === "Flowering tent <b>bold</b>" && (await ev(`!document.querySelector("#main .zdesc b")`)) === true);
 const newScreens = [];
-for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overview"], [`ui.screen="zone";ui.zone="${newId}";render()`, "zone"], [`ui.screen="devices";render()`, "devices"], [`ui.screen="setup";render()`, "setup"], [`openVpd("${newId}");render()`, "targets"], [`ui.vpdw=null;render()`, "setup again"]]) {
+for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overview"], [`ui.screen="zone";ui.zone="${newId}";render()`, "zone"], [`ui.screen="devices";render()`, "devices"], [`ui.screen="setup";render()`, "setup"], [`openVpd("${newId}");render()`, "targets"], [`ui.vpdw=null;ui.td=null;ui.sched=null;render()`, "setup again"]]) {
   await ev(e); await sleep(60);
   if (/NaN|undefined/.test(await ev(`document.querySelector("#main").textContent`))) newScreens.push(name);
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
 check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img, #tabs img")`)) === true);
-check("Zone: Setup's buttons follow the setup order, with no Sensor Calibration until it has sensors", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Targets", "Day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Setup's buttons follow the setup order, with no Sensor Calibration until it has sensors", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
 await ev(`ui.screen="overview";render()`); await sleep(40);
@@ -920,7 +920,7 @@ check("Zone: Continue setup goes back to the guide", (await ev(`ui.screen==="set
 await cClick("#g-devices [data-mapw]");
 await ev(`document.querySelector('[data-msensor="x-spare"]').click()`); await sleep(40);
 await ev(`Object.assign(ui.mapw.choice["x-spare"],{temperature:"a",humidity:"a",vpd:"a",light:"a"});render()`); await sleep(40);
-for (let i = 0; i < 3; i++) { await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50); }
+for (let i = 0; i < 2; i++) { await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(50); }
 check("Zone: mapping can finish for a new zone", (await ev(`!document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`document.querySelector("#main").textContent.slice(0,300)`));
 await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(60);
 await ev(`document.querySelector("[data-rapply]")?.click()`); await sleep(200);
@@ -941,12 +941,12 @@ await ev(`document.querySelector('[data-spot="0,0"]').dispatchEvent(new MouseEve
 await wizNext(); await cClick("[data-rapply]"); await sleep(200);
 check("Zone: placing goes back to the guide too", (await ev(`ui.screen==="setup" && !!ui.guide && zoneById("${newId}").sensors[0].pos.join()==="0,0"`)) === true && (await guideRows())[3] === "g-place:Done", await guideRows());
 check("Zone: its reading now shows", (await ev(`zoneById("${newId}").now.temperature`)) === 22);
-await cClick("#g-targets [data-vpd]"); await cClick("[data-vexit]"); await sleep(200);
+await cClick("#g-targets [data-vpd]"); await cClick("[data-tdexit]"); await sleep(200);
 check("Zone: going through Targets counts the last step as done", (await guideRows())[5] === "g-targets:Done", await guideRows());
 await cClick("[data-gfinish]"); await sleep(40);
 check("Zone: what's left still shows on its page", (await ev(`document.querySelector("#main [data-guide]").textContent`)).includes("Still to set up: Sensor Calibration."), await ev(`document.querySelector("#main [data-guide]")?.textContent`));
 await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
-check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets", "Day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`document.querySelector('[data-details="veg"]').click()`); await sleep(40);
 check("Zone: an existing zone's Zone details can rename it", (await ev(`document.querySelector("#wiz-name").value`)) === "Veg" && (await nextOff()) === false && (await ev(`document.querySelector("#main h1").textContent`)) === "Zone details: Veg");
 await tap("#wiz-name"); await type("Veg north"); await wizNext(); await cClick("[data-rapply]");
@@ -1098,19 +1098,21 @@ check("Placement: Apply saves it", (await ev(`zones[1].sensors[0].level`)) === "
 await ev(`zones[1].name="Veg";zones[1].sensors[0].level="above";zones[1].sensors[0].pos=[0.5,0.5]`);
 
 await ev(`ui.screen="setup";ui.wiz=null;openMap("veg");render()`); await sleep(40);
-for (let i = 0; i < 3; i++) await clickIt('[data-mstep="next"]');
+for (let i = 0; i < 2; i++) await clickIt('[data-mstep="next"]');
 check("Map: nothing changed just finishes", (await ev(`document.querySelector('[data-mstep="next"]').textContent`)) === "Finish", await ev(`document.querySelector('[data-mstep="next"]').textContent`));
 await clickIt('[data-mstep="next"]');
 check("Map: without a review", (await modalOpen()) === false && (await ev(`!ui.mapw`)) === true);
 const wasLinked = await ev(`zones[1].linked`);
-await ev(`openMap("veg");ui.mapw.band=${wasLinked} ? "here" : "helpers";ui.mapw.step=4;render()`); await sleep(40);
+const wasCombine = await ev(`methodOf(zones[1])`);
+await ev(`openMap("veg");ui.mapw.combine.env=${JSON.stringify(wasCombine)}==="median"?"average":"median";ui.mapw.step=3;render()`); await sleep(40);
 await clickIt('[data-mstep="next"]');
-check("Map: the review lists what moved", (await modalText()).includes("Limits") && (await ev(`zones[1].linked`)) === wasLinked, await modalText());
+check("Map: the review lists what moved", (await modalText()).includes("combine by") && (await ev(`methodOf(zones[1])`)) === wasCombine, await modalText());
+check("Map: it's sensors and devices only now, with day, night and limits on their own page", same(await ev(`MAP_STEPS`), ["Sensors", "Devices", "Check"]) && !(await modalText()).includes("Limits"));
 await clickIt("[data-rback]"); await ev(`ui.mapw.step=1;render()`); await sleep(40);
 await clickIt('[data-mstep="back"]');
 check("Map: Cancel asks once something changed", (await modalText()).includes("Discard unsaved changes?"), await modalText());
 await clickIt("[data-gdiscard]");
-check("Map: discarding keeps what was saved", (await ev(`!ui.mapw`)) === true && (await ev(`zones[1].linked`)) === wasLinked);
+check("Map: discarding keeps what was saved", (await ev(`!ui.mapw`)) === true && (await ev(`methodOf(zones[1])`)) === wasCombine);
 
 for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small phone"], [844, 390, "landscape"]]) {
   await phone(w, h); await openL(); await tap("#lin-g-left"); await type("1.6"); await key("Enter", 13); await sleep(100);
@@ -1231,7 +1233,7 @@ await ev(`ui.mapw=null;render()`);
 // ---------- Day and night
 await phone(390, 844); await reset(); await setupOnly();
 const setBox = async (k, v) => { await ev(`(()=>{const e=document.querySelector("#sin-${k}");e.value=${JSON.stringify(v)};e.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
-const schedOpen = async (id) => { await setupOnly(); await clickIt(`[data-schedw="${id}"]`); };
+const schedOpen = async (id) => { await setupOnly(); await clickIt(`[data-vpd="${id}"]`); };
 const schedModal = () => ev(`document.querySelector("#modal").textContent`);
 const schedSent = () => ev(`schedSends.length`);
 check("Sched: Setup says how long the day is", (await ev(`document.querySelector("#main").textContent`)).includes("12h 00m of light"));
@@ -1240,7 +1242,7 @@ check("Sched: opens on the zone's times", (await ev(`document.querySelector("#si
 check("Sched: it's a v1 page, with nothing marked as coming later", !/Coming|Preview/.test(await ev(`document.querySelector(".sched-title").textContent`)));
 check("Sched: shows the photoperiod", (await ev(`document.querySelector("#s-len").textContent`)) === "12h 00m of light, 12h 00m of dark", await ev(`document.querySelector("#s-len").textContent`));
 check("Emerson: same sum as the HA failsafe", (await ev(`document.querySelector("#s-em").textContent`)) === "Red lights 06:55 - 07:10 and 18:50 - 19:05", await ev(`document.querySelector("#s-em").textContent`));
-check("Sched: light limits aren't here, they belong to the sensors", (await ev(`!document.querySelector("#s-limits") && !document.querySelector("#sin-dayMin") && !document.querySelector("#main").textContent.includes(" lx")`)) === true);
+check("Sched: light limits aren't with the times, they belong to the sensors with the other limits", (await ev(`!document.querySelector("#s-limits") && !document.querySelector("#sin-dayMin") && !document.querySelector("#s-times [data-vin], #s-emerson [data-vin]") && !!document.querySelector("#td-targets #vin-light-0")`)) === true);
 check("Sched: nothing changed, no bar", (await ev(`document.querySelector("#draftbar").hidden`)) === true);
 await shot("sched-phone");
 await setBox("night", "18:00");
@@ -1265,7 +1267,7 @@ await haSet([["input_datetime.garden_night_time", "19:00:00"]]); await ev(`rende
 await schedOpen("veg");
 check("Sched: across midnight the length is right", (await ev(`document.querySelector("#s-len").textContent`)) === "18h 00m of light, 6h 00m of dark", await ev(`document.querySelector("#s-len").textContent`));
 check("Sched: shared helpers are named", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
-check("Sched: the helpers it reads are listed by entity", same(await ev(`[...document.querySelectorAll("#s-times .trow")].map(r=>r.textContent)`), ["Lights oninput_datetime.veg_day_time", "Lights offinput_datetime.veg_night_time"]), await ev(`[...document.querySelectorAll("#s-times .trow")].map(r=>r.textContent)`));
+check("Sched: the helpers it reads are picked right there, by entity", same(await ev(`[document.querySelector("#map-onHelper").value,document.querySelector("#map-offHelper").value]`), ["input_datetime.veg_day_time", "input_datetime.veg_night_time"]), await ev(`[document.querySelector("#map-onHelper").value,document.querySelector("#map-offHelper").value]`));
 check("Emerson: a zone without it says it's not used, with nothing to set", (await ev(`document.querySelector("#s-emerson").textContent`)).includes("Not used in Veg.") && (await ev(`!document.querySelector("#sin-morning")`)) === true);
 await setBox("day", "15:00"); await clickIt("[data-dreview]");
 check("Review: names the zone that moves with it", (await schedModal()).includes("Veg and Nursery") && (await schedModal()).includes("Nursery uses the same helpers"), await schedModal());
@@ -1301,7 +1303,7 @@ await clickIt("[data-ddiscard]");
 check("Discard: everything goes back", (await ev(`document.querySelector("#sin-evening").value`)) === "5" && (await ev(`document.querySelector("#draftbar").hidden`)) === true);
 await tap("#sin-morning"); await type("9"); await key("Enter", 13); await sleep(40);
 check("Typing: a real keystroke edit lands in the draft", (await ev(`ui.sched.vals.morning`)) === 9, await ev(`ui.sched.vals.morning`));
-await clickIt("[data-sexit]");
+await clickIt("[data-tdexit]");
 check("Leaving: Back asks first", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Discard unsaved changes?" && (await ev(`!!ui.sched`)) === true);
 await clickIt("[data-gkeep]"); await goTab("Overview");
 check("Leaving: so does a tab", (await ev(`!!ui.guard`)) === true);
@@ -1314,26 +1316,21 @@ await setBox("day", "15:30"); const sentFixed = await schedSent(); await clickIt
 check("Sched: Set here saves at once and sends nothing", (await schedSent()) === sentFixed && (await ev(`zoneById("nursery").dayAt`)) === 15.5 * 60 && (await ev(`zoneById("veg").dayAt`)) === 16 * 60, [await schedSent(), sentFixed, await ev(`[zoneById("nursery").dayAt,zoneById("veg").dayAt,ui.review&&ui.review.errors]`)]);
 await ev(`zoneById("nursery").periodMode=undefined;zoneById("nursery").dayAt=16*60;zoneById("garden").periodMode="detected";zoneById("garden").lights=["switch.tent_lights"];render()`);
 await schedOpen("garden");
-check("Sched: Detected has no times to set", (await ev(`!document.querySelector("#sin-day") && document.querySelector("#s-times").textContent.includes("no times to set") && !!document.querySelector("#s-times [data-mapw]")`)) === true);
+check("Sched: Detected has no times to set, and its switches are picked right there", (await ev(`!document.querySelector("#sin-day") && document.querySelector("#s-times").textContent.includes("no times to set") && document.querySelector('[data-mlight="switch.tent_lights"]').getAttribute("aria-pressed")==="true"`)) === true);
 check("Sched: but its Emerson effect still works", (await ev(`!!document.querySelector("#sin-morning")`)) === true && !/NaN|undefined/.test(await ev(`document.querySelector("#main").textContent`)));
-await setBox("morning", "9"); await clickIt("#s-times [data-mapw]");
-check("Sched: Map devices from here asks before dropping an edit", (await ev(`!!ui.guard`)) === true);
-await clickIt("[data-gkeep]"); await clickIt("[data-ddiscard]");
-const followed = await ev(`[...document.querySelectorAll("#s-times .trow")].map(r=>r.textContent)`);
-check("Sched: Detected names the switch it follows, with its entity and state", same(followed, ["Tent lightsswitch.tent_lightsOff now"]), followed);
-check("Sched: and says when it's day", (await ev(`document.querySelector("#s-times").textContent`)).includes("Garden is in its day while this is on"));
-check("Sched: its button reads Edit schedule", (await ev(`document.querySelector("#s-times [data-mapw]").textContent`)) === "Edit schedule");
-await clickIt("#s-times [data-mapw]");
-check("Sched: Edit schedule opens Map devices at Day, night and limits", (await ev(`ui.mapw && ui.mapw.step===3 && document.querySelector('.steps [aria-current]').textContent==="3. Day, night and limits" && document.querySelector('[data-mstep="back"]').textContent==="Cancel"`)) === true);
-await clickIt('[data-mstep="back"]');
-check("Sched: Cancel there goes back to Day and night", (await ev(`!!ui.sched && !ui.mapw && ui.sched.id==="garden"`)) === true);
-await ev(`window.__keptLights=LIGHTS.garden;delete LIGHTS.garden;ui.sched=null;openMap("garden");ui.mapw.step=3;ui.mapw.period="detected";render()`); await sleep(40);
+await setBox("morning", "9"); await clickIt('[data-mperiod="fixed"]');
+check("Sched: changing how day is known brings in the times and keeps an edit to the red lights", (await ev(`ui.sched.vals.morning`)) === 9 && (await ev(`!!document.querySelector("#sin-day")`)) === true, await ev(`ui.sched.vals`));
+const periodReview = await ev(`openReview();document.querySelector("#modal").textContent`);
+check("Sched: and the review lists the source change with the value", periodReview.includes("Day and night") && periodReview.includes("Detected") && periodReview.includes("Set here") && periodReview.includes("Morning extension"), periodReview);
+await clickIt("[data-rback]"); await clickIt("[data-ddiscard]");
+check("Sched: Discard puts the source back too", (await ev(`ui.td.m.period`)) === "detected" && (await ev(`ui.sched.vals.morning`)) === 5);
+await ev(`window.__keptLights=LIGHTS.garden;delete LIGHTS.garden;openTd("garden");ui.td.m.period="detected";render()`); await sleep(40);
 const fresh = await ev(`document.querySelector("#map-lights").textContent`);
 check("Sched: a zone with no suggested switches lists everything, not an empty search", !fresh.includes("Nothing matches") && fresh.includes("Everything in Home Assistant") && fresh.includes("switch.tent_lights"), fresh);
-await ev(`LIGHTS.garden=window.__keptLights;ui.mapw=null;render()`);
+await ev(`LIGHTS.garden=window.__keptLights;ui.td=null;ui.sched=null;ui.vpdw=null;render()`);
 await reset(); await goTab("Setup");
-await ev(`document.querySelector('#main [data-schedw="garden"]').click()`); await sleep(50);
-await ev(`document.querySelector("[data-sexit]").click()`); await sleep(50);
+await ev(`document.querySelector('#main [data-vpd="garden"]').click()`); await sleep(50);
+await ev(`document.querySelector("[data-tdexit]").click()`); await sleep(50);
 check("Sched: Back returns to where you came from", (await ev(`ui.screen==="setup" && !ui.sched`)) === true);
 
 /* Light limits are thresholds on the sensor, so they sit with the other thresholds. Same helpers, different zones: Veg and Nursery share a schedule but not these. */
@@ -1375,7 +1372,7 @@ await ev(`document.querySelector('[data-vstage="veg"]').click()`); await sleep(4
 check("Limits: an Athena stage leaves them alone", (await limitBox()) === "2500");
 await clickIt("[data-ddiscard]");
 check("Limits: Discard puts them back", (await limitBox()) === "2000" && (await ev(`document.querySelector("#draftbar").hidden`)) === true);
-await ev(`zoneById("garden").linked=false;render()`); await typeLimit("2500"); await period2("night"); await typeLimit("150");
+await ev(`zoneById("garden").linked=false;ui.td.m.band="here";render()`); await typeLimit("2500"); await period2("night"); await typeLimit("150");
 await clickIt("[data-dreview]");
 check("Limits: a zone not on helpers lists both for review", (await ev(`vpdDraft(ui.vpdw).items.map((i)=>i.label).join()`)) === "Day Light Min,Night Light Max", await ev(`vpdDraft(ui.vpdw).items.map((i)=>i.label).join()`));
 await clickIt("[data-rapply]"); await sleep(60);
@@ -1425,9 +1422,9 @@ check("Helpers: only allowlisted attributes cross", helperList.every((h) => Obje
 check("Helpers: listing them maps nothing, so no unlinked helper's state reaches the frame", (await ev(`"input_number.nursery_day_temperature_min_threshold" in haStates`)) === false);
 const pick = async (sel, value) => { await ev(`(()=>{const s=document.querySelector("#${sel}");s.value=${JSON.stringify(value)};s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
 const opts = (sel) => ev(`[...document.querySelectorAll("#${sel} option")].map(o=>o.value)`);
-const fixText = () => ev(`document.querySelector(".fixlink")?.textContent || ""`);
-const mapNextOff = () => ev(`document.querySelector('[data-mstep="next"]').disabled`);
-await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+const fixText = () => ev(`document.querySelector("#td-issues")?.textContent || ""`);
+const mapNextOff = () => ev(`!!topDraft().blocked`);
+await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 const onOpts = await opts("map-onHelper");
 check("Picker: lights on lists every time helper HA has, not names built from the zone", onOpts.includes("input_datetime.reservoir_refill_time") && onOpts.includes("input_datetime.garden_day_time") && !onOpts.includes("input_datetime.last_reservoir_refill"), onOpts);
 check("Picker: limit pickers only show once the zone uses its helpers", (await ev(`!!document.querySelector("[data-mlink^='bands']")`)) === false);
@@ -1445,20 +1442,19 @@ check("Picker: the box keeps focus through the redraw", (await active()) === tmi
 await pick("map-l-bands-day-temperature-max", nT);
 check("Picker: one helper behind two limits is flagged", (await fixText()).includes(`${nT} is linked to both Day temperature Min and Day temperature Max`), await fixText());
 await pick("map-l-bands-day-temperature-max", "input_number.nursery_day_temperature_max_threshold");
-await clickIt('[data-mlp="night"]');
+await clickIt('[data-vperiod="night"]');
 await pick("map-l-bands-night-vpd-min", "input_number.reservoir_target_ec");
-await clickIt('[data-mlp="day"]');
+await clickIt('[data-vperiod="day"]');
 check("Picker: a problem on the other period is still caught", (await fixText()).includes("Night VPD Min: input_number.reservoir_target_ec is in mS/cm, not kPa"), await fixText());
-await clickIt(".fixlink");
-check("Picker: and its Fix opens Night on that box", (await ev(`ui.mapw.lp`)) === "night" && (await active()) === "map-l-bands-night-vpd-min");
+await clickIt("#td-issues [data-tdfix]");
+check("Picker: and its Fix opens Night on that box", (await ev(`ui.vpdw.period`)) === "night" && (await active()) === "map-l-bands-night-vpd-min");
 await pick("map-l-bands-night-vpd-min", "input_number.nursery_night_vpd_min_threshold");
 await clickIt('[data-mem="helper"]');
 await pick("map-l-morning", "input_number.emerson_effect_morning_extension");
 check("Picker: red lights from helpers need all three", (await fixText()).includes("Red lights: pick all three helpers."), await fixText());
 await clickIt('[data-mem="none"]');
 check("Picker: with every problem fixed, Next is on", (await mapNextOff()) === false, await fixText());
-await ev(`ui.mapw.step=4;render()`); await sleep(40);
-await clickIt('[data-mstep="next"]');
+await ev(`openReview()`); await sleep(40);
 const linkReview = await modalText();
 check("Picker: the review lists each new link with what it holds, and says HA will ask", linkReview.includes("Day temperature Min") && linkReview.includes(`${nT} (${nTval} °C)`) && linkReview.includes("Set here") && linkReview.includes("asks you to allow each helper"), linkReview);
 check("Picker: nothing is saved before Apply", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").helpers.bands`)) === undefined);
@@ -1471,20 +1467,19 @@ check("Picker: once allowed, exactly the picked links are on disk", savedLinks.l
 check("Picker: Targets now treats them as on your helper", (await ev(`settingLink(zoneById("nursery"),"bands.day.temperature.min")`)) === nT && (await ev(`settingLink(zoneById("nursery"),"bands.day.humidity.min")`)) === undefined);
 await haSet([[nT, 17.5]]);
 check("Picker: and the zone reads what the helper holds", (await ev(`zoneById("nursery").bands.day.temperature[0]`)) === 17.5, await ev(`zoneById("nursery").bands.day.temperature`));
-await reset(); await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+await reset(); await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 await pick("map-onHelper", "input_datetime.reservoir_refill_time");
-await ev(`ui.mapw.step=4;render()`); await sleep(40);
-check("Picker: changing only which helper holds lights on is a change to review", (await ev(`document.querySelector('[data-mstep="next"]').textContent`)) === "Review and apply");
-await clickIt('[data-mstep="next"]');
+check("Picker: changing only which helper holds lights on is a change to review", (await ev(`tdDraft(ui.td).items.length`)) > 0 && (await ev(`document.querySelector("#draftbar").hidden`)) === false);
+await ev(`openReview()`); await sleep(40);
 check("Picker: and the review names both helpers", /Lights on helper.*input_datetime\.veg_day_time \(16:00\).*input_datetime\.reservoir_refill_time \(09:00\)/.test(await modalText()), await modalText());
-await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
+await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
 await clickIt('[data-mem="helper"]');
 for (const [k, e] of [["morning", "morning_extension"], ["daylight", "daylight_time"], ["evening", "evening_extension"]]) await pick(`map-l-${k}`, `input_number.emerson_effect_${e}`);
-await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]'); await clickIt("[data-rapply]"); await sleep(400);
+await ev(`openReview()`); await sleep(40); await clickIt("[data-rapply]"); await sleep(400);
 check("Picker: a helper another zone already links isn't asked about again", (await hostDialog()).open === false);
 check("Picker: linking all three Emerson helpers gives Veg the Emerson effect, read from them", JSON.stringify(await ev(`zoneById("veg").emerson`)) === JSON.stringify(await ev(`zoneById("garden").emerson`)), await ev(`zoneById("veg").emerson`));
-await ev(`openSched("veg");render()`); await sleep(40);
-check("Picker: and Day and night shows it", (await ev(`!!document.querySelector("#s-emerson")`)) === true);
+await ev(`openTd("veg");render()`); await sleep(40);
+check("Picker: and the page shows it, with its values", (await ev(`!!document.querySelector("#sin-morning") && document.querySelector('[data-mem="helper"]').getAttribute("aria-pressed")==="true"`)) === true);
 const wrongKind = await evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.humidity.min="input_datetime.veg_day_time"}).then(r=>[r.ok,r.error])`);
 check("Picker: the backend refuses a limit linked to a time helper", wrongKind[0] === false && wrongKind[1].includes("isn't a number helper"), wrongKind);
 
@@ -1499,6 +1494,9 @@ await clickIt("[data-dreview]");
 const noAimReview = await modalText();
 check("No target: the review lists each target going to None", /Day Temperature Target[^]*None/.test(noAimReview) && noAimReview.includes("Night VPD Target"), noAimReview);
 await clickIt("[data-rapply]"); await sleep(300);
+const appliedHelpers = await ev(`!!ui.review && ui.review.busy`);
+for (let i = 0; i < 80 && (await ev(`!!ui.review`)); i++) await sleep(50);
+check("No target: an Athena stage on a zone with helpers writes them, and the page waits until they report", appliedHelpers === true && (await ev(`!ui.review && !ui.td`)) === true);
 const noAimDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").bands`);
 check("No target: saved as no value in both periods", ["day", "night"].every((p) => ["temperature", "humidity", "vpd"].every((k) => noAimDisk[p][k][2] === null)), noAimDisk);
 await ev(`ui.screen="zone";ui.zone="nursery";render()`); await sleep(60);
@@ -1512,64 +1510,64 @@ check("No target: turning it back on starts it midway between Low and High", bac
 await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(300);
 check("No target: and that saves", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").bands.day.temperature[2]`)) === backOn[0]);
 const callsBefore = (await helperCalls()).length, vegTarget = await onHA(`fakeHA.states["input_number.veg_day_temperature_target"].state`);
-await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
-check("No target: Map devices shows Target pickers while the zone aims for one", (await ev(`!!document.querySelector("#map-l-bands-day-temperature-target")`)) === true);
-await clickIt('[data-mtarget="off"]');
+await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
+check("No target: the page shows Target pickers while the zone aims for one", (await ev(`!!document.querySelector("#map-l-bands-day-temperature-target")`)) === true);
+await clickIt('[data-vtarget="off"]');
 check("No target: and hides them once it doesn't", (await ev(`!!document.querySelector("#map-l-bands-day-temperature-target")`)) === false && (await mapNextOff()) === false);
-await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
-check("No target: the Map devices review says so", /Target[^]*Aim for a target[^]*No target/.test(await modalText()), await modalText());
+await ev(`openReview()`); await sleep(40);
+check("No target: the review says so, target by target", /Day Temperature Target[^]*None/.test(await modalText()), await modalText());
 await clickIt("[data-rapply]"); await sleep(400);
 const vegDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg")`);
 check("No target: the target helpers are unlinked and the zone holds no target", vegDisk.helpers.bands.day.temperature.target === undefined && vegDisk.helpers.bands.day.temperature.min === "input_number.veg_day_temperature_min_threshold" && vegDisk.bands.day.temperature[2] === null, vegDisk.helpers.bands.day);
 check("No target: nothing is written to the helpers, which keep their values", (await helperCalls()).length === callsBefore && (await onHA(`fakeHA.states["input_number.veg_day_temperature_target"].state`)) === vegTarget);
 const lateSet = await evp(`ask("setting",{zone:"veg",name:"bands.day.temperature.target",value:24}).then(r=>r.ok)`);
 check("No target: and the host refuses to write one", lateSet === false && (await helperCalls()).length === callsBefore);
-await reset(); await ev(`ui.screen="setup";openMap("veg");ui.mapw.step=3;render()`); await sleep(150);
-await clickIt('[data-mtarget="on"]');
+await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
+await clickIt('[data-vtarget="on"]');
 check("No target: turning it on offers Set here or a helper", (await ev(`document.querySelector("#map-l-bands-day-temperature-target").selectedOptions[0].textContent`)) === "Set here");
 await pick("map-l-bands-day-temperature-target", "input_number.veg_day_temperature_target");
-await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]'); await clickIt("[data-rapply]"); await sleep(300);
+await ev(`openReview()`); await sleep(40); await clickIt("[data-rapply]"); await sleep(300);
 await sleep(1100); await hostClick("allow"); await sleep(400);
 const vegBack = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="veg")`);
 check("No target: relinking asks again, then reads the helper, with the rest midway", vegBack.helpers.bands.day.temperature.target === "input_number.veg_day_temperature_target" && vegBack.bands.day.temperature[2] === Number(vegTarget) && vegBack.bands.night.temperature[2] !== null, [vegBack.helpers.bands.day.temperature, vegBack.bands.day.temperature, vegBack.bands.night.temperature]);
 await reset();
 
 // ---------- Red lights: from a helper, set here, detected, or not used
-await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 const emModes = () => ev(`[...document.querySelectorAll("[data-mem]")].map(b=>b.dataset.mem)`);
 check("Red lights: four sources, like day and night", JSON.stringify(await emModes()) === JSON.stringify(["none", "helper", "fixed", "detected"]) && (await ev(`document.querySelector('[data-mem="none"]').getAttribute("aria-pressed")`)) === "true", await emModes());
 await clickIt('[data-mem="fixed"]');
-check("Red lights: Set here asks for the three extensions and holds Next until they're filled", (await ev(`document.querySelectorAll("[data-memfixed]").length`)) === 3 && (await mapNextOff()) === true && (await fixText()).includes("Morning extension has to be a whole number of minutes from 0 to 59"), await fixText());
-await pick("map-em-morning", "10"); await pick("map-em-daylight", "20"); await pick("map-em-evening", "70");
-check("Red lights: one past the limit is flagged", (await fixText()).includes("Evening extension has to be a whole number of minutes from 0 to 59"), await fixText());
-await pick("map-em-evening", "15");
-check("Red lights: with all three fine, Next is on", (await mapNextOff()) === false, await fixText());
-await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
+check("Red lights: Set here shows the three extensions, starting at none", same(await ev(`["morning","daylight","evening"].map(k=>document.querySelector("#sin-"+k)?.value)`), ["0", "0", "0"]), await ev(`["morning","daylight","evening"].map(k=>document.querySelector("#sin-"+k)?.value)`));
+await setBox("morning", "10"); await setBox("daylight", "20"); await setBox("evening", "70");
+check("Red lights: one past the limit is flagged and holds the review", (await ev(`document.querySelector("#s-issues").textContent`)).includes("Evening extension has to be between 0 and 59") && (await mapNextOff()) === true, await ev(`document.querySelector("#s-issues").textContent`));
+await setBox("evening", "15");
+check("Red lights: with all three fine, the review is on", (await mapNextOff()) === false, await fixText());
+await ev(`openReview()`); await sleep(40);
 check("Red lights: the review lists the source and each extension", /Red lights[^]*Not used[^]*Set here/.test(await modalText()) && /Morning extension[^]*Not set[^]*10 min/.test(await modalText()), await modalText());
 await clickIt("[data-rapply]"); await sleep(400);
 const emFixedDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery")`);
 check("Red lights: Set here is stored, with no helper linked and nothing asked", emFixedDisk.emersonMode === "fixed" && JSON.stringify(emFixedDisk.emerson) === JSON.stringify({ morning: 10, daylight: 20, evening: 15 }) && emFixedDisk.helpers.morning === undefined && (await hostDialog()).open === false, emFixedDisk);
-await reset(); await ev(`openSched("nursery");render()`); await sleep(40);
+await reset(); await ev(`openTd("nursery");render()`); await sleep(40);
 const emCard = await ev(`document.querySelector("#s-emerson").textContent`);
-check("Red lights: Day and night edits them and works out the windows", (await ev(`!!document.querySelector("#sin-morning")`)) === true && emCard.includes("Red lights 15:50 - 16:20 and 09:40 - 10:15") && emCard.includes("Stored in Environment Control"), emCard);
+check("Red lights: the page edits them and works out the windows", (await ev(`!!document.querySelector("#sin-morning")`)) === true && emCard.includes("Red lights 15:50 - 16:20 and 09:40 - 10:15") && emCard.includes("Stored in Environment Control"), emCard);
 const emCalls = (await helperCalls()).length;
 await ev(`(()=>{const i=document.querySelector("#sin-morning");i.value="12";i.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40);
 await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(400);
 check("Red lights: and saves them here, writing to no helper", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").emerson.morning`)) === 12 && (await helperCalls()).length === emCalls);
-await reset(); await ev(`ui.screen="setup";openMap("nursery");ui.mapw.step=3;render()`); await sleep(150);
+await reset(); await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 await clickIt('[data-mem="detected"]');
 const redOffered = await ev(`[...document.querySelectorAll("#map-red [data-mred]")].map(b=>b.dataset.mred)`);
 check("Red lights: Detected lists on and off switches to follow, and needs one", redOffered.includes("switch.lights_red") && (await mapNextOff()) === true && (await fixText()).includes("Pick at least one red light switch"), [redOffered, await fixText()]);
 await clickIt('[data-mred="switch.lights_red"]');
-await ev(`ui.mapw.step=4;render()`); await sleep(40); await clickIt('[data-mstep="next"]');
+await ev(`openReview()`); await sleep(40);
 check("Red lights: the review names the switch", /Red lights[^]*Set here[^]*Detected/.test(await modalText()) && (await modalText()).includes("switch.lights_red"), await modalText());
 await clickIt("[data-rapply]"); await sleep(400);
 const emDetDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery")`);
 check("Red lights: Detected stores the switch and drops the extensions", emDetDisk.emersonMode === "detected" && JSON.stringify(emDetDisk.redLights) === JSON.stringify(["switch.lights_red"]) && emDetDisk.emerson === undefined, emDetDisk);
-await reset(); await ev(`openSched("nursery");render()`); await sleep(40);
+await reset(); await ev(`openTd("nursery");render()`); await sleep(40);
 const detCard = await ev(`document.querySelector("#s-emerson").textContent`);
-check("Red lights: Day and night shows what it follows, with nothing to set", detCard.includes("Detected") && detCard.includes("switch.lights_red") && (await ev(`!!document.querySelector("#sin-morning")`)) === false, detCard);
-await reset(); await ev(`ui.screen="setup";openMap("garden");ui.mapw.step=3;render()`); await sleep(150);
+check("Red lights: the page shows what it follows, with nothing to set", detCard.includes("Detected") && detCard.includes("switch.lights_red") && (await ev(`!!document.querySelector("#sin-morning")`)) === false, detCard);
+await reset(); await ev(`ui.screen="setup";openTd("garden");ui.vpdw.period="day";render()`); await sleep(150);
 check("Red lights: Garden is still on its helpers", (await ev(`document.querySelector('[data-mem="helper"]').getAttribute("aria-pressed")`)) === "true" && (await ev(`document.querySelector("#map-l-morning").value`)) === "input_number.emerson_effect_morning_extension");
 const emBad = await evp(`saveConfig(()=>{const z=zoneById("nursery");z.emersonMode="fixed";z.emerson={morning:90,daylight:10,evening:5}}).then(r=>[r.ok,r.error])`);
 const redBad = await evp(`saveConfig(()=>{zoneById("nursery").redLights=["lock.front_door"]}).then(r=>[r.ok,r.error])`);
@@ -1757,10 +1755,10 @@ await setupNow(); await cClick('[data-mapw="veg"]');
 await ev(`ui.mapw.q="left";render()`); await sleep(40);
 check("Remove: search finds a freed sensor from Map devices", (await ev(`!!document.querySelector("#ms-g-left")`)) === true);
 await cClick('[data-msensor="g-left"]');
-for (let i = 0; i < 3; i++) await cClick('[data-mstep="next"]');
+for (let i = 0; i < 2; i++) await cClick('[data-mstep="next"]');
 await ev(`ui.mapw.step=2;ui.mapw.q="air conditioner";render()`); await sleep(40);
 check("Remove: search finds a freed device too", (await mainText()).includes("Air conditioner"), (await mainText()).slice(0, 200));
-await ev(`ui.mapw.step=4;ui.mapw.q="";render()`); await sleep(40);
+await ev(`ui.mapw.step=3;ui.mapw.q="";render()`); await sleep(40);
 await cClick('[data-mstep="next"]'); await cClick("[data-rapply]"); await sleep(120);
 check("Remove: a freed sensor can be mapped to another zone", (await ev(`(()=>{const s=zoneById("veg").sensors.find(x=>x.id==="g-left");return !!s && s.pos===null})()`)) === true, await ev(`zoneById("veg").sensors.map(x=>x.id)`));
 await ev(`ui.review=null;ui.guard=null;renderModal();ui.mapw=null;ui.wiz=null;render()`);
