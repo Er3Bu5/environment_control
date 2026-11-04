@@ -1797,6 +1797,7 @@ check("Remove: focus lands on the title, not the red button", (await ev(`documen
 check("Remove: the page behind is locked", (await ev(`document.querySelector("#main").inert`)) === true);
 check("Remove: nothing goes before confirming", same(await zoneIds(), startZones), await zoneIds());
 check("Remove: it asks for the zone's name to be typed, and Remove stays off until it is", (await dialog()).includes("Type Garden to confirm") && (await removeOff()) === true);
+check("Remove: the name box capitalises like every other text box", (await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),n=document.createElement("input");n.type="text";return !i.hasAttribute("autocapitalize") && i.autocapitalize===n.autocapitalize})()`)) === true, await ev(`document.querySelector("#dlg-confirm").outerHTML`));
 await cClick("[data-gdiscard]");
 check("Remove: tapping Remove without the name does nothing", same(await zoneIds(), startZones) && (await ev(`!!ui.guard`)) === true);
 await typeName("garden");
