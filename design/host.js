@@ -4,6 +4,7 @@
    mapped entities and runs the few actions in the v1 write table, looking every entity up in the config it fetched
    itself. The frame sends ids, never an entity or a service, and anything not on the allowlist is dropped. The one list
    it hands over beyond mapped entities is HA's number and time helpers, read only, so Setup can offer them to link.
+   It also hands over HA's theme colours, each checked to be a plain colour, so the panel can match your theme.
    Kept small and dependency-free on purpose, because it runs with full trust. */
 (() => {
   const WRITE_DOMAINS = ["switch", "light", "fan", "humidifier"];
@@ -19,6 +20,20 @@
     ...["day", "night"].flatMap((p) => ["temperature", "humidity", "vpd"].flatMap((k) => ["min", "target", "max"].map((slot) => `bands.${p}.${k}.${slot}`)))];
   const linkAt = (z, name) => name.split(".").reduce((o, key) => (o && typeof o === "object" ? o[key] : undefined), z.helpers || {});
   const helperLinks = (z) => SETTINGS.map((n) => linkAt(z, n)).filter((e) => typeof e === "string" && HELPER.test(e));
+  /* HA's own theme colours, read from this element where HA's theme lands, each the first of its names that holds a plain
+     colour. Anything else, such as a url() or a value carrying a semicolon, is left behind and the frame keeps its own. */
+  const HA_COLORS = { primary: ["--primary-color"], bg: ["--primary-background-color"], card: ["--ha-card-background", "--card-background-color"],
+    tile: ["--secondary-background-color"], fg: ["--primary-text-color"], muted: ["--secondary-text-color"], line: ["--divider-color"] };
+  const COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
+  /* Appearance is per device, as HA's own theme choice is, so it lives in this browser rather than in the panel's storage. */
+  const APPEARANCES = ["ha", "light", "dark"], APPEARANCE_KEY = "environment-control-appearance";
+  /* Dark text on a light primary colour, white on any other. */
+  const onColor = (c) => {
+    const hex = /^#([0-9a-f]{6}|[0-9a-f]{3})/i.exec(c);
+    const rgb = hex ? (hex[1].length === 3 ? [...hex[1]].map((d) => d + d) : hex[1].match(/../g)).map((x) => parseInt(x, 16))
+      : ((/^rgba?\(([^)]*)\)/i.exec(c) || [])[1] || "").split(",").slice(0, 3).map(parseFloat);
+    return rgb.length === 3 && rgb.every(Number.isFinite) && (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
+  };
   /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
   const ARM_MS = 1000;
   const CAN = { switch: "Can be switched on and off.", fan: "Can be switched on and off.", light: "Can be switched on and off and dimmed.", humidifier: "Can be switched on and off, and its mode and target humidity set." };
@@ -28,7 +43,7 @@
     ul{list-style:none;margin:0 0 16px;padding:0;max-height:50dvh;overflow:auto}li{padding:10px 0;border-top:1px solid rgba(128,128,128,.3);display:flex;flex-direction:column;gap:2px}
     code{font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}span{font-size:13px;opacity:.8}strong{font-size:13px;font-weight:500;color:#D32F2F}dialog.dark strong{color:#EF9A9A}
     .row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid rgba(128,128,128,.5);background:none;color:inherit;cursor:pointer}
-    summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:#03A9F4;border-color:#03A9F4;color:#FFFFFF}button:disabled{opacity:.45;cursor:default}`;
+    summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:var(--p,#03A9F4);border-color:var(--p,#03A9F4);color:var(--on-p,#FFFFFF)}button:disabled{opacity:.45;cursor:default}`;
 
   class EnvironmentControlPanel extends HTMLElement {
     constructor() {
@@ -84,14 +99,42 @@
       const c = st.context || {};
       return { state: String(st.state), attributes, by: c.user_id ? "user" : c.parent_id ? "automation" : "device" };
     }
-    theme() { return this._hass.themes && this._hass.themes.darkMode ? "dark" : "light"; }
+    appearance() {
+      let v = this.picked;
+      if (!v) try { v = localStorage.getItem(APPEARANCE_KEY); } catch { /* No storage, so Home Assistant until one is picked. */ }
+      return APPEARANCES.includes(v) ? v : "ha";
+    }
+    /* Light and Dark are the panel's own palettes. Home Assistant takes HA's dark mode and HA's colours, so the panel matches
+       whatever theme and primary colour you've picked there. */
+    theme() {
+      const appearance = this.appearance(), colors = {};
+      if (appearance !== "ha") return { appearance, mode: appearance, colors };
+      const css = getComputedStyle(this);
+      for (const [k, names] of Object.entries(HA_COLORS)) {
+        const c = names.map((n) => css.getPropertyValue(n).trim()).find(Boolean);
+        if (c && COLOR.test(c)) colors[k] = c;
+      }
+      return { appearance, mode: this._hass.themes && this._hass.themes.darkMode ? "dark" : "light", colors };
+    }
+    setAppearance(m) {
+      if (!APPEARANCES.includes(m.value)) { this.reply(m.req, false, "Not an appearance."); return; }
+      /* Held here too, so a browser that blocks storage keeps the choice until the panel closes. */
+      this.picked = m.value;
+      try { localStorage.setItem(APPEARANCE_KEY, m.value); } catch { /* Kept for this visit only. */ }
+      this.reply(m.req, true);
+      this.sendTheme();
+    }
+    sendTheme(force) {
+      const t = this.theme(), key = JSON.stringify(t);
+      if (force || key !== this.sentTheme) { this.sentTheme = key; if (!force) this.post({ type: "theme", theme: t }); }
+      return t;
+    }
     post(msg) { if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage({ v: 1, ...msg }, "*"); }
 
     init() {
       const states = {};
       for (const e of this.mapped()) { states[e] = this.pick(this._hass.states[e]); this.forwarded[e] = JSON.stringify(states[e]); }
-      this.sentTheme = this.theme();
-      this.post({ type: "init", ...this.stored(), states, theme: this.sentTheme });
+      this.post({ type: "init", ...this.stored(), states, theme: this.sendTheme(true) });
       this.ready = true;
     }
     stored() { return { revision: this.config.revision, zones: this.config.zones, devices: this.config.devices }; }
@@ -108,7 +151,7 @@
         if (this.forwarded[e] !== key) { changed[e] = now; this.forwarded[e] = key; }
       }
       if (Object.keys(changed).length) this.post({ type: "states", states: changed });
-      if (this.theme() !== this.sentTheme) { this.sentTheme = this.theme(); this.post({ type: "theme", theme: this.sentTheme }); }
+      this.sendTheme();
     }
 
     onMessage(e) {
@@ -121,6 +164,7 @@
       else if (m.type === "calibrate") this.calibrate(m);
       else if (m.type === "setting") this.setting(m);
       else if (m.type === "helpers") this.helpers(m);
+      else if (m.type === "appearance") this.setAppearance(m);
     }
     /* Setup's helper picker: number helpers and time-only date helpers, with only the allowlisted attributes. Reading the list
        links nothing. A helper becomes writable only once a save links it, and that save asks you first. */
@@ -273,7 +317,8 @@
         const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
         const rows = items.map((it) => ({ it, ...this.describe(it, config) }));
         const zones = [...new Set(rows.flatMap((r) => r.zones))];
-        const dlg = make("dialog", undefined, this.theme());
+        const t = this.theme(), dlg = make("dialog", undefined, t.mode);
+        if (t.colors.primary) { dlg.style.setProperty("--p", t.colors.primary); dlg.style.setProperty("--on-p", onColor(t.colors.primary)); }
         dlg.setAttribute("aria-labelledby", "ec-confirm-title");
         const style = make("style", DIALOG_CSS), title = make("h2", "Allow Environment Control to control these?");
         title.id = "ec-confirm-title"; title.tabIndex = -1;

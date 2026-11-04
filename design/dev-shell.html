@@ -2,9 +2,14 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* This page plays Home Assistant. Everything in the bar and the drawer is outside the panel's sandbox, the way HA's own chrome is. */
-:root { --bg: #FAFAFA; --card: #FFFFFF; --line: #E0E0E0; --fg: #212121; --muted: #727272; --primary: #03A9F4; --bar: #03A9F4; --on-bar: #FFFFFF; --warn: #EF6C00; color-scheme: light; }
+:root { --bg: #FAFAFA; --card: #FFFFFF; --line: #E0E0E0; --fg: #212121; --muted: #727272; --primary: var(--primary-color); --bar: var(--primary-color); --on-bar: #FFFFFF; --warn: #EF6C00; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111111; --card: #1C1C1C; --line: #333333; --fg: #E1E1E1; --muted: #9E9E9E; --bar: #1C1C1C; --on-bar: #E1E1E1; color-scheme: dark; } }
 :root[data-theme="dark"] { --bg: #111111; --card: #1C1C1C; --line: #333333; --fg: #E1E1E1; --muted: #9E9E9E; --bar: #1C1C1C; --on-bar: #E1E1E1; color-scheme: dark; }
+/* HA's own theme variables, with its default values, which HA sets on the page and the panel element inherits. A primary
+   colour picked in your HA profile replaces --primary-color. */
+:root { --primary-color: #03A9F4; --primary-background-color: #FAFAFA; --card-background-color: #FFFFFF; --secondary-background-color: #E5E5E5; --primary-text-color: #212121; --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --primary-background-color: #111111; --card-background-color: #1C1C1C; --secondary-background-color: #282828; --primary-text-color: #E1E1E1; --secondary-text-color: #9B9B9B; --divider-color: rgba(225, 225, 225, .12); } }
+:root[data-theme="dark"] { --primary-background-color: #111111; --card-background-color: #1C1C1C; --secondary-background-color: #282828; --primary-text-color: #E1E1E1; --secondary-text-color: #9B9B9B; --divider-color: rgba(225, 225, 225, .12); }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: Roboto, system-ui, sans-serif; }
 .habar { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--bar); color: var(--on-bar); font-size: 13px; box-sizing: border-box; z-index: 2; border-bottom: 1px solid var(--line); }
 .habar strong { font-weight: 500; }
@@ -35,6 +40,7 @@ environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; botto
   <p>The panel's settings live in HA's storage, outside the panel's own code. A restart, a power cut or an update can't lose a save that finished, and a save that didn't finish leaves the old settings whole.</p>
   <div class="row"><button id="t-restart">Restart Home Assistant</button><button id="t-cut" aria-pressed="false">Cut power during the next save</button></div>
   <div class="row"><button id="t-reopen">Reopen the panel</button><button id="t-update">Install an update</button></div>
+  <div class="row"><label for="t-primary">Primary colour in your HA profile</label><select id="t-primary"><option value="#F44336">Red</option><option value="">Default blue</option><option value="#4CAF50">Green</option><option value="#FFEB3B">Yellow</option></select></div>
   <h2>Sent to Home Assistant</h2>
   <ul id="calls"><li>Nothing yet.</li></ul>
 </div>
@@ -52,6 +58,9 @@ fakeHA.darkMode = pageDark();
 fakeHA.attach(panel);
 new MutationObserver(() => fakeHA.setDark(pageDark())).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fakeHA.setDark(pageDark()));
+/* Your HA uses a red primary colour, so the mock does too. HA applies a new one to the page and updates hass. */
+function setPrimary(color) { if (color) document.documentElement.style.setProperty("--primary-color", color); else document.documentElement.style.removeProperty("--primary-color"); fakeHA.publish(); }
+setPrimary("#F44336");
 
 const $d = (s) => document.querySelector(s);
 const drawer = $d("#drawer"), drawerBtn = $d("#drawer-btn");
@@ -91,6 +100,7 @@ $d("#t-cut").addEventListener("click", () => { fakeHA.knobs.cutPower = !fakeHA.k
 fakeHA.onStatus(() => $d("#t-cut").setAttribute("aria-pressed", String(fakeHA.knobs.cutPower)));
 $d("#t-reopen").addEventListener("click", reopenPanel);
 $d("#t-update").addEventListener("click", installUpdate);
+$d("#t-primary").addEventListener("change", (e) => setPrimary(e.target.value));
 fakeHA.onCall(() => {
   dropLabels();
   const rows = fakeHA.calls.slice(-8).reverse().map((c) => {

@@ -315,6 +315,11 @@ body.vtyping .draftbar { display: none; }
 .btn.add { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px 9px 12px; font-size: 15px; font-weight: 500; }
 .btn.add svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .zacts { flex: none; }
+.looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.look { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: 14px; text-align: center; }
+.look svg { width: 24px; height: 24px; fill: var(--muted); }
+.look[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
+.look[aria-pressed="true"] svg { fill: var(--primary); }
 .zmenu { position: relative; }
 .btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
 .btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
@@ -376,6 +381,8 @@ const ICON = {
   plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
   menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  home: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
+  moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
   cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
 };
@@ -2035,7 +2042,15 @@ function renderSetup() {
   const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Map devices</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Placement</button>${z.sensors.length ? `<button role="menuitem" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Targets, day and night only to the helpers it's linked to.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
-    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
+    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section>
+    ${appearanceCard()}</div>`;
+}
+
+const APPEARANCE_SAYS = { ha: "Matching your Home Assistant theme, its colours and dark mode included, and following it when it changes.", light: "Light, whatever Home Assistant uses.", dark: "Dark, whatever Home Assistant uses." };
+function appearanceCard() {
+  return `<section class="card" id="appearance"><div><h2>Appearance</h2><p class="small muted">${APPEARANCE_SAYS[appearance]}</p></div>
+    <div class="looks" role="group" aria-label="Appearance">${Object.entries(APPEARANCE).map(([k, [ico, label]]) => `<button class="look" data-appearance="${k}" aria-pressed="${appearance === k}">${icon(ico)}<span>${label}</span></button>`).join("")}</div>
+    <p class="small muted">Only on this device. Nothing changes in Home Assistant or in Environment Control's settings.</p></section>`;
 }
 
 function suggestGrid(n, w, d) {
@@ -2510,6 +2525,7 @@ document.addEventListener("click", (e) => {
     guarded(() => { ui.td = null; ui.sched = null; ui.vpdw = null; openMap(id); render(); window.scrollTo(0, 0); });
     return;
   }
+  if ((el = q("[data-appearance]"))) { const value = el.dataset.appearance; ask("appearance", { value }).then((r) => { if (!r.ok) toast(`Not changed. ${r.error}`); }); return; }
   if (q("[data-addzone]")) { ui.screen = "setup"; ui.guide = null; openNewZone(); render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-rmzone]"))) { askRemoveZone(el.dataset.rmzone); return; }
   if ((el = q("[data-calw]"))) {
@@ -2745,7 +2761,29 @@ function ask(type, body) {
   const req = ++bridge.n;
   return new Promise((resolve) => { bridge.waiting.set(req, resolve); parent.postMessage({ v: 1, type, req, ...body }, "*"); });
 }
-const setTheme = (t) => { if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; };
+/* What the host sends: the appearance picked on this device, light or dark, and with Home Assistant picked, HA's own colours
+   in place of the panel's. Each colour is checked again here, so only a plain colour ever reaches the style. */
+const THEME_KEYS = ["primary", "bg", "card", "tile", "fg", "muted", "line"];
+const CSS_COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
+const APPEARANCE = { ha: ["home", "Home Assistant"], light: ["sun", "Light"], dark: ["moon", "Dark"] };
+let appearance = "ha";
+/* Dark text on a light primary colour, white on any other. The browser turns any colour into rgb() for us. */
+function onColor(c) {
+  const probe = document.createElement("i"); probe.style.color = c; document.body.append(probe);
+  const rgb = getComputedStyle(probe).color.match(/[\d.]+/g).slice(0, 3).map(Number); probe.remove();
+  return (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
+}
+function setTheme(t) {
+  if (!t || typeof t !== "object") return;
+  const root = document.documentElement, colors = t.colors && typeof t.colors === "object" ? t.colors : {};
+  if (t.mode === "dark" || t.mode === "light") root.dataset.theme = t.mode;
+  if (t.appearance in APPEARANCE) appearance = t.appearance;
+  for (const k of THEME_KEYS) {
+    const c = colors[k];
+    if (typeof c === "string" && CSS_COLOR.test(c)) root.style.setProperty(`--${k}`, c); else root.style.removeProperty(`--${k}`);
+  }
+  if (root.style.getPropertyValue("--primary")) root.style.setProperty("--on-primary", onColor(colors.primary)); else root.style.removeProperty("--on-primary");
+}
 window.addEventListener("message", (e) => {
   const m = e.data;
   if (e.source !== window.parent || window.parent === window || !m || m.v !== 1) return;
@@ -2756,7 +2794,7 @@ window.addEventListener("message", (e) => {
     render();
   } else if (m.type === "config") { if (m.revision !== configRevision) { adoptConfig(m); render(); } }
   else if (m.type === "states") statesChanged(m.states);
-  else if (m.type === "theme") { setTheme(m.theme); drawChart(); }
+  else if (m.type === "theme") { setTheme(m.theme); if (ui.screen === "setup" && $("#appearance") && !ui.guard && !ui.review) render(); else drawChart(); }
   else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
 });
 if (window.parent === window) render();
