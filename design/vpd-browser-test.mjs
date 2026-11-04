@@ -140,6 +140,12 @@ if (process.env.SMOKE) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
     check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`document.querySelector("#main .tbl-wrap tbody tr").textContent`)).includes("-"));
   }
+  /* Nothing in the real room is placed yet, so every zone's map says so, and says it's fine. */
+  for (const id of ["garden", "veg", "nursery"]) {
+    await go(`ui.screen="zone";ui.zone="${id}";ui.level="all";render()`);
+    const n = await ev(`placeable(zoneById("${id}")).length`), note = await ev(`document.querySelector("#unplaced-${id}")?.textContent || ""`);
+    check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
+  }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
   for (const id of ["garden", "veg", "nursery"]) {
     await go(`ui.screen="setup";openMap("${id}");ui.mapw.step=3;render()`); await sleep(150); await clean(`${id} Map devices helpers`);
@@ -1550,6 +1556,60 @@ check("Red lights: Garden is still on its helpers", (await ev(`document.querySel
 const emBad = await evp(`saveConfig(()=>{const z=zoneById("nursery");z.emersonMode="fixed";z.emerson={morning:90,daylight:10,evening:5}}).then(r=>[r.ok,r.error])`);
 const redBad = await evp(`saveConfig(()=>{zoneById("nursery").redLights=["lock.front_door"]}).then(r=>[r.ok,r.error])`);
 check("Red lights: the backend refuses an extension past 59 minutes and a switch that isn't on or off", emBad[0] === false && emBad[1].includes("outside 0 to 59") && redBad[0] === false && redBad[1].includes("isn't an on or off entity"), [emBad, redBad]);
+await reset();
+
+// ---------- Placement: devices too, optional, between the units and the wall if wanted
+await ev(`ui.level="all";ui.screen="zone";ui.zone="garden";render()`); await sleep(60);
+const devMarksOn = () => ev(`[...document.querySelectorAll("#main [data-mapdev]")].map(g=>g.dataset.mapdev).sort()`);
+check("Placement: the zone map has a wall round it", (await ev(`[...document.querySelectorAll("#main .map svg rect")].some(r=>r.querySelector("title")?.textContent==="Wall")`)) === true);
+check("Placement: placed devices show on the zone's map", same(await devMarksOn(), ["ac", "dehu", "heater", "intake"]), await devMarksOn());
+const unplacedLine = () => ev(`document.querySelector("#unplaced-garden")?.textContent || ""`);
+check("Placement: the zone says which devices aren't on the map, and that it's fine", /^8 devices aren't on the map: Auxiliary dehumidifier, Air conditioner exhaust fan, Plug 7, .*They don't need to be/.test(await unplacedLine()) && !(await unplacedLine()).includes("Dehumidifier"), await unplacedLine());
+const svgClick = async (sel) => { await ev(`document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new MouseEvent("click",{bubbles:true}))`); await sleep(50); };
+await svgClick('[data-mapdev="dehu"]');
+const devDetail = await ev(`document.querySelector("#main .detail").textContent`);
+check("Placement: tapping a device says where it is and how it's doing", devDetail.includes("Dehumidifier") && devDetail.includes("By the wall at unit 9"), devDetail);
+await svgClick('[data-mapdev="ac"]');
+check("Placement: one by the top wall is named by its unit", (await ev(`document.querySelector("#main .detail").textContent`)).includes("By the wall at unit 4"));
+await ev(`ui.level="above";render()`); await sleep(40);
+check("Placement: devices have no height, so a height filter hides them", (await devMarksOn()).length === 0);
+await ev(`ui.level="all";render()`); await sleep(40);
+await ev(`document.querySelector("#main .map").scrollIntoView({block:"start"})`); await shot("placement-zone-phone");
+await clickIt("#unplaced-garden [data-wizard]");
+check("Placement: Place devices opens the wizard on the first one left", (await ev(`!!ui.wiz && ui.wiz.step===3 && ui.wiz.pick==="d:aux"`)) === true, await ev(`ui.wiz && [ui.wiz.step, ui.wiz.pick]`));
+const edgeSpots = () => ev(`[...document.querySelectorAll("[data-spot]")].map(g=>g.dataset.spot).filter(s=>{const [r,c]=s.split(",").map(Number);return r<0||c<0||r>2||c>3})`);
+check("Placement: a device can go between the outer units and the wall, all the way round", (await edgeSpots()).length > 0 && (await edgeSpots()).includes("-0.5,-0.5") && (await edgeSpots()).includes("1,3.5") && (await edgeSpots()).includes("2.5,1.5"), await edgeSpots());
+check("Placement: spots another mark already holds aren't offered", !(await edgeSpots()).includes("2.5,0") && !(await edgeSpots()).includes("-0.5,3"), await edgeSpots());
+check("Placement: a device has no height to set", (await ev(`!!document.querySelector("[data-wizlevel]")`)) === false);
+check("Placement: unplaced devices are told about, and don't stop saving", (await ev(`document.querySelector("#wiz-unplaced")?.textContent || ""`)).includes("placing a device is optional") && (await nextOff()) === false, await ev(`document.querySelector("#wiz-unplaced")?.textContent`));
+const mapInView = () => ev(`(()=>{const r=document.querySelector("#main .map").getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight+1})()`);
+await ev(`window.scrollTo(0,0)`); await clickIt('[data-pick="d:plug"]');
+check("Placement: picking from a long list brings the map into view", (await mapInView()) === true);
+await shot("placement-device-phone");
+await clickIt('[data-pick="g-left"]');
+check("Placement: sensors still only go on units and in aisles", (await edgeSpots()).length === 0 && (await ev(`!!document.querySelector("[data-wizlevel]")`)) === true, await edgeSpots());
+await clickIt('[data-pick="d:acfan"]'); await svgClick('[data-spot="-0.5,-0.5"]');
+await clickIt('[data-pick="d:dehu"]'); await clickIt("[data-wunplace]");
+await wizNext();
+check("Placement: the review lists each device move", /Air conditioner exhaust fan position[^]*Not placed[^]*Corner by unit 1/.test(await modalText()) && /Dehumidifier position[^]*By the wall at unit 9[^]*Not placed/.test(await modalText()) && (await modalText()).includes("Placing a device is optional"), await modalText());
+await clickIt("[data-rapply]"); await sleep(400);
+const placeDisk = await onHA(`(()=>{const d=JSON.parse(fakeHA.disk).devices;return [d.find(x=>x.id==="acfan").place, d.find(x=>x.id==="dehu").place]})()`);
+check("Placement: it's stored per zone, and taking one off forgets it", same(placeDisk, [{ garden: [-0.5, -0.5] }, null]) || (same(placeDisk[0], { garden: [-0.5, -0.5] }) && placeDisk[1] === undefined), placeDisk);
+await ev(`ui.screen="zone";ui.zone="garden";render()`); await sleep(40);
+check("Placement: and the zone's map follows", (await devMarksOn()).includes("acfan") && !(await devMarksOn()).includes("dehu"), await devMarksOn());
+await ev(`ui.screen="setup";openWizard("garden");ui.wiz.step=2;ui.wiz.rows=2;ui.wiz.units=8;render()`); await sleep(40);
+check("Placement: shrinking the grid says which devices come off the map", /1 device no longer fits[^]*Heater/.test(await ev(`document.querySelector("#main").textContent`)), await ev(`document.querySelector("#main").textContent.slice(0,600)`));
+await ev(`ui.wiz=null;ui.screen="setup";ui.guide={id:"garden"};zoneById("garden").setup={devices:"done",place:"done",schedule:"done",calibrate:"done",targets:"done"};render()`); await sleep(40);
+check("Placement: the setup guide says so too, without counting it against the step", (await ev(`document.querySelector("#g-place").textContent`)).includes("aren't on the map") && (await ev(`document.querySelector("#g-place .pill").textContent`)) === "Done", await ev(`document.querySelector("#g-place").textContent`));
+await ev(`ui.guide=null;delete zoneById("garden").setup;render()`); await sleep(40);
+check("Placement: Setup counts placed devices", /3 of 3 sensors placed, 4 of \d+ devices/.test(await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`)), await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`));
+await ev(`openMap("garden");ui.mapw.pickD.acfan=false;render()`); await sleep(40);
+await evp(`(()=>{const m=ui.mapw;return saveConfig(()=>saveMap(m)).then(()=>{ui.mapw=null})})()`);
+check("Placement: a device taken out of a zone loses its spot there", (await onHA(`JSON.parse(fakeHA.disk).devices.find(x=>x.id==="acfan").place`)) === undefined);
+const placeOut = await evp(`saveConfig(()=>{devices.find(x=>x.id==="intake").place={garden:[5,0]}}).then(r=>[r.ok,r.error])`);
+const placeWrong = await evp(`saveConfig(()=>{devices.find(x=>x.id==="intake").place={veg:[0,0]}}).then(r=>[r.ok,r.error])`);
+const placeOdd = await evp(`saveConfig(()=>{devices.find(x=>x.id==="intake").place={garden:[0.3,0]}}).then(r=>[r.ok,r.error])`);
+check("Placement: the backend refuses a spot off the map, between half-steps, or in a zone the device isn't in", placeOut[0] === false && placeOut[1].includes("outside garden's map") && placeOdd[0] === false && placeWrong[0] === false && placeWrong[1].includes("isn't in"), [placeOut, placeOdd, placeWrong]);
 await reset();
 
 // Removing a zone. Last, because it takes the fixture's zones with it, so nothing here can call reset().

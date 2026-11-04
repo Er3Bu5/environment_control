@@ -23,14 +23,14 @@ const SEED = (() => {
   const tuya = { integration: "tuya_local", family: "Tuya", link: "wifi", source: "detected", path: "Local", hub: "" };
   const esphome = { integration: "esphome", family: "ESPHome", link: "ethernet", source: "confirmed", path: "Local", hub: "" };
   const devices = [
-    { id: "dehu", name: "Dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden"], entity: "humidifier.garden_dehumidifier" },
+    { id: "dehu", name: "Dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden"], entity: "humidifier.garden_dehumidifier", place: { garden: [2.5, 0] } },
     { id: "aux", name: "Auxiliary dehumidifier", type: "Dehumidifier", icon: "drop", ctl: "humidifier", ...tuya, zones: ["garden", "veg", "nursery"], entity: "humidifier.auxiliary_dehumidifier", note: "Unit sensor, not room RH" },
-    { id: "ac", name: "Air conditioner", type: "Air conditioner", icon: "gauge", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.air_conditioner" },
-    { id: "heater", name: "Heater", type: "Heater", icon: "thermo", ctl: "switch", ...tuya, zones: ["garden", "veg", "nursery"], entity: "switch.heater_mains" },
-    { id: "intake", name: "Intake fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.garden_intake_fan" },
+    { id: "ac", name: "Air conditioner", type: "Air conditioner", icon: "gauge", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.air_conditioner", place: { garden: [-0.5, 3] } },
+    { id: "heater", name: "Heater", type: "Heater", icon: "thermo", ctl: "switch", ...tuya, zones: ["garden", "veg", "nursery"], entity: "switch.heater_mains", place: { garden: [2.5, 3] } },
+    { id: "intake", name: "Intake fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.garden_intake_fan", place: { garden: [1, -0.5] } },
     { id: "acfan", name: "Air conditioner exhaust fan", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.air_conditioner_exhaust_fan" },
     { id: "plug", name: "Plug 7", type: null, icon: "plug", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.plug_7" },
-    { id: "fans", name: "Oscillating fans", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["veg", "nursery"], entity: "switch.veg_oscillating_fans" },
+    { id: "fans", name: "Oscillating fans", type: "Fan", icon: "fan", ctl: "switch", ...tuya, zones: ["veg", "nursery"], entity: "switch.veg_oscillating_fans", place: { veg: [-0.5, 0.5] } },
     { id: "lc-over", name: "Overhead light controller", type: "Light", icon: "sun", ctl: "dimmer", ...esphome, zones: ["garden"], entity: "light.garden_light_controller_overhead" },
     { id: "lp-1", name: "Overhead lights 1", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.garden_lights_1" },
     { id: "lp-2", name: "Overhead lights 2", type: "Light", icon: "sun", ctl: "switch", ...tuya, zones: ["garden"], entity: "switch.garden_lights_2" },

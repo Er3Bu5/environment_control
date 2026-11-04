@@ -144,6 +144,15 @@ class FakeHA {
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || d.zones.some((z) => !ids.has(z))) this.fail(`${d.id} is in a zone that doesn't exist`);
       if (d.entity !== undefined && !/^(switch|light|fan|humidifier)\.[a-z0-9_]+$/.test(d.entity)) this.fail(`${d.id} has an entity this panel can't control`);
+      /* A device's spot on each zone's map: half-steps, from the wall gap on one side to the wall gap on the other. */
+      if (d.place === undefined) continue;
+      if (!d.place || typeof d.place !== "object" || Array.isArray(d.place)) this.fail(`${d.id} has a placement that isn't per zone`);
+      for (const [zid, p] of Object.entries(d.place)) {
+        const z = c.zones.find((x) => x.id === zid), L = z && z.layout;
+        if (!d.zones.includes(zid) || !L) this.fail(`${d.id} is placed in a zone it isn't in`);
+        const ok = Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -0.5 && p[0] <= L.rows - 0.5 && p[1] >= -0.5 && p[1] <= L.cols - 0.5;
+        if (!ok) this.fail(`${d.id} is placed outside ${zid}'s map`);
+      }
     }
   }
   /* Revision-checked, so a save made from a stale copy can't undo someone else's. */
