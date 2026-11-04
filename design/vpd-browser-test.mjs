@@ -165,15 +165,15 @@ if (process.env.SMOKE) {
   await go(`ui.mapw=null;ui.wiz=null;ui.guide=null;ui.review=null;ui.guard=null;renderModal();ui.screen="setup";render()`);
   await go(`document.querySelector('[data-rmzone="flower_2"]').click()`); await clean("Setup behind the dialog");
   check("Remove: real data, dialog names the new zone", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Remove Flower 2?");
-  await go(`document.querySelector("[data-gdiscard]").click()`);
+  await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`);
   check("Remove: real data, the new zone goes", (await ev(`!zoneById("flower_2")`)) === true);
   await go(`document.querySelector('[data-rmzone="garden"]').click()`);
   check("Remove: real data, shared hardware named", /stay in /.test(await ev(`document.querySelector("#modal").textContent`)), await ev(`document.querySelector("#modal").textContent`));
   check("Remove: real data, dialog has no NaN or undefined", !/NaN|undefined/.test(await ev(`document.querySelector("#modal").textContent`)));
-  await go(`document.querySelector("[data-gdiscard]").click()`);
+  await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`);
   check("Remove: real data, Garden's sensors stay findable", (await ev(`catalog().length`)) > (await ev(`zones.flatMap(z=>z.sensors).length`)));
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview without Garden"], [`ui.screen="devices";render()`, "Devices without Garden"], [`ui.screen="zone";ui.zone="veg";render()`, "Veg without Garden"], [`ui.screen="setup";render()`, "Setup without Garden"]]) { await go(e); await clean(name); }
-  for (const id of ["veg", "nursery"]) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`document.querySelector("[data-gdiscard]").click()`); }
+  for (const id of ["veg", "nursery"]) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`); }
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview with no zones"], [`ui.screen="devices";render()`, "Devices with no zones"], [`ui.screen="setup";render()`, "Setup with no zones"]]) { await go(e); await clean(name); }
   check("Remove: real data, nothing left", (await ev(`zones.length`)) === 0);
   check("no script errors", exceptions.length === 0, exceptions.slice(0, 3));
@@ -1689,7 +1689,9 @@ await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, devi
 const zoneIds = () => ev(`zones.map(z=>z.id)`);
 const startZones = await zoneIds();
 const askRemove = (id) => cClick(`[data-rmzone="${id}"]`);
-const confirmRemove = () => cClick("[data-gdiscard]");
+const typeName = (text) => ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=${JSON.stringify(text)};i.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+const removeOff = () => ev(`document.querySelector("[data-gdiscard]").disabled`);
+const confirmRemove = async () => { await ev(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})()`); await cClick("[data-gdiscard]"); };
 const dialog = () => ev(`document.querySelector("#modal").textContent`);
 const mainText = () => ev(`document.querySelector("#main").textContent`);
 const see = async (screen, zone) => { await ev(`ui.screen="${screen}";${zone ? `ui.zone="${zone}";` : ""}render();window.scrollTo(0,0)`); await sleep(40); return mainText(); };
@@ -1709,6 +1711,16 @@ check("Remove: shared hardware is shown staying in its other zones", /\d+ stay i
 check("Remove: focus lands on the title, not the red button", (await ev(`document.activeElement.id`)) === "dlg-title", await ev(`document.activeElement.outerHTML.slice(0,60)`));
 check("Remove: the page behind is locked", (await ev(`document.querySelector("#main").inert`)) === true);
 check("Remove: nothing goes before confirming", same(await zoneIds(), startZones), await zoneIds());
+check("Remove: it asks for the zone's name to be typed, and Remove stays off until it is", (await dialog()).includes("Type Garden to confirm") && (await removeOff()) === true);
+await cClick("[data-gdiscard]");
+check("Remove: tapping Remove without the name does nothing", same(await zoneIds(), startZones) && (await ev(`!!ui.guard`)) === true);
+await typeName("garden");
+check("Remove: the name has to match exactly, case and all", (await removeOff()) === true);
+await typeName("Garden ");
+check("Remove: a stray space doesn't count", (await removeOff()) === true);
+await typeName("Garden");
+check("Remove: the exact name turns Remove on", (await removeOff()) === false);
+await typeName("");
 await shot("remove-dialog-phone");
 await key("Escape", 27); await sleep(60);
 check("Remove: Escape keeps the zone", same(await zoneIds(), startZones) && !(await ev(`!!ui.guard`)));
@@ -1725,7 +1737,8 @@ await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-sch
 await send("Emulation.setEmulatedMedia", { features: [] });
 
 const beforeHeater = await ev(`devices.find(d=>d.id==="heater").zones`);
-await ev(`ui.zone="garden"`); await askRemove("garden"); await confirmRemove(); await sleep(60);
+await ev(`ui.zone="garden"`); await askRemove("garden"); await typeName("Garden"); await ev(`document.querySelector("#dlg-confirm").focus()`); await key("Enter", 13); await sleep(60);
+check("Remove: Enter in the box removes it once the name matches", !(await zoneIds()).includes("garden"), await zoneIds());
 check("Remove: the zone goes", !(await zoneIds()).includes("garden"), await zoneIds());
 check("Remove: its tab goes", !(await ev(`[...document.querySelectorAll("[data-go=zone]")].some(b=>b.dataset.zone==="garden")`)));
 check("Remove: its activity and lights go", (await ev(`ACTIVITY.garden===undefined && LIGHTS.garden===undefined`)) === true);

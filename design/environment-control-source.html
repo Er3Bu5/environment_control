@@ -2039,7 +2039,7 @@ function removeRows(z) {
 function askRemoveZone(id) {
   const z = zoneById(id);
   ui.guard = { action: () => removeZone(id), title: `Remove ${z.name}?`, text: "This removes the zone from Environment Control and can't be undone. Nothing in Home Assistant changes.",
-    rows: removeRows(z), note: "Its sensors and devices can be mapped to another zone. Anything set on a board stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
+    rows: removeRows(z), confirm: z.name, note: "Its sensors and devices can be mapped to another zone. Anything set on a board stays there. Getting this zone back means setting it up again.", keep: "Keep zone", go: "Remove zone" };
   renderModal();
 }
 async function removeZone(id) {
@@ -2328,9 +2328,11 @@ function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes
   ui.guard = { action, title, text: text || `You have ${n} unsaved ${n === 1 ? "change" : "changes"} in ${held[0].zone}. Leaving will discard ${n === 1 ? "it" : "them"}.` };
   renderModal();
 }
+/* Removing a zone can't be undone, so its name has to be typed first, exactly, as GitHub asks before deleting a repository. */
+const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm") || {}).value === ui.guard.confirm;
 function modalHtml() {
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}<div class="row"><button class="btn" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="btn danger" data-gdiscard>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="row"><button class="btn" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="btn danger" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
@@ -2386,7 +2388,7 @@ document.addEventListener("click", (e) => {
   if (ui.vpdw && q("button")) vCommitActive();
   if (ui.wiz && q("button") && typedBox(document.activeElement)) document.activeElement.blur();
   if (ui.guard || ui.review) {
-    if (q("[data-gdiscard]")) { const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
+    if (q("[data-gdiscard]")) { if (!guardConfirmed()) return; const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
     if (q("[data-rapply]")) { applyReview(); return; }
     if (q("[data-gkeep], [data-rback]") || !q(".dialog")) closeModal();
     return;
@@ -2508,7 +2510,11 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
-  if (ui.guard || ui.review) { if (e.key === "Escape") closeModal(); return; }
+  if (ui.guard || ui.review) {
+    if (e.key === "Escape") closeModal();
+    if (e.key === "Enter" && e.target.id === "dlg-confirm" && guardConfirmed()) { e.preventDefault(); $("[data-gdiscard]").click(); }
+    return;
+  }
   const dir = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key], v = ui.vpdw;
   if (chartNow && e.target.closest && e.target.closest("#chart svg")) {
     if (e.key === "Escape") chartAt(null);
@@ -2604,6 +2610,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
   if (e.target.id === "wiz-vname" && ui.wiz) ui.wiz.vname = e.target.value;
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
+  if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.mapw) { ui.mapw.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.mapw, zoneById(ui.mapw.id)); }
   if (e.target.id === "map-lq" && ui.mapw) { ui.mapw.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.mapw, zoneById(ui.mapw.id)); }
