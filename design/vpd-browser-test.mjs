@@ -1587,7 +1587,7 @@ await ev(`window.scrollTo(0,0)`); await clickIt('[data-pick="d:plug"]');
 check("Placement: picking from a long list brings the map into view", (await mapInView()) === true);
 await shot("placement-device-phone");
 await clickIt('[data-pick="g-left"]');
-check("Placement: sensors still only go on units and in aisles", (await edgeSpots()).length === 0 && (await ev(`!!document.querySelector("[data-wizlevel]")`)) === true, await edgeSpots());
+check("Placement: sensors can go by the wall too, but not outside it", (await edgeSpots()).includes("-0.5,-0.5") && !(await edgeSpots()).some((k) => k.split(",").map(Number).some((x) => x === -1)) && (await ev(`!!document.querySelector("[data-wizlevel]")`)) === true, await edgeSpots());
 await clickIt('[data-pick="d:acfan"]'); await svgClick('[data-spot="-0.5,-0.5"]');
 await clickIt('[data-pick="d:dehu"]'); await clickIt("[data-wunplace]");
 await wizNext();
@@ -1607,7 +1607,7 @@ check("Placement: shortened names keep what tells them apart", same(await ev(`["
 await ev(`ui.wiz.units=11;render()`); await sleep(40);
 check("Placement: and on the spot an empty unit would have", (await spotLabel("2,3")) === "Where unit 12 would be", await spotLabel("2,3"));
 await clickIt('[data-pick="g-left"]');
-check("Placement: sensors get none of those", (await spotLabel("0,0.5")) === "" && (await spotLabel("-1,-1")) === "" && (await spotLabel("2,3")) === "");
+check("Placement: a sensor gets every spot inside the wall, and none outside it", (await spotLabel("0,0.5")) === "Between unit 1 and unit 2" && (await spotLabel("2,3")) === "Where unit 12 would be" && (await spotLabel("-0.5,1")) === "By the wall at unit 2" && (await spotLabel("-1,-1")) === "" && (await spotLabel("3,2")) === "", [await spotLabel("0,0.5"), await spotLabel("2,3"), await spotLabel("-1,-1")]);
 // Virtual devices: drawn on the map, unknown to Home Assistant
 await ev(`openWizard("garden");ui.wiz.step=3;ui.wiz.pick=null;render()`); await sleep(40);
 const vIssue = () => ev(`document.querySelector("#wiz-vissue").textContent`);

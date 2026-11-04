@@ -1940,14 +1940,14 @@ function suggestGrid(n, w, d) {
   return best;
 }
 const wizLayout = (w) => ({ w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols });
-/* Environment sensors go on a unit or in the aisle between two rows. Devices, real or virtual, can go on any spot: between
-   units, on an empty unit's spot, between the outer units and the wall, and outside the wall. */
+/* Anything can go on any spot inside the wall: a unit, between units, an empty unit's spot, an aisle, or between the outer
+   units and the wall. Only devices, real or virtual, go outside it: a sensor there would be measuring the room, not the
+   zone, and would quietly pull the zone's reading towards the room's. */
 const halfStep = (x) => Number.isInteger(x * 2);
+const reach = (s) => (onMapOnly(s) ? 1 : 0.5);
 function allowed(s, L, r, c) {
-  if (!halfStep(r) || !halfStep(c)) return false;
-  if (onMapOnly(s)) return r >= -1 && c >= -1 && r <= L.rows && c <= L.cols;
-  if (r < 0 || c < 0 || r > L.rows - 1 || c > L.cols - 1) return false;
-  return !Number.isInteger(r) ? true : planted(L, r, c);
+  const e = reach(s);
+  return halfStep(r) && halfStep(c) && r >= -e && c >= -e && r <= L.rows - 1 + e && c <= L.cols - 1 + e;
 }
 const fits = (s, w) => !!s.pos && allowed(s, w, s.pos[0], s.pos[1]);
 /* A virtual device exists only to be drawn, so like a sensor it has to be placed before saving. */
@@ -2057,18 +2057,14 @@ function renderWizard() {
     };
     const unitSpot = (r, c) => `<g role="button" tabindex="0" data-spot="${r},${c}" aria-label="${posText([r, c], L)}"><circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="transparent" stroke="var(--primary)" stroke-width="1.5"/></g>`;
     let spots = "";
-    if (free) for (let r = -1; r <= L.rows; r += 0.5) for (let c = -1; c <= L.cols; c += 0.5) spots += planted(L, r, c) ? unitSpot(r, c) : plus(r, c);
-    else if (sel) {
-      for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) spots += unitSpot(r, c);
-      for (let r = 0.5; r < L.rows - 0.5; r++) for (let c = 0; c <= L.cols - 1; c += 0.5) spots += plus(r, c);
-    }
+    if (sel) { const e = reach(sel); for (let r = -e; r <= L.rows - 1 + e; r += 0.5) for (let c = -e; c <= L.cols - 1 + e; c += 0.5) spots += planted(L, r, c) ? unitSpot(r, c) : plus(r, c); }
     const attrsFor = (s) => `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
     const where = (s, missing) => (fits(s, L) ? `<span class="small muted">${esc(posText(s.pos, L))}</span>` : missing);
     const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span>${esc(s.name)}</span>${where(s, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span>${esc(d.name)}</span>${where(d, '<span class="pill plain">Not placed</span>')}</button>`).join("");
     const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span>${esc(v.name)}</span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const left = devsOff(w);
-    const prompt = !sel ? "Pick a sensor or device." : free ? `Tap a unit, or any +, for ${esc(sel.name)}.` : `Tap a unit, or a + in an aisle, for ${esc(sel.name)}.`;
+    const prompt = !sel ? "Pick a sensor or device." : free ? `Tap a unit or any +, inside the wall or outside it, for ${esc(sel.name)}.` : `Tap a unit or any + inside the wall for ${esc(sel.name)}.`;
     const height = !sel || free ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
     const offMap = sel && sel.kind === "device" && fits(sel, L) ? `<div class="now"><strong>On the map</strong><button class="btn" data-wunplace>Take ${esc(sel.name)} off the map</button></div>`
       : sel && sel.kind === "virtual" ? `<div class="now"><strong>Virtual device</strong><button class="btn" data-vremove>Remove ${esc(sel.name)}</button></div>` : "";
