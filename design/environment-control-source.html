@@ -312,6 +312,20 @@ body.vtyping .draftbar { display: none; }
 .review-list.preview .review-row { color: var(--muted); }
 .btn.danger { background: var(--crit); border-color: var(--crit); color: #FFFFFF; font-weight: 500; }
 .btn.remove { background: transparent; border-color: transparent; color: var(--crit); }
+.btn.add { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px 9px 12px; font-size: 15px; font-weight: 500; }
+.btn.add svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
+.zacts { flex: none; }
+.zmenu { position: relative; }
+.btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
+.btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
+.btn.burger[aria-expanded="true"] { border-color: var(--primary); }
+.menu { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
+.menu[hidden] { display: none; }
+.menu.up { top: auto; bottom: calc(100% + 4px); }
+.menu button { text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+.menu button:hover, .menu button:focus-visible { background: var(--tile); outline: none; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu .remove { color: var(--crit); }
 .sched-len { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .tracked { display: flex; flex-direction: column; gap: 6px; }
 .trow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--tile); }
@@ -361,6 +375,7 @@ const ICON = {
   fan: "M12 11a3.5 3.5 0 0 0-1-7c-3 0-3.5 3-1 5l2 2Zm1 1a3.5 3.5 0 0 0 7 1c0-3-3-3.5-5-1l-2 0Zm-1 1a3.5 3.5 0 0 0 1 7c3 0 3.5-3 1-5l-2-2Zm-1-1a3.5 3.5 0 0 0-7-1c0 3 3 3.5 5 1l2 0Z",
   plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
   menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
+  plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
   cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
 };
@@ -503,7 +518,7 @@ function renderChrome() {
 }
 
 function renderOverview() {
-  if (!zones.length) return `<div class="wrap"><section class="card"><h2>No zones yet</h2><p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p><div class="row"><button class="btn primary" data-addzone>Add a zone</button></div></section></div>`;
+  if (!zones.length) return `<div class="wrap"><section class="card"><h2>No zones yet</h2><p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p><div class="row"><button class="btn primary add" data-addzone>${icon("plus")}Add a zone</button></div></section></div>`;
   const states = zones.filter((z) => envOf(z).length).flatMap((z) => ["temperature", "humidity", "vpd"].filter((k) => bandState(z, k) !== "ok").map((k) => [`${z.name} ${M[k].short} ${ISSUE[bandState(z, k)]}`, bandState(z, k).startsWith("crit"), z.id, k]));
   const link = ([text, , id, k]) => `<button class="fixlink" data-go="zone" data-zone="${id}" data-gometric="${k}">${esc(text)} &rsaquo;</button>`;
   const group = (list, title, cls) => (list.length ? `<div class="notice ${cls}"><strong>${title}</strong>${list.map(link).join("")}</div>` : "");
@@ -2017,10 +2032,10 @@ function renderSetup() {
   const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">ESPHome doesn't say whether a board is wired or on WiFi. How is this one connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("") +
     devices.filter((d) => inAZone(d) && !d.type).map((d) => `<div class="task" id="task-${d.id}"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant only sees a smart plug. What is plugged into it?</p></div><div class="row"><button class="btn" data-role="${d.id}" data-val="Heater">Heater</button><button class="btn" data-role="${d.id}" data-val="Fan">Fan</button><button class="btn" data-role="${d.id}" data-val="Light">Light</button><button class="btn" data-role="${d.id}" data-val="Other">Other</button></div></div>`).join("") +
     zones.filter((z) => z.sensors.some((s) => !s.pos)).map((z) => { const n = z.sensors.filter((s) => !s.pos).length; return `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${n} sensor${n > 1 ? "s" : ""} still need${n > 1 ? "" : "s"} placing on the map.</p></div><div class="row"><button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button></div></div>`; }).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<button class="btn" data-details="${z.id}">Zone details</button><button class="btn" data-mapw="${z.id}">Map devices</button><button class="btn" data-layout="${z.id}">Zone layout</button><button class="btn" data-wizard="${z.id}">Placement</button>${z.sensors.length ? `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button class="btn" data-vpd="${z.id}">Targets, day and night</button><button class="btn remove" data-rmzone="${z.id}">Remove zone</button></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Map devices</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Placement</button>${z.sensors.length ? `<button role="menuitem" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Targets, day and night only to the helpers it's linked to.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
-    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn" data-addzone>Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
+    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn add" data-addzone>${icon("plus")}Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section></div>`;
 }
 
 function suggestGrid(n, w, d) {
@@ -2429,9 +2444,27 @@ function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
 }
+/* A menu opens and closes without a render, so focus can move into it and back to its button as a menu's should. */
+function closeMenus(refocus) {
+  for (const m of document.querySelectorAll(".menu:not([hidden])")) {
+    m.hidden = true;
+    const b = document.querySelector(`[aria-controls="${m.id}"]`);
+    if (b) { b.setAttribute("aria-expanded", "false"); if (refocus) b.focus(); }
+  }
+}
+function openMenu(btn) {
+  closeMenus();
+  const m = document.getElementById(btn.getAttribute("aria-controls"));
+  m.hidden = false; m.classList.remove("up"); btn.setAttribute("aria-expanded", "true");
+  /* The last zone sits near the foot of the page, so its menu opens upwards when there's no room below. */
+  if (m.getBoundingClientRect().bottom > innerHeight - 8 && btn.getBoundingClientRect().top > m.offsetHeight + 8) m.classList.add("up");
+  m.querySelector("button").focus({ preventScroll: true });
+}
 document.addEventListener("click", (e) => {
   const q = (sel) => e.target.closest(sel);
   let el;
+  if ((el = q("[data-zmenu]"))) { if (el.getAttribute("aria-expanded") === "true") closeMenus(); else openMenu(el); return; }
+  closeMenus();
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();
   if (ui.sched && q("button")) sCommitActive();
@@ -2561,6 +2594,15 @@ document.addEventListener("keydown", (e) => {
   if (ui.guard || ui.review) {
     if (e.key === "Escape") closeModal();
     if (e.key === "Enter" && e.target.id === "dlg-confirm" && guardConfirmed()) { e.preventDefault(); $("[data-gdiscard]").click(); }
+    return;
+  }
+  const menu = e.target.closest && (e.target.closest(".menu") || (e.target.closest("[aria-expanded=true][data-zmenu]") && document.getElementById(e.target.getAttribute("aria-controls"))));
+  if (menu) {
+    const items = [...menu.querySelectorAll("button")], at = items.indexOf(e.target), n = items.length;
+    const to = { ArrowDown: (at + 1) % n, ArrowUp: at < 0 ? n - 1 : (at - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
+    if (to !== undefined) { e.preventDefault(); items[to].focus(); }
+    if (e.key === "Escape") { e.preventDefault(); closeMenus(true); }
+    if (e.key === "Tab") closeMenus();
     return;
   }
   const dir = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key], v = ui.vpdw;

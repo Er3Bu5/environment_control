@@ -648,11 +648,59 @@ await ev(`document.activeElement&&document.activeElement.blur()`);
 
 // Sensor Calibration comes before Targets and holds the leaf temperature offset
 const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;ui.mapw=null;ui.wiz=null;ui.screen="setup";render();window.scrollTo(0,0)`); await sleep(40); };
-const setupButtons = (zone) => ev(`[...document.querySelector('[data-mapw="${zone}"]').parentElement.children].map(b=>b.textContent)`);
+const setupButtons = (zone) => ev(`[...document.querySelectorAll('#zmenu-${zone} button')].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
 await setupNow();
 check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("garden"));
 check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("veg"));
+// The zone's setup steps sit behind a menu button, and Add zone is the bigger button with a plus
+await setupNow();
+const rowButtons = (zone) => ev(`[...document.querySelector('[data-zmenu="${zone}"]').closest(".zacts").children].filter(x=>x.matches("button")).map(b=>b.textContent)`);
+const menuOpen = (zone) => ev(`!document.querySelector("#zmenu-${zone}").hidden && document.querySelector('[data-zmenu="${zone}"]').getAttribute("aria-expanded")==="true"`);
+check("Menu: a zone's row shows no step buttons, only the menu and Continue setup", (await ev(`zones.every(z=>[...document.querySelector('[data-zmenu="'+z.id+'"]').closest(".zacts").querySelectorAll("button")].filter(b=>!b.closest(".menu")).every(b=>b.dataset.zmenu||b.dataset.guide))`)) === true, await rowButtons("garden"));
+check("Menu: it's closed until asked, and says it's a menu", (await ev(`zones.every(z=>document.querySelector("#zmenu-"+z.id).hidden && document.querySelector('[data-zmenu="'+z.id+'"]').getAttribute("aria-haspopup")==="menu")`)) === true);
+check("Menu: the button is named after its zone", (await ev(`document.querySelector('[data-zmenu="garden"]').getAttribute("aria-label")`)) === "Set up Garden");
+await tap('[data-zmenu="garden"]');
+check("Menu: a tap opens it, with focus on its first step", (await menuOpen("garden")) && (await ev(`document.activeElement.textContent`)) === "Zone details", await ev(`document.activeElement.outerHTML.slice(0,80)`));
+const menuBox = await ev(`(()=>{const r=document.querySelector("#zmenu-garden").getBoundingClientRect();return {l:r.left,r:r.right,t:r.top,b:r.bottom,w:innerWidth,h:innerHeight}})()`);
+check("Menu: it opens on screen", menuBox.l >= 0 && menuBox.r <= menuBox.w && menuBox.t >= 0 && menuBox.b <= menuBox.h, menuBox);
+await shot("setup-menu-phone");
+await key("ArrowDown", 40);
+check("Menu: arrow down moves to the next step", (await ev(`document.activeElement.textContent`)) === "Map devices");
+await key("End", 35);
+check("Menu: End lands on Remove zone, last and apart", (await ev(`document.activeElement.textContent`)) === "Remove zone" && (await ev(`document.activeElement.previousElementSibling.tagName`)) === "HR");
+await key("ArrowDown", 40);
+check("Menu: arrow down wraps to the top", (await ev(`document.activeElement.textContent`)) === "Zone details");
+await key("Escape", 27);
+check("Menu: Escape closes it and hands focus back to its button", !(await menuOpen("garden")) && (await ev(`document.activeElement.dataset.zmenu`)) === "garden");
+await tap('[data-zmenu="garden"]'); await tap('[data-zmenu="garden"]');
+check("Menu: tapping the button again closes it", !(await menuOpen("garden")));
+await tap('[data-zmenu="garden"]'); await tap("#main h1");
+check("Menu: a tap anywhere else closes it", !(await menuOpen("garden")));
+await tap('[data-zmenu="garden"]'); await ev(`document.querySelector('[data-zmenu="veg"]').click()`); await sleep(50);
+check("Menu: opening one zone's menu closes another's", !(await menuOpen("garden")) && (await menuOpen("veg")));
+await key("Escape", 27);
+const lastZone = await ev(`zones[zones.length-1].id`);
+await tap(`[data-zmenu="${lastZone}"]`);
+const lastBox = await ev(`(()=>{const r=document.querySelector("#zmenu-${lastZone}").getBoundingClientRect();return {t:r.top,b:r.bottom,h:innerHeight}})()`);
+check("Menu: the last zone's menu still fits on screen", lastBox.t >= 0 && lastBox.b <= lastBox.h, lastBox);
+await key("Escape", 27);
+await tap('[data-zmenu="veg"]'); await tap('#zmenu-veg [data-details]');
+check("Menu: a step in it opens that step for its zone", (await ev(`!!ui.wiz && ui.wiz.id==="veg" && ui.wiz.step===0`)) === true, await ev(`ui.wiz && [ui.wiz.id, ui.wiz.step]`));
+await setupNow();
+await tap('[data-zmenu="veg"]'); await tap('#zmenu-veg [data-rmzone]');
+check("Menu: Remove zone in it asks first", (await ev(`document.querySelector("#dlg-title")?.textContent`)) === "Remove Veg?");
+await ev(`document.querySelector("[data-gkeep]").click()`); await sleep(50);
+check("Menu: and keeping the zone leaves the menu closed", !(await menuOpen("veg")));
+const addBox = await ev(`(()=>{const a=document.querySelector("[data-addzone]"),s=a.querySelector("svg"),b=document.querySelector('[data-zmenu="garden"]');return {plus:!!s&&s.querySelector("path").getAttribute("d")===ICON.plus,first:a.firstElementChild===s,text:a.textContent,h:a.getBoundingClientRect().height,font:getComputedStyle(a).fontSize}})()`);
+const plainBtn = await ev(`(()=>{const b=document.createElement("button");b.className="btn";b.textContent="Add zone";document.querySelector("#main .card-head").appendChild(b);const h=b.getBoundingClientRect().height;b.remove();return h})()`);
+check("Add zone: a plus icon before the words", addBox.plus && addBox.first && addBox.text === "Add zone", addBox);
+check("Add zone: bigger than an ordinary button", addBox.h > plainBtn + 3 && addBox.font === "15px", { addBox, plainBtn });
+await ev(`window.scrollTo(0,0)`); await shot("setup-add-zone-phone");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await setupNow(); await tap('[data-zmenu="garden"]'); await shot("setup-menu-dark"); await key("Escape", 27);
+await send("Emulation.setEmulatedMedia", { features: [] });
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await setupNow(); await tap('[data-zmenu="garden"]'); await shot("setup-menu-desktop"); await key("Escape", 27); await phone(390, 844); await setupNow();
+
 await calibrate();
 check("Order: one page, leaf temperature offset only, no soil until irrigation", same(await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`), ["Leaf temperature offset"]), await ev(`[...document.querySelectorAll("#main h2")].map(e=>e.textContent)`));
 check("Order: the page is called Sensor Calibration", (await ev(`document.querySelector("#main h1").textContent`)) === "Sensor Calibration: Garden");
@@ -909,7 +957,7 @@ for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overvie
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
 check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img, #tabs img")`)) === true);
-check("Zone: Setup's buttons follow the setup order, with no Sensor Calibration until it has sensors", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Continue setup stays on the row, and the menu follows the setup order, with no Sensor Calibration until it has sensors", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Map devices", "Zone layout", "Placement", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
 await ev(`ui.screen="overview";render()`); await sleep(40);
@@ -946,7 +994,7 @@ check("Zone: going through Targets counts the last step as done", (await guideRo
 await cClick("[data-gfinish]"); await sleep(40);
 check("Zone: what's left still shows on its page", (await ev(`document.querySelector("#main [data-guide]").textContent`)).includes("Still to set up: Sensor Calibration."), await ev(`document.querySelector("#main [data-guide]")?.textContent`));
 await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
-check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await setupButtons(newId), ["Continue setup", "Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`document.querySelector('[data-details="veg"]').click()`); await sleep(40);
 check("Zone: an existing zone's Zone details can rename it", (await ev(`document.querySelector("#wiz-name").value`)) === "Veg" && (await nextOff()) === false && (await ev(`document.querySelector("#main h1").textContent`)) === "Zone details: Veg");
 await tap("#wiz-name"); await type("Veg north"); await wizNext(); await cClick("[data-rapply]");
@@ -1695,7 +1743,7 @@ const mainText = () => ev(`document.querySelector("#main").textContent`);
 const see = async (screen, zone) => { await ev(`ui.screen="${screen}";${zone ? `ui.zone="${zone}";` : ""}render();window.scrollTo(0,0)`); await sleep(40); return mainText(); };
 const noJunk = (t) => !/NaN|undefined/.test(t);
 check("Remove: every zone has the button, last in its row", (await ev(`zones.every(z=>document.querySelector('[data-mapw="'+z.id+'"]').parentElement.lastElementChild.dataset.rmzone===z.id)`)) === true);
-const toRow = () => ev(`document.querySelector('[data-rmzone="garden"]').scrollIntoView({block:"center"})`);
+const toRow = () => ev(`document.querySelector('[data-zmenu="garden"]').scrollIntoView({block:"center"})`);
 await toRow(); await shot("remove-setup-phone");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await setupNow(); await toRow(); await shot("remove-setup-desktop"); await phone(390, 844); await setupNow();
 
