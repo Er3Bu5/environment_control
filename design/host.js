@@ -51,6 +51,10 @@
       this.shadow = this.attachShadow({ mode: "closed" });
       this.forwarded = {};
       this.onMessage = this.onMessage.bind(this);
+      /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
+         raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly.
+         HA's sidebar changes pages without unloading this one, so it isn't covered. */
+      this.onUnload = (e) => { if (this.draftOpen) { e.preventDefault(); e.returnValue = ""; } };
     }
     set hass(h) {
       const first = !this._hass;
@@ -60,6 +64,8 @@
     get hass() { return this._hass; }
     disconnectedCallback() {
       window.removeEventListener("message", this.onMessage);
+      window.removeEventListener("beforeunload", this.onUnload);
+      this.draftOpen = false;
       if (this.onReady) this._hass.connection.removeEventListener("ready", this.onReady);
     }
 
@@ -82,6 +88,7 @@
       this.frame.setAttribute("title", "Environment Control");
       this.frame.srcdoc = this.ui;
       window.addEventListener("message", this.onMessage);
+      window.addEventListener("beforeunload", this.onUnload);
       this.shadow.append(style, this.frame);
     }
 
@@ -158,7 +165,9 @@
       if (!this.frame || e.source !== this.frame.contentWindow) return;
       const m = e.data;
       if (!m || typeof m !== "object" || m.v !== 1 || typeof m.type !== "string") return;
-      if (m.type === "ready") this.init();
+      /* A frame that has just loaded holds no draft. */
+      if (m.type === "ready") { this.draftOpen = false; this.init(); }
+      else if (m.type === "draft") { if (typeof m.open === "boolean") this.draftOpen = m.open; }
       else if (m.type === "device") this.device(m);
       else if (m.type === "save") this.save(m);
       else if (m.type === "calibrate") this.calibrate(m);

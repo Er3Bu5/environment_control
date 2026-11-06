@@ -1957,6 +1957,28 @@ const diskBefore = await onHA(`fakeHA.disk`);
 const junk = await evp(`Promise.all([ask("save",{base:configRevision,config:{zones:clone(zones),devices:[{id:"x",zones:["nowhere"]}]}}),ask("save",{base:configRevision,config:{zones:clone(zones),devices:[{id:"lock",zones:[zones[0].id],entity:"lock.front_door"}]}}),ask("save",{base:"1",config:{}})]).then(r=>r.map(x=>x.ok))`);
 check("Storage: the backend refuses a device in a missing zone, an entity it can't control and a malformed save", same(junk, [false, false, false]) && (await onHA(`fakeHA.disk`)) === diskBefore, junk);
 
+// ---------- Leaving the page: the frame can't raise the browser's leave prompt, so it tells the host a draft is open
+const leaveAsks = () => onHA(`(()=>{const e=new Event("beforeunload",{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented})()`);
+const openDetails = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();openWizard(zones[0].id,[0]);ui.screen="setup";render()`); await sleep(50); await ev(`document.querySelector("#wiz-name").focus()`); await type("x"); await sleep(50); };
+await ev(`ui.review=null;ui.guard=null;renderModal();ui.wiz=null;ui.screen="setup";render()`); await sleep(50);
+check("Leaving: with nothing unsaved, closing the page doesn't ask", (await leaveAsks()) === false);
+await openDetails();
+check("Leaving: a letter typed into a zone's name makes closing the page ask first", (await leaveAsks()) === true);
+await cClick('[data-wiz="back"]'); await sleep(40); await cClick("[data-gdiscard]"); await sleep(60);
+check("Leaving: once that's discarded, it doesn't ask", (await leaveAsks()) === false && (await ev(`ui.wiz`)) === null);
+await evp(`parent.postMessage({v:1,type:"draft",open:"yes"},"*")`); await sleep(40);
+check("Leaving: a draft message that isn't true or false is dropped", (await leaveAsks()) === false);
+await openDetails(); await onHA(`reopenPanel()`); await refindFrame();
+check("Leaving: a reopened panel holds no draft, so it doesn't ask", (await leaveAsks()) === false);
+await openDetails();
+let dialogSeen; const dialogShown = new Promise((r) => { dialogSeen = r; });
+ws.addEventListener("message", (m) => { const d = JSON.parse(m.data); if (d.method === "Page.javascriptDialogOpening") dialogSeen(d.params.type); });
+await onHA(`setTimeout(()=>location.reload(),0)`);
+const dialogType = await Promise.race([dialogShown, sleep(3000).then(() => "none")]);
+if (dialogType !== "none") await send("Page.handleJavaScriptDialog", { accept: false });
+await sleep(200);
+check("Leaving: reloading with a draft open raises the browser's own prompt, and staying keeps the draft", dialogType === "beforeunload" && /x/.test(await ev(`ui.wiz ? ui.wiz.name : ""`)), dialogType);
+
 check("no script errors", exceptions.length === 0, exceptions);
 
 console.log(`\n${pass} passed, ${fail} failed`);

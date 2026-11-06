@@ -2387,8 +2387,18 @@ async function saveWizard(w, said) {
 const openDrafts = () => [ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
 const topDraft = () => (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null);
 const draftCount = (d) => d.items.length + d.skipped.length;
+/* This frame can't raise the browser's leave prompt, so it tells the host whether leaving now would lose anything, and only
+   when that changes. */
+let draftHeld = false;
+function tellHostDraft() {
+  const held = openDrafts().some((d) => draftCount(d) > 0);
+  if (held === draftHeld) return;
+  draftHeld = held;
+  if (window.parent !== window) parent.postMessage({ v: 1, type: "draft", open: held }, "*");
+}
 /* Updates in place: a tap that blurs a box syncs here, and replacing the button under it would lose the click. */
 function draftSync() {
+  tellHostDraft();
   const d = topDraft(), n = d ? draftCount(d) : 0, bar = $("#draftbar"), on = !!d && d.bar && n > 0;
   bar.hidden = !on;
   document.body.classList.toggle("drafting", on);
@@ -2742,6 +2752,8 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.td) { ui.td.m.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.td.m, zoneById(ui.td.m.id)); }
   if (e.target.id === "map-lq" && ui.td) { ui.td.m.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.td.m, zoneById(ui.td.m.id)); }
+  /* Some boxes change a draft without a redraw, and a name typed then lost to a closed tab still counts. */
+  tellHostDraft();
 });
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
