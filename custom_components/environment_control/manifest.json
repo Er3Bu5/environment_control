@@ -1,0 +1,14 @@
+{
+  "domain": "environment_control",
+  "name": "Environment Control",
+  "codeowners": ["@Er3Bu5"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/Er3Bu5/environment_control",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/Er3Bu5/environment_control/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.0.0"
+}

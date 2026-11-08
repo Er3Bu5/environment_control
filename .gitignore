@@ -22,7 +22,7 @@ secrets.yaml
 
 # Dependencies, caches and build output
 node_modules/
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -35,3 +35,6 @@ build/
 *.zip
 test-results/
 playwright-report/
+
+# The panel bundle is built into the integration at release, never committed
+custom_components/environment_control/frontend/

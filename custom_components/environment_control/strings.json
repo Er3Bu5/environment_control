@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Environment Control",
+        "description": "Adds the Environment Control panel to the sidebar, for admins only. Nothing in Home Assistant changes until you set up a zone in the panel."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Environment Control is already added."
+    }
+  }
+}

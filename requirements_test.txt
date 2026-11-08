@@ -1,0 +1,5 @@
+# Pinned: the harness pins the matching Home Assistant release.
+pytest-homeassistant-custom-component==0.13.375
+# HA's own frontend package, at the version that release of HA requires, so panel_custom can load.
+home-assistant-frontend==20260930.5
+ruff==0.14.2

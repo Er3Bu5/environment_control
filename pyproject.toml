@@ -1,0 +1,22 @@
+[project]
+name = "environment-control"
+version = "0.0.0"
+description = "Grow-room climate and lights panel for Home Assistant"
+license = "AGPL-3.0-only"
+requires-python = ">=3.14.2"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components"]
