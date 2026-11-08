@@ -1,0 +1,7 @@
+{
+  "name": "Environment Control",
+  "homeassistant": "2026.10.0",
+  "zip_release": true,
+  "filename": "environment_control.zip",
+  "hide_default_branch": true
+}

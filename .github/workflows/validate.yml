@@ -1,0 +1,116 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 15 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: validate-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      # The backend tests read the mock's sample room through node.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - run: python -m pip install --no-input -r requirements_test.txt
+      - run: ruff check custom_components tests scripts
+      - run: ruff format --check custom_components tests scripts
+      - run: python -m pytest -q
+      - run: python scripts/check_backend_safety.py
+
+  frontend:
+    name: Frontend and mock
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # --ignore-scripts: no package gets to run code at install time.
+      - run: npm ci --ignore-scripts --no-fund
+      - run: npm audit --audit-level=moderate
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: python3 ../scripts/check_frontend_safety.py ..
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      # The mock's own suite keeps the design reference working. It drives a browser it starts itself as `chromium`.
+      - name: Mock suite
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -sf "$(node -e 'import("@playwright/test").then(m => console.log(m.chromium.executablePath()))')" "$RUNNER_TEMP/bin/chromium"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          cd ../design
+          node vpd-browser-test.mjs "$PWD" | tee test-fixture.log
+          grep -q ", 0 failed" test-fixture.log
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6 # master 2026-10-17
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main 2026-06-08
+        with:
+          category: integration
+          # Until milestone 3: the brand icon is still to be chosen, and the description and topics are set when the
+          # repo goes public. Remove each from this list as it's done.
+          ignore: brands description topics
+
+  secrets-and-privacy:
+    name: Secrets and privacy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Scans the whole history, not just the latest commit.
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: python3 scripts/check_privacy.py
