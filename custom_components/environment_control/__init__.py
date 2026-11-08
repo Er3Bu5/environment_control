@@ -30,24 +30,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: EnvironmentControlConfig
     await store.async_load()
     entry.runtime_data = store
 
-    # Static paths and websocket commands can't be unregistered, so they are added once per HA run.
+    # The version is part of the path, so after an update the browser fetches every file of the new release rather
+    # than pairing a new host with a cached frame. HA caches static files for long, which is safe only because of this.
+    version = (await async_get_integration(hass, DOMAIN)).version
+    static_url = f"{STATIC_URL}/{version}"
+
+    # Static paths and websocket commands can't be unregistered, so they are added once per HA run. An update needs a
+    # restart, so one version per run is all there is.
     registered = hass.data.setdefault(DOMAIN, {})
     if not registered.get("static"):
-        await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), True)])
+        await hass.http.async_register_static_paths([StaticPathConfig(static_url, str(FRONTEND_DIR), True)])
         registered["static"] = True
     if not registered.get("commands"):
         async_register_commands(hass)
         registered["commands"] = True
 
-    # The version in the URL makes the browser fetch the new host after an update instead of a cached one.
-    version = (await async_get_integration(hass, DOMAIN)).version
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
-        module_url=f"{STATIC_URL}/host.js?v={version}",
+        module_url=f"{static_url}/host.js",
         embed_iframe=False,
         require_admin=True,
     )

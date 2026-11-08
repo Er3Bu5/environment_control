@@ -12,9 +12,9 @@ scripts = re.findall(r"<script>(.*?)</script>", ui, flags=re.S)
 if len(scripts) != 1:
     sys.exit(f"the UI must have exactly one script, found {len(scripts)}")
 digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
-# The frame can't reach the network, so Roboto is built in rather than fetched (fonts/OFL.txt), as the real bundle must.
+# The frame can't reach the network, so Roboto is built in rather than fetched (frontend/fonts/OFL.txt), as the real bundle must.
 ui = re.sub(r'<link rel="(preconnect|stylesheet)" href="https://fonts\.[^"]*"[^>]*>\n?', "", ui)
-font = base64.b64encode(open(f"{root}/fonts/roboto-latin.woff2", "rb").read()).decode()
+font = base64.b64encode(open(f"{root}/../frontend/fonts/roboto-latin.woff2", "rb").read()).decode()
 ui = f'<style>@font-face{{font-family:Roboto;src:url(data:font/woff2;base64,{font}) format("woff2");font-weight:100 900;font-display:block}}</style>' + ui
 csp = f"default-src 'none'; script-src 'sha256-{digest}'; style-src 'unsafe-inline'; font-src data:"
 frame = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="{csp}">'

@@ -25,7 +25,8 @@ async def test_setup_adds_an_admin_only_panel(hass: HomeAssistant) -> None:
     custom = panel.config["_panel_custom"]
     assert custom["name"] == PANEL_ELEMENT
     assert custom["embed_iframe"] is False
-    assert custom["module_url"].startswith(f"{STATIC_URL}/host.js?v=")
+    # Each release is served under its own path, so a cached frame from the last release can't load with a new host.
+    assert custom["module_url"] == f"{STATIC_URL}/0.0.0/host.js"
 
 
 async def test_unload_removes_the_panel_and_keeps_storage(hass: HomeAssistant, hass_storage) -> None:
