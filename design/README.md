@@ -17,7 +17,7 @@ the UI runs in the host's sandboxed frame with the same no-network CSP the real 
 | `host.js` | The panel element HA mounts: holds `hass`, forwards mapped states to the frame, runs the v1 write table |
 | `fake-ha.js` | Stands in for HA: entities, services, the panel's backend commands, report delays, dropped commands, failsafes |
 | `sample-seed.js` | The made-up room the fake HA starts with: stored config, entity states, failsafes |
-| `dev-shell.html` | The page that plays HA, with the Test controls drawer outside the sandbox |
+| `dev-shell.html` | The page that plays HA, with a sidebar wired like HA's and the Test controls drawer outside the sandbox |
 | `build-mock.py` | Assembles one page from the above, inlining Roboto (`fonts/`, OFL) since the frame can't fetch it |
 | `vpd-browser-test.mjs` | Browser tests, run in real Chromium against the assembled page |
 | `build-snapshot.py` | Builds the UI and a seed from a real-room snapshot, then `environment-control-mock.html` |

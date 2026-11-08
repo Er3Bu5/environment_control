@@ -15,6 +15,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); f
 .habar strong { font-weight: 500; }
 .habar span { opacity: .8; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .habar button { font: inherit; font-size: 12px; color: inherit; background: none; border: 1px solid currentColor; border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+ha-sidebar { display: flex; gap: 4px; flex-shrink: 0; }
+#ha-overview { position: fixed; top: 36px; left: 0; right: 0; bottom: 0; padding: 24px 16px; box-sizing: border-box; color: var(--muted); font-size: 14px; }
 environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; bottom: 0; height: auto; }
 #drawer { position: fixed; top: 36px; right: 0; width: min(380px, 100vw); max-height: calc(100dvh - 36px); overflow: auto; box-sizing: border-box; padding: 12px 16px 16px; background: var(--card); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, .25); z-index: 3; font-size: 13px; }
 #drawer h2 { font-size: 14px; font-weight: 500; margin: 12px 0 6px; }
@@ -27,8 +29,9 @@ environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; botto
 #calls { margin: 0; padding: 0; list-style: none; font-family: ui-monospace, monospace; font-size: 11px; }
 #calls li { padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 </style>
-<header class="habar"><strong>Home Assistant</strong><span>Mock on this device, nothing reaches a real home</span><button id="drawer-btn" aria-expanded="false" aria-controls="drawer">Test controls</button></header>
+<header class="habar"><strong>Home Assistant</strong><ha-sidebar></ha-sidebar><span>Mock on this device, nothing reaches a real home</span><button id="drawer-btn" aria-expanded="false" aria-controls="drawer">Test controls</button></header>
 <environment-control-panel></environment-control-panel>
+<div id="ha-overview" hidden>HA's Overview dashboard would be here. The bar's links move between pages the way HA's sidebar does.</div>
 <div id="ha-status" role="status" hidden></div>
 <div id="drawer" hidden>
   <h2>Devices</h2>
@@ -50,6 +53,14 @@ environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; botto
 <script>/*UI*/</script>
 <script>
 "use strict";
+/* HA's sidebar: links inside an open shadow root, as HA's own list items render them. */
+customElements.define("ha-sidebar", class extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    this.attachShadow({ mode: "open" }).innerHTML = `<style>a{color:inherit;font-size:12px;text-decoration:none;padding:3px 8px;border-radius:6px;white-space:nowrap}a[aria-current]{background:rgba(255,255,255,.22)}</style><a href="#/lovelace" data-route="/lovelace">Overview</a><a href="#/environment-control" data-route="/environment-control">Environment Control</a>`;
+  }
+  set current(route) { for (const a of this.shadowRoot.querySelectorAll("a")) a.toggleAttribute("aria-current", a.dataset.route === route); }
+});
 const fakeHA = new FakeHA(SEED);
 let panel = document.querySelector("environment-control-panel");
 const pageDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
@@ -75,8 +86,38 @@ const dropLabels = () => { $d("#t-drop").setAttribute("aria-pressed", String(fak
 $d("#t-drop").addEventListener("click", () => { fakeHA.knobs.dropNext = !fakeHA.knobs.dropNext; dropLabels(); });
 $d("#t-dropall").addEventListener("click", () => { fakeHA.knobs.dropAll = !fakeHA.knobs.dropAll; dropLabels(); });
 $d("#t-delay").addEventListener("change", (e) => { fakeHA.knobs.reportMs = Number(e.target.value); });
+/* HA's router as its frontend has it: one click listener on the window turns a plain left click on a same-origin link into a
+   page change, unless something cancelled the click first, and changing page takes the panel element off the page. Routes
+   ride on the hash so the mock works from a file or a viewer, and the route is kept here in case the URL can't change. */
+let haRoute = "/environment-control";
+const sidebar = document.querySelector("ha-sidebar");
+sidebar.current = haRoute;
+try { history.replaceState(null, "", `#${haRoute}`); } catch { /* A viewer that won't let the URL change. */ }
+function isNavigationClick(e) {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return undefined;
+  const a = e.composedPath().find((n) => n.tagName === "A");
+  if (!a || a.target || a.hasAttribute("download") || a.getAttribute("rel") === "external") return undefined;
+  const url = new URL(a.href);
+  if (url.origin !== location.origin) return undefined;
+  e.preventDefault();
+  return url.hash.slice(1) || "/";
+}
+function haNavigate(route) {
+  if (route === haRoute) return;
+  try { history.pushState(null, "", `#${route}`); } catch { /* The route below still changes. */ }
+  haRoute = route; sidebar.current = route;
+  const onPanel = route === "/environment-control";
+  $d("#ha-overview").hidden = onPanel;
+  if (!onPanel && panel.isConnected) { fakeHA.detach(panel); panel.remove(); }
+  if (onPanel && !panel.isConnected) {
+    const next = document.createElement("environment-control-panel");
+    next.ui = UI_HTML; $d("#ha-overview").before(next); panel = next; fakeHA.attach(next);
+  }
+}
+window.addEventListener("click", (e) => { const route = isNavigationClick(e); if (route) haNavigate(route); });
 /* A new panel element and frame, reading what's stored, the same as closing the panel and opening it again. */
 function reopenPanel() {
+  if (!panel.isConnected) return;
   const next = document.createElement("environment-control-panel");
   next.ui = UI_HTML;
   fakeHA.detach(panel); panel.replaceWith(next); panel = next;

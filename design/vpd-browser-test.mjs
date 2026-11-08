@@ -1979,6 +1979,29 @@ if (dialogType !== "none") await send("Page.handleJavaScriptDialog", { accept: f
 await sleep(200);
 check("Leaving: reloading with a draft open raises the browser's own prompt, and staying keeps the draft", dialogType === "beforeunload" && /x/.test(await ev(`ui.wiz ? ui.wiz.name : ""`)), dialogType);
 
+/* HA's sidebar changes page without unloading, so the host holds the link click itself. These are real clicks on the page that
+   plays HA, landing on links inside the sidebar's shadow root, through the same router HA uses. */
+const sideClick = async (route) => {
+  const r = await onHA(`(()=>{const b=document.querySelector("ha-sidebar").shadowRoot.querySelector('[data-route="${route}"]').getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2}})()`);
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await rawSend("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
+  await sleep(200);
+};
+const haRoute = () => onHA(`haRoute`);
+await sideClick("/lovelace");
+const leaveDlg = await hostDialog();
+check("Leaving: with a draft open, HA's sidebar doesn't change page, and the host asks first", (await haRoute()) === "/environment-control" && leaveDlg.open === true && leaveDlg.text.includes("Discard unsaved changes?"), [await haRoute(), leaveDlg.text]);
+await hostClick("keep");
+check("Leaving: Keep editing stays on the panel with the draft as it was", (await haRoute()) === "/environment-control" && (await hostDialog()).open === false && /x/.test(await ev(`ui.wiz ? ui.wiz.name : ""`)), await haRoute());
+await sideClick("/environment-control");
+check("Leaving: the panel's own link in the sidebar goes nowhere, so it doesn't ask", (await hostDialog()).open === false && /x/.test(await ev(`ui.wiz ? ui.wiz.name : ""`)));
+await sideClick("/lovelace"); await hostClick("leave");
+check("Leaving: Discard and leave lets HA change page", (await haRoute()) === "/lovelace" && (await onHA(`document.querySelector("environment-control-panel")`)) === null && (await hostDialog()).open === false, await haRoute());
+await sideClick("/environment-control"); await refindFrame();
+check("Leaving: coming back opens the panel fresh, with no draft", (await haRoute()) === "/environment-control" && (await ev(`ui.wiz`)) === null);
+await sideClick("/lovelace");
+check("Leaving: with nothing unsaved, the sidebar changes page without asking", (await haRoute()) === "/lovelace" && (await hostDialog()).open === false);
+await sideClick("/environment-control"); await refindFrame();
+
 check("no script errors", exceptions.length === 0, exceptions);
 
 console.log(`\n${pass} passed, ${fail} failed`);

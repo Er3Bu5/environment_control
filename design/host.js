@@ -37,13 +37,26 @@
   /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
   const ARM_MS = 1000;
   const CAN = { switch: "Can be switched on and off.", fan: "Can be switched on and off.", light: "Can be switched on and off and dimmed.", humidifier: "Can be switched on and off, and its mode and target humidity set." };
+  /* HA's own test for a click it turns into a page change (isNavigationClick in its frontend): a plain left click on a
+     same-origin link with no target. HA leaves a click alone once something has cancelled it, which is how this holds the
+     page. Its sidebar entries are links like this, inside open shadow roots, so they show in the click's path. */
+  const leavingVia = (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return null;
+    const a = e.composedPath().find((n) => n.tagName === "A");
+    if (!a || a.target || a.hasAttribute("download") || a.getAttribute("rel") === "external") return null;
+    let url;
+    try { url = new URL(a.href); } catch { return null; }
+    if (url.origin !== location.origin) return null;
+    return url.pathname + url.search + url.hash === location.pathname + location.search + location.hash ? null : a;
+  };
+  const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
   const DIALOG_CSS = `dialog{max-width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;border:0;border-radius:16px;padding:20px;font:15px/1.45 Roboto,system-ui,sans-serif;background:#FFFFFF;color:#212121;box-shadow:0 12px 40px rgba(0,0,0,.35)}
     dialog.dark{background:#1C1C1C;color:#E1E1E1}dialog::backdrop{background:rgba(0,0,0,.55)}
     h2{margin:0 0 6px;font-size:19px;font-weight:500;outline:none}p{margin:0 0 12px;opacity:.8;font-size:14px}
     ul{list-style:none;margin:0 0 16px;padding:0;max-height:50dvh;overflow:auto}li{padding:10px 0;border-top:1px solid rgba(128,128,128,.3);display:flex;flex-direction:column;gap:2px}
     code{font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}span{font-size:13px;opacity:.8}strong{font-size:13px;font-weight:500;color:#D32F2F}dialog.dark strong{color:#EF9A9A}
     .row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid rgba(128,128,128,.5);background:none;color:inherit;cursor:pointer}
-    summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:var(--p,#03A9F4);border-color:var(--p,#03A9F4);color:var(--on-p,#FFFFFF)}button:disabled{opacity:.45;cursor:default}`;
+    summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:var(--p,#03A9F4);border-color:var(--p,#03A9F4);color:var(--on-p,#FFFFFF)}button.leave{color:#D32F2F;border-color:#D32F2F}dialog.dark button.leave{color:#EF9A9A;border-color:#EF9A9A}button:disabled{opacity:.45;cursor:default}`;
 
   class EnvironmentControlPanel extends HTMLElement {
     constructor() {
@@ -52,9 +65,23 @@
       this.forwarded = {};
       this.onMessage = this.onMessage.bind(this);
       /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
-         raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly.
-         HA's sidebar changes pages without unloading this one, so it isn't covered. */
+         raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
       this.onUnload = (e) => { if (this.draftOpen) { e.preventDefault(); e.returnValue = ""; } };
+      /* HA's sidebar changes pages without unloading this one, so the browser never asks. A link click that would take HA
+         elsewhere is held here first, before HA's own listener, and goes ahead only once you say so. */
+      this.onClick = (e) => {
+        if (!this.draftOpen || this.passing) return;
+        const link = leavingVia(e);
+        if (!link) return;
+        e.preventDefault();
+        if (this.asking) return;
+        this.askLeave().then((go) => {
+          if (!go) return;
+          /* The same link clicked again, so HA changes page its own way. */
+          this.passing = true;
+          try { link.click(); } finally { this.passing = false; }
+        });
+      };
     }
     set hass(h) {
       const first = !this._hass;
@@ -65,6 +92,7 @@
     disconnectedCallback() {
       window.removeEventListener("message", this.onMessage);
       window.removeEventListener("beforeunload", this.onUnload);
+      window.removeEventListener("click", this.onClick, true);
       this.draftOpen = false;
       if (this.onReady) this._hass.connection.removeEventListener("ready", this.onReady);
     }
@@ -89,6 +117,7 @@
       this.frame.srcdoc = this.ui;
       window.addEventListener("message", this.onMessage);
       window.addEventListener("beforeunload", this.onUnload);
+      window.addEventListener("click", this.onClick, true);
       this.shadow.append(style, this.frame);
     }
 
@@ -323,7 +352,6 @@
     confirm(items, config) {
       this.asking = true;
       return new Promise((resolve) => {
-        const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
         const rows = items.map((it) => ({ it, ...this.describe(it, config) }));
         const zones = [...new Set(rows.flatMap((r) => r.zones))];
         const t = this.theme(), dlg = make("dialog", undefined, t.mode);
@@ -365,6 +393,26 @@
         dlg.showModal();
         title.focus();
         arm();
+      });
+    }
+    askLeave() {
+      this.asking = true;
+      return new Promise((resolve) => {
+        const t = this.theme(), dlg = make("dialog", undefined, t.mode);
+        dlg.setAttribute("aria-labelledby", "ec-leave-title");
+        const title = make("h2", "Discard unsaved changes?");
+        title.id = "ec-leave-title"; title.tabIndex = -1;
+        const keep = make("button", "Keep editing"), leave = make("button", "Discard and leave", "leave");
+        keep.dataset.host = "keep"; leave.dataset.host = "leave";
+        const row = make("div", undefined, "row"); row.append(keep, leave);
+        dlg.append(make("style", DIALOG_CSS), title, make("p", "Environment Control has changes you haven't applied. Leaving discards them, and nothing is sent to Home Assistant."), row);
+        const finish = (yes) => { dlg.close(); dlg.remove(); this.asking = false; resolve(yes); };
+        keep.addEventListener("click", () => finish(false));
+        leave.addEventListener("click", () => finish(true));
+        dlg.addEventListener("cancel", (e) => { e.preventDefault(); finish(false); });
+        this.shadow.append(dlg);
+        dlg.showModal();
+        title.focus();
       });
     }
   }
