@@ -12,7 +12,8 @@ hardware or reach the network.
 - **ASCII hyphens only.** Never an em-dash or en-dash, in code, comments, docs or commit messages.
 - **No AI attribution in commits.** No `Co-Authored-By` or similar trailer.
 - **No secrets, addresses or real readings in the repo.** It is public. No tokens, hostnames, LAN addresses, MAC
-  addresses, email addresses other than GitHub noreply, or home paths. Zone names and entity ids are fine. Real-room
+  addresses, email addresses other than GitHub noreply, home paths, or anything about how one install is reached
+  (proxies, access headers, tunnels). Zone names and entity ids are fine. Real-room
   snapshots and anything built from them stay gitignored. `scripts/check_privacy.py` and gitleaks run in CI.
 - **The backend never calls a service or sets a state,** never reads a config entry's `data` or `options`, and has
   no `requirements`. `scripts/check_backend_safety.py` enforces it.
@@ -24,4 +25,9 @@ hardware or reach the network.
   reviewed is what runs.
 - **Dependencies:** runtime dependencies are Lit only for now. Pin exact versions, at least two weeks old. Install with
   `npm ci --ignore-scripts`. GitHub Actions are pinned to commit SHAs.
-- **Every change is one commit, made once all tests pass, then pushed.**
+- **Changes reach `main` only through pull requests.** Never push to `main`; a ruleset enforces it. Each change goes
+  on its own branch (`feat/`, `fix/`, `ci/`, `docs/`, `deps/`), with one commit per concern, each made once all tests
+  pass. The pull request says what changed, why and how it was checked. All five CI checks must pass, and the owner
+  merges. Dependabot's pull requests are reviewed and merged the same way, never re-applied by hand.
+- **Releases are the owner's.** An agent may run the Release workflow as a dry run only. Publishing waits for the
+  owner's approval on the `release` environment, which accepts runs from `main` only.
