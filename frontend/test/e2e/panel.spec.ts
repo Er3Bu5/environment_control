@@ -143,6 +143,36 @@ test.describe("talking to HA", () => {
   });
 });
 
+test.describe("what Home Assistant has", () => {
+  test("the catalog shows each device by area with how it is connected, and says so when that isn't known", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await expect.poll(() => frameText(frame)).toContain("Environment board");
+    const text = await frameText(frame);
+    for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "1 entity, such as a helper or template"]) {
+      expect(text).toContain(want);
+    }
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("a device named with markup is drawn as text, never run", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await expect.poll(() => frameText(frame)).toContain('<img src=x onerror="window.pwned=1">');
+    expect(await frame.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+    expect(await frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.querySelectorAll("img").length)).toBe(0);
+  });
+
+  test("when Home Assistant can't list its devices the panel says so, and Try again asks again", async ({ page }) => {
+    await page.goto(`${PAGE}?catalog=fail`);
+    const frame = await panelFrame(page);
+    await expect.poll(() => frameText(frame)).toContain("couldn't list its devices");
+    await page.evaluate("catalogDown = false");
+    await frame.locator("ec-app").getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => frameText(frame)).toContain("Environment board");
+  });
+});
+
 test.describe("appearance", () => {
   test("HA's primary colour reaches the frame, and one that isn't a plain colour doesn't", async ({ page }) => {
     await page.goto(PAGE);

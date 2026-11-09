@@ -35,6 +35,26 @@ customElements.define("ha-sidebar", class extends HTMLElement {
 const params = new URLSearchParams(location.search);
 if (params.has("primary")) document.documentElement.style.setProperty("--primary-color", params.get("primary"));
 const fakeHA = new FakeHA(SEED);
+/* The backend's catalog, as the real one shapes it. One name is markup, to prove the frame draws it as text. */
+const CATALOG = {
+  devices: [
+    { id: "d-board", name: "Environment board", area: "Garden", manufacturer: "Espressif", model: "PoE board", integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
+      entities: [{ entity_id: "sensor.environment_board_air_temp", name: "Air temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "24.1", category: null, area: null }] },
+    { id: "d-plug", name: "Heater plug", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
+      entities: [{ entity_id: "switch.heater_plug", name: "Heater plug", domain: "switch", device_class: "outlet", unit: null, state: "off", category: null, area: null }] },
+    { id: "d-bulb", name: "Tent light", area: "Veg", manufacturer: null, model: null, integration: "hue", family: "Philips Hue", link: "zigbee", path: "local", hub: "Hue bridge",
+      entities: [{ entity_id: "light.tent_light", name: "Tent light", domain: "light", device_class: null, unit: null, state: "on", category: null, area: null }] },
+    { id: "d-evil", name: '<img src=x onerror="window.pwned=1">', area: null, manufacturer: null, model: null, integration: "lg_thinq", family: "LG ThinQ", link: "unknown", path: "cloud", hub: null, entities: [] },
+  ],
+  entities: [{ entity_id: "input_boolean.lights_override", name: "Lights override", domain: "input_boolean", device_class: null, unit: null, state: "off", category: null, area: null, integration: "input_boolean", family: "Input boolean" }],
+};
+let catalogDown = params.get("catalog") === "fail";
+const backendCommand = fakeHA.command.bind(fakeHA);
+fakeHA.command = async (msg) => {
+  if (!msg || msg.type !== "environment_control/catalog") return backendCommand(msg);
+  if (catalogDown) fakeHA.fail("Catalog not ready");
+  return JSON.parse(JSON.stringify(CATALOG));
+};
 if (params.get("user") === "guest") { const hass = fakeHA.hass.bind(fakeHA); fakeHA.hass = () => ({ ...hass(), user: { is_admin: false } }); }
 let panel = document.querySelector("environment-control-panel");
 /* HA's router as its frontend has it: one click listener on the window turns a plain left click on a same-origin link

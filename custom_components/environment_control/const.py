@@ -14,3 +14,8 @@ STORAGE_VERSION = 1
 MAX_CONFIG_BYTES = 512 * 1024
 MAX_ZONES = 20
 MAX_DEVICES = 200
+
+# The catalog Setup picks from. A home has tens of devices and around a thousand entities; the caps keep a huge
+# install's answer to a size a phone can take.
+MAX_CATALOG_DEVICES = 1000
+MAX_CATALOG_ENTITIES = 5000

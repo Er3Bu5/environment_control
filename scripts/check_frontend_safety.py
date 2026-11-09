@@ -2,6 +2,7 @@
 
 - The host's frame is sandboxed with allow-scripts and nothing else, and allow-same-origin appears nowhere shipped.
 - callService appears only in the host, and only as often as the write table below allows (none in this release).
+- The host accepts exactly the frame messages listed below, so each new path into the host is added on purpose.
 - The frame's source has no network, no eval and no service calls; the built frame carries the no-network CSP.
 Usage: python3 scripts/check_frontend_safety.py [repo_root]
 """
@@ -15,6 +16,9 @@ from pathlib import Path
 # The write paths the host may call, as a count of callService sites. Each milestone that adds a write adds it here,
 # in the same change as its tests. Milestone 2 ships none.
 HOST_CALL_SERVICE_SITES = 0
+# The messages the host acts on from the frame. Each is a way into the code that holds the login, so adding one is a
+# deliberate change here, made with its tests.
+HOST_ACCEPTS = {"ready", "draft", "appearance", "catalog"}
 FRAME_BANNED = {
     "callService": r"\bcallService\b",
     "fetch": r"\bfetch\s*\(",
@@ -45,6 +49,9 @@ def main() -> int:
         problems.append("host.js: set the sandbox only through setAttribute, so this check sees it")
     if not re.search(r"srcdoc\s*=\s*FRAME_HTML", host) or re.search(r"\.src\s*=", host):
         problems.append("host.js: the frame must load only the built page, through srcdoc")
+    accepts = set(re.findall(r'm\.type === "([a-z_]+)"', host))
+    if accepts != HOST_ACCEPTS:
+        problems.append(f"host.js: accepts frame messages {sorted(accepts)}, the allowlist is {sorted(HOST_ACCEPTS)}")
     sites = len(re.findall(r"\bcallService\b", host))
     if sites != HOST_CALL_SERVICE_SITES:
         problems.append(f"host.js: {sites} callService sites, the write table allows {HOST_CALL_SERVICE_SITES}")
