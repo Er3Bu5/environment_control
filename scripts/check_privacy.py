@@ -28,6 +28,8 @@ CHECKS = {
     "home path": re.compile(r"/home/[a-z][a-z0-9_-]+/|/Users/[A-Za-z][^/\s]*/|C:\\\\Users\\\\"),
 }
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# A high-DPI image name such as icon@2x.png has the shape of an address, but no address ends in an image extension
+IMAGE_NAME = re.compile(r"@\d+(\.\d+)?x\.(png|jpe?g|svg|webp|gif)$", re.I)
 URL_HOST = re.compile(r"\b(?:https?|wss?)://([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 SKIP_SUFFIXES = {".woff2", ".png", ".jpg", ".ico"}
 SKIP_FILES = {"LICENSE", "frontend/package-lock.json", "frontend/fonts/OFL.txt", "scripts/check_privacy.py"}
@@ -35,7 +37,8 @@ SKIP_FILES = {"LICENSE", "frontend/package-lock.json", "frontend/fonts/OFL.txt",
 
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    ls = ["git", "-C", str(root), "ls-files"]
+    # Untracked files too, so a run before git add sees what is about to be committed
+    ls = ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"]
     files = subprocess.run(ls, capture_output=True, text=True, check=True).stdout.split()  # noqa: S603
     problems = []
     for name in files:
@@ -47,7 +50,7 @@ def main() -> int:
                 if rx.search(line):
                     problems.append(f"{name}:{n}: {label}")
             for m in EMAIL.finditer(line):
-                if not ALLOWED_EMAILS.match(m.group(0)):
+                if not ALLOWED_EMAILS.match(m.group(0)) and not IMAGE_NAME.search(m.group(0)):
                     problems.append(f"{name}:{n}: email address")
             for m in URL_HOST.finditer(line):
                 host = m.group(1).lower().rstrip(".")
