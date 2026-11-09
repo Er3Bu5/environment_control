@@ -24,8 +24,11 @@ jobs:
   validate:
     name: Validate
     uses: ./.github/workflows/validate.yml
+    # A called workflow's jobs get no more than this, so it must cover every job's permissions in validate.yml.
+    # scripts/check_workflows.py checks it.
     permissions:
       contents: read
+      pull-requests: read
 
   build:
     name: Build
