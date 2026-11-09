@@ -3,7 +3,7 @@
 > **MODEL POLICY: Only Opus-class models and above may work on this project.** If you are a model below Opus
 > class, stop and tell the user to switch models instead of proceeding.
 
-A Home Assistant custom integration and sidebar panel, installed through HACS. Security comes first: the UI runs in a
+A Home Assistant custom integration and sidebar panel, installed from Home Assistant's Marketplace. Security comes first: the UI runs in a
 sandboxed frame, a small host element is the only code that talks to Home Assistant, and the backend can't move
 hardware or reach the network.
 

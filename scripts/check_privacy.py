@@ -14,7 +14,7 @@ from pathlib import Path
 
 ALLOWED_HOSTS = {
     "github.com", "raw.githubusercontent.com", "docs.github.com", "www.home-assistant.io", "home-assistant.io",
-    "developers.home-assistant.io", "hacs.xyz", "www.gnu.org", "gnu.org", "fsf.org", "www.fsf.org",
+    "developers.home-assistant.io", "www.gnu.org", "gnu.org", "fsf.org", "www.fsf.org",
     "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "scripts.sil.org", "vpdchart.com",
     "athenaag.com", "127.0.0.1", "localhost", "x.test", "example.com", "www.w3.org", "json.schemastore.org",
     "spdx.org", "keepachangelog.com",
