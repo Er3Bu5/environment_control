@@ -21,7 +21,6 @@ the UI runs in the host's sandboxed frame with the same no-network CSP the real 
 | `build-mock.py` | Assembles one page from the above, inlining Roboto (`../frontend/fonts/`, OFL) since the frame can't fetch it |
 | `vpd-browser-test.mjs` | Browser tests, run in real Chromium against the assembled page |
 | `build-snapshot.py` | Builds the UI and a seed from a real-room snapshot, then `environment-control-mock.html` |
-| `ha-snap/*.py` | Read-only fetches from Home Assistant into `ha-snap/*.json` (not committed) |
 
 ## Workflow
 
@@ -41,14 +40,9 @@ python3 build-mock.py "$PWD" environment-control-source.html sample-seed.js mock
 
 A test run that died can leave Chromium behind: `pkill -f '[r]emote-debugging-port=9347'`.
 
-Refreshing the snapshot needs `HA_URL` and `HA_TOKEN` in the environment:
-
-```sh
-source ~/.env.local
-python3 ha-snap/states.py ha-snap/states.json
-python3 ha-snap/history.py ha-snap/history.json
-python3 ha-snap/history-long.py ha-snap/history-long.json
-```
+The snapshot files (`states.json`, `areas.json`, `history.json`, `history-long.json` in `ha-snap/`) are fetched
+by a read-only tool kept outside this repo, because what it reads is specific to one Home Assistant install.
+`build-snapshot.py` shows the shape it expects from each.
 
 The built mock is published as a private Artifact. Screenshots and the built mock are output and are
 ignored.
