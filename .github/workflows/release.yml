@@ -1,7 +1,8 @@
 name: Release
 
 # Run by hand from the Actions tab, on the web or the GitHub app. A dry run builds the zip and keeps it as a workflow
-# artifact; a real run attests it and publishes a GitHub release, which is what HACS offers as an update.
+# artifact; a real run attests it and publishes a GitHub release, which is what Home Assistant's Marketplace
+# offers as an update.
 on:
   workflow_dispatch:
     inputs:

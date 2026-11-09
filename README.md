@@ -16,16 +16,24 @@ the update path and the sandbox, and it can't move any hardware.
 - **The backend can't move hardware or reach the network:** no service calls, no state writes, no
   external packages, checked on every change.
 - **Admins only,** for the panel and for every command it uses.
-- **Releases are built by CI from a tagged commit.** HACS installs the built zip, never the default
-  branch.
+- **Releases are built by CI from a tagged commit** and carry a build attestation. Home Assistant
+  installs that zip, never the default branch.
 
 ## Install
 
-Through [HACS](https://hacs.xyz), once the repository is public: add it as a custom repository of
-type Integration, install Environment Control, restart Home Assistant, then add the integration
-under Settings, Devices and services. The panel appears in the sidebar for admins.
+From Home Assistant's Marketplace (2026.11 and later), which needs a GitHub connection for a
+repository added by link:
 
-Requires Home Assistant 2026.10 or later.
+1. Go to Settings, Marketplace, select **Add from link**, and enter `Er3Bu5/environment_control`.
+2. While every release is a beta, open the three-dot menu on its page and select **Include pre-releases**.
+   Otherwise the Marketplace offers the latest commit, which doesn't contain the built panel.
+3. Select **Install**. The Marketplace downloads the release zip and opens the setup step.
+
+The panel appears in the sidebar for admins. Updates are offered in the Marketplace and need a
+restart, which a repair notice offers to do.
+
+Requires Home Assistant 2026.10 or later. On 2026.10, which predates the Marketplace, add the
+repository to HACS as a custom repository of type Integration instead.
 
 ## Development
 
@@ -40,6 +48,7 @@ npm run typecheck && npm test && npm run build && npm run e2e
 
 # Safety and privacy checks
 python3 scripts/check_backend_safety.py && python3 scripts/check_frontend_safety.py && python3 scripts/check_privacy.py
+python3 scripts/check_marketplace.py && .venv/bin/python scripts/check_workflows.py
 ```
 
 The design mock and its browser suite live in [`design/`](design/README.md).

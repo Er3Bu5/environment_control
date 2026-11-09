@@ -123,7 +123,7 @@ function reopenPanel() {
   fakeHA.detach(panel); panel.replaceWith(next); panel = next;
   fakeHA.attach(next);
 }
-/* HACS replaces custom_components/environment_control and nothing else, so storage is untouched and the new panel reads it. */
+/* An update replaces custom_components/environment_control and nothing else, so storage is untouched and the new panel reads it. */
 function installUpdate() {
   reopenPanel();
   showStatus("Updated. Settings kept, read back from storage.", 2500);
