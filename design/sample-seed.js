@@ -1,6 +1,8 @@
 "use strict";
-/* Made-up room for the fake Home Assistant: what the panel's backend has stored, and what HA reports for each entity.
-   build-snapshot.py writes the same shape from a real room. */
+/* FAKED TEST DATA FOR MOCK PURPOSES. Every reading, limit, time, layout and device below is invented to exercise the
+   design mock and the tests; none of it is measured from a real room.
+   It is what the fake Home Assistant starts with: what the panel's backend has stored, and what HA reports for each
+   entity. build-snapshot.py writes the same shape from a real room, and that output is never committed. */
 const SEED = (() => {
   /* Each limit is [min, low, target, high, max]. Min and max are critical, and low to high is the ideal zone. */
   const bandsA = { day: { temperature: [23, 24, 25, 27, 28], humidity: [55, 60, 64, 67, 70], vpd: [0.8, 0.95, 1.1, 1.2, 1.3] }, night: { temperature: [16, 20, 23, 25, 26], humidity: [55, 58, 62, 65, 68], vpd: [0.7, 0.85, 1.0, 1.1, 1.2] } };

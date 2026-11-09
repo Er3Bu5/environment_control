@@ -18,7 +18,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 @pytest.fixture
 def sample_config():
-    """The mock's made-up room, so the backend is checked against the setup the UI really produces."""
+    """The mock's faked test data, so the backend is checked against the setup the UI really produces."""
     node = shutil.which("node")
     assert node, "node is needed to read the mock's sample room"
     script = (
