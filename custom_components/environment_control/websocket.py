@@ -1,4 +1,4 @@
-"""The panel's two backend commands, for admins only: read the setup, and save it."""
+"""The panel's backend commands, for admins only: read the setup, save it, and list what Home Assistant has."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import probatio
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
+from .catalog import async_build_catalog
 from .const import DOMAIN
 from .store import ConfigStore, RevisionConflict
 from .validation import InvalidConfig
@@ -17,9 +18,10 @@ CONFLICT = "Setup was saved from somewhere else since this was opened. Reopen th
 
 @callback
 def async_register_commands(hass: HomeAssistant) -> None:
-    """Register both commands."""
+    """Register the commands."""
     websocket_api.async_register_command(hass, ws_config)
     websocket_api.async_register_command(hass, ws_config_save)
+    websocket_api.async_register_command(hass, ws_catalog)
 
 
 def _store(hass: HomeAssistant) -> ConfigStore | None:
@@ -62,3 +64,14 @@ async def ws_config_save(hass: HomeAssistant, connection: websocket_api.ActiveCo
         connection.send_error(msg["id"], "invalid_config", str(err))
     else:
         connection.send_result(msg["id"], saved)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({probatio.Required("type"): f"{DOMAIN}/catalog"})
+@websocket_api.async_response
+async def ws_catalog(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """List the devices and entities setup can pick from, with how each device is connected."""
+    if _store(hass) is None:
+        connection.send_error(msg["id"], "not_loaded", "Environment Control isn't set up.")
+        return
+    connection.send_result(msg["id"], await async_build_catalog(hass))
