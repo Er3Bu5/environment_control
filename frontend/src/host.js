@@ -1,7 +1,8 @@
 // @ts-check
 /* The panel element Home Assistant mounts, and the only code that holds your login. The whole UI runs in a sandboxed
    frame with its own origin and no network, and this element is its only way out: it hands the frame the stored setup,
-   the states of mapped entities with allowlisted attributes, and HA's theme colours, each checked to be a plain colour.
+   the states of mapped entities with allowlisted attributes, HA's theme colours, each checked to be a plain colour, and,
+   when Setup asks, the backend's catalog of what HA has, which carries no identifiers, addresses or serials.
    Anything the frame sends that isn't on the allowlist is dropped.
 
    This release moves nothing: there is no service call here. Device controls, calibration and setting writes arrive in
@@ -219,6 +220,19 @@ class EnvironmentControlPanel extends HTMLElement {
     if (m.type === "ready") { this.draftOpen = false; this.init(); }
     else if (m.type === "draft") { if (typeof m.open === "boolean") this.draftOpen = m.open; }
     else if (m.type === "appearance") this.setAppearance(m);
+    else if (m.type === "catalog") this.catalog(m);
+  }
+  /* Setup's picker: the devices and entities HA has, with how each device is connected, as the backend lists them. Reading
+     it links nothing and makes nothing controllable; that takes a save, which asks you first. */
+  /** @param {any} m */
+  async catalog(m) {
+    if (!Number.isInteger(m.req)) return;
+    try {
+      const catalog = await this._hass.connection.sendMessagePromise({ type: "environment_control/catalog" });
+      this.post({ type: "result", req: m.req, ok: true, catalog });
+    } catch {
+      this.reply(m.req, false, "Home Assistant couldn't list its devices. Try again in a moment.");
+    }
   }
   /** @param {unknown} req @param {boolean} ok @param {string} [error] */
   reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
