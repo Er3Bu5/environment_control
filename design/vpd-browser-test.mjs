@@ -4,12 +4,15 @@ import { writeFileSync, readFileSync, rmSync } from "node:fs";
 
 const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
 process.on("uncaughtException", (e) => { console.log("Error", e.message); browser.kill(); process.exit(2); });
-const browser = spawn("chromium", ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--disable-features=IsolateSandboxedIframes", "--disable-site-isolation-trials", "about:blank"], { stdio: "ignore" });
+/* CHROMIUM_FLAGS adds flags for one machine, such as --no-sandbox on CI runners where Chromium's own sandbox can't start. */
+const extraFlags = (process.env.CHROMIUM_FLAGS || "").split(" ").filter(Boolean);
+const browser = spawn("chromium", [...extraFlags, "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--disable-features=IsolateSandboxedIframes", "--disable-site-isolation-trials", "about:blank"], { stdio: "ignore" });
 /* Chromium keeps writing its profile for a moment after the kill, so wait for it to exit before removing it. */
 const finish = async () => { const gone = new Promise((r) => browser.once("exit", r)); browser.kill(); await gone; rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); process.exit(fail ? 1 : 0); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let info;
 for (let n = 0; n < 50 && !info; n++) { await sleep(200); try { info = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" })).json(); } catch {} }
+if (!info) { console.log("Error Chromium didn't start: no DevTools on port " + port); browser.kill(); process.exit(2); }
 const ws = new WebSocket(info.webSocketDebuggerUrl);
 await new Promise((r) => { ws.onopen = r; });
 let id = 0, frameContext; const waiting = new Map(), exceptions = [], contexts = [];
@@ -252,6 +255,8 @@ const falseBlocks = await ev(`(()=>{const out=[];for(const z of zones){openVpd(z
 check("every zone band and Athena stage passes", falseBlocks.length === 0, falseBlocks);
 
 await open();
+/* This check fails about one run in five. Until it's explained, note what redraws the page so a failure names its cause. */
+await ev(`window.__redraws=[];if(!window.__renderWrapped){const r=render;render=function(){window.__redraws.push((new Error().stack||"").split("\\n").slice(2,5).join(" < "));return r.apply(this,arguments)};window.__renderWrapped=true}`);
 await ev(`document.querySelector("#vin-temperature-1").__mark=1;document.querySelector("#vin-temperature-3").__mark=1`);
 await tap("#vin-temperature-1");
 check("tap focuses the box", (await active()) === "vin-temperature-1", await active());
@@ -261,7 +266,7 @@ await type("22.2");
 await tap("#vin-temperature-3");
 check("exact value kept, not snapped to 0.5", (await band("temperature", 1)) === 22.2, await band("temperature", 1));
 check("moving box to box keeps focus, so the keyboard stays", (await active()) === "vin-temperature-3", await active());
-check("boxes were not rebuilt", (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === 1);
+check("boxes were not rebuilt", (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === 1, await ev(`window.__redraws`));
 
 await key("Escape", 27);
 await open();
