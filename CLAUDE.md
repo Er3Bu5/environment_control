@@ -24,4 +24,9 @@ hardware or reach the network.
   reviewed is what runs.
 - **Dependencies:** runtime dependencies are Lit only for now. Pin exact versions, at least two weeks old. Install with
   `npm ci --ignore-scripts`. GitHub Actions are pinned to commit SHAs.
-- **Every change is one commit, made once all tests pass, then pushed.**
+- **Changes reach `main` only through pull requests.** Never push to `main`; a ruleset enforces it. Each change goes
+  on its own branch (`feat/`, `fix/`, `ci/`, `docs/`, `deps/`), with one commit per concern, each made once all tests
+  pass. The pull request says what changed, why and how it was checked. All five CI checks must pass, and the owner
+  merges. Dependabot's pull requests are reviewed and merged the same way, never re-applied by hand.
+- **Releases are the owner's.** An agent may run the Release workflow as a dry run only. Publishing waits for the
+  owner's approval on the `release` environment, which accepts runs from `main` only.
