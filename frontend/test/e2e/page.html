@@ -7,16 +7,19 @@
 <style>
 /* HA's own theme variables, which the panel element inherits. ?primary= replaces --primary-color, as a profile colour does. */
 :root { --primary-color: #F44336; --primary-background-color: #FAFAFA; --card-background-color: #FFFFFF; --secondary-background-color: #E5E5E5;
-  --primary-text-color: #212121; --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12); }
+  --primary-text-color: #212121; --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12);
+  /* HA sets these from the device's safe areas; non-zero here so a panel that ignores them shows. */
+  --safe-area-inset-top: 10px; --safe-area-inset-bottom: 20px; }
 html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
 header { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #F44336; color: #fff; }
-environment-control-panel { position: fixed; top: 36px; left: 0; right: 0; bottom: 0; }
+/* As HA's ha-panel-custom styles itself for a panel it loads as a module: a block with safe-area padding and no height. */
+ha-panel-custom { display: block; box-sizing: border-box; margin-top: 36px; padding-top: var(--safe-area-inset-top); padding-bottom: var(--safe-area-inset-bottom); }
 #ha-overview { position: fixed; top: 36px; left: 0; right: 0; padding: 24px 16px; }
 </style>
 </head>
 <body>
 <header><strong>Home Assistant</strong><ha-sidebar></ha-sidebar></header>
-<environment-control-panel></environment-control-panel>
+<ha-panel-custom><environment-control-panel></environment-control-panel></ha-panel-custom>
 <div id="ha-overview" hidden>Overview</div>
 <script src="/design/sample-seed.js"></script>
 <script src="/design/fake-ha.js"></script>
@@ -56,7 +59,7 @@ function haNavigate(route) {
   if (!onPanel && panel.isConnected) { fakeHA.detach(panel); panel.remove(); }
   if (onPanel && !panel.isConnected) {
     const next = document.createElement("environment-control-panel");
-    document.querySelector("#ha-overview").before(next); panel = next; fakeHA.attach(next);
+    document.querySelector("ha-panel-custom").append(next); panel = next; fakeHA.attach(next);
   }
 }
 window.addEventListener("click", (e) => { const route = isNavigationClick(e); if (route) haNavigate(route); });

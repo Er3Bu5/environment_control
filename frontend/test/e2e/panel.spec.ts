@@ -91,6 +91,16 @@ test.describe("sandbox", () => {
   });
 });
 
+test.describe("layout", () => {
+  test("the frame fills the window, less the safe areas, inside a container with no height as HA mounts it", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const windowHeight = await page.evaluate(() => window.innerHeight);
+    /* The page sets the top and bottom safe areas to 10px and 20px. */
+    expect(await frame.evaluate(() => window.innerHeight)).toBe(windowHeight - 30);
+  });
+});
+
 test.describe("talking to HA", () => {
   test("the frame shows the release and what HA has stored", async ({ page }) => {
     await page.goto(PAGE);

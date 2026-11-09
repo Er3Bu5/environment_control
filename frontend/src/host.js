@@ -118,7 +118,9 @@ class EnvironmentControlPanel extends HTMLElement {
     }
     this.shadow.textContent = "";
     const style = document.createElement("style");
-    style.textContent = ":host{display:block;height:100%}iframe{display:block;width:100%;height:100%;border:0}";
+    /* HA mounts a panel in a container with no height of its own, padded for the safe areas, so the panel sizes itself
+       to the window less that padding. A height of 100% would resolve to nothing and leave the frame at 150px. */
+    style.textContent = ":host{display:block;height:calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))}iframe{display:block;width:100%;height:100%;border:0}";
     this.frame = document.createElement("iframe");
     /* allow-scripts alone: adding allow-same-origin would let the frame reach this page and undo the sandbox. */
     this.frame.setAttribute("sandbox", "allow-scripts");
