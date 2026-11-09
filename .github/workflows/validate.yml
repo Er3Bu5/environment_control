@@ -98,9 +98,9 @@ jobs:
       - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main 2026-06-08
         with:
           category: integration
-          # Until milestone 3: the brand icon is still to be chosen, and the description and topics are set when the
-          # repo goes public. Remove each from this list as it's done.
-          ignore: brands description topics
+          # Until the repo goes public at milestone 3: the description and topics are set then. Remove each from this
+          # list as it's done.
+          ignore: description topics
 
   secrets-and-privacy:
     name: Secrets and privacy
