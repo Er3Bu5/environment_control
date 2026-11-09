@@ -1158,11 +1158,18 @@ const linksOf = (z) => Object.fromEntries(linkNames().map((n) => [n, linkAtName(
 const linkTarget = (n) => `map-l-${n.replace(/\./g, "-")}`;
 /* HA's number and time helpers, from the host. Asked for each time Map devices opens, so one made since shows up. */
 let helperCatalog = null;
-async function loadHelpers() {
-  const r = await ask("helpers", {});
-  if (!r.ok || !Array.isArray(r.helpers)) return;
-  helperCatalog = r.helpers.filter((h) => h && typeof h.entity === "string" && h.attributes);
-  if (ui.td && !ui.review) render();
+/* The list arrives after a round trip, often after a box has been tapped. Redrawing then would replace the box being
+   typed in, which can close a phone's keyboard, so the redraw waits until typing ends. */
+let helpersRedraw = false, helpersLoading = null;
+function loadHelpers() {
+  helpersLoading = (async () => {
+    const r = await ask("helpers", {});
+    if (!r.ok || !Array.isArray(r.helpers)) return;
+    helperCatalog = r.helpers.filter((h) => h && typeof h.entity === "string" && h.attributes);
+    if (!ui.td || ui.review) return;
+    if (typedBox(document.activeElement)) helpersRedraw = true; else render();
+  })();
+  return helpersLoading;
 }
 const helperFound = (e) => (helperCatalog || []).find((h) => h.entity === e);
 const helperUnit = (h) => (h && h.attributes && h.attributes.unit_of_measurement) || "";
@@ -2465,6 +2472,7 @@ function closeModal() {
 }
 
 function render() {
+  helpersRedraw = false;
   refreshReadings();
   renderChrome();
   document.body.classList.remove("vtyping");
@@ -2688,7 +2696,11 @@ document.addEventListener("focusin", (e) => {
 });
 /* Dropping the keyboard room shortens the page, so doing it on finger down would slide the tapped button away before the tap ends. */
 let pressing = false;
-const dropKeyboardRoom = () => { if (!typedBox(document.activeElement)) document.body.classList.remove("vtyping"); };
+const dropKeyboardRoom = () => {
+  if (typedBox(document.activeElement)) return;
+  document.body.classList.remove("vtyping");
+  if (helpersRedraw && ui.td && !ui.review) render();
+};
 document.addEventListener("pointerdown", () => { pressing = true; }, true);
 for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => { pressing = false; setTimeout(dropKeyboardRoom, 50); }, true);
 document.addEventListener("focusout", (e) => {

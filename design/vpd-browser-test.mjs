@@ -255,8 +255,9 @@ const falseBlocks = await ev(`(()=>{const out=[];for(const z of zones){openVpd(z
 check("every zone band and Athena stage passes", falseBlocks.length === 0, falseBlocks);
 
 await open();
-/* This check fails about one run in five. Until it's explained, note what redraws the page so a failure names its cause. */
-await ev(`window.__redraws=[];if(!window.__renderWrapped){const r=render;render=function(){window.__redraws.push((new Error().stack||"").split("\\n").slice(2,5).join(" < "));return r.apply(this,arguments)};window.__renderWrapped=true}`);
+/* Opening the page asks the host for HA's helper list, and its answer redraws the page. Wait for it, or a late answer
+   rebuilds the boxes after they're marked (this check used to fail about one run in five for that reason). */
+await send("Runtime.evaluate", { expression: "helpersLoading", awaitPromise: true, contextId: frameContext });
 await ev(`document.querySelector("#vin-temperature-1").__mark=1;document.querySelector("#vin-temperature-3").__mark=1`);
 await tap("#vin-temperature-1");
 check("tap focuses the box", (await active()) === "vin-temperature-1", await active());
@@ -266,7 +267,12 @@ await type("22.2");
 await tap("#vin-temperature-3");
 check("exact value kept, not snapped to 0.5", (await band("temperature", 1)) === 22.2, await band("temperature", 1));
 check("moving box to box keeps focus, so the keyboard stays", (await active()) === "vin-temperature-3", await active());
-check("boxes were not rebuilt", (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === 1, await ev(`window.__redraws`));
+check("boxes were not rebuilt", (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === 1);
+/* On a phone the list can arrive after a box has been tapped. Redrawing then would replace the box being typed in. */
+await send("Runtime.evaluate", { expression: "loadHelpers()", awaitPromise: true, contextId: frameContext });
+check("Helpers: a list that arrives while typing doesn't rebuild the box", (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === 1 && (await active()) === "vin-temperature-3" && (await ev(`helpersRedraw`)) === true);
+await tap("#vread"); await sleep(150);
+check("Helpers: once typing ends, the page catches up", (await ev(`helpersRedraw`)) === false && (await ev(`document.querySelector("#vin-temperature-3").__mark`)) === undefined && !(await ev(`typedBox(document.activeElement)`)));
 
 await key("Escape", 27);
 await open();
