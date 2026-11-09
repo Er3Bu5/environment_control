@@ -48,6 +48,7 @@ npm run typecheck && npm test && npm run build && npm run e2e
 
 # Safety and privacy checks
 python3 scripts/check_backend_safety.py && python3 scripts/check_frontend_safety.py && python3 scripts/check_privacy.py
+python3 scripts/check_marketplace.py && .venv/bin/python scripts/check_workflows.py
 ```
 
 The design mock and its browser suite live in [`design/`](design/README.md).

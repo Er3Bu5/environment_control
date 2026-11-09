@@ -88,17 +88,17 @@ jobs:
           persist-credentials: false
       - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master 2026-10-26
 
-  hacs:
-    name: HACS
-    # The HACS action refuses private repos outright, so it starts checking at milestone 3, when the repo goes public.
-    if: ${{ !github.event.repository.private }}
+  marketplace:
+    name: Marketplace
+    # HA 2026.11 replaced HACS with its Marketplace. This checks the Marketplace's own rules, standard library only.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main 2026-06-08
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          category: integration
+          persist-credentials: false
+      - run: python3 -I scripts/check_marketplace.py
 
   secrets-and-privacy:
     name: Secrets and privacy
