@@ -16,7 +16,9 @@ export type SensorClass = keyof typeof CLASSES;
 export const SLOTS = ["temperature", "humidity", "vpd", "light", "moisture", "ec"] as const;
 export type Slot = (typeof SLOTS)[number];
 export const CLASS_SLOTS: Record<SensorClass, readonly Slot[]> = { env: ["temperature", "humidity", "vpd", "light"], soil: ["moisture", "ec", "temperature"] };
-export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture (VWC)", ec: "EC" };
+/* A soil probe's EC is its pore water EC, pwEC as Athena's handbook calls it: the EC of the water within the substrate's
+   pores. HA gives it no device class of its own, so every conductivity sensor on the probe is offered for it. */
+export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture (VWC)", ec: "pwEC" };
 const EC_UNITS = ["mS/cm", "µS/cm", "μS/cm", "uS/cm", "dS/m"];
 
 export const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"] as const;
