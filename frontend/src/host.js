@@ -58,6 +58,9 @@ const onColor = (c) => {
     : ((/^rgba?\(([^)]*)\)/i.exec(c) || [])[1] || "").split(",").slice(0, 3).map(parseFloat);
   return rgb.length === 3 && rgb.every(Number.isFinite) && (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
 };
+/* The browser's Navigation API, where it has one. */
+/** @returns {any} */
+const navigation = () => /** @type {any} */ (window).navigation;
 /** @param {string} tag @param {string} [text] @param {string} [cls] */
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
 const DIALOG_CSS = `dialog{max-width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;border:0;border-radius:16px;padding:20px;font:15px/1.45 Roboto,system-ui,sans-serif;background:#FFFFFF;color:#212121;box-shadow:0 12px 40px rgba(0,0,0,.35)}
@@ -84,6 +87,8 @@ class EnvironmentControlPanel extends HTMLElement {
     this.ready = false;
     this.draftOpen = false;
     this.passing = false;
+    /** @type {string | null} */
+    this.passUrl = null;
     this.asking = false;
     /** @type {string | null} */
     this.picked = null;
@@ -113,6 +118,29 @@ class EnvironmentControlPanel extends HTMLElement {
         try { link.click(); } finally { this.passing = false; }
       });
     };
+    /* Navigation with no click to hold: the back gesture, a notification tap, the quick bar, a Companion app command.
+       Only the browser's Navigation API sees these, and the panel is used in the Companion app, whose Android WebView has
+       it. Each is held while a draft is open and goes ahead only once you say so, the way HA's own navigate() does it:
+       history first, then location-changed for its router, or the same history step again for back and forward. A
+       navigation the browser won't let a page cancel goes ahead, and the leave prompt covers one that unloads the page. */
+    /** @param {any} e */
+    this.onNavigate = (e) => {
+      if (!this.draftOpen || !e.cancelable || !e.destination.sameDocument) return;
+      const url = String(e.destination.url);
+      if (this.passing || url === this.passUrl) { this.passUrl = null; return; }
+      if (url === location.href) return;
+      e.preventDefault();
+      if (this.asking) return;
+      const type = e.navigationType, key = e.destination.key;
+      this.askLeave().then((go) => {
+        if (!go) return;
+        this.passUrl = url;
+        if (type === "traverse") { navigation().traverseTo(key); return; }
+        const replace = type === "replace";
+        if (replace) history.replaceState(null, "", url); else history.pushState(null, "", url);
+        window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace } }));
+      });
+    };
   }
   set hass(h) {
     const first = !this._hass;
@@ -132,6 +160,7 @@ class EnvironmentControlPanel extends HTMLElement {
     window.removeEventListener("message", this.onMessage);
     window.removeEventListener("beforeunload", this.onUnload);
     window.removeEventListener("click", this.onClick, true);
+    if (navigation()) navigation().removeEventListener("navigate", this.onNavigate);
     this.draftOpen = false;
     if (this.onReady) this._hass.connection.removeEventListener("ready", this.onReady);
   }
@@ -159,6 +188,7 @@ class EnvironmentControlPanel extends HTMLElement {
     window.addEventListener("message", this.onMessage);
     window.addEventListener("beforeunload", this.onUnload);
     window.addEventListener("click", this.onClick, true);
+    if (navigation()) navigation().addEventListener("navigate", this.onNavigate);
     this.shadow.append(style, this.frame);
   }
 
