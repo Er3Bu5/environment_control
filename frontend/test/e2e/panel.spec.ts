@@ -286,6 +286,134 @@ test.describe("zones", () => {
   });
 });
 
+test.describe("map devices", () => {
+  type Stored = { revision: number; zones: { id: string; sensors: Record<string, unknown>[]; setup?: Record<string, string>; combine?: { env: string } }[]; devices: Record<string, unknown>[] };
+  const stored = (page: Page) => page.evaluate<Stored>("JSON.parse(JSON.stringify(fakeHA.config))");
+  const dialog = (frame: Frame) => app(frame).getByRole("dialog");
+  const row = (frame: Frame, name: string) => app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: name }) });
+  const next = (frame: Frame) => app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
+
+  /* A zone added through the panel, then its setup guide's Map devices. */
+  async function newZoneMap(page: Page): Promise<Frame> {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Map devices: Flower tent" })).toBeVisible();
+    return frame;
+  }
+
+  async function pickAll(frame: Frame): Promise<void> {
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await row(frame, "Two probe board").getByRole("button").first().click();
+    await row(frame, "Two probe board").getByLabel("sensor.two_probe_top_temp (23.0 °C)").check();
+    await next(frame).click();
+    await row(frame, "Spare Plug").getByRole("button").first().click();
+    await row(frame, "Spare Plug").getByLabel("Heater").check();
+    await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    await next(frame).click();
+  }
+
+  test("a board's readings are matched for it, two candidates ask, and Next waits for every answer", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await expect(next(frame)).toBeDisabled();
+    await row(frame, "Environment board").getByRole("button").first().click();
+    const board = row(frame, "Environment board");
+    await expect(board.getByLabel("sensor.environment_board_air_temp (24.1 °C)")).toBeChecked();
+    await expect(board.getByLabel("sensor.environment_board_chip_temp (41.0 °C)")).toHaveCount(0);
+    await expect(board.getByLabel("number.environment_board_leaf_offset (-1.5 °C)")).toBeChecked();
+    await expect(next(frame)).toBeEnabled();
+    await row(frame, "Two probe board").getByRole("button").first().click();
+    await expect(row(frame, "Two probe board")).toContainText("Pick one");
+    await expect(next(frame)).toBeDisabled();
+    await expect(app(frame).getByRole("button", { name: "Two probe board: pick which Temperature entity to use. ›" })).toBeVisible();
+    await row(frame, "Two probe board").getByLabel("sensor.two_probe_low_temp (21.4 °C)").check();
+    await expect(next(frame)).toBeEnabled();
+    await expect(app(frame).getByText("How should these 2 sensors combine into the zone's reading?")).toBeVisible();
+    await next(frame).click();
+    await row(frame, "Spare Plug").getByRole("button").first().click();
+    await expect(row(frame, "Spare Plug")).toContainText("What is it?");
+    await expect(next(frame)).toBeDisabled();
+    await row(frame, "Spare Plug").getByLabel("Heater").check();
+    await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
+    await next(frame).click();
+    await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+  });
+
+  test("applying waits for the host's own dialog; once you allow it, the mapping is stored and the step is done", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await pickAll(frame);
+    await next(frame).click();
+    await expect(dialog(frame)).toContainText("Spare Plug is a");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    /* Allow is off for a second after the dialog appears, so a stray tap can't land on it. */
+    await page.waitForTimeout(1100);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
+    expect(z?.setup?.devices).toBe("done");
+    expect(z?.combine).toEqual({ env: "mean" });
+    expect(z?.sensors.map((s) => [s.id, s.entities, s.leafEntity ?? null, s.leafUnused])).toEqual([
+      ["d-board", { temperature: "sensor.environment_board_air_temp", humidity: "sensor.environment_board_humidity", vpd: "sensor.environment_board_vpd", light: "sensor.environment_board_light" }, "number.environment_board_leaf_offset", false],
+      ["d-two", { temperature: "sensor.two_probe_top_temp", humidity: "sensor.two_probe_humidity" }, null, true],
+    ]);
+    const devices = (await stored(page)).devices.filter((d) => (d.zones as string[]).includes("flower_tent"));
+    expect(devices.map((d) => [d.entity, d.type]).sort()).toEqual([
+      ["humidifier.garden_dehumidifier", "Dehumidifier"],
+      ["switch.spare_plug", "Heater"],
+    ]);
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    const before = (await stored(page)).revision;
+    await pickAll(frame);
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog(frame)).toContainText("Not allowed, so nothing was saved.");
+    expect((await stored(page)).revision).toBe(before);
+  });
+
+  test("leaving Map devices with picks made asks first", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await expect.poll(() => leaveAsks(page)).toBe(true);
+    await app(frame).getByRole("button", { name: "Cancel" }).click();
+    await expect(app(frame).getByRole("alertdialog")).toContainText("Discard unsaved changes?");
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Discard and continue" }).click();
+    await expect.poll(() => leaveAsks(page)).toBe(false);
+  });
+
+  test("a board HA can't say the link of is asked about on Setup, and the answer is kept", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await next(frame).click();
+    await next(frame).click();
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    await tab(frame, "Setup").click();
+    const questions = app(frame).locator("section", { hasText: "Questions for you" });
+    const ask = questions.locator(".task", { hasText: "Environment board" });
+    await ask.getByRole("button", { name: "Ethernet" }).click();
+    await expect(ask).toHaveCount(0);
+    const s = (await stored(page)).zones.find((x) => x.id === "flower_tent")?.sensors[0];
+    expect([s?.link, s?.linkSource]).toEqual(["ethernet", "confirmed"]);
+  });
+});
+
 test.describe("narrow window", () => {
   test("with HA's sidebar hidden, the menu button opens it, and only then is there one", async ({ page }) => {
     await page.goto(`${PAGE}?narrow=1`);
@@ -316,7 +444,7 @@ test.describe("what Home Assistant has", () => {
     await tab(frame, "Devices").click();
     await expect.poll(() => frameText(frame)).toContain("Environment board");
     const text = await frameText(frame);
-    for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "1 entity, such as a helper or template"]) {
+    for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "1 entity, such as a helper or template", "Spare plug"]) {
       expect(text).toContain(want);
     }
     expect(await serviceCalls(page)).toBe(0);

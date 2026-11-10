@@ -39,9 +39,24 @@ const fakeHA = new FakeHA(SEED);
 const CATALOG = {
   devices: [
     { id: "d-board", name: "Environment board", area: "Garden", manufacturer: "Espressif", model: "PoE board", integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
-      entities: [{ entity_id: "sensor.environment_board_air_temp", name: "Air temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "24.1", category: null, area: null }] },
-    { id: "d-plug", name: "Heater plug", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
-      entities: [{ entity_id: "switch.heater_plug", name: "Heater plug", domain: "switch", device_class: "outlet", unit: null, state: "off", category: null, area: null }] },
+      entities: [
+        { entity_id: "sensor.environment_board_air_temp", name: "Air temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "24.1", category: null, area: null },
+        { entity_id: "sensor.environment_board_chip_temp", name: "Chip temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "41.0", category: "diagnostic", area: null },
+        { entity_id: "sensor.environment_board_humidity", name: "Humidity", domain: "sensor", device_class: "humidity", unit: "%", state: "61.2", category: null, area: null },
+        { entity_id: "sensor.environment_board_vpd", name: "VPD", domain: "sensor", device_class: null, unit: "kPa", state: "1.12", category: null, area: null },
+        { entity_id: "sensor.environment_board_light", name: "Light", domain: "sensor", device_class: "illuminance", unit: "lx", state: "41200", category: null, area: null },
+        { entity_id: "number.environment_board_leaf_offset", name: "Leaf offset", domain: "number", device_class: null, unit: "°C", state: "-1.5", category: "config", area: null },
+      ] },
+    { id: "d-two", name: "Two probe board", area: null, manufacturer: null, model: null, integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
+      entities: [
+        { entity_id: "sensor.two_probe_top_temp", name: "Top temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "23.0", category: null, area: null },
+        { entity_id: "sensor.two_probe_low_temp", name: "Low temp", domain: "sensor", device_class: "temperature", unit: "°C", state: "21.4", category: null, area: null },
+        { entity_id: "sensor.two_probe_humidity", name: "Humidity", domain: "sensor", device_class: "humidity", unit: "%", state: "66.0", category: null, area: null },
+      ] },
+    { id: "d-plug", name: "Spare plug", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
+      entities: [{ entity_id: "switch.spare_plug", name: "Spare Plug", domain: "switch", device_class: "outlet", unit: null, state: "off", category: null, area: null }] },
+    { id: "d-dehu", name: "Garden dehumidifier", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
+      entities: [{ entity_id: "humidifier.garden_dehumidifier", name: "Garden Dehumidifier", domain: "humidifier", device_class: "dehumidifier", unit: null, state: "on", category: null, area: null }] },
     { id: "d-bulb", name: "Tent light", area: "Veg", manufacturer: null, model: null, integration: "hue", family: "Philips Hue", link: "zigbee", path: "local", hub: "Hue bridge",
       entities: [{ entity_id: "light.tent_light", name: "Tent light", domain: "light", device_class: null, unit: null, state: "on", category: null, area: null }] },
     { id: "d-evil", name: '<img src=x onerror="window.pwned=1">', area: null, manufacturer: null, model: null, integration: "lg_thinq", family: "LG ThinQ", link: "unknown", path: "cloud", hub: null, entities: [] },

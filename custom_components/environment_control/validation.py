@@ -19,6 +19,14 @@ CONTROLLABLE = re.compile(r"^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$")
 HELPER = re.compile(r"^input_(number|datetime)\.[a-z0-9_]{1,200}$")
 ON_OFF = re.compile(r"^(switch|light|input_boolean)\.[a-z0-9_]{1,200}$")
 NUMBER_ENTITY = re.compile(r"^number\.[a-z0-9_]{1,200}$")
+SENSOR_ENTITY = re.compile(r"^sensor\.[a-z0-9_]{1,200}$")
+# A sensor is an HA device id, a device entry an id the panel makes; both stay short and safe in an id or a URL.
+ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light"})
+MAX_SENSORS_PER_ZONE = 50
+MAX_NAME = 100
+# Leaf temperature offsets kept here, as wide as any board allows and then some.
+LEAF_RANGE = (-10, 10)
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
 
 
@@ -72,6 +80,32 @@ def _spot_ok(p: Any, layout: Any) -> bool:
     return -1 <= p[0] <= rows and -1 <= p[1] <= cols
 
 
+def _check_sensor(zid: str, x: Any) -> None:
+    """A mapped sensor names only sensor entities for its readings and a number entity for its offset."""
+    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.match(x["id"]):
+        _fail(f"{zid} has a sensor with an id this panel can't use")
+    sid = x["id"]
+    name = x.get("name")
+    if name is not None and (not isinstance(name, str) or len(name) > MAX_NAME):
+        _fail(f"{sid} has a name that isn't short text")
+    entities = x.get("entities")
+    if entities is not None and (
+        not isinstance(entities, dict)
+        or not set(entities) <= READING_SLOTS
+        or not all(isinstance(e, str) and SENSOR_ENTITY.match(e) for e in entities.values())
+    ):
+        _fail(f"{sid} reads from something that isn't a sensor entity")
+    leaf = x.get("leafEntity")
+    if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.match(leaf)):
+        _fail(f"{sid} has a leaf temperature offset that isn't a number entity")
+    kept = x.get("leaf")
+    if kept is not None and not (_is_num(kept) and LEAF_RANGE[0] <= kept <= LEAF_RANGE[1]):
+        _fail(f"{sid} has a leaf temperature offset outside {LEAF_RANGE[0]} to {LEAF_RANGE[1]} °C")
+    for flag in ("avg", "leafUnused"):
+        if flag in x and not isinstance(x[flag], bool):
+            _fail(f"{sid} has {flag} that isn't true or false")
+
+
 def validate_config(c: Any) -> None:
     """Raise InvalidConfig if the setup can't be stored."""
     if not isinstance(c, dict) or not isinstance(c.get("zones"), list) or not isinstance(c.get("devices"), list):
@@ -117,12 +151,10 @@ def validate_config(c: Any) -> None:
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
         sensors = z.get("sensors") or []
-        if not isinstance(sensors, list):
-            _fail(f"{zid} has sensors that aren't a list")
+        if not isinstance(sensors, list) or len(sensors) > MAX_SENSORS_PER_ZONE:
+            _fail(f"{zid} has sensors that aren't a short list")
         for x in sensors:
-            leaf = x.get("leafEntity") if isinstance(x, dict) else None
-            if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.match(leaf)):
-                _fail(f"{x.get('id')} has a leaf temperature offset that isn't a number entity")
+            _check_sensor(zid, x)
         virtual = z.get("virtual")
         if virtual is not None:
             if not isinstance(virtual, list) or len(virtual) > 30:
@@ -147,6 +179,11 @@ def validate_config(c: Any) -> None:
 
     for d in devices:
         did, dz = d.get("id"), d.get("zones")
+        if not isinstance(did, str) or not ITEM_ID.match(did):
+            _fail("A device has an id this panel can't use")
+        name = d.get("name")
+        if name is not None and (not isinstance(name, str) or len(name) > MAX_NAME):
+            _fail(f"{did} has a name that isn't short text")
         if not isinstance(dz, list) or any(zid not in by_id for zid in dz):
             _fail(f"{did} is in a zone that doesn't exist")
         entity = d.get("entity")

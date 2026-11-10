@@ -147,3 +147,24 @@ export function removeZone(c: RawConfig, id: string): void {
     }
   }
 }
+
+/* HA can't tell how some devices are connected, ESPHome boards above all, so Setup asks and keeps the answer, marked as
+   confirmed so a later look at the catalog doesn't overwrite it. A sensor in several zones takes the answer in each. */
+export function confirmLink(c: RawConfig, id: string, link: "ethernet" | "wifi"): void {
+  for (const z of c.zones)
+    for (const s of Array.isArray(z.sensors) ? z.sensors.filter(isObj) : [])
+      if (s.id === id) Object.assign(s, { link, linkSource: "confirmed" });
+  for (const d of c.devices) if (d.id === id) Object.assign(d, { link, linkSource: "confirmed" });
+}
+
+/* Sensors and devices in a zone whose link is still unknown: the questions Setup puts to you. */
+export function unknownLinks(c: RawConfig): { id: string; name: string; kind: "sensor" | "device" }[] {
+  const out: { id: string; name: string; kind: "sensor" | "device" }[] = [];
+  for (const z of c.zones)
+    for (const s of Array.isArray(z.sensors) ? z.sensors.filter(isObj) : [])
+      if (s.link === "unknown" && typeof s.id === "string" && !out.some((x) => x.id === s.id)) out.push({ id: s.id, name: typeof s.name === "string" ? s.name : s.id, kind: "sensor" });
+  for (const d of c.devices)
+    if (d.link === "unknown" && typeof d.id === "string" && Array.isArray(d.zones) && d.zones.length)
+      out.push({ id: d.id, name: typeof d.name === "string" ? d.name : d.id, kind: "device" });
+  return out;
+}

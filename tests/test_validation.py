@@ -30,6 +30,26 @@ CASES = {
         lambda c: c["devices"].append({"id": "x", "zones": [], "entity": "lock.door"}),
         "can't control",
     ),
+    "sensor reading from a lock": (
+        lambda c: c["zones"][0]["sensors"][0].update(entities={"temperature": "lock.door"}),
+        "isn't a sensor entity",
+    ),
+    "sensor reading slot that isn't a reading": (
+        lambda c: c["zones"][0]["sensors"][0].update(entities={"door": "sensor.x"}),
+        "isn't a sensor entity",
+    ),
+    "sensor id with odd characters": (
+        lambda c: c["zones"][0]["sensors"][0].update(id="a b/c"),
+        "id this panel can't use",
+    ),
+    "too many sensors": (
+        lambda c: c["zones"][0].update(sensors=[{"id": f"s{i}"} for i in range(51)]),
+        "short list",
+    ),
+    "offset kept here out of range": (lambda c: c["zones"][0]["sensors"][0].update(leaf=40), "outside -10 to 10"),
+    "average flag that isn't a boolean": (lambda c: c["zones"][0]["sensors"][0].update(avg="yes"), "true or false"),
+    "device id with odd characters": (lambda c: c["devices"][0].update(id="<b>"), "id this panel can't use"),
+    "device name too long": (lambda c: c["devices"][0].update(name="x" * 101), "short text"),
     "time setting on a number helper": (
         lambda c: c["zones"][0].update(helpers={"day": "input_number.x"}),
         "time helper",
@@ -86,3 +106,23 @@ def test_a_boolean_is_not_a_minute(sample_config) -> None:
     )
     with pytest.raises(InvalidConfig):
         validate_config(c)
+
+
+def test_a_mapping_the_panel_makes_is_valid(sample_config) -> None:
+    c = copy.deepcopy({"zones": sample_config["zones"], "devices": sample_config["devices"]})
+    c["zones"][0]["sensors"].append(
+        {
+            "id": "0123456789abcdef0123456789abcdef",
+            "name": "Environment board",
+            "kind": "env",
+            "pos": None,
+            "entities": {"temperature": "sensor.board_air_temp", "humidity": "sensor.board_humidity"},
+            "leafUnused": True,
+            "leaf": -1.5,
+            "avg": True,
+            "link": "unknown",
+            "linkSource": "detected",
+        }
+    )
+    c["devices"].append({"id": "d-0a1b2c3d", "entity": "switch.spare_plug", "type": "Heater", "zones": ["garden"]})
+    validate_config(c)

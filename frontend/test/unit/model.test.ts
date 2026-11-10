@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addZone, copyConfig, markStep, readZones, removeZone, setDetails, stepsLeft, zoneNameIssue } from "../../src/frame/model";
+import { addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setDetails, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
 
 const base = () =>
   copyConfig(
@@ -82,5 +82,30 @@ describe("reading zones", () => {
     const zones = readZones([{ id: "old", name: "Old" }, { name: "No id" }, "junk"]);
     expect(zones.map((z) => z.id)).toEqual(["old"]);
     expect(stepsLeft(zones[0])).toEqual([]);
+  });
+});
+
+describe("links HA can't tell", () => {
+  it("asks once per board, only for mapped devices, and keeps an answer as confirmed in every zone", () => {
+    const c = copyConfig(
+      [
+        { id: "a", name: "A", sensors: [{ id: "b1", name: "Board", link: "unknown" }, { id: "b2", name: "Wired", link: "ethernet" }] },
+        { id: "b", name: "B", sensors: [{ id: "b1", name: "Board", link: "unknown" }] },
+      ],
+      [
+        { id: "d1", name: "Plug", link: "unknown", zones: ["a"] },
+        { id: "d2", name: "Spare", link: "unknown", zones: [] },
+      ],
+    );
+    expect(unknownLinks(c)).toEqual([
+      { id: "b1", name: "Board", kind: "sensor" },
+      { id: "d1", name: "Plug", kind: "device" },
+    ]);
+    confirmLink(c, "b1", "ethernet");
+    expect(c.zones.map((z) => (z.sensors as Record<string, unknown>[])[0])).toEqual([
+      { id: "b1", name: "Board", link: "ethernet", linkSource: "confirmed" },
+      { id: "b1", name: "Board", link: "ethernet", linkSource: "confirmed" },
+    ]);
+    expect(unknownLinks(c).map((x) => x.id)).toEqual(["d1"]);
   });
 });
