@@ -570,8 +570,8 @@ test.describe("targets, day and night", () => {
 
   test("a helper never linked before waits for you in the host's own dialog", async ({ page }) => {
     const frame = await open(page, "Garden");
-    await app(frame).locator("#sh-on").getByRole("button", { name: /^More helpers/ }).click();
-    await app(frame).locator("#sh-on").getByLabel(/^Reservoir refill time,/).check();
+    await app(frame).locator("#sh-on-q").fill("reservoir");
+    await app(frame).locator("#sh-on").getByRole("option", { name: /^Reservoir refill time/ }).click();
     await bar(frame).getByRole("button", { name: "Review and apply" }).click();
     await expect(dialog(frame)).toContainText("Home Assistant asks you to allow each helper this panel hasn't linked before.");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
@@ -736,7 +736,8 @@ test.describe("targets, day and night", () => {
     await pick(frame, "Period", "Day");
     await pick(frame, "Limits", "My helpers");
     await expect(bar(frame)).toContainText("Fix first: Link at least one limit to a helper, or choose Set here.");
-    await card(frame).locator("#tl-bands-day-temperature-min").getByLabel(/nursery_day_temperature_min_threshold, 21/).check();
+    await card(frame).locator("#tl-bands-day-temperature-min-q").fill("nursery day temperature min");
+    await card(frame).locator("#tl-bands-day-temperature-min").getByRole("option", { name: /nursery_day_temperature_min_threshold\s*21/ }).click();
     await expect(box(frame, "Temperature Min")).toHaveValue("21");
     await bar(frame).getByRole("button", { name: "Review and apply" }).click();
     await expect(dialog(frame)).toContainText("Day temperature Min helper");
@@ -767,6 +768,45 @@ test.describe("targets, day and night", () => {
       .toBe(true);
     await box(frame, "Humidity Low").press("Enter");
     await expect(bar(frame)).toBeVisible();
+  });
+
+  test("a helper is picked by searching: typing narrows the matches, and the list stays short however many helpers there are", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await pick(frame, "Period", "Day");
+    const picker = card(frame).locator("#tl-bands-day-humidity-max"), search = card(frame).locator("#tl-bands-day-humidity-max-q");
+    await expect(picker).toContainText("Linked: input_number.garden_day_humidity_max_threshold, 70 %");
+    await search.focus();
+    const options = picker.getByRole("option");
+    expect(await options.count()).toBeLessThanOrEqual(7);
+    await expect(options.first()).toHaveText(/^\s*Set here/);
+    await search.fill("night humidity");
+    await expect(options).not.toHaveCount(0);
+    for (const t of await options.allTextContents()) expect(t.toLowerCase()).toMatch(/night.*humidity|humidity.*night/);
+    await search.fill("nothing like this");
+    await expect(picker).toContainText("Nothing matches.");
+    await search.fill("garden night humidity max");
+    await expect(options).toHaveCount(1);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(picker).toContainText("Linked: input_number.garden_night_humidity_max_threshold, 68 %");
+    await expect(picker.getByRole("listbox")).toHaveCount(0);
+    await expect(box(frame, "Humidity Max")).toHaveValue("68");
+    await search.focus();
+    await search.fill("set here");
+    await page.keyboard.press("Enter");
+    await expect(picker).toContainText("Set here");
+    await expect(bar(frame)).toContainText("unsaved changes");
+  });
+
+  test("Escape closes a helper search without changing the link", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    const search = app(frame).locator("#sh-on-q");
+    await search.fill("reservoir");
+    await expect(app(frame).locator("#sh-on").getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(app(frame).locator("#sh-on").getByRole("listbox")).toHaveCount(0);
+    await expect(app(frame).locator("#sh-on")).toContainText("Linked: input_datetime.garden_day_time");
+    await expect(bar(frame)).toHaveCount(0);
   });
 
   test("the chart's Change goes to Sensor Calibration and back, keeping the page's draft", async ({ page }) => {

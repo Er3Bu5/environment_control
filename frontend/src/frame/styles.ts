@@ -310,6 +310,15 @@ export const styles = css`
   /* Room to scroll a typed box up above a phone's keyboard. */
   :host(.revealing) main { padding-bottom: 70vh; }
 
+  /* Helper search boxes: a field, and a short list of matches under it. */
+  .picker { display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .picker .field { max-width: none; }
+  .picklist-menu { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 6px 18px #00000026; }
+  .picklist-menu li { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
+  .picklist-menu li.active, .picklist-menu li:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
+  .picklist-menu li[aria-selected="true"] { font-weight: 500; }
+  .picker > p { margin: 0; overflow-wrap: anywhere; }
+
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }
   .eid { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

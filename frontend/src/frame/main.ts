@@ -304,6 +304,7 @@ export class EcApp extends LitElement {
     leafw: { state: true },
     sched: { state: true },
     tgt: { state: true },
+    pickQ: { state: true },
     typing: { state: true },
     metric: { state: true },
     range: { state: true },
@@ -336,6 +337,8 @@ export class EcApp extends LitElement {
   declare private leafw: LeafDraft | null;
   declare private sched: SchedDraft | null;
   declare private tgt: TargetsDraft | null;
+  /* The helper search box open now, what's typed in it, and the highlighted match. */
+  declare private pickQ: { id: string; q: string; active: number } | null;
   private vdrag = false;
   private leafBefore = 0;
   private schedBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
@@ -385,6 +388,7 @@ export class EcApp extends LitElement {
     this.leafw = null;
     this.sched = null;
     this.tgt = null;
+    this.pickQ = null;
     this.typing = false;
     this.metric = "temperature";
     this.range = 24;
@@ -507,8 +511,17 @@ export class EcApp extends LitElement {
     /* A typed number box also moves up to sit just above the keyboard, as the mock has it, so the chart or row it
        belongs to stays in view. The page gets room below to scroll into while it does. */
     const box = this.typing && el instanceof HTMLInputElement && !!el.dataset.lin;
-    this.classList.toggle("revealing", box);
+    const search = this.typing && el instanceof HTMLInputElement && el.dataset.pick !== undefined;
+    this.classList.toggle("revealing", box || search);
     if (box) setTimeout(() => this.reveal(el as HTMLInputElement), 300);
+    /* A helper search box goes to the top instead, so its matches have room below it, above the keyboard. */
+    if (search)
+      setTimeout(() => {
+        const input = el as HTMLInputElement, bar = this.shadowRoot?.querySelector(".topbar");
+        if (this.shadowRoot?.activeElement !== input) return;
+        const head = bar && getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
+        window.scrollBy(0, (input.closest(".field") ?? input).getBoundingClientRect().top - head - 8);
+      }, 300);
   };
 
   /* Tallest height seen at this width, so a window shrunk by the keyboard can be told from a rotation. */
@@ -2732,8 +2745,9 @@ export class EcApp extends LitElement {
     </div>`;
   }
 
-  /* A helper list as chips: the likeliest few, what's picked, and the rest on request, as Map devices offers a board's
-     other sensors. */
+  /* A helper picker as a search box: the likeliest few while it's empty, and typing narrows to what matches every word,
+     in the entity id or the name. Never more than a handful at once, so a long list of helpers can't make the page
+     huge on a phone. What's picked shows underneath. */
   private helperChips(
     legend: string,
     id: string,
@@ -2742,22 +2756,89 @@ export class EcApp extends LitElement {
     likely: string[],
     pick: (e: string) => void,
     locked: boolean,
-    /* none: a last chip for no helper at all. first: how many show before More; ones that don't fit wait behind it. */
+    /* none: a choice for no helper at all, such as Set here. */
     opts: { none?: string; first?: number } = {},
   ) {
+    const open = this.pickQ?.id === id, q = open ? (this.pickQ?.q ?? "") : "";
     const score = (o: { entity: string; name: string; unit?: string | null }) => likely.filter((w) => `${o.entity} ${o.name} ${o.unit ?? ""}`.toLowerCase().includes(w)).length;
-    const sorted = [...options].sort((a, b) => score(b) - score(a)), open = this.moreOpen.has(id), first = opts.first ?? 4;
-    const likeliest = sorted.filter((o) => o.fits !== false).slice(0, first);
-    const shown = open ? sorted : sorted.filter((o) => likeliest.includes(o) || o.entity === current);
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const label = (o: { name: string; state: string | null; unit?: string | null }) => `${o.name}, ${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}`;
-    const chips = [...shown.map((o) => ({ value: o.entity, label: label(o) })), ...(opts.none ? [{ value: "", label: opts.none }] : [])];
-    return html`<div id=${id}>
-      ${chips.length
-        ? this.chips(`${legend}${current || opts.none ? "" : ", pick one"}`, id, chips, current, (v) => !locked && pick(v))
-        : html`<p class="small muted">${legend}: Home Assistant has no helper of the right kind yet.</p>`}
-      ${sorted.length > shown.length || open
-        ? html`<button class="fixlink small" aria-expanded=${open ? "true" : "false"} @click=${() => this.toggleMore(id, !open)}>${open ? "Fewer" : `More helpers: ${sorted.length - shown.length}`} &rsaquo;</button>`
+    const matches = options
+      .filter((o) => words.every((w) => `${o.entity} ${o.name}`.toLowerCase().includes(w)))
+      .sort((a, b) => Number(b.fits !== false) - Number(a.fits !== false) || score(b) - score(a))
+      .slice(0, words.length ? 8 : 6);
+    const none = opts.none && (!words.length || words.every((w) => opts.none?.toLowerCase().includes(w)));
+    const items = [...(none ? [{ value: "", text: opts.none as string, sub: "Stored in Environment Control" }] : []), ...matches.map((o) => ({ value: o.entity, text: o.name, sub: `${o.name === o.entity ? "" : `${o.entity}, `}${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}` }))];
+    const active = open ? Math.min(this.pickQ?.active ?? -1, items.length - 1) : -1;
+    const now = options.find((o) => o.entity === current);
+    /* Picking leaves the box, so a phone's keyboard closes and the draft bar comes back. */
+    const choose = (v: string) => {
+      if (locked) return;
+      this.pickQ = null;
+      (this.shadowRoot?.activeElement as HTMLElement | null)?.blur();
+      pick(v);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (!this.pickQ || this.pickQ.id !== id) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        this.pickQ = { ...this.pickQ, active: Math.max(0, Math.min(items.length - 1, active + step)) };
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const it = items[active >= 0 ? active : 0];
+        if (it) choose(it.value);
+        (e.target as HTMLInputElement).blur();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.pickQ = null;
+        (e.target as HTMLInputElement).blur();
+      }
+    };
+    if (!options.length && !opts.none) return html`<div id=${id}><p class="small muted">${legend}: Home Assistant has no helper of the right kind yet.</p></div>`;
+    return html`<div id=${id} class="picker">
+      <label class="field" for="${id}-q"
+        >${legend}<input
+          id="${id}-q"
+          type="text"
+          role="combobox"
+          autocomplete="off"
+          spellcheck="false"
+          enterkeyhint="search"
+          data-pick
+          aria-expanded=${open ? "true" : "false"}
+          aria-controls="${id}-list"
+          aria-autocomplete="list"
+          aria-activedescendant=${active >= 0 ? `${id}-o${active}` : nothing}
+          placeholder=${now ? "Search to change it" : "Search your helpers"}
+          .value=${live(q)}
+          ?disabled=${locked}
+          @focus=${() => (this.pickQ = { id, q: "", active: -1 })}
+          @input=${(e: Event) => (this.pickQ = { id, q: (e.target as HTMLInputElement).value, active: -1 })}
+          @keydown=${key}
+          @blur=${() => setTimeout(() => this.pickQ?.id === id && (this.pickQ = null), 150)}
+      /></label>
+      ${open
+        ? html`<ul class="picklist-menu" id="${id}-list" role="listbox" aria-label=${legend}>
+            ${items.map(
+              (it, i) => html`<li
+                id="${id}-o${i}"
+                role="option"
+                aria-selected=${it.value === current ? "true" : "false"}
+                class=${i === active ? "active" : ""}
+                @pointerdown=${(e: PointerEvent) => {
+                  e.preventDefault();
+                  choose(it.value);
+                }}
+              >
+                <span>${it.text}</span><span class="eid">${it.sub}</span>
+              </li>`,
+            )}
+            ${items.length ? nothing : html`<li class="muted small" role="presentation">Nothing matches.</li>`}
+          </ul>`
         : nothing}
+      <p class="small ${current ? "" : "muted"}">${now ? html`Linked: <strong>${label(now)}</strong>` : current ? html`Linked: <strong>${current}</strong>` : opts.none ?? "None picked yet"}</p>
     </div>`;
   }
 
