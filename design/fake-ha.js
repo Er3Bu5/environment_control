@@ -162,7 +162,7 @@ class FakeHA {
       if (!Array.isArray(z.virtual) || z.virtual.length > 30) this.fail(`${z.id} has virtual devices that aren't a short list`);
       const vids = new Set();
       for (const v of z.virtual) {
-        const shape = v && typeof v === "object" && Object.keys(v).every((k) => ["id", "name", "pos"].includes(k));
+        const shape = v && typeof v === "object" && Object.keys(v).every((k) => ["id", "name", "pos", "type"].includes(k));
         if (!shape || typeof v.id !== "string" || !/^v-[a-z0-9_]{1,40}$/.test(v.id) || vids.has(v.id) || typeof v.name !== "string" || !v.name.trim() || v.name.length > 40) this.fail(`${z.id} has a virtual device that isn't a name and a spot`);
         vids.add(v.id);
         if (!spotOk(v.pos, z.layout)) this.fail(`${v.id} is placed outside ${z.id}'s map`);

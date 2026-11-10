@@ -118,6 +118,10 @@ CASES = {
         lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Tank", "pos": [0, 0], "entity": "switch.x"}]),
         "a name and a spot",
     ),
+    "virtual device of an unknown type": (
+        lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Tank", "pos": [0, 0], "type": "Spaceship"}]),
+        "kind of virtual device",
+    ),
     "virtual device off the map": (
         lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Tank", "pos": [99, 0]}]),
         "outside",
@@ -189,5 +193,13 @@ def test_a_mapping_the_panel_makes_is_valid(sample_config) -> None:
 def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
     c = _bad(
         sample_config, lambda c: [v.__setitem__(2, None) for p in c["zones"][0]["bands"].values() for v in p.values()]
+    )
+    validate_config(c)
+
+
+def test_a_virtual_device_can_say_what_it_is(sample_config) -> None:
+    c = _bad(
+        sample_config,
+        lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Drain tank", "pos": [0, 0], "type": "Tank"}]),
     )
     validate_config(c)

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   addVirtual,
+  noHeight,
+  removeVirtual,
+  renameVirtual,
+  retypeVirtual,
   allowed,
   applyLayout,
   devsOff,
@@ -145,6 +149,41 @@ describe("the draft", () => {
     d.vname = "Res lid";
     addVirtual(d);
     expect([d.vissue, d.virt.at(-1)?.id, d.pick]).toEqual(["", "v-res_lid", "v-res_lid"]);
+  });
+
+  it("gives a virtual device a type, Other until said, and the new one the type picked when adding", () => {
+    const d = openLayout(config(), "z", [3]);
+    expect(d.virt[0].type).toBe("Other");
+    d.vname = "Res lid";
+    d.vtype = "Tank";
+    addVirtual(d);
+    expect([d.virt.at(-1)?.type, d.vtype]).toEqual(["Tank", "Other"]);
+  });
+
+  it("renames a virtual device keeping its id, refusing a blank or taken name, and retypes and removes it", () => {
+    const c = config(), d = openLayout(c, "z", [3]);
+    renameVirtual(d, "v-tank", "  ");
+    expect([d.vissue, d.virt[0].name]).toEqual(["A virtual device needs a name.", "Drain tank"]);
+    renameVirtual(d, "v-tank", "Waste tank");
+    retypeVirtual(d, "v-tank", "Tank");
+    expect([d.vissue, d.virt[0].id, d.virt[0].name, d.virt[0].type]).toEqual(["", "v-tank", "Waste tank", "Tank"]);
+    expect(layoutChanges(d, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual([
+      "Drain tank, virtual, name: Drain tank > Waste tank",
+      "Waste tank, virtual, type: Other > Tank",
+    ]);
+    applyLayout(c, d);
+    expect((c.zones[0] as Record<string, unknown>).virtual).toEqual([{ id: "v-tank", name: "Waste tank", pos: [-1, 0], type: "Tank" }]);
+    d.pick = "v-tank";
+    removeVirtual(d, "v-tank");
+    expect([d.virt, d.pick]).toEqual([[], null]);
+  });
+
+  it("asks a height of every environment sensor on the map, and of no soil probe", () => {
+    const d = openLayout(config(), "z", [3]);
+    expect(noHeight(d)).toEqual([]);
+    d.sensors[0].level = undefined;
+    d.sensors[1].pos = [1, 1];
+    expect(noHeight(d).map((s) => s.id)).toEqual(["air"]);
   });
 
   it("lists every change and applies it to a copy, leaving fields it doesn't know and other zones alone", () => {

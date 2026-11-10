@@ -29,6 +29,11 @@ export interface Item {
   type?: string;
 }
 
+/* What a virtual device is. It only decides its mark: the same icon and colour as a real device of that role, a tank, or
+   a plain cube, always dashed. */
+export const VIRTUAL_TYPES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Tank", "Other"] as const;
+export type VirtualType = (typeof VIRTUAL_TYPES)[number];
+
 export const MAX_UNITS = 200;
 export const MAX_GRID = 20;
 export const MAX_VIRTUAL = 30;
@@ -127,6 +132,7 @@ export interface LayoutDraft extends Layout {
   virt: Item[];
   pick: string | null;
   vname: string;
+  vtype: VirtualType;
   vissue: string;
 }
 
@@ -163,7 +169,7 @@ export function zoneItems(c: RawConfig, zoneId: string): { sensors: Item[]; devs
     }));
   const virt = (Array.isArray(z?.virtual) ? z.virtual.filter(isObj) : [])
     .filter((v) => typeof v.id === "string" && typeof v.name === "string")
-    .map((v): Item => ({ id: v.id as string, name: v.name as string, kind: "virtual", pos: spot(v.pos) }));
+    .map((v): Item => ({ id: v.id as string, name: v.name as string, kind: "virtual", pos: spot(v.pos), type: (VIRTUAL_TYPES as readonly string[]).includes(v.type as string) ? (v.type as string) : "Other" }));
   return { sensors, devs, virt };
 }
 
@@ -178,7 +184,7 @@ export const flowOf = (d: LayoutDraft): (1 | 2 | 3)[] => (d.flow.includes(2) && 
 export function openLayout(c: RawConfig, zoneId: string, flow: (1 | 2 | 3)[]): LayoutDraft {
   const z = c.zones.find((x) => x.id === zoneId);
   const items = zoneItems(c, zoneId);
-  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null, vname: "", vissue: "" };
+  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null, vname: "", vtype: "Other", vissue: "" };
   if (flow[0] === 3) draft.pick = firstToPlace(draft);
   return draft;
 }
@@ -204,22 +210,38 @@ export function layoutIssues(d: LayoutDraft): string[] {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
 
 /* Virtual devices are things worth seeing on the map that Home Assistant doesn't have, like a drain tank. */
+const nameIssue = (d: LayoutDraft, name: string, self: string | null) =>
+  !name ? "A virtual device needs a name." : d.virt.some((v) => v.id !== self && v.name.toLowerCase() === name.toLowerCase()) ? `There's already a virtual device called ${name}.` : "";
+
 export function addVirtual(d: LayoutDraft): void {
-  const name = d.vname.trim();
-  d.vissue = !name
-    ? "Name it to add it."
-    : d.virt.some((v) => v.name.toLowerCase() === name.toLowerCase())
-      ? `There's already a virtual device called ${name}.`
-      : d.virt.length >= MAX_VIRTUAL
-        ? `A zone can have up to ${MAX_VIRTUAL} virtual devices.`
-        : "";
+  const name = d.vname.trim().slice(0, 40);
+  d.vissue = nameIssue(d, name, null) || (d.virt.length >= MAX_VIRTUAL ? `A zone can have up to ${MAX_VIRTUAL} virtual devices.` : "");
   if (d.vissue) return;
   const base = `v-${slug(name) || "device"}`;
   let id = base;
   for (let n = 2; d.virt.some((v) => v.id === id); n++) id = `${base}_${n}`;
-  d.virt.push({ id, name: name.slice(0, 40), kind: "virtual", pos: null });
+  d.virt.push({ id, name, kind: "virtual", pos: null, type: d.vtype });
   d.vname = "";
+  d.vtype = "Other";
   d.pick = id;
+}
+
+/* A rename keeps the virtual device's id, so nothing that points at it moves. A blank or taken name is refused and said. */
+export function renameVirtual(d: LayoutDraft, id: string, typed: string): void {
+  const v = d.virt.find((x) => x.id === id), name = typed.trim().slice(0, 40);
+  if (!v) return;
+  d.vissue = nameIssue(d, name, id);
+  if (!d.vissue) v.name = name;
+}
+
+export function retypeVirtual(d: LayoutDraft, id: string, type: VirtualType): void {
+  const v = d.virt.find((x) => x.id === id);
+  if (v) v.type = type;
+}
+
+export function removeVirtual(d: LayoutDraft, id: string): void {
+  d.virt = d.virt.filter((v) => v.id !== id);
+  if (d.pick === id) d.pick = null;
 }
 
 export interface Change {
@@ -247,6 +269,8 @@ export function layoutChanges(d: LayoutDraft, c: RawConfig): Change[] {
   for (const v of d.virt) {
     const old = items.virt.find((y) => y.id === v.id);
     add(`${v.name}, virtual`, old ? where(old.pos, was) : "Not added", fits(v, d) ? where(v.pos, d) : "Not placed");
+    if (old) add(`${old.name}, virtual, name`, old.name, v.name);
+    add(`${v.name}, virtual, type`, old?.type ?? "Not added", v.type ?? "Other");
   }
   for (const v of items.virt) if (!d.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, where(v.pos, was), "Removed");
   return out;
@@ -264,7 +288,7 @@ export function applyLayout(c: RawConfig, d: LayoutDraft): void {
     if (drafted.kind === "env" && drafted.level) s.level = drafted.level;
     if (drafted.kind === "soil") delete s.level;
   }
-  const virt = d.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...(v.pos as Spot)] }));
+  const virt = d.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...(v.pos as Spot)], type: v.type ?? "Other" }));
   if (virt.length) z.virtual = virt;
   else delete z.virtual;
   for (const dev of c.devices) {

@@ -25,11 +25,10 @@ export interface Look {
 }
 
 export function look(s: Item): Look {
-  if (s.kind === "virtual") return { icon: "cube", c: "var(--muted)", dash: true };
-  if (s.kind === "device") {
-    const k = Object.values(CLASS_LOOK).find((x) => x.types.includes(s.type ?? ""));
-    return k ? { icon: k.icon, c: k.c } : { icon: "plug", c: "var(--muted)" };
-  }
+  const k = Object.values(CLASS_LOOK).find((x) => x.types.includes(s.type ?? ""));
+  /* A virtual device looks like a real one of its type, dashed: a tank is a tank, anything else a cube. */
+  if (s.kind === "virtual") return k ? { icon: k.icon, c: k.c, dash: true } : s.type === "Tank" ? { icon: "tank", c: "var(--hum)", dash: true } : { icon: "cube", c: "var(--muted)", dash: true };
+  if (s.kind === "device") return k ? { icon: k.icon, c: k.c } : { icon: "plug", c: "var(--muted)" };
   if (s.kind === "soil") return { icon: "probe", c: "var(--soil)", fill: true };
   return { icon: "chip", c: s.level ? LEVEL_COLOR[s.level] : "var(--muted)", fill: true };
 }
@@ -43,7 +42,8 @@ export const keyView = html`<div class="key">
   <span>${mk({ icon: "probe", c: "var(--soil)", fill: true })}Soil probe</span>
   ${Object.values(CLASS_LOOK).map((k) => html`<span>${mk({ icon: k.icon, c: k.c })}${k.label}</span>`)}
   <span>${mk({ icon: "plug", c: "var(--muted)" })}Unknown device type</span>
-  <span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device</span>
+  <span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device, dashed</span>
+  <span>${mk({ icon: "tank", c: "var(--hum)", dash: true })}Tank, virtual</span>
   <span><i class="wall"></i>Wall</span>
 </div>`;
 
