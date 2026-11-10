@@ -11,6 +11,8 @@ async function panelFrame(page: Page): Promise<Frame> {
   return frame;
 }
 const frameText = (frame: Frame) => frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.textContent ?? "");
+const app = (frame: Frame) => frame.locator("ec-app");
+const tab = (frame: Frame, name: string) => app(frame).getByRole("navigation").getByRole("button", { name, exact: true });
 const leaveAsks = (page: Page) =>
   page.evaluate(() => {
     const e = new Event("beforeunload", { cancelable: true });
@@ -102,17 +104,30 @@ test.describe("layout", () => {
 });
 
 test.describe("talking to HA", () => {
-  test("the frame shows the release and what HA has stored", async ({ page }) => {
+  test("the frame shows what HA has stored: a tab and a card per zone, and the release on Setup", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await expect.poll(() => frameText(frame)).toContain("3 zones stored.");
-    expect(await frameText(frame)).toContain("Installed, version 0.0.0.");
+    for (const name of ["Garden", "Veg", "Nursery"]) await expect(tab(frame, name)).toBeVisible();
+    await expect(app(frame).locator(".zone-card")).toHaveCount(3);
+    await tab(frame, "Setup").click();
+    await expect.poll(() => frameText(frame)).toContain("Installed, version 0.0.0.");
+  });
+
+  test("a zone's tab opens its page, and Overview's card does too", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Veg").click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg" })).toBeVisible();
+    await expect(tab(frame, "Veg")).toHaveAttribute("aria-current", "page");
+    await tab(frame, "Overview").click();
+    await app(frame).locator(".zone-card", { hasText: "Nursery" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Nursery" })).toBeVisible();
   });
 
   test("after HA restarts, the panel reads what's stored again", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await expect.poll(() => frameText(frame)).toContain("3 zones stored.");
+    await expect(tab(frame, "Nursery")).toBeVisible();
     await page.evaluate(`(() => {
       fakeHA.knobs.restartMs = 100;
       const next = JSON.parse(fakeHA.disk);
@@ -120,7 +135,8 @@ test.describe("talking to HA", () => {
       fakeHA.disk = JSON.stringify(next);
       fakeHA.restart();
     })()`);
-    await expect.poll(() => frameText(frame)).toContain("1 zone stored.");
+    await expect(tab(frame, "Nursery")).toHaveCount(0);
+    await expect(app(frame).locator(".zone-card")).toHaveCount(1);
   });
 
   test("a message the host doesn't know, or from anywhere but the frame, is dropped, and nothing is ever sent to HA", async ({ page }) => {
@@ -143,10 +159,34 @@ test.describe("talking to HA", () => {
   });
 });
 
+test.describe("narrow window", () => {
+  test("with HA's sidebar hidden, the menu button opens it, and only then is there one", async ({ page }) => {
+    await page.goto(`${PAGE}?narrow=1`);
+    let frame = await panelFrame(page);
+    await app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" }).click();
+    await expect.poll(() => page.evaluate<number>("sidebarToggles")).toBe(1);
+    await page.goto(PAGE);
+    frame = await panelFrame(page);
+    await expect(tab(frame, "Overview")).toBeVisible();
+    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
+  });
+
+  test("the host passes a change of width on, so the button comes and goes", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await expect(tab(frame, "Overview")).toBeVisible();
+    await page.evaluate("panel.narrow = true");
+    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toBeVisible();
+    await page.evaluate("panel.narrow = false");
+    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
+  });
+});
+
 test.describe("what Home Assistant has", () => {
   test("the catalog shows each device by area with how it is connected, and says so when that isn't known", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await tab(frame, "Devices").click();
     await expect.poll(() => frameText(frame)).toContain("Environment board");
     const text = await frameText(frame);
     for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "1 entity, such as a helper or template"]) {
@@ -158,6 +198,7 @@ test.describe("what Home Assistant has", () => {
   test("a device named with markup is drawn as text, never run", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await tab(frame, "Devices").click();
     await expect.poll(() => frameText(frame)).toContain('<img src=x onerror="window.pwned=1">');
     expect(await frame.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
     expect(await frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.querySelectorAll("img").length)).toBe(0);
@@ -166,6 +207,7 @@ test.describe("what Home Assistant has", () => {
   test("when Home Assistant can't list its devices the panel says so, and Try again asks again", async ({ page }) => {
     await page.goto(`${PAGE}?catalog=fail`);
     const frame = await panelFrame(page);
+    await tab(frame, "Devices").click();
     await expect.poll(() => frameText(frame)).toContain("couldn't list its devices");
     await page.evaluate("catalogDown = false");
     await frame.locator("ec-app").getByRole("button", { name: "Try again" }).click();
@@ -187,12 +229,10 @@ test.describe("appearance", () => {
   test("an appearance picked in the frame is kept by the host and survives reopening the panel", async ({ page }) => {
     await page.goto(PAGE);
     let frame = await panelFrame(page);
-    await frame.evaluate(() => {
-      const s = document.querySelector("ec-app")?.shadowRoot?.querySelector("select") as HTMLSelectElement;
-      s.value = "dark";
-      s.dispatchEvent(new Event("change"));
-    });
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Dark", exact: true }).click();
     await expect.poll(() => frame.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+    await expect(app(frame).getByRole("button", { name: "Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.evaluate(() => (window as unknown as { reopenPanel(): void }).reopenPanel());
     await expect.poll(() => page.frames().length).toBe(2);
     frame = page.frames()[1];

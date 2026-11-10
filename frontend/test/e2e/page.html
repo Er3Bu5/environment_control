@@ -57,6 +57,9 @@ fakeHA.command = async (msg) => {
 };
 if (params.get("user") === "guest") { const hass = fakeHA.hass.bind(fakeHA); fakeHA.hass = () => ({ ...hass(), user: { is_admin: false } }); }
 let panel = document.querySelector("environment-control-panel");
+/* HA opens its sidebar on hass-toggle-menu. */
+let sidebarToggles = 0;
+window.addEventListener("hass-toggle-menu", () => { sidebarToggles += 1; });
 /* HA's router as its frontend has it: one click listener on the window turns a plain left click on a same-origin link
    into a page change, unless something cancelled the click first, and changing page takes the panel element off. */
 let haRoute = "/environment-control";
@@ -90,6 +93,8 @@ function reopenPanel() {
 </script>
 <script type="module">
 import "/custom_components/environment_control/frontend/host.js";
+/* HA sets narrow on a panel when its sidebar is hidden, once the panel's module has loaded, as here. */
+if (params.has("narrow")) panel.narrow = true;
 fakeHA.attach(panel);
 </script>
 </body>

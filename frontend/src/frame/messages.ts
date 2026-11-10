@@ -41,10 +41,11 @@ export interface Catalog {
   entities: (CatalogEntity & { integration: string; family: string })[];
 }
 export type HostMessage =
-  | ({ type: "init"; states: Record<string, unknown>; theme: Theme } & Stored)
+  | ({ type: "init"; states: Record<string, unknown>; theme: Theme; narrow: boolean } & Stored)
   | ({ type: "config" } & Stored)
   | { type: "states"; states: Record<string, unknown> }
   | { type: "theme"; theme: Theme }
+  | { type: "narrow"; narrow: boolean }
   | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog };
 
 const COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
@@ -118,7 +119,7 @@ export function readHostMessage(data: unknown): HostMessage | null {
   switch (data.type) {
     case "init": {
       const stored = readStored(data), theme = readTheme(data.theme);
-      return stored && theme && isObj(data.states) ? { type: "init", ...stored, states: data.states, theme } : null;
+      return stored && theme && isObj(data.states) ? { type: "init", ...stored, states: data.states, theme, narrow: data.narrow === true } : null;
     }
     case "config": {
       const stored = readStored(data);
@@ -130,6 +131,8 @@ export function readHostMessage(data: unknown): HostMessage | null {
       const theme = readTheme(data.theme);
       return theme ? { type: "theme", theme } : null;
     }
+    case "narrow":
+      return typeof data.narrow === "boolean" ? { type: "narrow", narrow: data.narrow } : null;
     case "result": {
       if (!Number.isInteger(data.req) || typeof data.ok !== "boolean") return null;
       const catalog = "catalog" in data ? readCatalog(data.catalog) : undefined;

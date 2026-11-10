@@ -18,7 +18,7 @@ from pathlib import Path
 HOST_CALL_SERVICE_SITES = 0
 # The messages the host acts on from the frame. Each is a way into the code that holds the login, so adding one is a
 # deliberate change here, made with its tests.
-HOST_ACCEPTS = {"ready", "draft", "appearance", "catalog"}
+HOST_ACCEPTS = {"ready", "draft", "appearance", "catalog", "sidebar"}
 FRAME_BANNED = {
     "callService": r"\bcallService\b",
     "fetch": r"\bfetch\s*\(",
