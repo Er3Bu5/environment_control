@@ -26,6 +26,9 @@ export interface CatalogEntity {
   min?: number;
   max?: number;
   step?: number;
+  /* A date and time helper's: lights on and off take a time-only one. */
+  has_date?: boolean;
+  has_time?: boolean;
 }
 export interface CatalogDevice {
   id: string;
@@ -91,6 +94,7 @@ function readEntity(e: unknown): CatalogEntity | null {
     category: str(e.category),
     area: str(e.area),
     ...Object.fromEntries((["min", "max", "step"] as const).filter((k) => typeof e[k] === "number" && Number.isFinite(e[k])).map((k) => [k, e[k] as number])),
+    ...Object.fromEntries((["has_date", "has_time"] as const).filter((k) => typeof e[k] === "boolean").map((k) => [k, e[k] as boolean])),
   };
 }
 
