@@ -44,7 +44,12 @@ const catalog: Catalog = {
     },
     {
       id: "soil", name: "Soil 1", area: "Garden", manufacturer: null, model: null, integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
-      entities: [ent("sensor.soil_temp", { device_class: "temperature", unit: "°C" }), ent("sensor.soil_vwc", { device_class: "moisture", unit: "%" }), ent("sensor.soil_ec", { unit: "mS/cm" })],
+      entities: [
+        ent("sensor.soil_temp", { device_class: "temperature", unit: "°C" }),
+        ent("sensor.soil_vwc", { device_class: "moisture", unit: "%" }),
+        ent("sensor.soil_raw", { device_class: "moisture", unit: "%" }),
+        ent("sensor.soil_ec", { device_class: "conductivity", unit: "mS/cm" }),
+      ],
     },
     {
       id: "plug", name: "Heater plug", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
@@ -91,13 +96,42 @@ describe("candidates", () => {
   });
 });
 
+describe("sensor classes", () => {
+  const sensors = sensorCandidates(catalog), controls = controlCandidates(catalog);
+  const soil = sensors.find((s) => s.id === "soil")!;
+
+  it("detects a soil probe from moisture or conductivity, and asks it for moisture, EC and temperature", () => {
+    expect(sensors.map((s) => [s.id, s.detected])).toEqual([["board1", "env"], ["board2", "env"], ["soil", "soil"]]);
+    expect(seedSlots(soil)).toEqual({ temperature: "sensor.soil_temp", humidity: "none", vpd: "none", light: "none", moisture: "", ec: "sensor.soil_ec" });
+  });
+
+  it("changing class asks for the new class's readings and keeps one already picked", () => {
+    const asEnv = seedSlots(soil, "env", seedSlots(soil));
+    expect(asEnv).toEqual({ temperature: "sensor.soil_temp", humidity: "none", vpd: "none", light: "none", moisture: "none", ec: "none" });
+  });
+
+  it("stores the class and only its readings, places a sensor that changes class again, and combines each class on its own", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "soil", name: "Soil 1", kind: "env", pos: [1, 1], entities: { temperature: "sensor.soil_temp" } }] }], []);
+    const d = openMap(c, "garden");
+    expect(d.cls.soil).toBe("env");
+    d.cls.soil = "soil";
+    d.sensors.soil = { ...seedSlots(soil, "soil", d.sensors.soil), moisture: "sensor.soil_vwc" };
+    d.combine.soil = "median";
+    applyMap(c, d, sensors, controls);
+    const s = (c.zones[0].sensors as Record<string, unknown>[])[0];
+    expect([s.kind, s.pos, s.entities]).toEqual(["soil", null, { moisture: "sensor.soil_vwc", ec: "sensor.soil_ec", temperature: "sensor.soil_temp" }]);
+    expect(c.zones[0].combine).toEqual({ env: "mean", soil: "median" });
+    expect(mapChanges(openMap(c, "garden"), c, sensors, controls)).toEqual([]);
+  });
+});
+
 describe("the draft", () => {
   const sensors = sensorCandidates(catalog), controls = controlCandidates(catalog);
 
   it("takes a single candidate, waits on several, and leaves a missing slot unused", () => {
-    expect(seedSlots(sensors[0])).toEqual({ temperature: "sensor.left_temp", humidity: "sensor.left_rh", vpd: "sensor.left_vpd", light: "sensor.left_lux" });
-    expect(seedSlots(sensors[1])).toEqual({ temperature: "", humidity: "sensor.two_rh", vpd: "none", light: "none" });
-    expect(seedSlots(sensors[2])).toEqual({ temperature: "sensor.soil_temp", humidity: "none", vpd: "none", light: "none" });
+    const no = { moisture: "none", ec: "none" };
+    expect(seedSlots(sensors[0])).toEqual({ temperature: "sensor.left_temp", humidity: "sensor.left_rh", vpd: "sensor.left_vpd", light: "sensor.left_lux", ...no });
+    expect(seedSlots(sensors[1])).toEqual({ temperature: "", humidity: "sensor.two_rh", vpd: "none", light: "none", ...no });
   });
 
   it("names every answer still owed, and needs at least one sensor", () => {
@@ -107,7 +141,7 @@ describe("the draft", () => {
     d.sensors.board2 = seedSlots(sensors[1]);
     d.controls["switch.heater_plug"] = "";
     expect(mapIssues(d, sensors, controls).map((i) => i.text)).toEqual(["Two temps: pick which Temperature entity to use.", "Heater plug: say what it is."]);
-    d.sensors.board2 = { temperature: "none", humidity: "none", vpd: "none", light: "none" };
+    d.sensors.board2 = { temperature: "none", humidity: "none", vpd: "none", light: "none", moisture: "none", ec: "none" };
     expect(mapIssues(d, sensors).map((i) => i.text)).toContain("Two temps: pick at least one reading, or leave this sensor out.");
     d.sensors.board2.temperature = "sensor.two_rh";
     expect(mapIssues(d, sensors).filter((i) => i.step === 1)).toEqual([]);

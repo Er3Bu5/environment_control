@@ -352,7 +352,7 @@ test.describe("map devices", () => {
     await expect(app(frame).getByRole("button", { name: "Two probe board: pick which Temperature entity to use. ›" })).toBeVisible();
     await row(frame, "Two probe board").getByLabel("Low temp, 21.4 °C").check();
     await expect(next(frame)).toBeEnabled();
-    await expect(app(frame).getByText("How should these 2 sensors combine into the zone's reading?")).toBeVisible();
+    await expect(app(frame).getByText("How should these 2 environment sensors combine into the zone's reading?")).toBeVisible();
     await next(frame).click();
     await row(frame, "Spare Plug").getByRole("button").first().click();
     await expect(row(frame, "Spare Plug")).toContainText("What is it?");
@@ -362,6 +362,24 @@ test.describe("map devices", () => {
     await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+  });
+
+  test("a soil probe is detected as Soil and asked for moisture, EC and temperature, not humidity, VPD or light", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Soil 1").getByRole("button").first().click();
+    const soil = row(frame, "Soil 1");
+    await expect(soil.locator("fieldset", { hasText: "Class" }).getByLabel("Soil, detected")).toBeChecked();
+    for (const reading of ["Moisture (VWC), pick one", "EC, pick one", "Temperature"]) await expect(soil.locator("legend", { hasText: reading })).toHaveCount(1);
+    for (const reading of ["Humidity", "VPD", "Light"]) await expect(soil.locator("legend", { hasText: new RegExp(`^${reading}`) })).toHaveCount(0);
+    await soil.getByLabel("Soil 1 Substrate Normalised VWC, 85.4 %").check();
+    await soil.getByLabel("Soil 1 Substrate Pore Water EC, 2.54 mS/cm").check();
+    await expect(soil.getByLabel("Soil 1 Substrate Temperature, 20.8 °C")).toBeChecked();
+    await expect(next(frame)).toBeEnabled();
+    /* Changed to Environment it asks that class's readings instead, keeping the temperature already picked. */
+    await soil.locator("fieldset", { hasText: "Class" }).getByLabel("Environment").check();
+    await expect(soil.locator("legend", { hasText: /^Humidity/ })).toHaveCount(1);
+    await expect(soil.locator("legend", { hasText: /^Moisture/ })).toHaveCount(0);
+    await expect(soil.getByLabel("Soil 1 Substrate Temperature, 20.8 °C")).toBeChecked();
   });
 
   test("any sensor on the device can go to any reading, and Not used is always there", async ({ page }) => {
@@ -395,7 +413,7 @@ test.describe("map devices", () => {
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.devices).toBe("done");
-    expect(z?.combine).toEqual({ env: "mean" });
+    expect(z?.combine).toEqual({ env: "mean", soil: "mean" });
     expect(z?.sensors.map((s) => [s.id, s.entities])).toEqual([
       ["d-board", { temperature: "sensor.environment_board_air_temp", humidity: "sensor.environment_board_humidity", vpd: "sensor.environment_board_vpd", light: "sensor.environment_board_light" }],
       ["d-two", { temperature: "sensor.two_probe_top_temp", humidity: "sensor.two_probe_humidity" }],

@@ -3,6 +3,8 @@
    Devices and Setup, where zones are added, named, followed through their setup and removed. Editing only ever changes a
    draft; nothing is saved until it has been reviewed and applied, and leaving with a draft open asks first. */
 import { LitElement, type PropertyValues, html, nothing } from "lit";
+import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
 import {
   type Catalog,
@@ -41,6 +43,10 @@ import {
   type ControlCandidate,
   type Issue,
   type MapDraft,
+  CLASSES,
+  CLASS_SLOTS,
+  type SensorClass,
+  classSlots,
   METHODS,
   type Option,
   type Method,
@@ -491,8 +497,13 @@ export class EcApp extends LitElement {
 
   private toggleSensor(s: SensorCandidate): void {
     this.setMap((m) => {
-      if (s.id in m.sensors) delete m.sensors[s.id];
-      else m.sensors[s.id] = seedSlots(s);
+      if (s.id in m.sensors) {
+        delete m.sensors[s.id];
+        delete m.cls[s.id];
+      } else {
+        m.cls[s.id] = s.detected;
+        m.sensors[s.id] = seedSlots(s);
+      }
     });
   }
 
@@ -809,7 +820,7 @@ export class EcApp extends LitElement {
       <div class="chiprow">
         ${options.map(
           (o) => html`<label class="chip ${o.wait ? "wait" : ""}"
-            ><input type="radio" name=${name} .value=${o.value} .checked=${current === o.value} @change=${() => pick(o.value)} />${o.label}</label
+            ><input type="radio" name=${name} .value=${o.value} .checked=${live(current === o.value)} @change=${() => pick(o.value)} />${o.label}</label
           >`,
         )}
       </div>
@@ -849,8 +860,15 @@ export class EcApp extends LitElement {
     return !!area && area.toLowerCase() === z.name.toLowerCase();
   }
 
+  private setClass(s: SensorCandidate, cls: SensorClass): void {
+    this.setMap((m) => {
+      m.cls[s.id] = cls;
+      m.sensors[s.id] = seedSlots(s, cls, m.sensors[s.id]);
+    });
+  }
+
   private sensorRow(m: MapDraft, z: Zone, s: SensorCandidate) {
-    const on = s.id in m.sensors, waiting = on && SLOTS.some((k) => m.sensors[s.id][k] === "");
+    const on = s.id in m.sensors, cls = m.cls[s.id] ?? s.detected, waiting = on && classSlots(m, s.id).some((k) => m.sensors[s.id][k] === "");
     const elsewhere = this.zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
     const pill = waiting
       ? html`<span class="pill high">Pick one</span>`
@@ -859,15 +877,22 @@ export class EcApp extends LitElement {
         : elsewhere.length
           ? html`<span class="pill plain">In ${elsewhere[0]}</span>`
           : nothing;
-    const has = SLOTS.filter((k) => s.slots[k].length).map((k) => SLOT_NAME[k]).join(", ");
+    const has = CLASS_SLOTS[s.detected].filter((k) => s.slots[k].length).map((k) => SLOT_NAME[k]).join(", ");
     return html`<div class="pickwrap" id=${sensorTarget(s.id)}>
       <button class="pickrow" aria-pressed=${on ? "true" : "false"} @click=${() => this.toggleSensor(s)}>
         <span class="tick">${on ? "✓" : ""}</span>
-        <span class="pick-text"><strong>${s.name}</strong><span class="dev-sub">${s.family}, ${LINK_LABEL[s.link]}. ${has}</span></span>${pill}
+        <span class="pick-text"><strong>${s.name}</strong><span class="dev-sub">${s.family}, ${LINK_LABEL[s.link]}. ${CLASSES[s.detected]}: ${has}</span></span>${pill}
       </button>
       ${on
         ? html`<div class="ents">
-            ${SLOTS.map((k) => this.slotChoice(m, s, k))}
+            ${this.chips(
+              "Class",
+              `class-${s.id}`,
+              (Object.keys(CLASSES) as SensorClass[]).map((k) => ({ value: k, label: k === s.detected ? `${CLASSES[k]}, detected` : CLASSES[k] })),
+              cls,
+              (v) => this.setClass(s, v as SensorClass),
+            )}
+            ${repeat(CLASS_SLOTS[cls], (k) => k, (k) => this.slotChoice(m, s, k))}
             <label class="inavg"
               ><input type="checkbox" .checked=${m.avg[s.id] === false} @change=${(e: Event) => this.setMap((d) => (d.avg[s.id] = !(e.target as HTMLInputElement).checked))} />
               Exclude from average</label
@@ -938,7 +963,7 @@ export class EcApp extends LitElement {
     if (m.step === 1) {
       const shown = sensors.filter((s) => hit(`${s.name} ${s.family} ${SLOTS.flatMap((k) => s.slots[k].map((o) => o.entity)).join(" ")}`));
       const gone = Object.keys(m.sensors).filter((id) => !sensors.some((s) => s.id === id));
-      const counted = countedSensors(m);
+      const combine = (Object.keys(CLASSES) as SensorClass[]).map((cls) => [cls, countedSensors(m, cls)] as const).filter(([, n]) => n >= 2);
       body = html`<p class="muted">
           Pick the sensors in ${z.name}. Each one is a physical device. Its readings are suggested by what Home Assistant says each entity measures, and any
           sensor on the device can be put to any reading.
@@ -953,19 +978,19 @@ export class EcApp extends LitElement {
               </button>
             </div>`,
           )}
-          ${this.mapList(shown, (s) => this.nearZone(z, s.area) || s.id in m.sensors, (s) => this.sensorRow(m, z, s), q ? "Nothing matches that search." : "Home Assistant has no temperature or humidity sensors.")}
+          ${this.mapList(shown, (s) => this.nearZone(z, s.area) || s.id in m.sensors, (s) => this.sensorRow(m, z, s), q ? "Nothing matches that search." : "Home Assistant has no sensors to map.")}
         </div>
-        ${counted >= 2
-          ? html`<div class="combine">
-              ${this.chips(
-                `How should these ${counted} sensors combine into the zone's reading?`,
-                "combine",
-                Object.entries(METHODS).map(([value, label]) => ({ value, label })),
-                m.combine,
-                (v) => this.setMap((d) => (d.combine = v as Method)),
-              )}
-            </div>`
-          : nothing}`;
+        ${combine.map(
+          ([cls, n]) => html`<div class="combine">
+            ${this.chips(
+              `How should these ${n} ${CLASSES[cls].toLowerCase()} sensors combine into the zone's reading?`,
+              `combine-${cls}`,
+              Object.entries(METHODS).map(([value, label]) => ({ value, label })),
+              m.combine[cls],
+              (v) => this.setMap((d) => (d.combine[cls] = v as Method)),
+            )}
+          </div>`,
+        )}`;
     }
     if (m.step === 2) {
       const shown = controls.filter((c) => hit(`${c.name} ${c.family} ${c.entity}`));
@@ -985,7 +1010,7 @@ export class EcApp extends LitElement {
         </div>`;
     }
     if (m.step === 3) {
-      const ss = Object.keys(m.sensors).map((id) => sensors.find((s) => s.id === id)?.name ?? id);
+      const ss = Object.keys(m.sensors).map((id) => `${sensors.find((s) => s.id === id)?.name ?? id} (${CLASSES[m.cls[id] ?? "env"].toLowerCase()})`);
       const cs = Object.entries(m.controls).map(([e, role]) => `${controls.find((c) => c.entity === e)?.name ?? e} (${role || "not set"})`);
       body = html`<div class="review">
           <div><strong>${plural(ss.length, "sensor")}</strong><p class="small muted">${ss.join(", ") || "None"}</p></div>
