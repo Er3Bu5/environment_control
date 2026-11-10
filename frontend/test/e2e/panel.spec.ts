@@ -1417,6 +1417,14 @@ test.describe("history", () => {
     await expect(card(frame).locator("thead")).toContainText("Min");
   });
 
+  test("every sensor's line is drawn at full strength, so it shows against the ideal band", async ({ page }) => {
+    const frame = await garden(page);
+    await tab(frame, "Garden").click();
+    const lines = card(frame).locator(".chart svg path");
+    await expect(lines).toHaveCount(4);
+    for (const l of await lines.all()) expect(await l.getAttribute("stroke-opacity")).toBeNull();
+  });
+
   test("a metric and range ask for exactly the readings drawn, and VPD asks for temperature and humidity where a board has none", async ({ page }) => {
     const frame = await garden(page);
     await tab(frame, "Garden").click();
