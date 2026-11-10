@@ -1,13 +1,16 @@
 name: Beta
 
-# After each merge to main, once Validate has passed on it: the next beta, built from exactly that commit and published
-# only once you approve it in the release environment, as every release is. The number follows the newest release
-# tag (b8, then b9), and a merge that changes nothing that ships makes no beta. Nothing is tested again here: this only
-# starts when Validate's own run on the merge succeeded. Full releases stay with Release.
+# After each merge to main: the next beta, built from exactly that commit and published only once you approve it in
+# the release environment, as every release is. The number follows the newest release tag (b8, then b9), and a merge
+# that changes nothing that ships makes no beta.
+#
+# The suites aren't run again. The merge's pull request ran Validate on GitHub's test merge with main, and its last
+# job recorded that content by its git tree hash. When the merge's tree matches one recorded by a passing run from
+# this repository, that content has been tested byte for byte. When it doesn't (main moved after the pull request's
+# last run, so the merge combines changes never tested together), Validate runs here first, so nothing untested is
+# ever built. Full releases stay with Release.
 on:
-  workflow_run:
-    workflows: [Validate]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions: {}
@@ -20,29 +23,23 @@ concurrency:
 jobs:
   plan:
     name: Next beta
-    # Only Validate's run on a merge: not its daily run, a run by hand, or a pull request's.
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       version: ${{ steps.next.outputs.version }}
       ship: ${{ steps.next.outputs.ship }}
+      tested: ${{ steps.tested.outputs.tested }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Work out the version
         id: next
-        env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          python3 scripts/next_beta.py "$SHA" > "$RUNNER_TEMP/next"
+          python3 scripts/next_beta.py "$GITHUB_SHA" > "$RUNNER_TEMP/next"
           cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
           get() { sed -n "s/^$1=//p" "$RUNNER_TEMP/next"; }
           ship=$(get ship) version=$(get version) since=$(get since)
@@ -51,11 +48,44 @@ jobs:
           else
             echo "Nothing that ships changed since $since, so no beta." >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Check this content already passed Validate
+        id: tested
+        if: ${{ steps.next.outputs.ship == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          tree=$(git rev-parse "$GITHUB_SHA^{tree}")
+          # Only a run on this repository's own branches counts: a fork's pull request runs a workflow it can edit.
+          found=$(gh api "repos/$GH_REPO/actions/artifacts?name=tested-tree-$tree&per_page=100" \
+            --jq "[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == $REPO_ID)] | length")
+          if [ "$found" -gt 0 ]; then
+            echo "tested=true" >> "$GITHUB_OUTPUT"
+            echo "Validate already passed on tree $tree, so it isn't run again." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+            echo "Tree $tree hasn't passed Validate (main moved after the pull request's last run), so it runs first." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  validate:
+    name: Validate
+    needs: plan
+    if: ${{ needs.plan.outputs.ship == 'true' && needs.plan.outputs.tested != 'true' }}
+    uses: ./.github/workflows/validate.yml
+    # A called workflow's jobs get no more than this, so it must cover every job's permissions in validate.yml.
+    # scripts/check_workflows.py checks it.
+    permissions:
+      contents: read
+      pull-requests: read
 
   beta:
     name: Build and publish
-    needs: plan
-    if: ${{ needs.plan.outputs.ship == 'true' }}
+    needs: [plan, validate]
+    # Runs after Validate passed here, or with Validate skipped because the content had already passed it.
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.ship == 'true' &&
+      (needs.validate.result == 'success' || (needs.validate.result == 'skipped' && needs.plan.outputs.tested == 'true')) }}
     uses: ./.github/workflows/publish.yml
     # A called workflow's jobs get no more than this, so it must cover every job's permissions in publish.yml.
     # scripts/check_workflows.py checks it.
@@ -65,5 +95,5 @@ jobs:
       attestations: write
     with:
       version: ${{ needs.plan.outputs.version }}
-      ref: ${{ github.event.workflow_run.head_sha }}
+      ref: ${{ github.sha }}
       publish: true
