@@ -480,11 +480,14 @@ export class EcApp extends LitElement {
     if (this.sched && !this.zoneById(this.sched.zoneId)) [this.sched, this.tgt] = [null, null];
   };
 
+  /* What Home Assistant has: asked when the panel opens, and again each time a setup page that picks from it opens, so
+     a device or helper made since shows up and a helper's value is what it holds now. */
   private askCatalog = async (): Promise<void> => {
     this.catalogError = null;
     const r = await this.ask("catalog");
     if (r.ok && r.catalog) [this.catalog, this.catalogError] = [r.catalog, null];
-    else this.catalogError = r.error ?? "Home Assistant couldn't list its devices.";
+    /* A list already in hand stays usable when looking again fails; only having none at all is a problem to show. */
+    else if (!this.catalog) this.catalogError = r.error ?? "Home Assistant couldn't list its devices.";
     /* Sensor Calibration waits for this list, since it says which boards have somewhere to hold an offset. */
     const d = this.leafw;
     if (d && !d.seeded && this.catalog) this.leafw = { ...d, rows: seedRows(this.raw(d.zoneId), this.catalog, this.states), seeded: true };
@@ -789,7 +792,7 @@ export class EcApp extends LitElement {
       this.menu = null;
       this.mapw = openMap(this.config, id);
       this.mapFromGuide = fromGuide;
-      if (!this.catalog) void this.askCatalog();
+      void this.askCatalog();
       this.go("setup");
     });
   }
@@ -1007,7 +1010,7 @@ export class EcApp extends LitElement {
       this.leafBefore = zoneLeaf(this.raw(id), this.states);
       this.leafw = openLeaf(this.raw(id), id, this.catalog, this.states, fromGuide);
       this.leafBack = back;
-      if (!this.catalog) void this.askCatalog();
+      void this.askCatalog();
       this.go("setup");
     };
     /* From the VPD chart the Targets page's own draft is kept for the way back, so there is nothing to ask about. */
@@ -1206,7 +1209,7 @@ export class EcApp extends LitElement {
       this.tgt = this.openTgt(id);
       this.schedBack = back;
       this.schedQ = { lights: "", red: "" };
-      if (!this.catalog) void this.askCatalog();
+      void this.askCatalog();
       this.go("setup");
     });
   }

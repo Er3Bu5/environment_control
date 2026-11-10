@@ -725,8 +725,11 @@ test.describe("targets, day and night", () => {
   test("a picked helper shows what it holds, and HA asks before it's linked for the first time", async ({ page }) => {
     await page.goto(PAGE);
     const helper = "input_number.nursery_day_temperature_min_threshold";
-    await page.evaluate(`(() => { fakeHA.states[${JSON.stringify(helper)}].state = "21"; CATALOG.entities.find((e) => e.entity_id === ${JSON.stringify(helper)}).state = "21"; })()`);
     const frame = await panelFrame(page);
+    /* The helper changes in HA after the panel has listed HA's helpers, so the page has to look again when it opens. */
+    await tab(frame, "Devices").click();
+    await expect.poll(() => frameText(frame)).toContain("Environment board");
+    await page.evaluate(`(() => { fakeHA.states[${JSON.stringify(helper)}].state = "21"; CATALOG.entities.find((e) => e.entity_id === ${JSON.stringify(helper)}).state = "21"; })()`);
     await tab(frame, "Setup").click();
     await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
     await app(frame).getByRole("menuitem", { name: "Targets, day and night" }).click();
