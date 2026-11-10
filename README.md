@@ -5,17 +5,20 @@ placement of every sensor and device in each zone, and, in later releases, the c
 and schedules that today live across several dashboards.
 
 **Status: early development, in betas.** Zones are set up in the panel: their sensors and devices, layout and
-placement, and live readings. The one thing it can change in Home Assistant so far is a sensor's leaf temperature
-offset, on that sensor's own board.
+placement, leaf temperature offsets, and their day and night times and limits, with live readings and history
+judged against them. It changes two things in Home Assistant so far, each only after you review and apply: a
+sensor's leaf temperature offset on its own board, and the helpers you link a zone's times and limits to.
 
 ## Built for security first
 
 - **The UI runs in a sandboxed frame** with its own origin and no network. It can't read your login,
   HA's page or your browser's storage, and it can't send anything anywhere.
 - **Only a small host element talks to Home Assistant,** and it accepts a fixed list of messages
-  from the UI. Its one service call so far sets a leaf temperature offset: the UI names a sensor and a
-  value, never an entity, and the host checks the number is in °C on that sensor's own device and inside
-  its own limits.
+  from the UI. It makes two kinds of service call so far, and the UI never names an entity for either. A
+  leaf temperature offset: the UI names a sensor and a value, and the host checks the number is in °C on
+  that sensor's own device and inside its own limits. A zone's time or limit: the UI names the zone and
+  the setting, and the host writes the helper that zone links to it, a link you approved in a dialog the
+  host draws itself, inside the helper's own limits.
 - **The backend can't move hardware or reach the network:** no service calls, no state writes, no
   external packages, checked on every change.
 - **Admins only,** for the panel and for every command it uses.
