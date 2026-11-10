@@ -4,15 +4,18 @@ A Home Assistant panel for grow-room climate and lights: live readings against y
 placement of every sensor and device in each zone, and, in later releases, the controls, thresholds
 and schedules that today live across several dashboards.
 
-**Status: early development.** This release adds an empty, admin-only panel. It proves the install,
-the update path and the sandbox, and it can't move any hardware.
+**Status: early development, in betas.** Zones are set up in the panel: their sensors and devices, layout and
+placement, and live readings. The one thing it can change in Home Assistant so far is a sensor's leaf temperature
+offset, on that sensor's own board.
 
 ## Built for security first
 
 - **The UI runs in a sandboxed frame** with its own origin and no network. It can't read your login,
   HA's page or your browser's storage, and it can't send anything anywhere.
 - **Only a small host element talks to Home Assistant,** and it accepts a fixed list of messages
-  from the UI. This release makes no service calls at all.
+  from the UI. Its one service call so far sets a leaf temperature offset: the UI names a sensor and a
+  value, never an entity, and the host checks the number is in °C on that sensor's own device and inside
+  its own limits.
 - **The backend can't move hardware or reach the network:** no service calls, no state writes, no
   external packages, checked on every change.
 - **Admins only,** for the panel and for every command it uses.
