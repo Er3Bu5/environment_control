@@ -79,6 +79,11 @@ import {
   devsOff,
   firstToPlace,
   noHeight,
+  VIRTUAL_TYPES,
+  type VirtualType,
+  removeVirtual,
+  renameVirtual,
+  retypeVirtual,
   fits,
   flowOf,
   itemOf,
@@ -2536,7 +2541,7 @@ export class EcApp extends LitElement {
     const where = (s: Item, missing: unknown) =>
       !fits(s, L) ? missing : s.kind === "env" && !s.level ? html`<span class="pill high">Needs a height</span>` : html`<span class="small muted">${posText(s.pos as Spot, L)}</span>`;
     const opt = (s: Item, missing: unknown) => html`<button class="sensor-opt" aria-pressed=${d.pick === s.id ? "true" : "false"} @click=${() => this.pickItem(s.id)}>
-      <span class="opt-name">${mk(look(s))}${s.name}</span>${where(s, missing)}
+      <span class="opt-name">${mk(look(s))}${s.name}${s.kind === "virtual" ? html` <span class="small muted">${s.type ?? "Other"}</span>` : nothing}</span>${where(s, missing)}
     </button>`;
     const needs = html`<span class="pill high">Needs placing</span>`;
     const prompt = !sel
@@ -2573,6 +2578,7 @@ export class EcApp extends LitElement {
         /></label>
         <button class="btn" @click=${() => this.setLay(addVirtual)}>Add</button>
       </div>
+      ${this.chips("Its type", "lay-vtype", VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), d.vtype, (v) => this.setLay((x) => (x.vtype = v as VirtualType)))}
       ${d.vissue ? html`<p class="small" role="status">${d.vissue}</p>` : nothing}
       <div class="now"><strong>${prompt}</strong></div>
       ${mapView(L, {
@@ -2602,7 +2608,25 @@ export class EcApp extends LitElement {
         ? html`<div class="now"><strong>On the map</strong><button class="btn" @click=${() => this.setLay((x) => { const s = itemOf(x, sel.id); if (s) s.pos = null; })}>Take ${sel.name} off the map</button></div>`
         : nothing}
       ${sel?.kind === "virtual"
-        ? html`<div class="now"><strong>Virtual device</strong><button class="btn" @click=${() => this.setLay((x) => { x.virt = x.virt.filter((v) => v.id !== sel.id); x.pick = null; })}>Remove ${sel.name}</button></div>`
+        ? html`<div class="now vedit">
+            <label class="field" for="lay-vrename"
+              >Name<input
+                id="lay-vrename"
+                type="text"
+                maxlength="40"
+                enterkeyhint="done"
+                autocomplete="off"
+                .value=${live(sel.name)}
+                @change=${(e: Event) => {
+                  const input = e.target as HTMLInputElement;
+                  this.setLay((x) => renameVirtual(x, sel.id, input.value));
+                  input.value = itemOf(this.lay as LayoutDraft, sel.id)?.name ?? input.value;
+                }}
+                @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            /></label>
+            ${this.chips(`Type of ${sel.name}`, `vtype-${sel.id}`, VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), sel.type ?? "Other", (v) => this.setLay((x) => retypeVirtual(x, sel.id, v as VirtualType)))}
+            <button class="btn danger" @click=${() => this.setLay((x) => removeVirtual(x, sel.id))}>Remove ${sel.name}</button>
+          </div>`
         : nothing}
       ${keyView}
       ${left.length

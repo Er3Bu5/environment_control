@@ -1264,8 +1264,17 @@ test.describe("zone layout and placement", () => {
     await expect(finish(frame)).toBeEnabled();
 
     await app(frame).getByLabel("Add a virtual device").fill("Drain tank");
+    await app(frame).getByRole("group", { name: "Its type" }).getByLabel("Tank").check();
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
     await spot(frame, "Outside the wall, by unit 1").click();
+    /* Picked, a virtual device can be renamed, retyped and removed right here. */
+    await app(frame).getByLabel("Name", { exact: true }).fill("Waste tank");
+    await app(frame).getByLabel("Name", { exact: true }).press("Enter");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank" })).toContainText("Tank");
+    await app(frame).getByLabel("Add a virtual device").fill("Spare bucket");
+    await app(frame).getByRole("button", { name: "Add", exact: true }).click();
+    await app(frame).getByRole("button", { name: "Remove Spare bucket" }).click();
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Spare bucket" })).toHaveCount(0);
 
     await finish(frame).click();
     await expect(dialog(frame)).toContainText("Soil 1 position");
@@ -1277,7 +1286,7 @@ test.describe("zone layout and placement", () => {
       ["d-board", "env", [0.5, 0], "in"],
       ["d-soil", "soil", [0, 0], null],
     ]);
-    expect(z?.virtual).toEqual([{ id: "v-drain_tank", name: "Drain tank", pos: [-1, -1] }]);
+    expect(z?.virtual).toEqual([{ id: "v-drain_tank", name: "Waste tank", pos: [-1, -1], type: "Tank" }]);
   });
 
   test("a zone's page shows its map, and names devices that aren't on it", async ({ page }) => {

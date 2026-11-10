@@ -319,6 +319,8 @@ export const styles = css`
   .picklist-menu li[aria-selected="true"] { font-weight: 500; }
   .picker > p { margin: 0; overflow-wrap: anywhere; }
 
+  .now.vedit { flex-direction: column; align-items: stretch; }
+
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }
   .eid { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

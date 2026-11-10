@@ -16,6 +16,8 @@ const PATHS = {
   gauge: "M12 4a9 9 0 0 0-8 13.2l1.8-1A7 7 0 1 1 18.2 16l1.8 1A9 9 0 0 0 12 4Zm3.5 4.5-4.6 5.1a1.8 1.8 0 1 0 2.5 2.5l2.1-7.6Z",
   /* A soil probe: a body with prongs, as the probes stand in the substrate. */
   probe: "M8 2h8v9h-1.5v6L13 21v1h-2v-1l-1.5-4v-6H8V2Zm2 2v5h4V4h-4Z",
+  /* A tank: a drum with a level line, for drain tanks and reservoirs. */
+  tank: "M12 2C7.6 2 4 3.3 4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5c0-1.7-3.6-3-8-3Zm0 2c3.6 0 6 .9 6 1s-2.4 1-6 1-6-.9-6-1 2.4-1 6-1Zm6 14.9c-.3.4-2.6 1.1-6 1.1s-5.7-.7-6-1.1V13c1.5.7 3.6 1 6 1s4.5-.3 6-1v5.9Z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

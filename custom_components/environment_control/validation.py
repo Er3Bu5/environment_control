@@ -34,6 +34,8 @@ MAX_UNITS = 200
 MAX_GRID = 20
 MAX_SIZE_M = 100
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
+# What a virtual device is: the roles real devices have, a tank, or something else. It only decides how it's drawn.
+VIRTUAL_TYPES = ("Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Tank", "Other")
 PERIOD_MODES = ("helper", "fixed", "detected")
 # Limits as stored: wider than the panel lets you type, since a value read off a helper is kept here as last known.
 BAND_RANGE = {"temperature": (-50, 100), "humidity": (0, 100), "vpd": (0, 10)}
@@ -264,7 +266,7 @@ def validate_config(c: Any) -> None:
                 _fail(f"{zid} has virtual devices that aren't a short list")
             seen: set[str] = set()
             for v in virtual:
-                shape = isinstance(v, dict) and set(v) <= {"id", "name", "pos"}
+                shape = isinstance(v, dict) and set(v) <= {"id", "name", "pos", "type"}
                 vid, name = (v.get("id"), v.get("name")) if shape else (None, None)
                 if (
                     not shape
@@ -276,6 +278,8 @@ def validate_config(c: Any) -> None:
                     or len(name) > 40
                 ):
                     _fail(f"{zid} has a virtual device that isn't a name and a spot")
+                if v.get("type") is not None and v.get("type") not in VIRTUAL_TYPES:
+                    _fail(f"{vid} is a kind of virtual device this panel doesn't know")
                 seen.add(vid)
                 if not _spot_ok(v.get("pos"), z.get("layout")):
                     _fail(f"{vid} is placed outside {zid}'s map")
