@@ -506,7 +506,8 @@ test.describe("targets, day and night", () => {
     await expect(dialog(frame)).toHaveCount(0);
     expect((await sets(page)).map((c) => [c.domain, c.service, c.data])).toEqual([["input_datetime", "set_datetime", { entity_id: "input_datetime.garden_day_time", time: "06:30:00" }]]);
     await expect(app(frame).locator(".toast")).toHaveText("Garden saved, on your helpers too.");
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await tab(frame, "Garden").click();
     await expect(app(frame).locator(".period").first()).toContainText("06:30 - 19:00");
   });
 
@@ -549,6 +550,8 @@ test.describe("targets, day and night", () => {
     await expect(dialog(frame)).toHaveCount(0);
     const z = (await stored(page)).zones.find((x) => x.id === "garden") as Record<string, unknown>;
     expect([z.periodMode, z.lights]).toEqual(["detected", ["light.tent_light"]]);
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await tab(frame, "Garden").click();
     await expect(app(frame).locator(".period").first()).toContainText("Lights not reporting");
     await page.evaluate(`(() => { fakeHA.states["light.tent_light"] = { entity_id: "light.tent_light", state: "on", attributes: {}, context: {} }; fakeHA.publish(); })()`);
     await expect(app(frame).locator(".period").first()).toContainText("Lights on");
@@ -621,7 +624,8 @@ test.describe("targets, day and night", () => {
       ["set_value", "input_number.day_lights_garden_min_threshold", 2500],
     ]);
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await tab(frame, "Garden").click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24.5", "25", "27", "29"]);
     await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "", "", "", ""]);
   });
@@ -666,6 +670,8 @@ test.describe("targets, day and night", () => {
     expect(z.bands.day.temperature[2]).toBeNull();
     expect(z.helpers.bands.day.temperature).toEqual({ min: "input_number.garden_day_temperature_min_threshold", max: "input_number.garden_day_temperature_max_threshold" });
     expect(await serviceCalls(page)).toBe(0);
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await tab(frame, "Garden").click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "-", "27", "28"]);
   });
 
@@ -1207,8 +1213,24 @@ test.describe("zone layout and placement", () => {
     await expect(dialog(frame)).toContainText("1.2 x 1.2 m");
     await expect(dialog(frame)).toContainText("2.4 x 1.2 m");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg", exact: true })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await expect.poll(async () => (await stored(page)).zones.find((z) => z.id === "veg")?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
+  });
+
+  test("finishing or cancelling a setup editor goes back where it was opened: Setup from its menu, the zone's page from a link", async ({ page }) => {
+    const frame = await openFromMenu(page, "Garden", "Zone layout");
+    await app(frame).getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
+    await app(frame).getByLabel("Description, optional").fill("By the window");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    await tab(frame, "Garden").click();
+    await app(frame).getByRole("button", { name: "Set targets" }).click();
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
   });
 
   test("a grid that strands a placed sensor carries on to the map, and can't save until it's placed again", async ({ page }) => {

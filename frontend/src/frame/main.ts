@@ -714,17 +714,32 @@ export class EcApp extends LitElement {
     });
   };
 
+  /* Where a setup editor was opened from, so finishing or cancelling returns there: Setup from its zone menu, the zone's
+     page from a link on it. One opened from the setup guide returns to the guide. */
+  private editBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
+
+  private backFromEditor(zoneId: string | null, fromGuide: boolean): void {
+    if (fromGuide && zoneId) {
+      this.guide = zoneId;
+      return;
+    }
+    this.go(this.editBack.screen, this.editBack.zoneId);
+  }
+
   private openDetails(id: string, fromGuide = false): void {
     const z = this.zoneById(id);
     if (!z) return;
+    this.editBack = { screen: this.screen, zoneId: this.zoneId };
     this.wiz = { id, name: z.name, desc: z.description ?? "", fromGuide };
     this.menu = null;
     this.go("setup");
   }
 
   private cancelWizard = (): void => {
+    const w = this.wiz;
     this.guarded(() => {
       this.wiz = null;
+      this.backFromEditor(w?.id ?? null, !!w?.fromGuide);
     });
   };
 
@@ -754,7 +769,7 @@ export class EcApp extends LitElement {
             this.toast(`${w.name.trim()} created.`);
           } else {
             this.toast("Zone details saved.");
-            if (!w.fromGuide) this.go("zone", w.id);
+            this.backFromEditor(w.id, w.fromGuide);
           }
         },
       };
@@ -763,6 +778,7 @@ export class EcApp extends LitElement {
     /* Finish with nothing changed still confirms the step, which is how a step opened from the guide counts as done. */
     this.wiz = null;
     if (w.id && w.fromGuide) void this.mark(w.id, "details", "done");
+    this.backFromEditor(w.id, w.fromGuide);
   };
 
   private applyReview = async (): Promise<void> => {
@@ -809,6 +825,7 @@ export class EcApp extends LitElement {
       this.sched = null;
       this.tgt = null;
       this.menu = null;
+      this.editBack = { screen: this.screen, zoneId: this.zoneId };
       this.mapw = openMap(this.config, id);
       this.mapFromGuide = fromGuide;
       void this.askCatalog();
@@ -860,13 +877,13 @@ export class EcApp extends LitElement {
     }
     this.guarded(() => {
       this.mapw = null;
+      this.backFromEditor(m.zoneId, this.mapFromGuide);
     });
   };
 
   private mapDone(zoneId: string): void {
     this.mapw = null;
-    if (this.mapFromGuide) this.guide = zoneId;
-    else this.go("zone", zoneId);
+    this.backFromEditor(zoneId, this.mapFromGuide);
   }
 
   private mapNext = (): void => {
@@ -926,6 +943,7 @@ export class EcApp extends LitElement {
       this.sched = null;
       this.tgt = null;
       this.menu = null;
+      this.editBack = { screen: this.screen, zoneId: this.zoneId };
       this.lay = openLayout(this.config, id, flow);
       this.layFromGuide = fromGuide;
       this.go("setup");
@@ -967,13 +985,13 @@ export class EcApp extends LitElement {
     }
     this.guarded(() => {
       this.lay = null;
+      this.backFromEditor(d.zoneId, this.layFromGuide);
     });
   };
 
   private layDone(zoneId: string): void {
     this.lay = null;
-    if (this.layFromGuide) this.guide = zoneId;
-    else this.go("zone", zoneId);
+    this.backFromEditor(zoneId, this.layFromGuide);
   }
 
   private layNext = (): void => {
@@ -1282,7 +1300,6 @@ export class EcApp extends LitElement {
     this.sched = null;
     this.tgt = null;
     if (d.fromGuide) this.guide = d.zoneId;
-    else if (applied) this.go("zone", d.zoneId);
     else this.go(this.schedBack.screen, this.schedBack.zoneId);
   }
 
