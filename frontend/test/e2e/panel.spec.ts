@@ -732,6 +732,27 @@ test.describe("targets, day and night", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("on a phone, a typed box rises to sit just above where the keyboard lands, and the draft bar gets out of its way", async ({ page }, info) => {
+    test.skip(info.project.name !== "phone", "Touch screens only: a mouse has no on-screen keyboard.");
+    const frame = await open(page, "Garden");
+    await pick(frame, "Period", "Day");
+    await type(frame, "Temperature Max", "29");
+    await expect(bar(frame)).toBeVisible();
+    await box(frame, "Humidity Low").focus();
+    await expect(bar(frame)).toBeHidden();
+    /* With nothing to measure, the keyboard is taken to cover the lower half of the screen. */
+    await expect
+      .poll(() =>
+        frame.evaluate(() => {
+          const root = document.querySelector("ec-app")?.shadowRoot, row = root?.activeElement?.closest(".vrow")?.getBoundingClientRect(), bar = root?.querySelector(".topbar")?.getBoundingClientRect();
+          return !!row && !!bar && row.bottom <= window.innerHeight * 0.5 && row.top >= bar.bottom;
+        }),
+      )
+      .toBe(true);
+    await box(frame, "Humidity Low").press("Enter");
+    await expect(bar(frame)).toBeVisible();
+  });
+
   test("the chart's Change goes to Sensor Calibration and back, keeping the page's draft", async ({ page }) => {
     const frame = await open(page, "Garden");
     await pick(frame, "Period", "Day");

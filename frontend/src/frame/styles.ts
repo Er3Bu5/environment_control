@@ -304,6 +304,8 @@ export const styles = css`
   .vcell input:disabled { opacity: .6; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
+  /* Room to scroll a typed box up above a phone's keyboard. */
+  :host(.revealing) main { padding-bottom: 70vh; }
 
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }

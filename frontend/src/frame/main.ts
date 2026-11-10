@@ -501,7 +501,28 @@ export class EcApp extends LitElement {
     const el = e.composedPath()[0];
     const field = el instanceof HTMLInputElement && el.type === "text";
     this.typing = e.type === "focusin" && field && matchMedia("(pointer: coarse)").matches;
+    /* A typed number box also moves up to sit just above the keyboard, as the mock has it, so the chart or row it
+       belongs to stays in view. The page gets room below to scroll into while it does. */
+    const box = this.typing && el instanceof HTMLInputElement && !!el.dataset.lin;
+    this.classList.toggle("revealing", box);
+    if (box) setTimeout(() => this.reveal(el as HTMLInputElement), 300);
   };
+
+  /* Tallest height seen at this width, so a window shrunk by the keyboard can be told from a rotation. */
+  private fullView = { w: 0, h: 0 };
+
+  /* When the app resizes the window for the keyboard, that edge is measured. When it lays the keyboard over the page
+     nothing can be measured, so the keyboard's largest usual share of the screen is assumed. */
+  private reveal(input: HTMLInputElement): void {
+    if (this.shadowRoot?.activeElement !== input) return;
+    const vv = window.visualViewport, h = vv ? Math.min(vv.height, window.innerHeight) : window.innerHeight;
+    if (window.innerWidth !== this.fullView.w || h > this.fullView.h) this.fullView = { w: window.innerWidth, h };
+    const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect();
+    const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
+    const edge = h < this.fullView.h * 0.8 ? h : assumed, bar = this.shadowRoot?.querySelector(".topbar");
+    const head = bar && getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
+    window.scrollBy(0, row.top - Math.max(head + 8, edge - row.height - 8));
+  }
 
   private applyTheme(t: Theme): void {
     this.theme = t;
