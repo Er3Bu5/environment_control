@@ -70,6 +70,10 @@ fakeHA.command = async (msg) => {
   if (catalogDown) fakeHA.fail("Catalog not ready");
   return JSON.parse(JSON.stringify(CATALOG));
 };
+/* HA's panel list, which says where each panel's code is served from. A test points it at a new release to play an update
+   that happened while the page stayed open. */
+let panelModuleUrl = "/custom_components/environment_control/frontend/host.js";
+{ const hass = fakeHA.hass.bind(fakeHA); fakeHA.hass = () => ({ ...hass(), panels: { "environment-control": { config: { _panel_custom: { module_url: panelModuleUrl } } } } }); }
 if (params.get("user") === "guest") { const hass = fakeHA.hass.bind(fakeHA); fakeHA.hass = () => ({ ...hass(), user: { is_admin: false } }); }
 let panel = document.querySelector("environment-control-panel");
 /* HA opens its sidebar on hass-toggle-menu. */

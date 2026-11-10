@@ -58,6 +58,8 @@ const onColor = (c) => {
     : ((/^rgba?\(([^)]*)\)/i.exec(c) || [])[1] || "").split(",").slice(0, 3).map(parseFloat);
   return rgb.length === 3 && rgb.every(Number.isFinite) && (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
 };
+/* The bar asking for a reload after an update, in HA's own colours where its theme sets them. */
+const UPDATED_CSS = ".updated{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;font:14px/1.4 Roboto,system-ui,sans-serif;background:var(--secondary-background-color,#E5E5E5);color:var(--primary-text-color,#212121)}.updated button{font:inherit;min-height:36px;padding:0 16px;border-radius:18px;border:0;background:var(--primary-color,#03A9F4);color:var(--text-primary-color,#FFFFFF);cursor:pointer}";
 /* The browser's Navigation API, where it has one. */
 /** @returns {any} */
 const navigation = () => /** @type {any} */ (window).navigation;
@@ -97,6 +99,8 @@ class EnvironmentControlPanel extends HTMLElement {
     /** @type {(() => void) | null} */
     this.onReady = null;
     this._narrow = false;
+    /** @type {HTMLElement | null} */
+    this.updatedBar = null;
     this.onMessage = this.onMessage.bind(this);
     /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
        raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
@@ -146,6 +150,26 @@ class EnvironmentControlPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = h;
     if (first) this.start(); else this.forward();
+    if (this.frame && !this.updatedBar && this.stale()) this.showUpdated();
+  }
+  /* After an update HA serves the new release from a new path and registers the panel there, but a page that stayed
+     open, a browser tab or the Companion app, keeps this element: a custom element can't be defined twice, so HA goes on
+     building the panel from the old code until the page reloads. HA's panel list says where the panel now comes from;
+     when that isn't where this element was loaded from, an update has happened behind an open page. */
+  stale() {
+    const panel = this._hass && this._hass.panels && this._hass.panels["environment-control"];
+    const url = panel && panel.config && panel.config._panel_custom && panel.config._panel_custom.module_url;
+    if (typeof url !== "string") return false;
+    try { return new URL(url, location.origin).pathname !== new URL(import.meta.url).pathname; } catch { return false; }
+  }
+  /* The old panel stays usable underneath, so a draft can still be applied before reloading. */
+  showUpdated() {
+    const bar = make("div", undefined, "updated"), go = make("button", "Reload");
+    bar.setAttribute("role", "status");
+    bar.append(make("span", "Environment Control was updated. Reload to use the new version."), go);
+    go.addEventListener("click", () => location.reload());
+    this.updatedBar = bar;
+    this.shadow.prepend(bar);
   }
   get hass() { return this._hass; }
   /* HA hides its sidebar in a narrow window, the Fold folded for one, and a panel then has to offer a way to open it. */
@@ -179,7 +203,7 @@ class EnvironmentControlPanel extends HTMLElement {
     const style = document.createElement("style");
     /* HA mounts a panel in a container with no height of its own, padded for the safe areas, so the panel sizes itself
        to the window less that padding. A height of 100% would resolve to nothing and leave the frame at 150px. */
-    style.textContent = ":host{display:block;height:calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))}iframe{display:block;width:100%;height:100%;border:0}";
+    style.textContent = ":host{display:flex;flex-direction:column;height:calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))}iframe{display:block;width:100%;flex:1;min-height:0;border:0}" + UPDATED_CSS;
     this.frame = document.createElement("iframe");
     /* allow-scripts alone: adding allow-same-origin would let the frame reach this page and undo the sandbox. */
     this.frame.setAttribute("sandbox", "allow-scripts");

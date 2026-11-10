@@ -19,6 +19,24 @@ const leaveAsks = (page: Page) =>
     window.dispatchEvent(e);
     return e.defaultPrevented;
   });
+/* The host's reload bar, also in its closed shadow root: its button's centre on the page, or null when there's no bar. */
+async function updatedBarButton(page: Page): Promise<{ x: number; y: number } | null> {
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+  let button: number | null = null;
+  const walk = (n: { nodeId: number; nodeName: string; attributes?: string[]; children?: unknown[]; shadowRoots?: unknown[] }, inBar: boolean) => {
+    const attrs = n.attributes || [], bar = inBar || (n.nodeName === "DIV" && attrs[attrs.indexOf("class") + 1] === "updated" && attrs.includes("class"));
+    if (bar && n.nodeName === "BUTTON") button = n.nodeId;
+    if (n.nodeName === "IFRAME") return;
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c as typeof n, bar);
+  };
+  walk(root as Parameters<typeof walk>[0], false);
+  if (button === null) { await cdp.detach(); return null; }
+  const { model } = await cdp.send("DOM.getBoxModel", { nodeId: button });
+  await cdp.detach();
+  const q = model.content;
+  return { x: (q[0] + q[4]) / 2, y: (q[1] + q[5]) / 2 };
+}
 /* The page declares these with let and const, so they are globals but not window properties: read them as expressions. */
 const route = (page: Page) => page.evaluate<string>("haRoute");
 const serviceCalls = (page: Page) => page.evaluate<number>("fakeHA.calls.length");
@@ -411,6 +429,36 @@ test.describe("map devices", () => {
     await expect(ask).toHaveCount(0);
     const s = (await stored(page)).zones.find((x) => x.id === "flower_tent")?.sensors[0];
     expect([s?.link, s?.linkSource]).toEqual(["ethernet", "confirmed"]);
+  });
+});
+
+test.describe("after an update", () => {
+  test("a page that stayed open asks for a reload, keeps working underneath, and Reload reloads", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await expect(tab(frame, "Overview")).toBeVisible();
+    expect(await updatedBarButton(page)).toBeNull();
+    await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
+    await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
+    await expect.poll(() => updatedBarButton(page)).not.toBeNull();
+    await tab(frame, "Setup").click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup" })).toBeVisible();
+    const button = await updatedBarButton(page);
+    await Promise.all([page.waitForEvent("load"), page.mouse.click(button!.x, button!.y)]);
+    expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBeUndefined();
+    await panelFrame(page);
+  });
+
+  test("with the release HA registers, or no panel list at all, there is no bar", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await expect(tab(frame, "Overview")).toBeVisible();
+    await page.evaluate(`panelModuleUrl = location.origin + "/custom_components/environment_control/frontend/host.js"; fakeHA.publish()`);
+    await page.waitForTimeout(200);
+    expect(await updatedBarButton(page)).toBeNull();
+    await page.evaluate(`panelModuleUrl = undefined; fakeHA.publish()`);
+    await page.waitForTimeout(200);
+    expect(await updatedBarButton(page)).toBeNull();
   });
 });
 
