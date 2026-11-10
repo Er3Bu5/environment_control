@@ -7,11 +7,17 @@
 import type { Catalog, CatalogDevice, CatalogEntity, LinkKind, PathKind } from "./messages";
 import type { RawConfig } from "./model";
 
-/* The readings a sensor gives the zone. A sensor's leaf temperature offset is Sensor Calibration's, not mapping's: a
-   mapping leaves whatever is stored about it alone. */
-export const SLOTS = ["temperature", "humidity", "vpd", "light"] as const;
+/* A sensor has a class, as the design mock has it, and its class decides the readings it is asked for: an environment
+   board gives temperature, humidity, VPD and light, a soil probe moisture, EC and temperature. Calibration values, a
+   board's leaf temperature offset and a probe's full saturation and field capacity, are Sensor Calibration's, not
+   mapping's: a mapping leaves whatever is stored about them alone. */
+export const CLASSES = { env: "Environment", soil: "Soil" } as const;
+export type SensorClass = keyof typeof CLASSES;
+export const SLOTS = ["temperature", "humidity", "vpd", "light", "moisture", "ec"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light" };
+export const CLASS_SLOTS: Record<SensorClass, readonly Slot[]> = { env: ["temperature", "humidity", "vpd", "light"], soil: ["moisture", "ec", "temperature"] };
+export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", moisture: "Moisture (VWC)", ec: "EC" };
+const EC_UNITS = ["mS/cm", "µS/cm", "μS/cm", "uS/cm", "dS/m"];
 
 export const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"] as const;
 export type Role = (typeof ROLES)[number];
@@ -32,6 +38,8 @@ export interface SensorCandidate {
   family: string;
   link: LinkKind;
   path: PathKind;
+  /* The class its readings suggest: soil when it measures moisture or conductivity. */
+  detected: SensorClass;
   /* What HA's device classes suggest for each reading. */
   slots: Record<Slot, Option[]>;
   /* Every sensor on the device, so any of them can be put to any reading. */
@@ -65,6 +73,8 @@ function slotOf(e: CatalogEntity): Slot | null {
   if (e.device_class === "temperature") return "temperature";
   if (e.device_class === "humidity") return "humidity";
   if (e.device_class === "illuminance") return "light";
+  if (e.device_class === "moisture") return "moisture";
+  if (e.device_class === "conductivity" || (e.unit && EC_UNITS.includes(e.unit))) return "ec";
   if (e.unit === "kPa") return "vpd";
   return null;
 }
@@ -91,7 +101,8 @@ export function sensorCandidates(c: Catalog): SensorCandidate[] {
     .map((d) => {
       const sensors = d.entities.filter((e) => e.domain === "sensor");
       const all = [...sensors.filter((e) => e.category !== "diagnostic"), ...sensors.filter((e) => e.category === "diagnostic")].map(option);
-      return { id: d.id, name: d.name, area: d.area, family: d.family, link: d.link, path: d.path, slots: slotsOf(d), all };
+      const slots = slotsOf(d), detected: SensorClass = slots.moisture.length || slots.ec.length ? "soil" : "env";
+      return { id: d.id, name: d.name, area: d.area, family: d.family, link: d.link, path: d.path, detected, slots, all };
     })
     .filter((s) => SLOTS.some((k) => s.slots[k].length));
 }
@@ -122,30 +133,41 @@ export interface MapDraft {
   step: 1 | 2 | 3;
   q: string;
   sensors: Record<string, Record<Slot, string>>;
+  cls: Record<string, SensorClass>;
   avg: Record<string, boolean>;
-  combine: Method;
+  combine: Record<SensorClass, Method>;
   controls: Record<string, Role | "">;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-/* A new pick takes the only suggestion for each reading, leaves one with none unused, and waits on one with several. */
-export function seedSlots(s: SensorCandidate): Record<Slot, string> {
-  return Object.fromEntries(SLOTS.map((k) => [k, s.slots[k].length === 1 ? s.slots[k][0].entity : s.slots[k].length ? "" : "none"])) as Record<Slot, string>;
+/* A new pick takes the only suggestion for each of its class's readings, leaves one with none unused, and waits on one
+   with several. Readings outside its class are not used. A reading picked before, under either class, is kept. */
+export function seedSlots(s: SensorCandidate, cls: SensorClass = s.detected, kept: Partial<Record<Slot, string>> = {}): Record<Slot, string> {
+  return Object.fromEntries(
+    SLOTS.map((k) => {
+      if (!CLASS_SLOTS[cls].includes(k)) return [k, "none"];
+      if (kept[k] && kept[k] !== "none") return [k, kept[k]];
+      return [k, s.slots[k].length === 1 ? s.slots[k][0].entity : s.slots[k].length ? "" : "none"];
+    }),
+  ) as Record<Slot, string>;
 }
+export const classSlots = (d: MapDraft, id: string): readonly Slot[] => CLASS_SLOTS[d.cls[id] ?? "env"];
 
 export function openMap(c: RawConfig, zoneId: string): MapDraft {
   const z = c.zones.find((x) => x.id === zoneId);
-  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, avg: {}, combine: "mean", controls: {} };
+  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, cls: {}, avg: {}, combine: { env: "mean", soil: "mean" }, controls: {} };
   if (!z) return draft;
   for (const s of Array.isArray(z.sensors) ? z.sensors.filter(isObj) : []) {
     const id = str(s.id), ents = isObj(s.entities) ? s.entities : {};
     if (!id) continue;
-    draft.sensors[id] = Object.fromEntries(SLOTS.map((k) => [k, str(ents[k]) || "none"])) as Record<Slot, string>;
+    const cls: SensorClass = s.kind === "soil" ? "soil" : "env";
+    draft.cls[id] = cls;
+    draft.sensors[id] = Object.fromEntries(SLOTS.map((k) => [k, CLASS_SLOTS[cls].includes(k) ? str(ents[k]) || "none" : "none"])) as Record<Slot, string>;
     if (s.avg === false) draft.avg[id] = false;
   }
-  if (isObj(z.combine) && str(z.combine.env) in METHODS) draft.combine = z.combine.env as Method;
+  if (isObj(z.combine)) for (const k of Object.keys(CLASSES) as SensorClass[]) if (str(z.combine[k]) in METHODS) draft.combine[k] = z.combine[k] as Method;
   for (const d of c.devices) if (Array.isArray(d.zones) && d.zones.includes(zoneId) && str(d.entity)) draft.controls[str(d.entity)] = (ROLES as readonly string[]).includes(str(d.type)) ? (d.type as Role) : "";
   return draft;
 }
@@ -164,8 +186,9 @@ export function mapIssues(d: MapDraft, sensors: SensorCandidate[], controls: Con
   const picked = Object.keys(d.sensors);
   for (const id of picked) {
     const s = sensors.find((x) => x.id === id), slots = d.sensors[id], name = s?.name ?? "A sensor";
-    for (const k of SLOTS) if (slots[k] === "") out.push({ text: `${name}: pick which ${SLOT_NAME[k]} entity to use.`, step: 1, target: sensorTarget(id) });
-    if (SLOTS.every((k) => slots[k] === "none")) out.push({ text: `${name}: pick at least one reading, or leave this sensor out.`, step: 1, target: sensorTarget(id) });
+    const own = classSlots(d, id);
+    for (const k of own) if (slots[k] === "") out.push({ text: `${name}: pick which ${SLOT_NAME[k]} entity to use.`, step: 1, target: sensorTarget(id) });
+    if (own.every((k) => slots[k] === "none")) out.push({ text: `${name}: pick at least one reading, or leave this sensor out.`, step: 1, target: sensorTarget(id) });
   }
   if (!picked.length) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
   for (const [entity, role] of Object.entries(d.controls))
@@ -173,7 +196,7 @@ export function mapIssues(d: MapDraft, sensors: SensorCandidate[], controls: Con
   return out;
 }
 
-export const countedSensors = (d: MapDraft) => Object.keys(d.sensors).filter((id) => d.avg[id] !== false).length;
+export const countedSensors = (d: MapDraft, cls: SensorClass = "env") => Object.keys(d.sensors).filter((id) => (d.cls[id] ?? "env") === cls && d.avg[id] !== false).length;
 
 export interface Change {
   label: string;
@@ -189,10 +212,12 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
     const had = was.sensors[id], has = d.sensors[id], name = sensorName(id);
     add(name, had ? "Mapped" : "Not mapped", has ? "Mapped" : "Not mapped");
     if (!had || !has) continue;
-    for (const k of SLOTS) add(`${name} ${SLOT_NAME[k].toLowerCase()}`, slotWords(k, had[k]), slotWords(k, has[k]));
+    add(`${name} class`, CLASSES[was.cls[id] ?? "env"], CLASSES[d.cls[id] ?? "env"]);
+    for (const k of new Set([...classSlots(was, id), ...classSlots(d, id)])) add(`${name} ${SLOT_NAME[k].toLowerCase()}`, slotWords(k, had[k]), slotWords(k, has[k]));
     add(`${name} average`, was.avg[id] === false ? "Excluded" : "Included", d.avg[id] === false ? "Excluded" : "Included");
   }
-  if (countedSensors(d) >= 2 || countedSensors(was) >= 2) add("Environment sensors combine by", METHODS[was.combine], METHODS[d.combine]);
+  for (const cls of Object.keys(CLASSES) as SensorClass[])
+    if (countedSensors(d, cls) >= 2 || countedSensors(was, cls) >= 2) add(`${CLASSES[cls]} sensors combine by`, METHODS[was.combine[cls]], METHODS[d.combine[cls]]);
   const controlName = (e: string) => controls.find((x) => x.entity === e)?.name ?? e;
   for (const e of new Set([...Object.keys(was.controls), ...Object.keys(d.controls)])) {
     const had = e in was.controls, has = e in d.controls;
@@ -222,13 +247,16 @@ export function applyMap(c: RawConfig, d: MapDraft, sensors: SensorCandidate[], 
   const before = Array.isArray(z.sensors) ? z.sensors.filter(isObj) : [];
   z.sensors = Object.entries(d.sensors).map(([id, slots]) => {
     const had = before.find((x) => x.id === id), cand = sensors.find((x) => x.id === id);
-    const entry: Record<string, unknown> = had ? { ...had } : { id, name: cand?.name ?? id, kind: "env", pos: null };
+    const cls = d.cls[id] ?? "env";
+    const entry: Record<string, unknown> = had ? { ...had } : { id, name: cand?.name ?? id, kind: cls, pos: null };
+    /* Where a sensor may sit depends on its class, so one that changes class is placed again. */
+    if (had && (had.kind === "soil" ? "soil" : "env") !== cls) Object.assign(entry, { kind: cls, pos: null });
     if (cand) Object.assign(entry, { name: cand.name, family: cand.family, link: had?.linkSource === "confirmed" ? had.link : cand.link, linkSource: had?.linkSource === "confirmed" ? "confirmed" : "detected" });
-    entry.entities = Object.fromEntries(SLOTS.filter((k) => slots[k] && slots[k] !== "none").map((k) => [k, slots[k]]));
+    entry.entities = Object.fromEntries(CLASS_SLOTS[cls].filter((k) => slots[k] && slots[k] !== "none").map((k) => [k, slots[k]]));
     entry.avg = d.avg[id] !== false;
     return entry;
   });
-  z.combine = { env: d.combine };
+  z.combine = { ...d.combine };
 
   const picked = new Set(Object.keys(d.controls));
   for (const dev of c.devices) {
