@@ -1193,8 +1193,35 @@ export class EcApp extends LitElement {
     const want = this.chartWant(z.id), e = want ? this.hist[want.key] : undefined;
     if (!this.envOf(z.id).length) return html`<section class="card">${head}<p class="small muted">No environment sensors in ${z.name} yet.</p></section>`;
     if (!want) return html`<section class="card">${head}<p class="small muted">No sensor in ${z.name} reads ${METRIC[k].label.toLowerCase()}.</p></section>`;
-    if (!e?.h)
-      return html`<section class="card">${head}<p class="small muted">${e?.error ? `Couldn't read the history. ${e.error}` : "Reading the history from Home Assistant."}</p></section>`;
+    /* While a new metric or range loads, or when it can't, the chart's frame and the table's rows hold their place, so
+       the page doesn't get shorter under you and scroll away from the card. */
+    if (!e?.h) {
+      const W = Math.max(300, this.chartW || 300), H = W < 520 ? 210 : 260, sensors = this.envOf(z.id), extremesShown = k !== "light";
+      const names = [...(sensors.length > 1 ? [METHODS[this.methodOf(z.id)]] : []), ...sensors.map((s) => s.name)];
+      const words = e?.error ? `Couldn't read the history. ${e.error}` : "Reading the history from Home Assistant.";
+      const blank = html`<td>--<span class="sub">&nbsp;</span></td>`;
+      return html`<section class="card">
+        ${head}
+        <div class="chart">
+          <svg viewBox="0 0 ${W} ${H}" role="img" aria-label=${words}><text x=${W / 2} y=${H / 2} text-anchor="middle">${words}</text></svg>
+        </div>
+        <div class="tbl-wrap">
+          <table class="cstats">
+            <thead>
+              <tr>
+                <th>${METRIC[k].unit}</th>
+                <th>Now</th>
+                ${extremesShown ? html`<th>Min</th><th>Max</th>` : nothing}
+              </tr>
+            </thead>
+            <tbody>
+              ${names.map((n) => html`<tr><td>${n}</td><td>--</td>${extremesShown ? html`${blank}${blank}` : nothing}</tr>`)}
+            </tbody>
+          </table>
+        </div>
+        <div class="key"><span>&nbsp;</span></div>
+      </section>`;
+    }
     const h = e.h, rows = this.chartRows(z, k, h), n = rows[0].line.length - 1;
     const raw = this.raw(z.id), judged = this.judged(z), dayAt = Number(raw?.dayAt ?? 0), nightAt = Number(raw?.nightAt ?? 0);
     const bands = judged && k !== "light" ? { day: bandsOf(raw, "day", k), night: bandsOf(raw, "night", k) } : null;

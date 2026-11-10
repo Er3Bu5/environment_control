@@ -1003,6 +1003,24 @@ test.describe("history", () => {
     await expect(card(frame).locator(".chart-note")).toContainText("Home Assistant has kept 12 hours of these readings");
   });
 
+  test("switching metric or range keeps the card's place on the page while the new readings load", async ({ page }) => {
+    const frame = await garden(page);
+    await tab(frame, "Garden").click();
+    await expect(card(frame).locator(".chart svg")).toBeVisible();
+    await page.evaluate("historyDelayMs = 1500");
+    await card(frame).locator(".chart").scrollIntoViewIfNeeded();
+    const before = await frame.evaluate(() => window.scrollY);
+    const height = (await card(frame).boundingBox())?.height ?? 0;
+    await card(frame).getByRole("button", { name: "RH", exact: true }).click();
+    await expect(card(frame)).toContainText("Reading the history from Home Assistant.");
+    expect(await frame.evaluate(() => window.scrollY)).toBe(before);
+    expect(Math.abs(((await card(frame).boundingBox())?.height ?? 0) - height)).toBeLessThan(40);
+    await card(frame).getByRole("button", { name: "72h", exact: true }).click();
+    expect(await frame.evaluate(() => window.scrollY)).toBe(before);
+    await expect(card(frame)).not.toContainText("Reading the history", { timeout: 5000 });
+    expect(await frame.evaluate(() => window.scrollY)).toBe(before);
+  });
+
   test("when the history can't be read it says so", async ({ page }) => {
     const frame = await garden(page);
     await page.evaluate("historyDown = true");
