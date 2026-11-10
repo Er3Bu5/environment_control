@@ -7,7 +7,8 @@ const stored = { revision: 2, zones: [{ id: "garden" }], devices: [] };
 describe("messages from the host", () => {
   it("reads an init with the stored setup, states and theme", () => {
     const m = readHostMessage({ v: 1, type: "init", ...stored, states: {}, theme });
-    expect(m).toEqual({ type: "init", ...stored, states: {}, theme });
+    expect(m).toEqual({ type: "init", ...stored, states: {}, theme, narrow: false });
+    expect(readHostMessage({ v: 1, type: "init", ...stored, states: {}, theme, narrow: true })).toMatchObject({ narrow: true });
   });
 
   it("drops anything without version 1", () => {

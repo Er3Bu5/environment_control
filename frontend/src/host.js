@@ -71,6 +71,7 @@ class EnvironmentControlPanel extends HTMLElement {
     this.sentTheme = undefined;
     /** @type {(() => void) | null} */
     this.onReady = null;
+    this._narrow = false;
     this.onMessage = this.onMessage.bind(this);
     /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
        raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
@@ -99,6 +100,14 @@ class EnvironmentControlPanel extends HTMLElement {
     if (first) this.start(); else this.forward();
   }
   get hass() { return this._hass; }
+  /* HA hides its sidebar in a narrow window, the Fold folded for one, and a panel then has to offer a way to open it. */
+  set narrow(v) {
+    const now = v === true;
+    if (now === this._narrow) return;
+    this._narrow = now;
+    if (this.ready) this.post({ type: "narrow", narrow: now });
+  }
+  get narrow() { return this._narrow; }
   disconnectedCallback() {
     window.removeEventListener("message", this.onMessage);
     window.removeEventListener("beforeunload", this.onUnload);
@@ -190,7 +199,7 @@ class EnvironmentControlPanel extends HTMLElement {
     /** @type {Record<string, unknown>} */
     const states = {};
     for (const e of this.mapped()) { states[e] = this.pick(this._hass.states[e]); this.forwarded[e] = JSON.stringify(states[e]); }
-    this.post({ type: "init", ...this.stored(), states, theme: this.sendTheme(true) });
+    this.post({ type: "init", ...this.stored(), states, theme: this.sendTheme(true), narrow: this._narrow });
     this.ready = true;
   }
   stored() { return { revision: this.config.revision, zones: this.config.zones, devices: this.config.devices }; }
@@ -221,6 +230,8 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "draft") { if (typeof m.open === "boolean") this.draftOpen = m.open; }
     else if (m.type === "appearance") this.setAppearance(m);
     else if (m.type === "catalog") this.catalog(m);
+    /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
+    else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
   /* Setup's picker: the devices and entities HA has, with how each device is connected, as the backend lists them. Reading
      it links nothing and makes nothing controllable; that takes a save, which asks you first. */
