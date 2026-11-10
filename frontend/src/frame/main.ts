@@ -1744,7 +1744,7 @@ export class EcApp extends LitElement {
 
   /* A zone made before setup steps were recorded counts as having its targets; a new one waits for Targets. */
   private judged(z: Zone): boolean {
-    return !this.raw(z.id)?.setup || z.setup.targets === "done";
+    return z.setup.targets === undefined || z.setup.targets === "done";
   }
 
   private minuteNow(): number {

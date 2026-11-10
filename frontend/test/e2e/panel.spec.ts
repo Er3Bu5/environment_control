@@ -284,6 +284,19 @@ test.describe("sensor calibration", () => {
     await expect(bar(frame)).toHaveCount(0);
   });
 
+  test("a zone made before setup steps were recorded stays judged after one of its steps is confirmed", async ({ page }) => {
+    const frame = await openGarden(page);
+    await type(frame, "Environment under", "1");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect(((await stored(page)).zones.find((z) => z.id === "garden") as { setup?: Record<string, string> }).setup).toEqual({ calibrate: "done" });
+    await tab(frame, "Garden").click();
+    const tile = app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) });
+    await expect(tile).toContainText("Max");
+    await expect(tile).not.toContainText("Targets not set up yet");
+  });
+
   test("a board that doesn't report the new value is never shown as saved, and only what's left is offered again", async ({ page }) => {
     test.setTimeout(45_000);
     const frame = await openGarden(page);
