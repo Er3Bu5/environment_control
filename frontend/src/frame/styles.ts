@@ -275,6 +275,9 @@ export const styles = css`
   .follow > span:nth-of-type(1) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .now .sched-strip { flex: 1 1 160px; min-width: 120px; }
 
+  /* The zone's Day and Night limits, column under column. */
+  table.limits { table-layout: fixed; }
+  table.limits th:first-child { width: 30%; }
   /* Targets: the VPD chart and its boxes, as the mock has them. The chart takes a finger's drag for itself. */
   .tdlinks { display: grid; gap: 8px; }
   .stepper { display: inline-flex; align-items: center; gap: 8px; }

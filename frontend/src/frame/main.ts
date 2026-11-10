@@ -3074,7 +3074,7 @@ export class EcApp extends LitElement {
     const row = (p: Period, name: string, k: BandKey) => html`<tr><td>${name}<span class="sub">${METRIC[k].unit}</span></td>${b[p][k].map((v) => html`<td>${v === null ? "-" : v}</td>`)}</tr>`;
     const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : ""}</td>`)}</tr>`;
     const table = (p: Period, title: string) => html`<div class="tbl-wrap">
-      <table>
+      <table class="limits">
         <thead><tr><th>${title}</th>${LIMIT_NAME.map((n) => html`<th>${n}</th>`)}</tr></thead>
         <tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody>
       </table>
