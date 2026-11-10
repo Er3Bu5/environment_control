@@ -164,7 +164,7 @@ test.describe("talking to HA", () => {
       for (const m of [
         { v: 1, type: "device", id: "heater", action: "turn_on", req: 1 },
         { v: 1, type: "calibrate", sensor: "s1", value: 0, req: 2 },
-        { v: 1, type: "setting", zone: "garden", name: "day", value: "07:00", req: 3 },
+        { v: 1, type: "setting", zone: "nursery", name: "bands.day.temperature.min", value: 20, req: 3 },
         { v: 1, type: "save", base: 0, config: { zones: [], devices: [] }, req: 4 },
         { v: 1, type: "callService", domain: "switch", service: "turn_on" },
       ]) parent.postMessage(m, "*");
@@ -390,6 +390,75 @@ test.describe("sensor calibration", () => {
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(dialog(frame)).toHaveCount(0);
     expect((await sets(page)).map((c) => c.data)).toEqual([{ entity_id: "number.environment_board_leaf_offset", value: -1 }]);
+  });
+});
+
+test.describe("the setting write", () => {
+  /* The frame's message, sent raw: the host answers it the same whether the panel's own screen sent it or not. */
+  const setting = (frame: Frame, body: Record<string, unknown>) =>
+    frame.evaluate(
+      (b) =>
+        new Promise<{ ok: boolean; error?: string }>((resolve) => {
+          const req = 8000 + Math.floor(Math.random() * 1000);
+          window.addEventListener("message", (e) => e.data?.type === "result" && e.data.req === req && resolve(e.data));
+          parent.postMessage({ v: 1, type: "setting", req, ...b }, "*");
+        }),
+      body,
+    );
+  const calls = (page: Page) => page.evaluate<{ domain: string; service: string; data: Record<string, unknown> }[]>("fakeHA.calls");
+  const MIN = "input_number.garden_day_temperature_min_threshold";
+
+  test("sets a zone's linked number helper inside its own limits, and HA then reports the value", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    expect(await setting(frame, { zone: "garden", name: "bands.day.temperature.min", value: 22.5 })).toEqual(expect.objectContaining({ ok: true }));
+    expect(await calls(page)).toEqual([expect.objectContaining({ domain: "input_number", service: "set_value", data: { entity_id: MIN, value: 22.5 } })]);
+    await expect.poll(() => page.evaluate<string>(`fakeHA.states[${JSON.stringify(MIN)}].state`)).toBe("22.5");
+  });
+
+  test("sets lights on as a time on the zone's time helper", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    expect((await setting(frame, { zone: "garden", name: "day", value: "07:30" })).ok).toBe(true);
+    expect((await calls(page)).map((c) => [c.domain, c.service, c.data])).toEqual([["input_datetime", "set_datetime", { entity_id: "input_datetime.garden_day_time", time: "07:30:00" }]]);
+  });
+
+  test("ignores an entity named by the frame: the write goes to the zone's own link", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    expect((await setting(frame, { zone: "garden", name: "bands.day.temperature.min", value: 22, entity_id: "input_number.veg_day_temperature_min_threshold" })).ok).toBe(true);
+    expect((await calls(page)).map((c) => c.data.entity_id)).toEqual([MIN]);
+  });
+
+  const REFUSED: [string, Record<string, unknown>, string][] = [
+    ["a setting the panel doesn't know", { zone: "garden", name: "bands.day.co2.min", value: 1 }, "Not a setting"],
+    ["a zone the setup doesn't have", { zone: "kitchen", name: "day", value: "07:00" }, "isn't linked to a helper"],
+    ["a limit the zone keeps in Environment Control", { zone: "nursery", name: "bands.day.temperature.min", value: 20 }, "isn't linked to a helper"],
+    ["a value past the helper's limits", { zone: "garden", name: "bands.day.temperature.min", value: 80 }, "between -20 and 50"],
+    ["a value off the helper's step", { zone: "garden", name: "bands.day.temperature.min", value: 22.55 }, "in steps of 0.1"],
+    ["a number for a time", { zone: "garden", name: "day", value: 7 }, "isn't a time"],
+    ["a time that isn't one", { zone: "garden", name: "night", value: "25:00" }, "isn't a time"],
+    ["text for a number", { zone: "garden", name: "light.dayMin", value: "2000" }, "isn't a number"],
+  ];
+  for (const [what, body, why] of REFUSED) {
+    test(`refuses ${what}`, async ({ page }) => {
+      await page.goto(PAGE);
+      const frame = await panelFrame(page);
+      const r = await setting(frame, body);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain(why);
+      expect(await serviceCalls(page)).toBe(0);
+    });
+  }
+
+  test("refuses a time helper that holds a date too, and a helper HA has gone without", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await page.evaluate(`(() => { fakeHA.states["input_datetime.garden_day_time"].attributes.has_date = true; fakeHA.publish(); })()`);
+    expect((await setting(frame, { zone: "garden", name: "day", value: "07:00" })).error).toContain("holds a date");
+    await page.evaluate(`fakeHA.offline(${JSON.stringify(MIN)}, true)`);
+    expect((await setting(frame, { zone: "garden", name: "bands.day.temperature.min", value: 22 })).error).toContain("has no");
+    expect(await serviceCalls(page)).toBe(0);
   });
 });
 
