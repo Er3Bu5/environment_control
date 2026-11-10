@@ -5,14 +5,23 @@
    when Setup asks, the backend's catalog of what HA has, which carries no identifiers, addresses or serials.
    Anything the frame sends that isn't on the allowlist is dropped.
 
-   This release moves nothing: there is no service call here. Device controls, calibration and setting writes arrive in
-   the releases that use them, each checked here against the setup this element fetched itself, never the frame's copy.
+   It saves Setup to the integration's own storage through the backend, and asks you first, in a dialog it draws itself,
+   before a save makes any device controllable or links a helper. This release moves nothing: there is no service call
+   here. Device controls, calibration and setting writes arrive in the releases that use them, each checked here against
+   the setup this element fetched itself, never the frame's copy.
    Kept small and dependency-free on purpose, because it runs with full trust, and shipped exactly as written. */
 import FRAME_HTML from "./frame.js";
 
 /* Only what the UI draws. Anything else an integration puts in its attributes stays here. */
 const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
 const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
+const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
+/* The backend's own limit, checked here too so a frame can't make this element send something huge. */
+const MAX_CONFIG_BYTES = 512 * 1024;
+/* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
+const ARM_MS = 1000;
+/** @type {Record<string, string>} */
+const CAN = { switch: "Can be switched on and off.", fan: "Can be switched on and off.", light: "Can be switched on and off and dimmed.", humidifier: "Can be switched on and off, and its mode and target humidity set." };
 /* The settings a zone can link to a helper. */
 const SETTINGS = ["day", "night", "morning", "daylight", "evening", "light.dayMin", "light.nightMax",
   ...["day", "night"].flatMap((p) => ["temperature", "humidity", "vpd"].flatMap((k) => ["min", "target", "max"].map((slot) => `bands.${p}.${k}.${slot}`)))];
@@ -41,13 +50,24 @@ const leavingVia = (e) => {
   if (url.origin !== location.origin) return null;
   return url.pathname + url.search + url.hash === location.pathname + location.search + location.hash ? null : a;
 };
+/* Dark text on a light primary colour, white on any other. */
+/** @param {string} c */
+const onColor = (c) => {
+  const hex = /^#([0-9a-f]{6}|[0-9a-f]{3})/i.exec(c);
+  const rgb = hex ? (hex[1].length === 3 ? [...hex[1]].map((d) => d + d) : /** @type {string[]} */ (hex[1].match(/../g))).map((x) => parseInt(x, 16))
+    : ((/^rgba?\(([^)]*)\)/i.exec(c) || [])[1] || "").split(",").slice(0, 3).map(parseFloat);
+  return rgb.length === 3 && rgb.every(Number.isFinite) && (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
+};
 /** @param {string} tag @param {string} [text] @param {string} [cls] */
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
 const DIALOG_CSS = `dialog{max-width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;border:0;border-radius:16px;padding:20px;font:15px/1.45 Roboto,system-ui,sans-serif;background:#FFFFFF;color:#212121;box-shadow:0 12px 40px rgba(0,0,0,.35)}
   dialog.dark{background:#1C1C1C;color:#E1E1E1}dialog::backdrop{background:rgba(0,0,0,.55)}
   h2{margin:0 0 6px;font-size:19px;font-weight:500;outline:none}p{margin:0 0 12px;opacity:.8;font-size:14px}
+  ul{list-style:none;margin:0 0 16px;padding:0;max-height:50dvh;overflow:auto}li{padding:10px 0;border-top:1px solid rgba(128,128,128,.3);display:flex;flex-direction:column;gap:2px}
+  code{font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}span{font-size:13px;opacity:.8}strong{font-size:13px;font-weight:500;color:#D32F2F}dialog.dark strong{color:#EF9A9A}
   .row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid rgba(128,128,128,.5);background:none;color:inherit;cursor:pointer}
-  button.leave{color:#D32F2F;border-color:#D32F2F}dialog.dark button.leave{color:#EF9A9A;border-color:#EF9A9A}`;
+  summary{cursor:pointer;margin:0 0 8px;font-size:14px}details ul{max-height:30dvh}button.allow{background:var(--p,#03A9F4);border-color:var(--p,#03A9F4);color:var(--on-p,#FFFFFF)}
+  button.leave{color:#D32F2F;border-color:#D32F2F}dialog.dark button.leave{color:#EF9A9A;border-color:#EF9A9A}button:disabled{opacity:.45;cursor:default}`;
 
 class EnvironmentControlPanel extends HTMLElement {
   constructor() {
@@ -230,6 +250,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "draft") { if (typeof m.open === "boolean") this.draftOpen = m.open; }
     else if (m.type === "appearance") this.setAppearance(m);
     else if (m.type === "catalog") this.catalog(m);
+    else if (m.type === "save") this.save(m);
     /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
     else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
@@ -247,6 +268,119 @@ class EnvironmentControlPanel extends HTMLElement {
   }
   /** @param {unknown} req @param {boolean} ok @param {string} [error] */
   reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
+
+  /* Setup changes only this integration's own storage, through its backend, which checks the whole config and the
+     revision it was based on. The host keeps the backend's answer, never the frame's copy, as its config. */
+  /** @param {any} m */
+  async save(m) {
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
+    if (JSON.stringify(m.config).length > MAX_CONFIG_BYTES) return refuse("That setup is too large to save.");
+    const config = { zones: m.config.zones, devices: m.config.devices };
+    /* A mapping decides what a button moves, so a device becomes controllable only once a person says yes here, outside the frame. */
+    const added = this.newlyControlled(config);
+    if (typeof added === "string") return refuse(added);
+    if (added.length) {
+      if (this.asking) return refuse("Home Assistant is already asking you about another change.");
+      if (!(await this.confirm(added, config))) return refuse("Not allowed, so nothing was saved.");
+    }
+    try {
+      this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config/save", revision: m.base, config });
+    } catch (err) {
+      return refuse(String((err && /** @type {any} */ (err).message) || err));
+    }
+    this.post({ type: "result", req: m.req, ok: true, ...this.stored() });
+    this.forward();
+  }
+  /* Entities this save would make controllable, or helpers it would link, that aren't now. Removing one, or changing only
+     its role, adds nothing. */
+  /** @param {any} config @returns {string | {entity: string, zones: string[], helper?: boolean}[]} */
+  newlyControlled(config) {
+    if (!Array.isArray(config.devices) || !Array.isArray(config.zones)) return "That isn't a setup this panel can save.";
+    const now = this.mapped();
+    /** @type {{entity: string, zones: string[], helper?: boolean}[]} */
+    const out = [];
+    for (const d of config.devices) {
+      if (!d || typeof d.entity !== "string" || !Array.isArray(d.zones) || !d.zones.length || now.has(d.entity) || out.some((x) => x.entity === d.entity)) continue;
+      if (!ENTITY.test(d.entity)) return "That isn't something this panel can control.";
+      if (!this._hass.states[d.entity]) return `Home Assistant has no ${d.entity}.`;
+      out.push({ entity: d.entity, zones: d.zones });
+    }
+    const linked = new Set(this.config.zones.flatMap(helperLinks));
+    for (const z of config.zones) for (const e of z && typeof z === "object" ? helperLinks(z) : []) {
+      if (linked.has(e) || out.some((x) => x.entity === e)) continue;
+      if (!this._hass.states[e]) return `Home Assistant has no ${e}.`;
+      out.push({ entity: e, zones: [z.id], helper: true });
+    }
+    return out;
+  }
+  /* Everything shown comes from Home Assistant's own state and registries, never from the frame, and is set as text. */
+  /** @param {{entity: string, zones: string[], helper?: boolean}} item @param {any} config */
+  describe(item, config) {
+    const st = this._hass.states[item.entity], reg = (this._hass.entities || {})[item.entity] || {}, areas = this._hass.areas || {};
+    const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
+    /** @type {string[]} */
+    const zones = item.zones.map((id) => (config.zones.find((/** @type {any} */ z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
+    const domain = item.entity.split(".")[0], a = st.attributes || {};
+    const can = item.helper ? "Its value can be changed." : domain === "light" && !(a.supported_color_modes || []).some((/** @type {string} */ c) => c !== "onoff") ? CAN.switch : CAN[domain];
+    /* Zone names are the user's own and can be a single letter, so each is named as an area or zone, and every line ends in
+       a full stop, so a short name never reads as text cut off. */
+    const flag = item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
+    const facts = [reg.platform, area].filter(Boolean).map(String).join(", ");
+    return { name: String(a.friendly_name || item.entity), facts: facts ? `${facts}.` : "", can, flag, zones };
+  }
+  /** @param {{entity: string, zones: string[], helper?: boolean}[]} items @param {any} config @returns {Promise<boolean>} */
+  confirm(items, config) {
+    this.asking = true;
+    return new Promise((resolve) => {
+      const rows = items.map((it) => ({ it, ...this.describe(it, config) }));
+      const zones = [...new Set(rows.flatMap((r) => r.zones))];
+      const t = this.theme(), dlg = /** @type {HTMLDialogElement} */ (make("dialog", undefined, t.mode));
+      if (t.colors.primary) { dlg.style.setProperty("--p", t.colors.primary); dlg.style.setProperty("--on-p", onColor(t.colors.primary)); }
+      dlg.setAttribute("aria-labelledby", "ec-confirm-title");
+      const style = make("style", DIALOG_CSS), title = make("h2", "Allow Environment Control to control these?");
+      title.id = "ec-confirm-title"; title.tabIndex = -1;
+      const sub = make("p", `Asked for by the panel${zones.length ? `, for the ${zones.join(" and ")} zone${zones.length > 1 ? "s" : ""}` : ""}. Allow only what you meant to add: once allowed, the panel can switch it from now on.`);
+      /** @param {typeof rows[number]} r */
+      const item = (r) => {
+        const li = make("li");
+        li.append(make("code", r.it.entity), make("span", r.facts ? `${r.name}. ${r.facts}` : `${r.name}.`), make("span", r.can));
+        if (r.flag) li.append(make("strong", r.flag));
+        return li;
+      };
+      /* Devices move hardware, so they're always listed. Helpers fold away under a count. */
+      const devices = rows.filter((r) => !r.it.helper), helpers = rows.filter((r) => r.it.helper), list = make("ul");
+      devices.forEach((r) => list.append(item(r)));
+      const fold = make("details"), hlist = make("ul");
+      fold.append(make("summary", `${helpers.length} helper${helpers.length > 1 ? "s" : ""}: values can be changed.`), hlist);
+      helpers.forEach((r) => hlist.append(item(r)));
+      /** @param {number} n @param {string} word */
+      const count = (n, word) => (n ? `${n} ${word}${n > 1 ? "s" : ""}` : "");
+      const cancel = make("button", "Cancel"), allow = /** @type {HTMLButtonElement} */ (make("button", `Allow ${[count(devices.length, "device"), count(helpers.length, "helper")].filter(Boolean).join(" and ")}`, "allow"));
+      cancel.dataset.host = "cancel"; allow.dataset.host = "allow";
+      const row = make("div", undefined, "row"); row.append(cancel, allow);
+      dlg.append(style, title, sub, ...(devices.length ? [list] : []), ...(helpers.length ? [fold] : []), row);
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      const arm = () => { allow.disabled = true; clearTimeout(timer); timer = setTimeout(() => { allow.disabled = false; }, ARM_MS); };
+      const seen = () => { if (document.visibilityState === "visible") arm(); };
+      /** @param {boolean} yes */
+      const finish = (yes) => {
+        clearTimeout(timer);
+        document.removeEventListener("visibilitychange", seen); window.removeEventListener("focus", arm);
+        dlg.close(); dlg.remove(); this.asking = false; resolve(yes);
+      };
+      allow.addEventListener("click", (e) => { if (e.isTrusted && !allow.disabled) finish(true); });
+      cancel.addEventListener("click", () => finish(false));
+      dlg.addEventListener("cancel", (e) => { e.preventDefault(); finish(false); });
+      document.addEventListener("visibilitychange", seen); window.addEventListener("focus", arm);
+      this.shadow.append(dlg);
+      dlg.showModal();
+      title.focus();
+      arm();
+    });
+  }
 
   /** @returns {Promise<boolean>} */
   askLeave() {

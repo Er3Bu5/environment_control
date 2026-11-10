@@ -46,7 +46,7 @@ export type HostMessage =
   | { type: "states"; states: Record<string, unknown> }
   | { type: "theme"; theme: Theme }
   | { type: "narrow"; narrow: boolean }
-  | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog };
+  | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog; stored?: Stored };
 
 const COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
 const COLOR_KEYS = ["primary", "bg", "card", "tile", "fg", "muted", "line"];
@@ -136,12 +136,15 @@ export function readHostMessage(data: unknown): HostMessage | null {
     case "result": {
       if (!Number.isInteger(data.req) || typeof data.ok !== "boolean") return null;
       const catalog = "catalog" in data ? readCatalog(data.catalog) : undefined;
+      /* A save answers with what the backend stored, which replaces the frame's copy. */
+      const stored = "revision" in data ? readStored(data) : null;
       return {
         type: "result",
         req: data.req as number,
         ok: data.ok,
         ...(typeof data.error === "string" ? { error: data.error } : {}),
         ...(catalog ? { catalog } : {}),
+        ...(stored ? { stored } : {}),
       };
     }
     default:

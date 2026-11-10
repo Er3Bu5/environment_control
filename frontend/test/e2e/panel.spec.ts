@@ -159,6 +159,29 @@ test.describe("talking to HA", () => {
   });
 });
 
+test.describe("saving", () => {
+  const stored = (page: Page) => page.evaluate<{ revision: number }>("JSON.parse(JSON.stringify(fakeHA.config))");
+
+  test("a save that would make a device controllable waits for you, in the host's own dialog", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const before = await stored(page);
+    const answer = frame.evaluate(
+      (config) =>
+        new Promise<{ ok: boolean; error?: string }>((resolve) => {
+          window.addEventListener("message", (e) => e.data?.type === "result" && e.data.req === 777 && resolve(e.data));
+          const devices = config.devices.map((d: { id: string; zones: string[] }) => (d.id === "spare-plug" ? { ...d, zones: ["garden"] } : d));
+          parent.postMessage({ v: 1, type: "save", req: 777, base: config.revision, config: { zones: config.zones, devices } }, "*");
+        }),
+      before,
+    );
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    expect(await answer).toEqual(expect.objectContaining({ ok: false, error: "Not allowed, so nothing was saved." }));
+    expect((await stored(page)).revision).toBe(before.revision);
+  });
+});
+
 test.describe("narrow window", () => {
   test("with HA's sidebar hidden, the menu button opens it, and only then is there one", async ({ page }) => {
     await page.goto(`${PAGE}?narrow=1`);
