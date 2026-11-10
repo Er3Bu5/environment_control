@@ -379,8 +379,8 @@ test.describe("sensor calibration", () => {
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    await expect(app(frame).locator("#g-calibrate")).toContainText("Needs sensors from Map devices");
-    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    await expect(app(frame).locator("#g-calibrate")).toContainText("Needs sensors from Device identification");
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
     await app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: "Environment board" }) }).getByRole("button").first().click();
     const next = app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
     for (let i = 0; i < 3; i++) await next.click();
@@ -570,8 +570,8 @@ test.describe("targets, day and night", () => {
 
   test("a helper never linked before waits for you in the host's own dialog", async ({ page }) => {
     const frame = await open(page, "Garden");
-    await app(frame).locator("#sh-on").getByRole("button", { name: /^More helpers/ }).click();
-    await app(frame).locator("#sh-on").getByLabel(/^Reservoir refill time,/).check();
+    await app(frame).locator("#sh-on-q").fill("reservoir");
+    await app(frame).locator("#sh-on").getByRole("option", { name: /^Reservoir refill time/ }).click();
     await bar(frame).getByRole("button", { name: "Review and apply" }).click();
     await expect(dialog(frame)).toContainText("Home Assistant asks you to allow each helper this panel hasn't linked before.");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
@@ -736,7 +736,8 @@ test.describe("targets, day and night", () => {
     await pick(frame, "Period", "Day");
     await pick(frame, "Limits", "My helpers");
     await expect(bar(frame)).toContainText("Fix first: Link at least one limit to a helper, or choose Set here.");
-    await card(frame).locator("#tl-bands-day-temperature-min").getByLabel(/nursery_day_temperature_min_threshold, 21/).check();
+    await card(frame).locator("#tl-bands-day-temperature-min-q").fill("nursery day temperature min");
+    await card(frame).locator("#tl-bands-day-temperature-min").getByRole("option", { name: /nursery_day_temperature_min_threshold\s*21/ }).click();
     await expect(box(frame, "Temperature Min")).toHaveValue("21");
     await bar(frame).getByRole("button", { name: "Review and apply" }).click();
     await expect(dialog(frame)).toContainText("Day temperature Min helper");
@@ -767,6 +768,45 @@ test.describe("targets, day and night", () => {
       .toBe(true);
     await box(frame, "Humidity Low").press("Enter");
     await expect(bar(frame)).toBeVisible();
+  });
+
+  test("a helper is picked by searching: typing narrows the matches, and the list stays short however many helpers there are", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await pick(frame, "Period", "Day");
+    const picker = card(frame).locator("#tl-bands-day-humidity-max"), search = card(frame).locator("#tl-bands-day-humidity-max-q");
+    await expect(picker).toContainText("Linked: input_number.garden_day_humidity_max_threshold, 70 %");
+    await search.focus();
+    const options = picker.getByRole("option");
+    expect(await options.count()).toBeLessThanOrEqual(7);
+    await expect(options.first()).toHaveText(/^\s*Set here/);
+    await search.fill("night humidity");
+    await expect(options).not.toHaveCount(0);
+    for (const t of await options.allTextContents()) expect(t.toLowerCase()).toMatch(/night.*humidity|humidity.*night/);
+    await search.fill("nothing like this");
+    await expect(picker).toContainText("Nothing matches.");
+    await search.fill("garden night humidity max");
+    await expect(options).toHaveCount(1);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(picker).toContainText("Linked: input_number.garden_night_humidity_max_threshold, 68 %");
+    await expect(picker.getByRole("listbox")).toHaveCount(0);
+    await expect(box(frame, "Humidity Max")).toHaveValue("68");
+    await search.focus();
+    await search.fill("set here");
+    await page.keyboard.press("Enter");
+    await expect(picker).toContainText("Set here");
+    await expect(bar(frame)).toContainText("unsaved changes");
+  });
+
+  test("Escape closes a helper search without changing the link", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    const search = app(frame).locator("#sh-on-q");
+    await search.fill("reservoir");
+    await expect(app(frame).locator("#sh-on").getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(app(frame).locator("#sh-on").getByRole("listbox")).toHaveCount(0);
+    await expect(app(frame).locator("#sh-on")).toContainText("Linked: input_datetime.garden_day_time");
+    await expect(bar(frame)).toHaveCount(0);
   });
 
   test("the chart's Change goes to Sensor Calibration and back, keeping the page's draft", async ({ page }) => {
@@ -957,8 +997,8 @@ test.describe("map devices", () => {
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Map devices: Flower tent", exact: true })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
     return frame;
   }
 
@@ -1143,7 +1183,7 @@ test.describe("zone layout and placement", () => {
   const spot = (frame: Frame, name: string) => app(frame).locator(".map").getByRole("button", { name, exact: true }).first();
   const finish = (frame: Frame) => app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
 
-  async function openFromMenu(page: Page, zone: string, item: "Zone layout" | "Placement"): Promise<Frame> {
+  async function openFromMenu(page: Page, zone: string, item: "Zone layout" | "Device placement"): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await tab(frame, "Setup").click();
@@ -1193,8 +1233,8 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    await expect(app(frame).getByRole("button", { name: "Placement", exact: true })).toBeDisabled();
-    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    await expect(app(frame).getByRole("button", { name: "Device placement", exact: true })).toBeDisabled();
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
     const row = (name: string) => app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: name }) });
     await row("Environment board").getByRole("button").first().click();
     await row("Soil 1").getByRole("button").first().click();
@@ -1202,20 +1242,26 @@ test.describe("zone layout and placement", () => {
     await row("Soil 1").getByLabel("Soil 1 Substrate Pore Water EC, 2.54 mS/cm").check();
     for (let i = 0; i < 3; i++) await finish(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
-    await app(frame).getByRole("button", { name: "Placement", exact: true }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Placement: Flower tent", exact: true })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Device placement", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device placement: Flower tent", exact: true })).toBeVisible();
 
     await app(frame).locator(".sensor-opt", { hasText: "Soil 1" }).click();
     await expect(app(frame).getByText("Tap the unit Soil 1 is in.")).toBeVisible();
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Aisle/ })).toHaveCount(0);
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Unit \d$/ })).toHaveCount(4);
     await spot(frame, "Unit 1").click();
-    await expect(app(frame).getByText("Always at substrate height")).toBeVisible();
+    /* A soil probe is in the substrate, so it's asked no height. */
+    await expect(app(frame).getByRole("group", { name: /^Height of Soil 1/ })).toHaveCount(0);
 
     await app(frame).locator(".sensor-opt", { hasText: "Environment board" }).click();
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Outside the wall/ })).toHaveCount(0);
     await spot(frame, "Aisle between rows 1 and 2").click();
+    /* An air sensor can't be saved until its height is chosen. */
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Environment board" })).toContainText("Needs a height");
+    await expect(finish(frame)).toBeDisabled();
+    await app(frame).getByRole("button", { name: "Set Environment board's height to save" }).click();
     await app(frame).getByLabel("In canopy").check();
+    await expect(finish(frame)).toBeEnabled();
 
     await app(frame).getByLabel("Add a virtual device").fill("Drain tank");
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
@@ -1272,7 +1318,7 @@ test.describe("live readings", () => {
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
     await row(frame, "Environment board").getByRole("button").first().click();
     await row(frame, "Two probe board").getByRole("button").first().click();
     await row(frame, "Two probe board").getByLabel(/^Top temp,/).check();

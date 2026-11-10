@@ -69,9 +69,9 @@ export const copyConfig = (zones: unknown[], devices: unknown[]): RawConfig => s
 
 export const STEP_TITLE: Record<SetupStep, string> = {
   details: "Zone details",
-  devices: "Map devices",
+  devices: "Device identification",
   layout: "Zone layout",
-  place: "Placement",
+  place: "Device placement",
   calibrate: "Sensor Calibration",
   targets: "Targets, day and night",
 };

@@ -187,6 +187,10 @@ export function firstToPlace(d: LayoutDraft): string | null {
   return (stranded(d)[0] ?? d.sensors[0] ?? devsOff(d)[0] ?? d.devs[0] ?? null)?.id ?? null;
 }
 
+/* Environment sensors on the map with no height yet. Height decides which readings mean what, so every one needs it
+   chosen before saving; a soil probe is in the substrate and needs none. */
+export const noHeight = (d: LayoutDraft) => d.sensors.filter((s) => s.kind === "env" && s.pos && !s.level);
+
 export const itemOf = (d: LayoutDraft, id: string | null) => [...d.sensors, ...d.devs, ...d.virt].find((x) => x.id === id);
 
 export function layoutIssues(d: LayoutDraft): string[] {
