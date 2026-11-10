@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY, STORAGE_VERSION
+from .leaf_links import check_leaf_links
 from .validation import validate_config
 
 
@@ -23,6 +24,7 @@ class ConfigStore:
     """Holds the setup in memory and on disk."""
 
     def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY, atomic_writes=True)
         self.data: dict[str, Any] = {"revision": 0, "zones": [], "devices": []}
 
@@ -37,6 +39,8 @@ class ConfigStore:
         if revision != self.data["revision"]:
             raise RevisionConflict
         validate_config(config)
+        # A new offset link decides what a calibration can write, so it is checked against HA's registry too.
+        check_leaf_links(self._hass, self.data, config)
         nxt = {**config, "revision": self.data["revision"] + 1}
         await self._store.async_save(nxt)
         self.data = nxt

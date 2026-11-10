@@ -30,3 +30,13 @@ def sample_config():
         [node, "-e", script, str(ROOT / "design" / "sample-seed.js")], capture_output=True, check=True, text=True
     )
     return json.loads(out.stdout)
+
+
+@pytest.fixture
+def sample_unlinked(sample_config):
+    """The sample room with its boards' offset links taken out: those name mock devices HA doesn't have, so saving them
+    would be refused, rightly. The links themselves are tested on their own."""
+    for z in sample_config["zones"]:
+        for s in z.get("sensors", []):
+            s.pop("leafEntity", None)
+    return sample_config

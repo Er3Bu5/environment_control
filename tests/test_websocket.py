@@ -30,8 +30,9 @@ async def test_a_first_install_has_no_zones(hass, loaded, hass_ws_client) -> Non
 
 
 async def test_a_save_is_stored_and_moves_the_revision_on(
-    hass, loaded, hass_ws_client, hass_storage, sample_config
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
 ) -> None:
+    sample_config = sample_unlinked
     client = await hass_ws_client(hass)
     cfg = {"zones": sample_config["zones"], "devices": sample_config["devices"]}
     r = await _send(client, type=f"{DOMAIN}/config/save", revision=0, config=cfg)
@@ -44,7 +45,8 @@ async def test_a_save_is_stored_and_moves_the_revision_on(
     assert r["result"]["revision"] == 1
 
 
-async def test_a_save_survives_reloading_the_integration(hass, loaded, hass_ws_client, sample_config) -> None:
+async def test_a_save_survives_reloading_the_integration(hass, loaded, hass_ws_client, sample_unlinked) -> None:
+    sample_config = sample_unlinked
     client = await hass_ws_client(hass)
     cfg = {"zones": sample_config["zones"], "devices": sample_config["devices"]}
     assert (await _send(client, type=f"{DOMAIN}/config/save", revision=0, config=cfg))["success"]
