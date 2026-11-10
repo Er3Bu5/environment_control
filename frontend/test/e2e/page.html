@@ -60,8 +60,9 @@ let panel = document.querySelector("environment-control-panel");
 /* HA opens its sidebar on hass-toggle-menu. */
 let sidebarToggles = 0;
 window.addEventListener("hass-toggle-menu", () => { sidebarToggles += 1; });
-/* HA's router as its frontend has it: one click listener on the window turns a plain left click on a same-origin link
-   into a page change, unless something cancelled the click first, and changing page takes the panel element off. */
+/* HA's router as its frontend has it. navigate() writes history first, then fires location-changed for the router to
+   read the address; back and forward reach it as popstate. One click listener on the window turns a plain left click on
+   a same-origin link into navigate(), unless something cancelled the click first. Changing page takes the panel off. */
 let haRoute = "/environment-control";
 history.replaceState(null, "", `${location.pathname}${location.search}#${haRoute}`);
 function isNavigationClick(e) {
@@ -73,9 +74,14 @@ function isNavigationClick(e) {
   e.preventDefault();
   return url.hash.slice(1) || "/";
 }
-function haNavigate(route) {
+function haNavigate(route, replace = false) {
+  const url = `${location.pathname}${location.search}#${route}`;
+  if (replace) history.replaceState(null, "", url); else history.pushState(null, "", url);
+  window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace } }));
+}
+function syncRoute() {
+  const route = location.hash.slice(1) || "/";
   if (route === haRoute) return;
-  history.pushState(null, "", `${location.pathname}${location.search}#${route}`);
   haRoute = route;
   const onPanel = route === "/environment-control";
   document.querySelector("#ha-overview").hidden = onPanel;
@@ -85,7 +91,9 @@ function haNavigate(route) {
     document.querySelector("ha-panel-custom").append(next); panel = next; fakeHA.attach(next);
   }
 }
-window.addEventListener("click", (e) => { const route = isNavigationClick(e); if (route) haNavigate(route); });
+window.addEventListener("location-changed", syncRoute);
+window.addEventListener("popstate", syncRoute);
+window.addEventListener("click", (e) => { const route = isNavigationClick(e); if (route && route !== haRoute) haNavigate(route); });
 function reopenPanel() {
   const next = document.createElement("environment-control-panel");
   fakeHA.detach(panel); panel.replaceWith(next); panel = next; fakeHA.attach(next);

@@ -413,6 +413,66 @@ test.describe("leaving with a draft open", () => {
     expect(await page.evaluate(() => document.querySelector("environment-control-panel"))).toBeNull();
   });
 
+  test("a navigation with no click, such as a notification tap, is held the same way", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await draft(frame, true);
+    await expect.poll(() => leaveAsks(page)).toBe(true);
+    await page.evaluate("haNavigate('/lovelace')");
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    expect(await route(page)).toBe("/environment-control");
+    expect(await page.evaluate(() => location.hash)).toBe("#/environment-control");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    expect(await route(page)).toBe("/environment-control");
+    await page.evaluate("haNavigate('/lovelace')");
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => route(page)).toBe("/lovelace");
+    expect(await page.evaluate(() => location.hash)).toBe("#/lovelace");
+    expect(await page.evaluate(() => document.querySelector("environment-control-panel"))).toBeNull();
+  });
+
+  test("the back gesture is held too, and Discard and leave goes back", async ({ page }) => {
+    await page.goto(PAGE);
+    await panelFrame(page);
+    await page.evaluate("haNavigate('/lovelace')");
+    await expect.poll(() => route(page)).toBe("/lovelace");
+    await page.evaluate("haNavigate('/environment-control')");
+    await expect.poll(() => route(page)).toBe("/environment-control");
+    const frame = await panelFrame(page);
+    await draft(frame, true);
+    await expect.poll(() => leaveAsks(page)).toBe(true);
+    /* A real gesture gives the page a user activation, which Chromium asks for before it lets a page cancel going back. */
+    await page.mouse.click(5, 120);
+    await page.evaluate(() => history.back());
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    expect(await route(page)).toBe("/environment-control");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    expect(await route(page)).toBe("/environment-control");
+    await page.mouse.click(5, 120);
+    await page.evaluate(() => history.back());
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => route(page)).toBe("/lovelace");
+  });
+
+  test("with nothing unsaved, navigation with no click and going back go straight through", async ({ page }) => {
+    await page.goto(PAGE);
+    await panelFrame(page);
+    await page.evaluate("haNavigate('/lovelace')");
+    await expect.poll(() => route(page)).toBe("/lovelace");
+    expect(await hostDialogOpen(page)).toBe(false);
+    await page.evaluate(() => history.back());
+    await expect.poll(() => route(page)).toBe("/environment-control");
+    await panelFrame(page);
+  });
+
   test("with nothing unsaved, the sidebar goes straight away, and coming back opens the panel fresh", async ({ page }) => {
     await page.goto(PAGE);
     await panelFrame(page);
