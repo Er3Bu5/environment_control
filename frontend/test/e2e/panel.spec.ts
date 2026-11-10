@@ -177,6 +177,71 @@ test.describe("talking to HA", () => {
   });
 });
 
+test.describe("the calibration write", () => {
+  const LEFT = "number.environment_left_leaf_temperature_offset";
+  /* The frame's message, sent raw: the host answers it the same whether the panel's own screen sent it or not. */
+  const calibrate = (frame: Frame, body: Record<string, unknown>) =>
+    frame.evaluate(
+      (b) =>
+        new Promise<{ ok: boolean; error?: string }>((resolve) => {
+          const req = 9000 + Math.floor(Math.random() * 1000);
+          window.addEventListener("message", (e) => e.data?.type === "result" && e.data.req === req && resolve(e.data));
+          parent.postMessage({ v: 1, type: "calibrate", req, ...b }, "*");
+        }),
+      body,
+    );
+  const calls = (page: Page) => page.evaluate<{ domain: string; service: string; data: Record<string, unknown> }[]>("fakeHA.calls");
+
+  test("sets the offset on the number the sensor is linked to, and the value counts once the board reports it", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    expect(await calibrate(frame, { sensor: "g-left", value: -1.5 })).toEqual(expect.objectContaining({ ok: true }));
+    expect(await calls(page)).toEqual([expect.objectContaining({ domain: "number", service: "set_value", data: { entity_id: LEFT, value: -1.5 } })]);
+    await expect.poll(() => page.evaluate<string>(`fakeHA.states[${JSON.stringify(LEFT)}].state`)).toBe("-1.5");
+  });
+
+  test("ignores an entity named by the frame: the write goes to the sensor's own link", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    expect((await calibrate(frame, { sensor: "g-left", value: -1, entity_id: "number.environment_right_leaf_temperature_offset" })).ok).toBe(true);
+    expect((await calls(page)).map((c) => c.data.entity_id)).toEqual([LEFT]);
+  });
+
+  const REFUSED: [string, Record<string, unknown>, string][] = [
+    ["a value past the board's limits", { sensor: "g-left", value: 2.5 }, "between -5 and 2"],
+    ["a value off the board's step", { sensor: "g-left", value: -1.05 }, "in steps of 0.1"],
+    ["a value that isn't a number", { sensor: "g-left", value: "-1" }, "Not a sensor or value"],
+    ["a sensor the setup doesn't have", { sensor: "nobody", value: -1 }, "no leaf temperature offset"],
+    ["a sensor whose offset is kept in Environment Control", { sensor: "g-under", value: -1 }, "no leaf temperature offset"],
+  ];
+  for (const [what, body, why] of REFUSED) {
+    test(`refuses ${what}`, async ({ page }) => {
+      await page.goto(PAGE);
+      const frame = await panelFrame(page);
+      const r = await calibrate(frame, body);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain(why);
+      expect(await serviceCalls(page)).toBe(0);
+    });
+  }
+
+  test("refuses a link HA doesn't list on the sensor's own device, one not in °C, and an offline board", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const set = (js: string) => page.evaluate(`(() => { ${js}; fakeHA.publish(); })()`);
+    await set(`fakeHA.registry.entities[${JSON.stringify(LEFT)}].device_id = "g-right"`);
+    expect((await calibrate(frame, { sensor: "g-left", value: -1 })).error).toContain("on that sensor's own device");
+    await set(`fakeHA.registry.entities[${JSON.stringify(LEFT)}].device_id = "g-left"; fakeHA.states[${JSON.stringify(LEFT)}].attributes.unit_of_measurement = "%"`);
+    expect((await calibrate(frame, { sensor: "g-left", value: -1 })).error).toContain("isn't in °C");
+    await set(`fakeHA.states[${JSON.stringify(LEFT)}].attributes.unit_of_measurement = "℃"; fakeHA.states[${JSON.stringify(LEFT)}].state = "unavailable"`);
+    expect((await calibrate(frame, { sensor: "g-left", value: -1 })).error).toContain("offline");
+    expect(await serviceCalls(page)).toBe(0);
+    /* HA writes Celsius both ways, so the other sign is a °C setting too. */
+    await set(`fakeHA.states[${JSON.stringify(LEFT)}].state = "-1.0"`);
+    expect((await calibrate(frame, { sensor: "g-left", value: -1.2 })).ok).toBe(true);
+  });
+});
+
 test.describe("zones", () => {
   const stored = (page: Page) => page.evaluate<{ revision: number; zones: { id: string; name: string; description?: string; setup?: Record<string, string> }[]; devices: { id: string; zones: string[] }[] }>("JSON.parse(JSON.stringify(fakeHA.config))");
   const dialog = (frame: Frame) => app(frame).getByRole("dialog");

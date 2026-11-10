@@ -45,7 +45,7 @@ const CATALOG = {
         { entity_id: "sensor.environment_board_humidity", name: "Humidity", domain: "sensor", device_class: "humidity", unit: "%", state: "61.2", category: null, area: null },
         { entity_id: "sensor.environment_board_vpd", name: "VPD", domain: "sensor", device_class: null, unit: "kPa", state: "1.12", category: null, area: null },
         { entity_id: "sensor.environment_board_light", name: "Light", domain: "sensor", device_class: "illuminance", unit: "lx", state: "41200", category: null, area: null },
-        { entity_id: "number.environment_board_leaf_offset", name: "Leaf offset", domain: "number", device_class: null, unit: "°C", state: "-1.5", category: "config", area: null },
+        { entity_id: "number.environment_board_leaf_offset", name: "Leaf offset", domain: "number", device_class: null, unit: "°C", state: "-1.5", category: "config", area: null, min: -5, max: 2, step: 0.1 },
       ] },
     { id: "d-two", name: "Two probe board", area: null, manufacturer: null, model: null, integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
       entities: [
@@ -72,6 +72,14 @@ const CATALOG = {
   entities: [{ entity_id: "input_boolean.lights_override", name: "Lights override", domain: "input_boolean", device_class: null, unit: null, state: "off", category: null, area: null, integration: "input_boolean", family: "Input boolean" }],
 };
 let catalogDown = params.get("catalog") === "fail";
+/* HA's entity registry says which device each entity is on. A sensor's id is its device id, and each board's offset
+   number sits on that board, so the host's same-device check has the registry it reads in HA. The catalog's environment
+   board holds an offset too, for zones set up from scratch. */
+for (const z of fakeHA.config.zones) for (const s of z.sensors || []) if (s.leafEntity) fakeHA.registry.entities[s.leafEntity] = { ...fakeHA.registry.entities[s.leafEntity], device_id: s.id };
+for (const d of CATALOG.devices) for (const e of d.entities) if (e.domain === "number") {
+  fakeHA.registry.entities[e.entity_id] = { entity_id: e.entity_id, platform: "esphome", area_id: null, device_id: d.id };
+  fakeHA.states[e.entity_id] = { entity_id: e.entity_id, state: e.state, attributes: { friendly_name: e.name, min: e.min, max: e.max, step: e.step, unit_of_measurement: e.unit }, context: { user_id: null, parent_id: null }, last_updated: new Date().toISOString() };
+}
 const backendCommand = fakeHA.command.bind(fakeHA);
 fakeHA.command = async (msg) => {
   if (!msg || msg.type !== "environment_control/catalog") return backendCommand(msg);
