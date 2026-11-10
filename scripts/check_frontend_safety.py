@@ -1,7 +1,7 @@
 """The browser side keeps its sandbox: what the frame can do, and what only the host may do.
 
 - The host's frame is sandboxed with allow-scripts and nothing else, and allow-same-origin appears nowhere shipped.
-- callService appears only in the host, and only as often as the write table below allows (the calibration write so far).
+- callService appears only in the host, and only as often as the write table below allows (for now, calibration).
 - The host accepts exactly the frame messages listed below, so each new path into the host is added on purpose.
 - The frame's source has no network, no eval and no service calls; the built frame carries the no-network CSP.
 Usage: python3 scripts/check_frontend_safety.py [repo_root]
