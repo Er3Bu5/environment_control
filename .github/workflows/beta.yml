@@ -1,0 +1,69 @@
+name: Beta
+
+# After each merge to main, once Validate has passed on it: the next beta, built from exactly that commit and published
+# only once you approve it in the release environment, as every release is. The number follows the newest release
+# tag (b8, then b9), and a merge that changes nothing that ships makes no beta. Nothing is tested again here: this only
+# starts when Validate's own run on the merge succeeded. Full releases stay with Release.
+on:
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+# One beta at a time, each numbered once the one before it is published or turned down, so two never take one number.
+concurrency:
+  group: beta
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Next beta
+    # Only Validate's run on a merge: not its daily run, a run by hand, or a pull request's.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      ship: ${{ steps.next.outputs.ship }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Work out the version
+        id: next
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 scripts/next_beta.py "$SHA" > "$RUNNER_TEMP/next"
+          cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
+          get() { sed -n "s/^$1=//p" "$RUNNER_TEMP/next"; }
+          ship=$(get ship) version=$(get version) since=$(get since)
+          if [ "$ship" = true ]; then
+            echo "Beta $version, waiting for approval in the release environment." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nothing that ships changed since $since, so no beta." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  beta:
+    name: Build and publish
+    needs: plan
+    if: ${{ needs.plan.outputs.ship == 'true' }}
+    uses: ./.github/workflows/publish.yml
+    # A called workflow's jobs get no more than this, so it must cover every job's permissions in publish.yml.
+    # scripts/check_workflows.py checks it.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ github.event.workflow_run.head_sha }}
+      publish: true

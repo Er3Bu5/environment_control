@@ -62,9 +62,10 @@ def check(root: Path) -> list[str]:
             "which has no built panel"
         )
     else:
-        release = (root / ".github/workflows/release.yml").read_text()
+        # Both release paths (Release by hand, Beta after a merge) publish through publish.yml.
+        release = (root / ".github/workflows/publish.yml").read_text()
         if not re.search(rf"gh release create .*\b{re.escape(filename)}\b", release):
-            problems.append(f"release.yml doesn't attach {filename} to the release; the Marketplace downloads that")
+            problems.append(f"publish.yml doesn't attach {filename} to the release; the Marketplace downloads that")
 
     integrations = root / "custom_components"
     folders = sorted(p for p in integrations.iterdir() if p.is_dir() and not p.name.startswith((".", "__")))
