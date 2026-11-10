@@ -2,7 +2,7 @@
    host one of the few messages the host accepts. Screens follow the design mock, rebuilt here: Overview, a tab per zone,
    Devices and Setup, where zones are added, named, followed through their setup and removed. Editing only ever changes a
    draft; nothing is saved until it has been reviewed and applied, and leaving with a draft open asks first. */
-import { LitElement, type PropertyValues, html, nothing } from "lit";
+import { LitElement, type PropertyValues, html, nothing, svg, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
@@ -10,6 +10,7 @@ import {
   type Catalog,
   type CatalogDevice,
   type CatalogEntity,
+  type History,
   type HostMessage,
   type LinkKind,
   type PathKind,
@@ -140,6 +141,7 @@ import {
   typeInto,
   zoneVpdAt,
 } from "./calibration";
+import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, periodRuns, sensorLine, tickWords, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
@@ -210,6 +212,16 @@ const PATH_LABEL: Record<PathKind, string> = { local: "Local", cloud: "Cloud", d
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/* A chart's readings as last fetched. They're fetched again after a while; the last point is live either way. */
+interface HistEntry {
+  h: History | null;
+  at: number;
+  error: string;
+  loading: boolean;
+}
+const HISTORY_REFRESH_MS = 5 * 60 * 1000;
+const METRIC_KEYS: Metric[] = ["temperature", "humidity", "vpd", "light"];
+
 /* Plain properties rather than decorators, so the same source builds under any compiler setting. */
 export class EcApp extends LitElement {
   static properties = {
@@ -225,6 +237,11 @@ export class EcApp extends LitElement {
     lay: { state: true },
     leafw: { state: true },
     typing: { state: true },
+    metric: { state: true },
+    range: { state: true },
+    hist: { state: true },
+    chartAt: { state: true },
+    chartW: { state: true },
     states: { state: true },
     now: { state: true },
     level: { state: true },
@@ -250,6 +267,14 @@ export class EcApp extends LitElement {
   declare private lay: LayoutDraft | null;
   declare private leafw: LeafDraft | null;
   declare private typing: boolean;
+  declare private metric: Metric;
+  declare private range: number;
+  declare private hist: Record<string, HistEntry>;
+  declare private chartAt: number | null;
+  declare private chartW: number;
+  private chartGeom: { W: number; L: number; PW: number; n: number } | null = null;
+  private chartEl: Element | null = null;
+  private chartRO: ResizeObserver | null = null;
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
@@ -285,6 +310,11 @@ export class EcApp extends LitElement {
     this.lay = null;
     this.leafw = null;
     this.typing = false;
+    this.metric = "temperature";
+    this.range = 24;
+    this.hist = {};
+    this.chartAt = null;
+    this.chartW = 0;
     this.states = {};
     this.now = Date.now();
     this.level = "all";
@@ -317,6 +347,7 @@ export class EcApp extends LitElement {
     this.removeEventListener("focusin", this.onFocus);
     this.removeEventListener("focusout", this.onFocus);
     clearInterval(this.clock);
+    this.chartRO?.disconnect();
     super.disconnectedCallback();
   }
 
@@ -450,6 +481,19 @@ export class EcApp extends LitElement {
   /* The frame can't raise the browser's leave prompt or stop HA's sidebar, so it tells the host whether leaving now would
      lose anything, and only when that changes. */
   protected updated(changed: PropertyValues): void {
+    this.fetchWanted();
+    const chart = this.shadowRoot?.querySelector(".chart") ?? null;
+    if (chart !== this.chartEl) {
+      this.chartRO?.disconnect();
+      this.chartEl = chart;
+      if (chart) {
+        this.chartRO = new ResizeObserver(([e]) => {
+          const w = Math.round(e.contentRect.width);
+          if (w && w !== this.chartW) this.chartW = w;
+        });
+        this.chartRO.observe(chart);
+      }
+    }
     const held = this.draftCount > 0;
     this.classList.toggle("drafting", held && !!this.leafw && this.screen === "setup");
     this.classList.toggle("typing", this.typing);
@@ -487,6 +531,7 @@ export class EcApp extends LitElement {
     this.screen = screen;
     this.zoneId = zoneId;
     this.menu = null;
+    this.chartAt = null;
     window.scrollTo(0, 0);
   }
 
@@ -515,6 +560,8 @@ export class EcApp extends LitElement {
 
   private onOutsideClick = (e: MouseEvent): void => {
     if (this.menu && !e.composedPath().some((n) => n instanceof HTMLElement && n.classList.contains("zmenu"))) this.menu = null;
+    /* A point read on a touch screen stays until a tap elsewhere. */
+    if (this.chartAt !== null && !e.composedPath().some((n) => n instanceof Element && n.classList.contains("chart"))) this.chartAt = null;
   };
 
   private closeModal(): void {
@@ -1068,6 +1115,204 @@ export class EcApp extends LitElement {
     return html`<button class="btn primary add" @click=${this.openNewZone}>${icon("plus")}${label}</button>`;
   }
 
+  /* History. Each chart asks the host for exactly the readings it draws, over its range, bucketed by the backend. */
+  private envOf(id: string) {
+    return sensorsOf(this.raw(id)).filter((s) => s.kind === "env");
+  }
+
+  private histWant(id: string, k: Metric, hours: number, buckets: number) {
+    const entities = [...new Set(this.envOf(id).flatMap((s) => entitiesFor(s, k)))];
+    return entities.length ? { key: `${hours}|${buckets}|${entities.join(",")}`, entities, hours, buckets } : null;
+  }
+
+  private chartWant(id: string) {
+    const r = RANGES.find((x) => x.hours === this.range) ?? RANGES[1];
+    return this.histWant(id, this.metric, r.hours, r.buckets);
+  }
+
+  private lightWant(id: string) {
+    return this.histWant(id, "light", LIGHT_LINE.hours, LIGHT_LINE.buckets);
+  }
+
+  /* What the screen draws: a zone's chart and light line, or every zone's light line on Overview. */
+  private fetchWanted(): void {
+    if (!this.stored) return;
+    const ids = this.screen === "zone" && this.zoneId ? [this.zoneId] : this.screen === "overview" ? this.zones.map((z) => z.id) : [];
+    const wants = ids.flatMap((id) => [this.lightWant(id), this.screen === "zone" ? this.chartWant(id) : null]);
+    for (const w of wants) {
+      if (!w) continue;
+      const e = this.hist[w.key];
+      if (e && (e.loading || this.now - e.at < HISTORY_REFRESH_MS)) continue;
+      this.hist = { ...this.hist, [w.key]: { h: e?.h ?? null, at: this.now, error: "", loading: true } };
+      void this.ask("history", { entities: w.entities, hours: w.hours, buckets: w.buckets }).then((r) => {
+        const h = r.ok && r.history ? r.history : null;
+        this.hist = { ...this.hist, [w.key]: { h: h ?? e?.h ?? null, at: Date.now(), error: h ? "" : (r.error ?? "Home Assistant sent something this panel can't read."), loading: false } };
+      });
+    }
+  }
+
+  /* Every sensor's line ending on its live reading, and with two or more the combined line, by the zone's method. */
+  private chartRows(z: Zone, k: Metric, h: History) {
+    const sensors = this.envOf(z.id), mode = this.theme?.mode ?? "light", n = Math.round((h.end - h.start) / h.step);
+    const blank = Array.from({ length: n }, (_, i): Point => ({ t: h.start + (i + 0.5) * h.step, v: null, lo: null, hi: null }));
+    const lines = sensors.map((s) => endingNow(sensorLine(s, k, h, this.states) ?? blank, readSensor(s, this.states, this.now).values[k]));
+    const method = this.methodOf(z.id);
+    const rows = sensors.map((s, i) => ({ name: s.name, line: lines[i], color: lineColor(mode, i), width: 1 }));
+    if (sensors.length < 2) return rows;
+    return [{ name: METHODS[method], line: combinedLine(lines, sensors.map((s) => s.avg), method), color: "var(--fg)", width: 1.5 }, ...rows];
+  }
+
+  private chartKey = (e: KeyboardEvent): void => {
+    const g = this.chartGeom;
+    if (!g) return;
+    const at = this.chartAt ?? g.n;
+    const next: Record<string, number | null> = { ArrowLeft: Math.max(0, at - 1), ArrowRight: at + 1 >= g.n ? null : at + 1, Home: 0, End: null, Escape: null };
+    if (!(e.key in next)) return;
+    e.preventDefault();
+    this.chartAt = next[e.key];
+  };
+
+  private chartPointer = (e: PointerEvent): void => {
+    const g = this.chartGeom, el = e.currentTarget as Element | null;
+    if (!g || !el) return;
+    const box = el.getBoundingClientRect(), x = (e.clientX - box.left) * (g.W / box.width);
+    this.chartAt = Math.round(Math.min(1, Math.max(0, (x - g.L) / g.PW)) * g.n);
+  };
+
+  private historyCard(z: Zone) {
+    const k = this.metric, R = RANGES.find((x) => x.hours === this.range) ?? RANGES[1];
+    const seg = (label: string, items: [string, string][], cur: string, pick: (v: string) => void) =>
+      html`<div class="seg" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => pick(v)}>${l}</button>`)}</div>`;
+    const head = html`<div class="card-head">
+      <h2>History</h2>
+      <div class="row">
+        ${seg("Metric", METRIC_KEYS.map((m) => [m, METRIC[m].short]), k, (v) => ([this.metric, this.chartAt] = [v as Metric, null]))}
+        ${seg("Range", RANGES.map((r) => [String(r.hours), r.label]), String(R.hours), (v) => ([this.range, this.chartAt] = [Number(v), null]))}
+      </div>
+    </div>`;
+    const want = this.chartWant(z.id), e = want ? this.hist[want.key] : undefined;
+    if (!this.envOf(z.id).length) return html`<section class="card">${head}<p class="small muted">No environment sensors in ${z.name} yet.</p></section>`;
+    if (!want) return html`<section class="card">${head}<p class="small muted">No sensor in ${z.name} reads ${METRIC[k].label.toLowerCase()}.</p></section>`;
+    if (!e?.h)
+      return html`<section class="card">${head}<p class="small muted">${e?.error ? `Couldn't read the history. ${e.error}` : "Reading the history from Home Assistant."}</p></section>`;
+    const h = e.h, rows = this.chartRows(z, k, h), n = rows[0].line.length - 1;
+    const raw = this.raw(z.id), judged = this.judged(z), dayAt = Number(raw?.dayAt ?? 0), nightAt = Number(raw?.nightAt ?? 0);
+    const bands = judged && k !== "light" ? { day: bandsOf(raw, "day", k), night: bandsOf(raw, "night", k) } : null;
+    const limits = bands ? [bands.day, bands.night].flatMap((b) => (b ? [b[0], b[4]].filter((x): x is number => x !== null) : [])) : [];
+    const [lo, hi] = yRange(rows.map((r) => r.line), k, limits);
+    const W = Math.max(300, this.chartW || 300), H = W < 520 ? 210 : 260, L = 46, Rm = 8, T = 8, B = 22, PW = W - L - Rm, PH = H - T - B;
+    this.chartGeom = { W, L, PW, n };
+    const X = (i: number) => L + (n ? i / n : 0) * PW, Y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * PH;
+    const runs = judged ? periodRuns(rows[0].line, dayAt, nightAt) : [];
+    const parts: TemplateResult[] = [];
+    for (const r of runs) {
+      const x = X(r.from), w = X(Math.min(n, r.to + 1)) - x;
+      if (!r.day) parts.push(svg`<rect x=${x} y=${T} width=${w} height=${PH} fill="var(--shade)"></rect>`);
+      const b = bands?.[r.day ? "day" : "night"];
+      if (b) {
+        const [mn, l2, tg, h2, mx] = b.map((v) => v ?? 0);
+        parts.push(svg`<rect x=${x} y=${Y(mx)} width=${w} height=${Math.max(0, Y(mn) - Y(mx))} fill="var(--band)"></rect><rect x=${x} y=${Y(h2)} width=${w} height=${Math.max(0, Y(l2) - Y(h2))} fill="var(--ideal)"></rect>`);
+        if (b[2] !== null) parts.push(svg`<line x1=${x} x2=${x + w} y1=${Y(tg)} y2=${Y(tg)} stroke="var(--muted)" stroke-dasharray="3 3"></line>`);
+      }
+    }
+    const span = hi - lo, dp = k === "vpd" ? 2 : k !== "light" && span < 5 ? 1 : 0;
+    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(dp));
+    for (let t = 0; t <= 4; t++) {
+      const v = lo + (span * t) / 4, y = Y(v);
+      parts.push(svg`<line x1=${L} x2=${W - Rm} y1=${y} y2=${y} stroke="var(--line)"></line><text x=${L - 6} y=${y + 4} text-anchor="end">${axis(v)}</text>`);
+    }
+    const ticks = W < 520 ? 3 : 6;
+    for (let t = 0; t <= ticks; t++) {
+      const ix = Math.round((t / ticks) * n);
+      parts.push(svg`<text x=${X(ix)} y=${H - 6} text-anchor=${t === 0 ? "start" : t === ticks ? "end" : "middle"}>${tickWords(rows[0].line[ix].t, R.hours)}</text>`);
+    }
+    const path = (line: Point[]) => {
+      let d = "", pen = false;
+      line.forEach((p, i) => {
+        if (p.v === null) return void (pen = false);
+        d += `${pen ? "L" : "M"}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`;
+        pen = true;
+      });
+      return d;
+    };
+    const many = rows.length > 1;
+    for (const r of [...rows].reverse())
+      parts.push(svg`<path d=${path(r.line)} fill="none" stroke=${r.color} stroke-width=${r.width} stroke-opacity=${many && r.width === 1 ? 0.55 : 1}></path>`);
+    const at = this.chartAt, shown = at ?? n;
+    if (at !== null) {
+      parts.push(svg`<line x1=${X(at)} x2=${X(at)} y1=${T} y2=${T + PH} stroke="var(--muted)"></line>`);
+      for (const r of rows) if (r.line[at].v !== null) parts.push(svg`<circle cx=${X(at)} cy=${Y(r.line[at].v as number)} r="3" fill=${r.color}></circle>`);
+    }
+    const showExtremes = k !== "light";
+    const cell = (m: { v: number; t: number } | null) => (m ? html`${fmt(k, m.v)}<span class="sub">${whenWords(m.t, R.hours)}</span>` : "--");
+    const note = keptNote(h, R.hours);
+    return html`<section class="card">
+      ${head}
+      <div class="chart">
+        <svg
+          viewBox="0 0 ${W} ${H}"
+          tabindex="0"
+          role="img"
+          aria-label="${METRIC[k].label} over the last ${R.label} for ${z.name}. Move across it, or use the left and right arrows, to read a point in time."
+          @pointerdown=${this.chartPointer}
+          @pointermove=${this.chartPointer}
+          @pointerleave=${(ev: PointerEvent) => ev.pointerType === "mouse" && (this.chartAt = null)}
+          @keydown=${this.chartKey}
+        >
+          ${parts}
+        </svg>
+      </div>
+      <div class="tbl-wrap">
+        <table class="cstats">
+          <thead>
+            <tr>
+              <th>${METRIC[k].unit}</th>
+              <th>${at === null ? "Now" : whenWords(rows[0].line[at].t, R.hours)}</th>
+              ${showExtremes ? html`<th>Min</th><th>Max</th>` : nothing}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r) => {
+              const ex = extremes(r.line);
+              return html`<tr>
+                <td><i style="background:${r.color}"></i>${r.name}</td>
+                <td>${fmt(k, r.line[shown].v)}</td>
+                ${showExtremes ? html`<td>${cell(ex.min)}</td><td>${cell(ex.max)}</td>` : nothing}
+              </tr>`;
+            })}
+          </tbody>
+        </table>
+      </div>
+      ${note ? html`<p class="chart-note">${note}</p>` : nothing}
+      <div class="key">
+        ${bands ? html`<span><i style="background:var(--ideal)"></i>Ideal zone</span><span><i style="background:var(--band);outline:1px solid var(--line)"></i>Min to max</span>` : nothing}
+        ${runs.some((r) => !r.day) ? html`<span><i style="background:var(--shade);outline:1px solid var(--line)"></i>Lights off</span>` : nothing}
+      </div>
+    </section>`;
+  }
+
+  /* The zone's combined light over the last 4 hours, as the HA dashboard draws it: black to yellow between 1210 and
+     2120 lx. The zone's light card and its Overview card draw the same line. */
+  private lightSpark(z: Zone, height: number, cls: string) {
+    const want = this.lightWant(z.id), h = want ? this.hist[want.key]?.h : null;
+    if (!h) return nothing;
+    const rows = this.chartRows(z, "light", h), pts = rows[0].line, n = pts.length - 1;
+    const vals = pts.flatMap((p) => (p.v === null ? [] : [p.v]));
+    if (!vals.length) return nothing;
+    const W = 300, max = Math.max(...vals, 2120) * 1.05, X = (i: number) => (n ? i / n : 0) * W, Y = (v: number) => height - 3 - (v / max) * (height - 6);
+    let d = "", pen = false;
+    pts.forEach((p, i) => {
+      if (p.v === null) return void (pen = false);
+      d += `${pen ? "L" : "M"}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`;
+      pen = true;
+    });
+    const id = `lg-${cls}-${z.id}`, name = rows.length > 1 ? `Light (${rows[0].name})` : "Light";
+    return html`<svg class=${cls} viewBox="0 0 ${W} ${height}" preserveAspectRatio="none" role="img" aria-label="${name} in ${z.name} over the last 4 hours">
+      ${svg`<defs><linearGradient id=${id} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1=${Y(2120)} y2=${Y(1210)}><stop offset="0" style="stop-color:var(--lhigh)"></stop><stop offset="1" style="stop-color:var(--llow)"></stop></linearGradient></defs>
+      <path d=${d} fill="none" stroke="url(#${id})" stroke-width="2" vector-effect="non-scaling-stroke"></path>`}
+    </svg>`;
+  }
+
   /* Live readings. */
   private raw(id: string | null): Record<string, unknown> | undefined {
     return this.config.zones.find((z) => z.id === id);
@@ -1204,6 +1449,7 @@ export class EcApp extends LitElement {
               <div class="mrow">
                 ${this.ic(...EcApp.LOOKS.light)}
                 <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
+                ${this.lightSpark(z, 34, "lspark")}
               </div>
             </div>
             ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
@@ -1242,7 +1488,7 @@ export class EcApp extends LitElement {
     return html`<div class="lcard">
       <div class="name">${all.length >= 2 ? `Light (${METHODS[r.method]})` : "Light"}</div>
       <div class="val">${fmt("light", r.value)} <small>lx</small></div>
-      <div class="tavg">Its 4 hour line arrives with charts.</div>
+      ${this.lightSpark(z, 60, "lline")}
     </div>`;
   }
 
@@ -1326,8 +1572,8 @@ export class EcApp extends LitElement {
         : nothing}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
-      ${this.zoneMap(z)}
-      <p class="small muted">Charts, controls and activity arrive in the releases that follow.</p>`;
+      ${this.zoneMap(z)}${this.historyCard(z)}
+      <p class="small muted">Controls and activity arrive in the releases that follow.</p>`;
   }
 
   private entityRow(e: CatalogEntity) {

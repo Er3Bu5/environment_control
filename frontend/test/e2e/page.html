@@ -80,8 +80,22 @@ for (const d of CATALOG.devices) for (const e of d.entities) if (e.domain === "n
   fakeHA.registry.entities[e.entity_id] = { entity_id: e.entity_id, platform: "esphome", area_id: null, device_id: d.id };
   fakeHA.states[e.entity_id] = { entity_id: e.entity_id, state: e.state, attributes: { friendly_name: e.name, min: e.min, max: e.max, step: e.step, unit_of_measurement: e.unit }, context: { user_id: null, parent_id: null }, last_updated: new Date().toISOString() };
 }
+/* The backend's history, made up: each reading holds its live value with a little spread, its first row at the start
+   of the range. A test can replace historyFor to draw something exact, or set historyDown. */
+const historyCalls = [];
+let historyDown = false;
+let historyFor = (entity, msg, start) => {
+  const v = Number(fakeHA.states[entity] && fakeHA.states[entity].state);
+  return { first: start, values: Array.from({ length: msg.buckets }, () => (Number.isFinite(v) ? [v, v - 0.5, v + 0.5] : null)) };
+};
 const backendCommand = fakeHA.command.bind(fakeHA);
 fakeHA.command = async (msg) => {
+  if (msg && msg.type === "environment_control/history") {
+    historyCalls.push(msg);
+    if (historyDown) fakeHA.fail("Recorder busy");
+    const end = Date.now() / 1000, start = end - msg.hours * 3600;
+    return { start, end, step: (end - start) / msg.buckets, series: Object.fromEntries(msg.entities.map((e) => [e, historyFor(e, msg, start)])) };
+  }
   if (!msg || msg.type !== "environment_control/catalog") return backendCommand(msg);
   if (catalogDown) fakeHA.fail("Catalog not ready");
   return JSON.parse(JSON.stringify(CATALOG));
