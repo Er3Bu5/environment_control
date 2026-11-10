@@ -15,6 +15,7 @@ import FRAME_HTML from "./frame.js";
 /* Only what the UI draws. Anything else an integration puts in its attributes stays here. */
 const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
 const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
+const SENSOR = /^sensor\.[a-z0-9_]{1,200}$/;
 const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
 const MAX_CONFIG_BYTES = 512 * 1024;
@@ -220,6 +221,8 @@ class EnvironmentControlPanel extends HTMLElement {
     const out = new Set();
     for (const d of this.config.devices || []) if (d && typeof d.entity === "string" && Array.isArray(d.zones) && d.zones.length) out.add(d.entity);
     for (const z of this.config.zones || []) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
+    /* A mapped sensor's readings, which the panel draws. Only sensor entities, as the backend only stores those. */
+    for (const z of this.config.zones || []) for (const x of z.sensors || []) for (const e of Object.values((x && x.entities) || {})) if (typeof e === "string" && SENSOR.test(e)) out.add(e);
     for (const z of this.config.zones || []) for (const e of helperLinks(z)) out.add(e);
     return out;
   }
@@ -230,7 +233,9 @@ class EnvironmentControlPanel extends HTMLElement {
     const attributes = {};
     for (const k of ATTRS) if (k in st.attributes) attributes[k] = st.attributes[k];
     const c = st.context || {};
-    return { state: String(st.state), attributes, by: c.user_id ? "user" : c.parent_id ? "automation" : "device" };
+    /* When it last updated, so a reading that stopped can be marked stale rather than shown as current. */
+    const at = typeof st.last_updated === "string" ? st.last_updated : null;
+    return { state: String(st.state), attributes, by: c.user_id ? "user" : c.parent_id ? "automation" : "device", at };
   }
   appearance() {
     let v = this.picked;

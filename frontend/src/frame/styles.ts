@@ -4,12 +4,12 @@ import { css } from "lit";
 
 /* The map's colours, as the mock has them: a sensor's height, a device's class, and the soil probes'. The same in both
    palettes, because each sits on its own fill. */
-const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF9800", hum: "#2196F3", air: "#26A69A", sun: "#FBC02D", soil: "#8D6E63" } as const;
+const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF9800", hum: "#2196F3", air: "#26A69A", vpd: "#4CAF50", sun: "#FBC02D", soil: "#8D6E63", day: "#FBC02D" } as const;
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
+  dark: { night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
 } as const;
 
 export const styles = css`
@@ -155,6 +155,54 @@ export const styles = css`
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong { font-weight: 500; }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
+
+  /* Live readings, as the mock draws them: tinted-icon tiles, each reading on a line-and-dot band track. */
+  .ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--c) 20%, transparent); }
+  .ic svg { width: 21px; height: 21px; fill: var(--c); }
+  .pill.low, .pill.high { color: var(--ramp-text); }
+  .pill.critlow, .pill.crithigh { color: #FFFFFF; background: var(--crit); border-color: var(--crit); }
+  .pill.dead { color: var(--dead); border-style: dashed; }
+  .notice.critical { background: color-mix(in srgb, var(--crit) 16%, var(--card)); }
+  .period { display: flex; flex-direction: column; gap: 5px; }
+  .period-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; font-size: 13px; }
+  .period-top strong { font-weight: 500; }
+  .lux { margin-left: 8px; color: var(--muted); }
+  .strip { position: relative; height: 8px; border-radius: 4px; background: var(--night); overflow: hidden; }
+  .strip i { position: absolute; top: 0; bottom: 0; background: var(--day); }
+  .strip b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--fg); }
+  .track { position: relative; height: 14px; border-bottom: 1px solid var(--off); min-width: 0; }
+  .track .bandc { position: absolute; top: 3px; bottom: 0; left: 0; right: 0; background: var(--tcrit); }
+  .track.unset .bandc { background: var(--line); }
+  .track .bandr { position: absolute; top: 3px; bottom: 0; background: var(--tramp); }
+  .track .bandi { position: absolute; top: 3px; bottom: 0; background: var(--tnom); }
+  .track .tick { position: absolute; top: 3px; bottom: 0; width: 1px; background: var(--fg); }
+  .track .dot { position: absolute; bottom: -5px; width: 9px; height: 9px; margin-left: -6px; border-radius: 50%; border: 2px solid var(--card); box-sizing: content-box; background: var(--fg); }
+  .track .dot.ok { background: var(--tnom); }
+  .track .dot.low, .track .dot.high { background: var(--tramp); }
+  .track .dot.critlow, .track .dot.crithigh { background: var(--crit); }
+  .rows { display: flex; flex-direction: column; gap: 12px; }
+  .mrow { display: grid; grid-template-columns: 36px 78px minmax(0, 1fr) 76px; gap: 8px; align-items: center; }
+  .mrow .t1 { font-size: 12px; color: var(--muted); }
+  .mrow .t2 { font-size: 17px; font-weight: 500; line-height: 1.15; white-space: nowrap; }
+  .mrow .t2 span { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+  .mrow .pillcell { justify-self: end; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .tile, .lcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tile-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .tile .name, .lcard .name { font-size: 13px; color: var(--muted); }
+  .tile .val, .lcard .val { font-size: 22px; font-weight: 500; line-height: 1.1; }
+  .tile .val small, .lcard .val small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .tavg { font-size: 12px; color: var(--muted); }
+  .range { display: flex; justify-content: space-between; gap: 2px; color: var(--muted); }
+  .range span { display: flex; flex-direction: column; align-items: center; font-size: 10px; }
+  .range b { font-size: 12px; font-weight: 500; color: var(--fg); }
+  .detail { padding: 10px 12px; border-radius: 8px; background: var(--tile); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+  .tbl-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td .sub { display: block; font-size: 12px; color: var(--muted); }
+  @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   ul { list-style: none; margin: 0; padding: 0; }
   li.device { padding: 10px 0; border-top: 1px solid var(--line); }

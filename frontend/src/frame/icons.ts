@@ -13,6 +13,7 @@ const PATHS = {
   plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
   cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
+  gauge: "M12 4a9 9 0 0 0-8 13.2l1.8-1A7 7 0 1 1 18.2 16l1.8 1A9 9 0 0 0 12 4Zm3.5 4.5-4.6 5.1a1.8 1.8 0 1 0 2.5 2.5l2.1-7.6Z",
   /* A soil probe: a body with prongs, as the probes stand in the substrate. */
   probe: "M8 2h8v9h-1.5v6L13 21v1h-2v-1l-1.5-4v-6H8V2Zm2 2v5h4V4h-4Z",
 } as const;
