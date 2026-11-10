@@ -148,6 +148,23 @@ async def test_each_device_comes_with_its_usable_entities_and_how_it_is_connecte
     assert loose == ["input_boolean.lights_override"]
 
 
+async def test_a_number_comes_with_its_own_limits(hass, loaded, room, hass_ws_client) -> None:
+    entities = er.async_get(hass)
+    board = entities.async_get(entities.async_get_entity_id("sensor", "esphome", "board-temp")).device_id
+    offset = entities.async_get_or_create("number", "esphome", "board-offset", device_id=board)
+    hass.states.async_set(offset.entity_id, "-1.0", {"unit_of_measurement": "°C", "min": -5, "max": 2, "step": 0.1})
+    result = await _catalog(hass, await hass_ws_client(hass))
+    found = {e["entity_id"]: e for d in result["devices"] for e in d["entities"]}
+    assert {k: found[offset.entity_id][k] for k in ("min", "max", "step", "unit")} == {
+        "min": -5,
+        "max": 2,
+        "step": 0.1,
+        "unit": "°C",
+    }
+    temp = entities.async_get_entity_id("sensor", "esphome", "board-temp")
+    assert not {"min", "max", "step"} & set(found[temp])
+
+
 async def test_no_identifier_address_serial_or_firmware_leaves_the_backend(hass, loaded, room, hass_ws_client) -> None:
     text = json.dumps(await _catalog(hass, await hass_ws_client(hass)))
     for private in (

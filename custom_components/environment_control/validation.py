@@ -194,6 +194,9 @@ def validate_config(c: Any) -> None:
         desc = z.get("description")
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
+        basis = z.get("leafBasis")
+        if basis is not None and not (isinstance(basis, str) and ITEM_ID.match(basis)):
+            _fail(f"{zid} draws its VPD chart at an offset this panel doesn't know")
         layout = z.get("layout")
         if layout is not None:
             _check_layout(zid, layout)
