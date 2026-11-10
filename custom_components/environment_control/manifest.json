@@ -1,9 +1,19 @@
 {
   "domain": "environment_control",
   "name": "Environment Control",
-  "codeowners": ["@Er3Bu5"],
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@Er3Bu5"
+  ],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/Er3Bu5/environment_control",
   "integration_type": "service",
   "iot_class": "calculated",
