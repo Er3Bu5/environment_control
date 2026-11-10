@@ -1,8 +1,9 @@
 name: Validate
 
+# Runs on each pull request, daily on main, and by hand. Not on a merge to main: the pull request's run already tested
+# the merged content, and the last job records that content by its git tree hash, so Beta and Release can confirm
+# exactly what they build passed here without running the suites a second time.
 on:
-  push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "17 15 * * *"
@@ -119,3 +120,29 @@ jobs:
           # It would comment on the PR, which needs write access; a failed check is enough.
           GITLEAKS_ENABLE_COMMENTS: "false"
       - run: python3 scripts/check_privacy.py
+
+  tested:
+    name: Tested
+    # Only once every check above passed. For a pull request the checkout is GitHub's test merge with main, so this is
+    # the tree a merge lands when main hasn't moved since.
+    needs: [backend, frontend, hassfest, marketplace, secrets-and-privacy]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record the tree that passed
+        id: tree
+        run: |
+          tree=$(git rev-parse "HEAD^{tree}")
+          echo "$tree" > tested-tree
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          echo "Passed on tree $tree." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-tree-${{ steps.tree.outputs.tree }}
+          path: tested-tree
+          retention-days: 30
+          if-no-files-found: error
