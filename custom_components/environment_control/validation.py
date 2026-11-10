@@ -29,6 +29,10 @@ MAX_SENSORS_PER_ZONE = 50
 MAX_NAME = 100
 # Leaf temperature offsets kept here, as wide as any board allows and then some.
 LEAF_RANGE = (-10, 10)
+LEVELS = ("above", "in", "under")
+MAX_UNITS = 200
+MAX_GRID = 20
+MAX_SIZE_M = 100
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
 
 
@@ -82,6 +86,40 @@ def _spot_ok(p: Any, layout: Any) -> bool:
     return -1 <= p[0] <= rows and -1 <= p[1] <= cols
 
 
+def _check_layout(zid: str, layout: Any) -> None:
+    """A zone's size and grid: every unit has a place, and nothing is bigger than a room could be."""
+    if not isinstance(layout, dict):
+        _fail(f"{zid} has a layout that isn't a size and a grid")
+    w, d, units, rows, cols = (layout.get(k) for k in ("w", "d", "units", "rows", "cols"))
+    if not all(_is_num(v) and 0.1 <= v <= MAX_SIZE_M for v in (w, d)):
+        _fail(f"{zid} has a size outside 0.1 to {MAX_SIZE_M} m")
+    if not (_is_int(units) and 1 <= units <= MAX_UNITS):
+        _fail(f"{zid} has a unit count outside 1 to {MAX_UNITS}")
+    if not all(_is_int(v) and 1 <= v <= MAX_GRID for v in (rows, cols)) or rows * cols < units:
+        _fail(f"{zid} has a grid that doesn't hold its units")
+
+
+def _planted(layout: dict[str, Any], r: Any, c: Any) -> bool:
+    return (
+        _is_int(r)
+        and _is_int(c)
+        and 0 <= r < layout["rows"]
+        and 0 <= c < layout["cols"]
+        and r * layout["cols"] + c < layout["units"]
+    )
+
+
+def _sensor_spot_ok(kind: Any, p: Any, layout: Any) -> bool:
+    """An environment sensor sits inside the wall on the half-steps; a soil probe sits in a unit."""
+    if not isinstance(layout, dict) or not isinstance(p, list) or len(p) != 2 or not all(_is_num(x) for x in p):
+        return False
+    if kind == "soil":
+        return all(float(x).is_integer() for x in p) and _planted(layout, int(p[0]), int(p[1]))
+    if not all(float(x * 2).is_integer() for x in p):
+        return False
+    return -0.5 <= p[0] <= layout["rows"] - 0.5 and -0.5 <= p[1] <= layout["cols"] - 0.5
+
+
 def _check_sensor(zid: str, x: Any) -> None:
     """A mapped sensor names only sensor entities for its readings and a number entity for its offset."""
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.match(x["id"]):
@@ -108,6 +146,8 @@ def _check_sensor(zid: str, x: Any) -> None:
     for flag in ("avg", "leafUnused"):
         if flag in x and not isinstance(x[flag], bool):
             _fail(f"{sid} has {flag} that isn't true or false")
+    if "level" in x and x["level"] not in LEVELS:
+        _fail(f"{sid} has a height this panel doesn't know")
 
 
 def validate_config(c: Any) -> None:
@@ -154,11 +194,17 @@ def validate_config(c: Any) -> None:
         desc = z.get("description")
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
+        layout = z.get("layout")
+        if layout is not None:
+            _check_layout(zid, layout)
         sensors = z.get("sensors") or []
         if not isinstance(sensors, list) or len(sensors) > MAX_SENSORS_PER_ZONE:
             _fail(f"{zid} has sensors that aren't a short list")
         for x in sensors:
             _check_sensor(zid, x)
+            if x.get("pos") is not None and not _sensor_spot_ok(x.get("kind", "env"), x.get("pos"), layout):
+                what = "soil probe" if x.get("kind") == "soil" else "sensor"
+                _fail(f"{x['id']} is placed where a {what} can't go in {zid}")
         virtual = z.get("virtual")
         if virtual is not None:
             if not isinstance(virtual, list) or len(virtual) > 30:
