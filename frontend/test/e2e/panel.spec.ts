@@ -328,7 +328,7 @@ test.describe("map devices", () => {
   async function pickAll(frame: Frame): Promise<void> {
     await row(frame, "Environment board").getByRole("button").first().click();
     await row(frame, "Two probe board").getByRole("button").first().click();
-    await row(frame, "Two probe board").getByLabel("sensor.two_probe_top_temp (23.0 °C)").check();
+    await row(frame, "Two probe board").getByLabel("Top temp, 23 °C").check();
     await next(frame).click();
     await row(frame, "Spare Plug").getByRole("button").first().click();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
@@ -341,15 +341,16 @@ test.describe("map devices", () => {
     await expect(next(frame)).toBeDisabled();
     await row(frame, "Environment board").getByRole("button").first().click();
     const board = row(frame, "Environment board");
-    await expect(board.getByLabel("sensor.environment_board_air_temp (24.1 °C)")).toBeChecked();
-    await expect(board.getByLabel("sensor.environment_board_chip_temp (41.0 °C)")).toHaveCount(0);
-    await expect(board.getByLabel("number.environment_board_leaf_offset (-1.5 °C)")).toBeChecked();
+    await expect(board.getByLabel("Air temp, 24.1 °C")).toBeChecked();
+    await expect(board.getByLabel("Light, 41,200 lx")).toBeChecked();
+    await expect(board.getByLabel("Chip temp, 41 °C")).toHaveCount(0);
+    await expect(board.getByText("Leaf temperature offset")).toHaveCount(0);
     await expect(next(frame)).toBeEnabled();
     await row(frame, "Two probe board").getByRole("button").first().click();
     await expect(row(frame, "Two probe board")).toContainText("Pick one");
     await expect(next(frame)).toBeDisabled();
     await expect(app(frame).getByRole("button", { name: "Two probe board: pick which Temperature entity to use. ›" })).toBeVisible();
-    await row(frame, "Two probe board").getByLabel("sensor.two_probe_low_temp (21.4 °C)").check();
+    await row(frame, "Two probe board").getByLabel("Low temp, 21.4 °C").check();
     await expect(next(frame)).toBeEnabled();
     await expect(app(frame).getByText("How should these 2 sensors combine into the zone's reading?")).toBeVisible();
     await next(frame).click();
@@ -361,6 +362,21 @@ test.describe("map devices", () => {
     await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+  });
+
+  test("any sensor on the device can go to any reading, and Not used is always there", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Two probe board").getByRole("button").first().click();
+    const two = row(frame, "Two probe board"), light = two.locator("fieldset", { hasText: "Light" });
+    await expect(light.getByLabel("Not used")).toBeChecked();
+    await two.getByRole("button", { name: /From this device/ }).last().click();
+    await light.getByLabel("Low temp, 21.4 °C").check();
+    await expect(light.getByLabel("Low temp, 21.4 °C")).toBeChecked();
+    await expect(light.getByLabel("Top temp, 23 °C")).toHaveCount(0);
+    for (const reading of ["Temperature", "Humidity", "VPD"]) await two.locator("fieldset", { hasText: reading }).getByLabel("Not used").check();
+    await light.getByLabel("Not used").check();
+    await expect(app(frame).getByRole("button", { name: "Two probe board: pick at least one reading, or leave this sensor out. ›" })).toBeVisible();
+    await expect(next(frame)).toBeDisabled();
   });
 
   test("applying waits for the host's own dialog; once you allow it, the mapping is stored and the step is done", async ({ page }) => {
@@ -380,10 +396,12 @@ test.describe("map devices", () => {
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.devices).toBe("done");
     expect(z?.combine).toEqual({ env: "mean" });
-    expect(z?.sensors.map((s) => [s.id, s.entities, s.leafEntity ?? null, s.leafUnused])).toEqual([
-      ["d-board", { temperature: "sensor.environment_board_air_temp", humidity: "sensor.environment_board_humidity", vpd: "sensor.environment_board_vpd", light: "sensor.environment_board_light" }, "number.environment_board_leaf_offset", false],
-      ["d-two", { temperature: "sensor.two_probe_top_temp", humidity: "sensor.two_probe_humidity" }, null, true],
+    expect(z?.sensors.map((s) => [s.id, s.entities])).toEqual([
+      ["d-board", { temperature: "sensor.environment_board_air_temp", humidity: "sensor.environment_board_humidity", vpd: "sensor.environment_board_vpd", light: "sensor.environment_board_light" }],
+      ["d-two", { temperature: "sensor.two_probe_top_temp", humidity: "sensor.two_probe_humidity" }],
     ]);
+    /* The leaf temperature offset is Sensor Calibration's, so mapping writes nothing about it. */
+    expect(z?.sensors.some((s) => "leafEntity" in s || "leafUnused" in s || "leaf" in s)).toBe(false);
     const devices = (await stored(page)).devices.filter((d) => (d.zones as string[]).includes("flower_tent"));
     expect(devices.map((d) => [d.entity, d.type]).sort()).toEqual([
       ["humidifier.garden_dehumidifier", "Dehumidifier"],

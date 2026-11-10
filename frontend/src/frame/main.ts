@@ -42,6 +42,7 @@ import {
   type Issue,
   type MapDraft,
   METHODS,
+  type Option,
   type Method,
   ROLES,
   type Role,
@@ -139,6 +140,7 @@ export class EcApp extends LitElement {
     zoneId: { state: true },
     wiz: { state: true },
     mapw: { state: true },
+    moreOpen: { state: true },
     guide: { state: true },
     modal: { state: true },
     menu: { state: true },
@@ -155,6 +157,7 @@ export class EcApp extends LitElement {
   declare private zoneId: string | null;
   declare private wiz: Wizard | null;
   declare private mapw: MapDraft | null;
+  declare private moreOpen: Set<string>;
   private mapFromGuide = false;
   declare private guide: string | null;
   declare private modal: Guard | Review | null;
@@ -178,6 +181,7 @@ export class EcApp extends LitElement {
     this.zoneId = null;
     this.wiz = null;
     this.mapw = null;
+    this.moreOpen = new Set();
     this.guide = null;
     this.modal = null;
     this.menu = null;
@@ -812,16 +816,33 @@ export class EcApp extends LitElement {
     </fieldset>`;
   }
 
+  /* A reading offers what HA's device classes suggest, Not used, and then, on request, every other sensor on the device,
+     so any of them can be put to any reading. A pick from that list stays in view once it closes. */
   private slotChoice(m: MapDraft, s: SensorCandidate, k: Slot) {
-    const opts = s.slots[k], cur = m.sensors[s.id][k];
-    const none = k === "leaf" ? "None, kept in Environment Control" : opts.length ? "Not used" : "None found";
-    return this.chips(
-      `${SLOT_NAME[k]}${cur === "" ? ", pick one" : ""}`,
-      `${s.id}-${k}`,
-      [...opts.map((o) => ({ value: o.entity, label: `${o.entity} (${o.reading})` })), { value: "none", label: none }],
-      cur,
-      (v) => this.setMap((d) => (d.sensors[s.id][k] = v)),
-    );
+    const cur = m.sensors[s.id][k], key = `${s.id}:${k}`, open = this.moreOpen.has(key);
+    const label = (o: Option) => `${o.name}, ${o.reading}`;
+    const shown = [...s.slots[k]];
+    const picked = s.all.find((o) => o.entity === cur);
+    if (picked && !shown.some((o) => o.entity === cur)) shown.push(picked);
+    const more = s.all.filter((o) => !shown.some((x) => x.entity === o.entity));
+    const options = [...shown.map((o) => ({ value: o.entity, label: label(o) })), { value: "none", label: "Not used" }];
+    if (open) options.push(...more.map((o) => ({ value: o.entity, label: label(o) })));
+    return html`${this.chips(`${SLOT_NAME[k]}${cur === "" ? ", pick one" : ""}`, `${s.id}-${k}`, options, cur, (v) => {
+        this.setMap((d) => (d.sensors[s.id][k] = v));
+        this.toggleMore(key, false);
+      })}
+      ${more.length
+        ? html`<button class="fixlink small" aria-expanded=${open ? "true" : "false"} @click=${() => this.toggleMore(key, !open)}>
+            ${open ? "Fewer" : `From this device: ${plural(more.length, "more sensor")}`} &rsaquo;
+          </button>`
+        : nothing}`;
+  }
+
+  private toggleMore(key: string, open: boolean): void {
+    const next = new Set(this.moreOpen);
+    if (open) next.add(key);
+    else next.delete(key);
+    this.moreOpen = next;
   }
 
   private nearZone(z: Zone, area: string | null): boolean {
@@ -918,7 +939,10 @@ export class EcApp extends LitElement {
       const shown = sensors.filter((s) => hit(`${s.name} ${s.family} ${SLOTS.flatMap((k) => s.slots[k].map((o) => o.entity)).join(" ")}`));
       const gone = Object.keys(m.sensors).filter((id) => !sensors.some((s) => s.id === id));
       const counted = countedSensors(m);
-      body = html`<p class="muted">Pick the sensors in ${z.name}. Each one is a physical device, and its readings are matched for you by what Home Assistant says each entity measures.</p>
+      body = html`<p class="muted">
+          Pick the sensors in ${z.name}. Each one is a physical device. Its readings are suggested by what Home Assistant says each entity measures, and any
+          sensor on the device can be put to any reading.
+        </p>
         ${search}
         <div class="picklist">
           ${gone.map(

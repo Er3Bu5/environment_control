@@ -122,6 +122,7 @@ export const styles = css`
   .chip:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
   .chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   .chip.wait { border-style: dashed; color: var(--muted); }
+  .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
   .review { display: flex; flex-direction: column; gap: 10px; }
 
