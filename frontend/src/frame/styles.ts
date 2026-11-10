@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
+  dark: { shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
 } as const;
 
 export const styles = css`
@@ -254,6 +254,20 @@ export const styles = css`
     :host(.drafting) main { padding-bottom: 136px; }
     :host(.drafting) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   }
+
+  /* History, as the mock draws it. The chart scrolls the page vertically under a finger and reads a point sideways. */
+  .chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; outline-offset: 2px; }
+  .chart text { font-size: 11px; fill: var(--muted); }
+  .chart-note { font-size: 13px; color: var(--muted); }
+  table.cstats { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .cstats th, .cstats td { padding: 5px 0 5px 10px; text-align: right; vertical-align: top; white-space: nowrap; }
+  .cstats th:first-child, .cstats td:first-child { padding-left: 0; text-align: left; font-size: 13px; }
+  .cstats td:first-child { white-space: normal; }
+  .cstats td:first-child i { display: inline-block; width: 11px; height: 2px; margin-right: 6px; vertical-align: middle; }
+  .cstats td .sub { font-size: 11px; }
+  .cstats tbody tr:last-child td { border-bottom: 0; }
+  .lcard .lline { display: block; width: calc(100% + 24px); margin: auto -12px -12px; height: 60px; }
+  .mrow .lspark { grid-column: 3 / -1; display: block; width: 100%; height: 34px; }
 
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }

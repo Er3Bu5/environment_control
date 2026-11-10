@@ -44,13 +44,22 @@ export interface Catalog {
   devices: CatalogDevice[];
   entities: (CatalogEntity & { integration: string; family: string })[];
 }
+/* A chart's readings as the backend buckets them: per entity, each bucket's mean, low and high, or null where there
+   was no live reading. */
+export type Bucket = [number, number, number] | null;
+export interface History {
+  start: number;
+  end: number;
+  step: number;
+  series: Record<string, { first: number | null; values: Bucket[] }>;
+}
 export type HostMessage =
   | ({ type: "init"; states: Record<string, unknown>; theme: Theme; narrow: boolean } & Stored)
   | ({ type: "config" } & Stored)
   | { type: "states"; states: Record<string, unknown> }
   | { type: "theme"; theme: Theme }
   | { type: "narrow"; narrow: boolean }
-  | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog; stored?: Stored };
+  | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog; stored?: Stored; history?: History };
 
 const COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
 const COLOR_KEYS = ["primary", "bg", "card", "tile", "fg", "muted", "line"];
@@ -119,6 +128,23 @@ function readStored(m: Record<string, unknown>): Stored | null {
   return { revision: m.revision as number, zones: m.zones, devices: m.devices };
 }
 
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/* Checked bucket by bucket: anything that isn't three numbers is no data, never a guess. Every series must have one
+   bucket per step, or the whole answer is dropped rather than drawn against the wrong times. */
+export function readHistory(h: unknown): History | null {
+  if (!isObj(h) || !finite(h.start) || !finite(h.end) || !finite(h.step) || h.step <= 0 || h.end <= h.start || !isObj(h.series)) return null;
+  const n = Math.round((h.end - h.start) / h.step);
+  if (n < 1 || n > 1000) return null;
+  const series: History["series"] = {};
+  for (const [entity, raw] of Object.entries(h.series)) {
+    if (!ENTITY_ID.test(entity) || !isObj(raw) || !Array.isArray(raw.values) || raw.values.length !== n) return null;
+    const values = raw.values.map((b): Bucket => (Array.isArray(b) && b.length === 3 && b.every(finite) ? [b[0], b[1], b[2]] : null));
+    series[entity] = { first: finite(raw.first) ? raw.first : null, values };
+  }
+  return { start: h.start, end: h.end, step: h.step, series };
+}
+
 export function readHostMessage(data: unknown): HostMessage | null {
   if (!isObj(data) || data.v !== 1 || typeof data.type !== "string") return null;
   switch (data.type) {
@@ -143,6 +169,7 @@ export function readHostMessage(data: unknown): HostMessage | null {
       const catalog = "catalog" in data ? readCatalog(data.catalog) : undefined;
       /* A save answers with what the backend stored, which replaces the frame's copy. */
       const stored = "revision" in data ? readStored(data) : null;
+      const history = "history" in data ? readHistory(data.history) : null;
       return {
         type: "result",
         req: data.req as number,
@@ -150,6 +177,7 @@ export function readHostMessage(data: unknown): HostMessage | null {
         ...(typeof data.error === "string" ? { error: data.error } : {}),
         ...(catalog ? { catalog } : {}),
         ...(stored ? { stored } : {}),
+        ...(history ? { history } : {}),
       };
     }
     default:
