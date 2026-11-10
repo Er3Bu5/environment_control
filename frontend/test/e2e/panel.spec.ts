@@ -369,7 +369,7 @@ test.describe("map devices", () => {
     await row(frame, "Soil 1").getByRole("button").first().click();
     const soil = row(frame, "Soil 1");
     await expect(soil.locator("fieldset", { hasText: "Class" }).getByLabel("Soil, detected")).toBeChecked();
-    for (const reading of ["Moisture (VWC), pick one", "EC, pick one", "Temperature"]) await expect(soil.locator("legend", { hasText: reading })).toHaveCount(1);
+    for (const reading of ["Moisture (VWC), pick one", "pwEC, pick one", "Temperature"]) await expect(soil.locator("legend", { hasText: reading })).toHaveCount(1);
     for (const reading of ["Humidity", "VPD", "Light"]) await expect(soil.locator("legend", { hasText: new RegExp(`^${reading}`) })).toHaveCount(0);
     await soil.getByLabel("Soil 1 Substrate Normalised VWC, 85.4 %").check();
     await soil.getByLabel("Soil 1 Substrate Pore Water EC, 2.54 mS/cm").check();
@@ -520,10 +520,11 @@ test.describe("zone layout and placement", () => {
     await expect(app(frame).getByRole("heading", { level: 1, name: "Zone layout: Veg", exact: true })).toBeVisible();
     await app(frame).getByLabel("Width in metres").fill("2.4");
     await finish(frame).click();
+    /* More units than the grid holds re-suggests the grid straight away, as the mock does. */
     await app(frame).getByLabel("Units", { exact: true }).fill("8");
-    await expect(app(frame).getByText("This grid holds 4 units, and you have 8.")).toBeVisible();
-    await expect(finish(frame)).toBeDisabled();
-    await app(frame).getByRole("button", { name: "Suggest a grid" }).click();
+    await expect(app(frame).locator(".stepper").first()).toContainText("2");
+    await expect(app(frame).locator(".stepper").last()).toContainText("4");
+    await expect(app(frame).getByText(/This grid holds/)).toHaveCount(0);
     await expect(finish(frame)).toBeEnabled();
     await finish(frame).click();
     await expect(dialog(frame)).toContainText("1.2 x 1.2 m");
@@ -537,8 +538,6 @@ test.describe("zone layout and placement", () => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await finish(frame).click();
     await app(frame).getByLabel("Units", { exact: true }).fill("4");
-    await app(frame).getByRole("button", { name: "Fewer rows" }).click();
-    for (let i = 0; i < 2; i++) await app(frame).getByRole("button", { name: "Fewer columns" }).click();
     await expect(app(frame).locator(".steps")).toContainText("3. Sensors and devices");
     await expect(app(frame).getByText(/no longer fits?/).first()).toBeVisible();
     await finish(frame).click();

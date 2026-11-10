@@ -13,6 +13,7 @@ import {
   spotsFor,
   stranded,
   suggestGrid,
+  typed,
   zoneItems,
 } from "../../src/frame/layout";
 import { copyConfig } from "../../src/frame/model";
@@ -66,6 +67,26 @@ describe("grids", () => {
     expect(suggestGrid(12, 2.4, 1.2)).toEqual([3, 4]);
     expect(suggestGrid(4, 1.2, 1.2)).toEqual([2, 2]);
     expect(suggestGrid(1, 1, 1)).toEqual([1, 1]);
+  });
+
+  it("never suggests more than 20 either way, however long and thin the zone", () => {
+    const [rows, cols] = suggestGrid(200, 100, 0.1);
+    expect(rows <= 20 && cols <= 20 && rows * cols >= 200).toBe(true);
+  });
+
+  it("re-suggests the grid as a size or unit count is typed, clamped, and ignores what isn't a positive number", () => {
+    const d = { w: 2.4, d: 1.2, units: 4, rows: 2, cols: 2 };
+    typed(d, "units", 8);
+    expect(d).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
+    typed(d, "units", 12.4);
+    expect([d.units, d.rows, d.cols]).toEqual([12, 3, 4]);
+    typed(d, "units", 999);
+    expect(d.units).toBe(200);
+    typed(d, "w", Number.NaN);
+    typed(d, "d", -1);
+    expect([d.w, d.d]).toEqual([2.4, 1.2]);
+    typed(d, "w", 400);
+    expect(d.w).toBe(100);
   });
 
   it("says when sizes, units or the grid can't work", () => {
