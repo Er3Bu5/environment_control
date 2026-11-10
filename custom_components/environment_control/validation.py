@@ -34,6 +34,9 @@ MAX_UNITS = 200
 MAX_GRID = 20
 MAX_SIZE_M = 100
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
+PERIOD_MODES = ("helper", "fixed", "detected")
+DAY_RULES = ("any", "all")
+MINUTES_IN_DAY = 1440
 
 
 class InvalidConfig(ValueError):
@@ -182,9 +185,21 @@ def validate_config(c: Any) -> None:
         ]
         if any(e is not None and not e.startswith("input_number.") for e in numbers):
             _fail(f"{zid} links a number setting to something that isn't a number helper")
+        period = z.get("periodMode")
+        if period is not None and period not in PERIOD_MODES:
+            _fail(f"{zid} has a day and night source this panel doesn't know")
+        if period == "helper" and not (h.get("day") and h.get("night")):
+            _fail(f"{zid} takes its times from helpers but doesn't link both")
+        if z.get("rule") is not None and z.get("rule") not in DAY_RULES:
+            _fail(f"{zid} has a day rule this panel doesn't know")
+        for k in ("dayAt", "nightAt"):
+            if k in z and not (_is_int(z[k]) and 0 <= z[k] < MINUTES_IN_DAY):
+                _fail(f"{zid} has a time that isn't minutes into the day")
         mode = z.get("emersonMode")
         if mode is not None and mode not in EMERSON_MODES:
             _fail(f"{zid} has a red light source this panel doesn't know")
+        if mode == "helper" and not all(h.get(k) for k in ("morning", "daylight", "evening")):
+            _fail(f"{zid} takes its red light extensions from helpers but doesn't link all three")
         if mode == "fixed":
             em = z.get("emerson") if isinstance(z.get("emerson"), dict) else {}
             if not all(_is_int(em.get(k)) and 0 <= em[k] <= 59 for k in ("morning", "daylight", "evening")):
