@@ -2,10 +2,14 @@
    custom properties the app sets from the theme the host sends, so Home Assistant's own colours can take over. */
 import { css } from "lit";
 
+/* The map's colours, as the mock has them: a sensor's height, a device's class, and the soil probes'. The same in both
+   palettes, because each sits on its own fill. */
+const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF9800", hum: "#2196F3", air: "#26A69A", sun: "#FBC02D", soil: "#8D6E63" } as const;
+
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD" },
-  dark: { bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161" },
+  light: { bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
+  dark: { bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
 } as const;
 
 export const styles = css`
@@ -125,6 +129,32 @@ export const styles = css`
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
   .review { display: flex; flex-direction: column; gap: 10px; }
+
+  .map svg { display: block; width: 100%; height: auto; max-height: 460px; }
+  .map text { font-family: inherit; }
+  .map .hit { cursor: pointer; }
+  .map .hit:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+  .key span { display: inline-flex; align-items: center; gap: 5px; }
+  .key i { width: 11px; height: 11px; display: inline-block; }
+  .key i.unit { border: 1px solid var(--off); border-radius: 50%; background: var(--tile); }
+  .key i.wall { border: 2px solid var(--muted); }
+  .mk { width: 22px; height: 22px; border: 2px solid var(--c); border-radius: 6px; display: inline-grid; place-items: center; flex: none; background: var(--card); }
+  .mk svg { width: 14px; height: 14px; fill: var(--c); }
+  .mk.fill { background: var(--c); }
+  .mk.fill svg { fill: #FFFFFF; }
+  .mk.dash { border-style: dashed; }
+  .key .mk { width: 16px; height: 16px; border-width: 1.5px; border-radius: 4px; }
+  .key .mk svg { width: 11px; height: 11px; }
+  .opt-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+  .stepper { display: inline-flex; align-items: center; gap: 8px; }
+  .stepper button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 18px; }
+  .sensor-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; min-width: 0; }
+  .sensor-opt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); text-align: left; }
+  .sensor-opt[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+  .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
+  .now strong { font-weight: 500; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
 
   ul { list-style: none; margin: 0; padding: 0; }
   li.device { padding: 10px 0; border-top: 1px solid var(--line); }

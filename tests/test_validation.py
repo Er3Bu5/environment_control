@@ -54,6 +54,16 @@ CASES = {
     "average flag that isn't a boolean": (lambda c: c["zones"][0]["sensors"][0].update(avg="yes"), "true or false"),
     "device id with odd characters": (lambda c: c["devices"][0].update(id="<b>"), "id this panel can't use"),
     "device name too long": (lambda c: c["devices"][0].update(name="x" * 101), "short text"),
+    "layout too big": (lambda c: c["zones"][0]["layout"].update(w=500), "size outside"),
+    "grid too small for its units": (lambda c: c["zones"][0]["layout"].update(units=99), "doesn't hold its units"),
+    "unit count that isn't whole": (lambda c: c["zones"][0]["layout"].update(units=2.5), "unit count outside"),
+    "sensor outside the wall": (lambda c: c["zones"][0]["sensors"][0].update(pos=[-1, 0]), "can't go"),
+    "sensor off the half-steps": (lambda c: c["zones"][0]["sensors"][0].update(pos=[0.25, 0]), "can't go"),
+    "soil probe in an aisle": (
+        lambda c: c["zones"][0]["sensors"][0].update(kind="soil", pos=[0.5, 0]),
+        "soil probe can't go",
+    ),
+    "height the panel doesn't know": (lambda c: c["zones"][0]["sensors"][0].update(level="roof"), "height this panel"),
     "time setting on a number helper": (
         lambda c: c["zones"][0].update(helpers={"day": "input_number.x"}),
         "time helper",
@@ -133,7 +143,7 @@ def test_a_mapping_the_panel_makes_is_valid(sample_config) -> None:
             "id": "soilprobe01",
             "name": "Soil 1",
             "kind": "soil",
-            "pos": None,
+            "pos": [0, 0],
             "entities": {
                 "moisture": "sensor.soil_1_vwc",
                 "ec": "sensor.soil_1_pore_water_ec",
