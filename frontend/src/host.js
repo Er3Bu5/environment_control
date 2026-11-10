@@ -17,6 +17,9 @@ const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "
 const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
 const SENSOR = /^sensor\.[a-z0-9_]{1,200}$/;
 const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
+const NUMBER = /^number\.[a-z0-9_]{1,200}$/;
+const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const CELSIUS = ["°C", "℃"];
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
 const MAX_CONFIG_BYTES = 512 * 1024;
 /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
@@ -310,6 +313,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "appearance") this.setAppearance(m);
     else if (m.type === "catalog") this.catalog(m);
     else if (m.type === "save") this.save(m);
+    else if (m.type === "calibrate") this.calibrate(m);
     /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
     else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
@@ -351,6 +355,38 @@ class EnvironmentControlPanel extends HTMLElement {
     }
     this.post({ type: "result", req: m.req, ok: true, ...this.stored() });
     this.forward();
+  }
+  /* The calibration write: a sensor's leaf temperature offset, on its own board. The frame names a sensor and a value,
+     never an entity. The entity is the one the stored setup links that sensor to, which the backend only accepts as a °C
+     number on the sensor's own device; that is checked again here against HA's registry, since a link stored by an
+     earlier release wasn't checked when it was saved. The value has to sit inside the entity's own limits and step. A
+     yes here means HA accepted the call, not that the board took it: the frame waits for the board to report it. */
+  /** @param {any} m */
+  async calibrate(m) {
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    if (typeof m.sensor !== "string" || !ITEM_ID.test(m.sensor) || typeof m.value !== "number" || !Number.isFinite(m.value)) return refuse("Not a sensor or value this panel knows.");
+    /** @type {any[]} */
+    const zones = this.config.zones || [];
+    const sensor = zones.flatMap((z) => (z && Array.isArray(z.sensors) ? z.sensors : [])).find((x) => x && x.id === m.sensor);
+    const entity = sensor && !sensor.leafUnused && typeof sensor.leafEntity === "string" && NUMBER.test(sensor.leafEntity) ? sensor.leafEntity : null;
+    if (!entity) return refuse("That sensor has no leaf temperature offset on its board.");
+    const entry = this._hass.entities && this._hass.entities[entity];
+    if (!entry || entry.device_id !== m.sensor) return refuse(`Home Assistant doesn't list ${entity} on that sensor's own device.`);
+    const st = this._hass.states[entity];
+    if (!st) return refuse(`Home Assistant has no ${entity}.`);
+    if (st.state === "unavailable") return refuse("The board is offline.");
+    const a = st.attributes || {}, num = (/** @type {unknown} */ v) => typeof v === "number" && Number.isFinite(v);
+    if (!CELSIUS.includes(a.unit_of_measurement)) return refuse("That setting isn't in °C, so it isn't a leaf temperature offset.");
+    if (!num(a.min) || !num(a.max) || !num(a.step) || a.step <= 0) return refuse("That setting doesn't say its limits.");
+    const steps = (m.value - a.min) / a.step;
+    if (m.value < a.min || m.value > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max} °C, in steps of ${a.step}.`);
+    try {
+      await this._hass.callService("number", "set_value", { entity_id: entity, value: m.value });
+    } catch (err) {
+      return refuse(String((err && /** @type {any} */ (err).message) || err));
+    }
+    this.reply(m.req, true);
   }
   /* Entities this save would make controllable, or helpers it would link, that aren't now. Removing one, or changing only
      its role, adds nothing. */

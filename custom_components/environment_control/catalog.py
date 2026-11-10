@@ -80,7 +80,7 @@ def _area_name(areas: ar.AreaRegistry, area_id: str | None) -> str | None:
 def _entity(hass: HomeAssistant, entry: er.RegistryEntry, areas: ar.AreaRegistry) -> dict[str, Any]:
     state = hass.states.get(entry.entity_id)
     attrs = state.attributes if state else {}
-    return {
+    out = {
         "entity_id": entry.entity_id,
         "name": attrs.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
         "domain": entry.domain,
@@ -90,6 +90,13 @@ def _entity(hass: HomeAssistant, entry: er.RegistryEntry, areas: ar.AreaRegistry
         "category": entry.entity_category.value if entry.entity_category else None,
         "area": _area_name(areas, entry.area_id),
     }
+    # A number's own limits, so Sensor Calibration can hold a value to them before the number is linked.
+    if entry.domain == "number":
+        for k in ("min", "max", "step"):
+            v = attrs.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = v
+    return out
 
 
 async def async_build_catalog(hass: HomeAssistant) -> dict[str, Any]:

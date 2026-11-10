@@ -209,6 +209,52 @@ export const styles = css`
   .name { font-weight: 500; overflow-wrap: anywhere; }
   .facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   details { margin-top: 6px; font-size: 13px; }
+  /* Sensor Calibration, as the mock has it: a row per sensor, the box holding the size and two buttons the direction. */
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+  .seg button { border: 1px solid var(--line); background: none; padding: 3px 10px; min-height: 32px; border-radius: 16px; font-size: 13px; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 18%, transparent); border-color: var(--primary); color: var(--fg); }
+  .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
+  .now strong, .lrow strong, .lbasis strong { font-weight: 500; }
+  .lrows { display: flex; flex-direction: column; gap: 8px; }
+  .lrow, .lbasis { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--tile); min-width: 0; }
+  .lbasis { gap: 6px; }
+  .lrow-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+  .lfield { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .lcell { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .lcell input { width: 72px; padding: 7px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font-size: 14px; font-weight: 500; text-align: center; }
+  .lcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  .lcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
+  .lcell input:disabled { opacity: .6; }
+  .lstatus { font-size: 13px; color: var(--warn); }
+  .lstatus:empty { display: none; }
+  .issues { display: flex; flex-direction: column; gap: 10px; }
+  .issues:empty { display: none; }
+  @media (pointer: coarse) { .lcell input { font-size: 16px; } }
+
+  /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
+  .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
+  :host(.drafting) main { padding-bottom: 96px; }
+  :host(.drafting) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+  :host(.typing) .draftbar { display: none; }
+  .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
+  .draft-text { flex: 1; min-width: 0; font-size: 14px; }
+  .draft-text strong { font-weight: 500; }
+  .draft-why { opacity: .8; }
+  .draft-discard, .draft-review { flex: none; height: 44px; padding: 0 14px; border-radius: 10px; font-size: 14px; white-space: nowrap; }
+  .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
+  .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
+  .draft-review:disabled { opacity: .5; cursor: not-allowed; }
+  @media (max-width: 640px) {
+    .draftbar { flex-wrap: wrap; gap: 8px 10px; padding: 10px; }
+    .draft-text { flex: 1 1 calc(100% - 36px); }
+    .draftbar:not([data-blocked]) .draft-why { display: none; }
+    .draft-discard { flex: 1; }
+    .draft-review { flex: 2; }
+    :host(.drafting) main { padding-bottom: 136px; }
+    :host(.drafting) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+  }
+
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }
   .eid { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

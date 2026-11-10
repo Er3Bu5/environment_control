@@ -84,6 +84,7 @@ CASES = {
         lambda c: c["zones"][0].update(sensors=[{"id": "s", "leafEntity": "sensor.x"}]),
         "number entity",
     ),
+    "VPD chart offset that isn't a sensor id": (lambda c: c["zones"][0].update(leafBasis="<b>"), "VPD chart"),
     "virtual device with an entity": (
         lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Tank", "pos": [0, 0], "entity": "switch.x"}]),
         "a name and a spot",

@@ -22,6 +22,10 @@ export interface CatalogEntity {
   state: string | null;
   category: string | null;
   area: string | null;
+  /* A number's own limits, so Sensor Calibration can hold a value to them before the number is linked. */
+  min?: number;
+  max?: number;
+  step?: number;
 }
 export interface CatalogDevice {
   id: string;
@@ -77,6 +81,7 @@ function readEntity(e: unknown): CatalogEntity | null {
     state: str(e.state),
     category: str(e.category),
     area: str(e.area),
+    ...Object.fromEntries((["min", "max", "step"] as const).filter((k) => typeof e[k] === "number" && Number.isFinite(e[k])).map((k) => [k, e[k] as number])),
   };
 }
 
