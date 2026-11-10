@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readCatalog, readHostMessage, readTheme } from "../../src/frame/messages";
+import { readCatalog, readHistory, readHostMessage, readTheme } from "../../src/frame/messages";
 
 const theme = { appearance: "ha", mode: "dark", colors: { primary: "#F44336" } };
 const stored = { revision: 2, zones: [{ id: "garden" }], devices: [] };
@@ -89,5 +89,26 @@ describe("readCatalog", () => {
     expect(ok?.type === "result" && ok.catalog?.devices.length).toBe(1);
     const broken = readHostMessage({ v: 1, type: "result", req: 3, ok: true, catalog: "nope" });
     expect(broken?.type === "result" && broken.catalog).toBeFalsy();
+  });
+});
+
+describe("history from the host", () => {
+  const ok = { start: 0, end: 60, step: 20, series: { "sensor.t": { first: 0, values: [[20, 19, 21], null, [21, 21, 21]] } } };
+
+  it("keeps three numbers as a bucket, and anything else as no data rather than a guess", () => {
+    const h = readHistory({ ...ok, series: { "sensor.t": { first: "x", values: [[20, 19, 21], ["21", 1, 2], [1, Number.NaN, 3]] } } });
+    expect(h?.series["sensor.t"]).toEqual({ first: null, values: [[20, 19, 21], null, null] });
+  });
+
+  it("drops the whole answer when a series doesn't have one bucket per step, or names something that isn't an entity", () => {
+    expect(readHistory(ok)).not.toBeNull();
+    expect(readHistory({ ...ok, series: { "sensor.t": { first: 0, values: [[20, 19, 21]] } } })).toBeNull();
+    expect(readHistory({ ...ok, series: { "<img src=x>": { first: 0, values: [null, null, null] } } })).toBeNull();
+    expect(readHistory({ ...ok, step: 0 })).toBeNull();
+  });
+
+  it("arrives on a result, and a result without one is still a result", () => {
+    const m = readHostMessage({ v: 1, type: "result", req: 3, ok: true, history: ok });
+    expect(m && m.type === "result" && m.history?.series["sensor.t"].values.length).toBe(3);
   });
 });

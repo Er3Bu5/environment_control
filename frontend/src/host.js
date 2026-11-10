@@ -20,6 +20,8 @@ const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
 const NUMBER = /^number\.[a-z0-9_]{1,200}$/;
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CELSIUS = ["°C", "℃"];
+/* The ranges the panel draws: the light card's 4 hours and the History card's four. The backend holds the same list. */
+const HISTORY_HOURS = [4, 6, 24, 72, 168];
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
 const MAX_CONFIG_BYTES = 512 * 1024;
 /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
@@ -224,9 +226,14 @@ class EnvironmentControlPanel extends HTMLElement {
     const out = new Set();
     for (const d of this.config.devices || []) if (d && typeof d.entity === "string" && Array.isArray(d.zones) && d.zones.length) out.add(d.entity);
     for (const z of this.config.zones || []) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
-    /* A mapped sensor's readings, which the panel draws. Only sensor entities, as the backend only stores those. */
-    for (const z of this.config.zones || []) for (const x of z.sensors || []) for (const e of Object.values((x && x.entities) || {})) if (typeof e === "string" && SENSOR.test(e)) out.add(e);
+    for (const e of this.readings()) out.add(e);
     for (const z of this.config.zones || []) for (const e of helperLinks(z)) out.add(e);
+    return out;
+  }
+  /* A mapped sensor's readings, which the panel draws. Only sensor entities, as the backend only stores those. */
+  readings() {
+    const out = new Set();
+    for (const z of this.config.zones || []) for (const x of z.sensors || []) for (const e of Object.values((x && x.entities) || {})) if (typeof e === "string" && SENSOR.test(e)) out.add(e);
     return out;
   }
   /** @param {any} st */
@@ -314,6 +321,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "catalog") this.catalog(m);
     else if (m.type === "save") this.save(m);
     else if (m.type === "calibrate") this.calibrate(m);
+    else if (m.type === "history") this.history(m);
     /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
     else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
@@ -327,6 +335,24 @@ class EnvironmentControlPanel extends HTMLElement {
       this.post({ type: "result", req: m.req, ok: true, catalog });
     } catch {
       this.reply(m.req, false, "Home Assistant couldn't list its devices. Try again in a moment.");
+    }
+  }
+  /* A chart's readings: only a mapped sensor's own readings, over a range the panel draws. The backend checks both again
+     and buckets them, so a week of 10 second readings never reaches the frame. */
+  /** @param {any} m */
+  async history(m) {
+    if (!Number.isInteger(m.req)) return;
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    const readings = this.readings();
+    if (!Array.isArray(m.entities) || !m.entities.length || m.entities.length > 24 || !m.entities.every((/** @type {unknown} */ e) => typeof e === "string" && readings.has(e)))
+      return refuse("History is only for the readings of a sensor in a zone.");
+    if (!HISTORY_HOURS.includes(m.hours) || !Number.isInteger(m.buckets) || m.buckets < 12 || m.buckets > 1000) return refuse("That isn't a range this panel draws.");
+    try {
+      const history = await this._hass.connection.sendMessagePromise({ type: "environment_control/history", entities: m.entities, hours: m.hours, buckets: m.buckets });
+      this.post({ type: "result", req: m.req, ok: true, history });
+    } catch (err) {
+      refuse(String((err && /** @type {any} */ (err).message) || err));
     }
   }
   /** @param {unknown} req @param {boolean} ok @param {string} [error] */
