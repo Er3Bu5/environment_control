@@ -7,10 +7,11 @@
 import type { Catalog, CatalogDevice, CatalogEntity, LinkKind, PathKind } from "./messages";
 import type { RawConfig } from "./model";
 
-export const SLOTS = ["temperature", "humidity", "vpd", "light", "leaf"] as const;
+/* The readings a sensor gives the zone. A sensor's leaf temperature offset is Sensor Calibration's, not mapping's: a
+   mapping leaves whatever is stored about it alone. */
+export const SLOTS = ["temperature", "humidity", "vpd", "light"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light", leaf: "Leaf temperature offset" };
-const REQUIRED: readonly Slot[] = ["temperature", "humidity"];
+export const SLOT_NAME: Record<Slot, string> = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD", light: "Light" };
 
 export const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"] as const;
 export type Role = (typeof ROLES)[number];
@@ -21,6 +22,7 @@ export type Method = keyof typeof METHODS;
 
 export interface Option {
   entity: string;
+  name: string;
   reading: string;
 }
 export interface SensorCandidate {
@@ -30,7 +32,10 @@ export interface SensorCandidate {
   family: string;
   link: LinkKind;
   path: PathKind;
+  /* What HA's device classes suggest for each reading. */
   slots: Record<Slot, Option[]>;
+  /* Every sensor on the device, so any of them can be put to any reading. */
+  all: Option[];
 }
 export interface ControlCandidate {
   entity: string;
@@ -43,12 +48,19 @@ export interface ControlCandidate {
   detected: Role | "";
 }
 
-const CELSIUS = ["°C", "℃"];
-const reading = (e: CatalogEntity) => (e.state === null ? "no reading" : e.unit ? `${e.state} ${e.unit}` : e.state);
+/* A reading as a person would say it: rounded to what the size of the number deserves. */
+function reading(e: CatalogEntity): string {
+  if (e.state === null || e.state === "unknown" || e.state === "unavailable") return e.state ?? "no reading";
+  const x = Number(e.state);
+  const value = Number.isFinite(x) && e.state.trim() !== ""
+    ? new Intl.NumberFormat(undefined, { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : Math.abs(x) >= 10 ? 1 : 2 }).format(x)
+    : e.state;
+  return e.unit ? `${value} ${e.unit}` : value;
+}
+const option = (e: CatalogEntity): Option => ({ entity: e.entity_id, name: e.name, reading: reading(e) });
 
-/* Which slot an entity can fill, from HA's device class and unit. */
+/* Which reading HA's device class and unit suggest an entity for. A suggestion only: any sensor can be picked for any. */
 function slotOf(e: CatalogEntity): Slot | null {
-  if (e.domain === "number") return e.unit && CELSIUS.includes(e.unit) ? "leaf" : null;
   if (e.domain !== "sensor") return null;
   if (e.device_class === "temperature") return "temperature";
   if (e.device_class === "humidity") return "humidity";
@@ -67,16 +79,21 @@ function slotsOf(d: CatalogDevice): Record<Slot, Option[]> {
   }
   return Object.fromEntries(
     SLOTS.map((s) => {
-      const primary = out[s].filter((e) => e.category !== "diagnostic" || s === "leaf");
-      return [s, (primary.length ? primary : out[s]).map((e) => ({ entity: e.entity_id, reading: reading(e) }))];
+      const primary = out[s].filter((e) => e.category !== "diagnostic");
+      return [s, (primary.length ? primary : out[s]).map(option)];
     }),
   ) as Record<Slot, Option[]>;
 }
 
+/* A device counts as a sensor when HA suggests it for any reading. Its own diagnostics come last in its full list. */
 export function sensorCandidates(c: Catalog): SensorCandidate[] {
   return c.devices
-    .map((d) => ({ id: d.id, name: d.name, area: d.area, family: d.family, link: d.link, path: d.path, slots: slotsOf(d) }))
-    .filter((s) => s.slots.temperature.length || s.slots.humidity.length);
+    .map((d) => {
+      const sensors = d.entities.filter((e) => e.domain === "sensor");
+      const all = [...sensors.filter((e) => e.category !== "diagnostic"), ...sensors.filter((e) => e.category === "diagnostic")].map(option);
+      return { id: d.id, name: d.name, area: d.area, family: d.family, link: d.link, path: d.path, slots: slotsOf(d), all };
+    })
+    .filter((s) => SLOTS.some((k) => s.slots[k].length));
 }
 
 function detectedRole(e: CatalogEntity): Role | "" {
@@ -99,7 +116,7 @@ export function controlCandidates(c: Catalog): ControlCandidate[] {
   return out;
 }
 
-/* The draft. A slot holds an entity, "none" for not used, or "" while it waits for an answer. */
+/* The draft. A slot holds an entity, "none" for not used, or "" while it waits for an answer between several. */
 export interface MapDraft {
   zoneId: string;
   step: 1 | 2 | 3;
@@ -113,7 +130,7 @@ export interface MapDraft {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-/* A new pick takes the only candidate for each slot, leaves a slot with none unused, and waits on one with several. */
+/* A new pick takes the only suggestion for each reading, leaves one with none unused, and waits on one with several. */
 export function seedSlots(s: SensorCandidate): Record<Slot, string> {
   return Object.fromEntries(SLOTS.map((k) => [k, s.slots[k].length === 1 ? s.slots[k][0].entity : s.slots[k].length ? "" : "none"])) as Record<Slot, string>;
 }
@@ -125,9 +142,7 @@ export function openMap(c: RawConfig, zoneId: string): MapDraft {
   for (const s of Array.isArray(z.sensors) ? z.sensors.filter(isObj) : []) {
     const id = str(s.id), ents = isObj(s.entities) ? s.entities : {};
     if (!id) continue;
-    draft.sensors[id] = Object.fromEntries(
-      SLOTS.map((k) => [k, k === "leaf" ? (s.leafUnused || !s.leafEntity ? "none" : str(s.leafEntity)) : str(ents[k]) || "none"]),
-    ) as Record<Slot, string>;
+    draft.sensors[id] = Object.fromEntries(SLOTS.map((k) => [k, str(ents[k]) || "none"])) as Record<Slot, string>;
     if (s.avg === false) draft.avg[id] = false;
   }
   if (isObj(z.combine) && str(z.combine.env) in METHODS) draft.combine = z.combine.env as Method;
@@ -150,9 +165,7 @@ export function mapIssues(d: MapDraft, sensors: SensorCandidate[], controls: Con
   for (const id of picked) {
     const s = sensors.find((x) => x.id === id), slots = d.sensors[id], name = s?.name ?? "A sensor";
     for (const k of SLOTS) if (slots[k] === "") out.push({ text: `${name}: pick which ${SLOT_NAME[k]} entity to use.`, step: 1, target: sensorTarget(id) });
-    const missing = REQUIRED.filter((k) => slots[k] === "none");
-    if (missing.length)
-      out.push({ text: `${name}: an environment sensor needs ${missing.map((k) => SLOT_NAME[k].toLowerCase()).join(" and ")}. Pick ${missing.length > 1 ? "them" : "it"}, or leave this sensor out.`, step: 1, target: sensorTarget(id) });
+    if (SLOTS.every((k) => slots[k] === "none")) out.push({ text: `${name}: pick at least one reading, or leave this sensor out.`, step: 1, target: sensorTarget(id) });
   }
   if (!picked.length) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
   for (const [entity, role] of Object.entries(d.controls))
@@ -189,7 +202,7 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
   return out;
 }
 
-const slotWords = (k: Slot, v: string) => (v === "none" ? (k === "leaf" ? "Kept in Environment Control" : "Not used") : v || "Not picked");
+const slotWords = (_k: Slot, v: string) => (v === "none" ? "Not used" : v || "Not picked");
 
 function storedName(c: RawConfig, zoneId: string, id: string): string | undefined {
   const z = c.zones.find((x) => x.id === zoneId), s = Array.isArray(z?.sensors) ? z.sensors.filter(isObj).find((x) => x.id === id) : undefined;
@@ -211,18 +224,7 @@ export function applyMap(c: RawConfig, d: MapDraft, sensors: SensorCandidate[], 
     const had = before.find((x) => x.id === id), cand = sensors.find((x) => x.id === id);
     const entry: Record<string, unknown> = had ? { ...had } : { id, name: cand?.name ?? id, kind: "env", pos: null };
     if (cand) Object.assign(entry, { name: cand.name, family: cand.family, link: had?.linkSource === "confirmed" ? had.link : cand.link, linkSource: had?.linkSource === "confirmed" ? "confirmed" : "detected" });
-    entry.entities = Object.fromEntries((["temperature", "humidity", "vpd", "light"] as const).filter((k) => slots[k] && slots[k] !== "none").map((k) => [k, slots[k]]));
-    if (slots.leaf && slots.leaf !== "none") {
-      entry.leafEntity = slots.leaf;
-      entry.leafUnused = false;
-    } else {
-      /* Kept here from now on. One that was on the board starts from what the board last said; a new one starts at 0. */
-      const board = had && !had.leafUnused && typeof had.leafEntity === "string" ? cand?.slots.leaf.find((o) => o.entity === had.leafEntity) : undefined;
-      const fromBoard = board ? Number.parseFloat(board.reading) : NaN;
-      if (typeof had?.leaf !== "number" || board) entry.leaf = Number.isFinite(fromBoard) ? fromBoard : 0;
-      delete entry.leafEntity;
-      entry.leafUnused = true;
-    }
+    entry.entities = Object.fromEntries(SLOTS.filter((k) => slots[k] && slots[k] !== "none").map((k) => [k, slots[k]]));
     entry.avg = d.avg[id] !== false;
     return entry;
   });

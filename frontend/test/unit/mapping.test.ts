@@ -33,13 +33,18 @@ const catalog: Catalog = {
         ent("sensor.left_chip", { device_class: "temperature", unit: "°C", category: "diagnostic" }),
         ent("sensor.left_rh", { device_class: "humidity", unit: "%" }),
         ent("sensor.left_vpd", { unit: "kPa" }),
-        ent("sensor.left_lux", { device_class: "illuminance", unit: "lx" }),
+        ent("sensor.left_lux", { device_class: "illuminance", unit: "lx", state: "14849.5224609375" }),
+        ent("sensor.left_pressure", { device_class: "pressure", unit: "hPa", state: "1013.2" }),
         ent("number.left_offset", { unit: "°C", state: "-1.5", category: "config" }),
       ],
     },
     {
       id: "board2", name: "Two temps", area: null, manufacturer: null, model: null, integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
       entities: [ent("sensor.a_temp", { device_class: "temperature" }), ent("sensor.b_temp", { device_class: "temperature" }), ent("sensor.two_rh", { device_class: "humidity" })],
+    },
+    {
+      id: "soil", name: "Soil 1", area: "Garden", manufacturer: null, model: null, integration: "esphome", family: "ESPHome", link: "unknown", path: "local", hub: null,
+      entities: [ent("sensor.soil_temp", { device_class: "temperature", unit: "°C" }), ent("sensor.soil_vwc", { device_class: "moisture", unit: "%" }), ent("sensor.soil_ec", { unit: "mS/cm" })],
     },
     {
       id: "plug", name: "Heater plug", area: "Garden", manufacturer: null, model: null, integration: "tuya_local", family: "Tuya Local", link: "wifi", path: "local", hub: null,
@@ -59,9 +64,19 @@ describe("candidates", () => {
     expect(left.slots.temperature.map((o) => o.entity)).toEqual(["sensor.left_temp"]);
     expect(left.slots.vpd.map((o) => o.entity)).toEqual(["sensor.left_vpd"]);
     expect(left.slots.light.map((o) => o.entity)).toEqual(["sensor.left_lux"]);
-    expect(left.slots.leaf.map((o) => o.entity)).toEqual(["number.left_offset"]);
     expect(two.slots.temperature).toHaveLength(2);
-    expect(sensorCandidates(catalog).map((s) => s.id)).toEqual(["board1", "board2"]);
+    expect(sensorCandidates(catalog).map((s) => s.id)).toEqual(["board1", "board2", "soil"]);
+  });
+
+  it("keeps every sensor on the device for any reading, its own diagnostics last, and never a number", () => {
+    const left = sensorCandidates(catalog)[0];
+    expect(left.all.map((o) => o.entity)).toEqual(["sensor.left_temp", "sensor.left_rh", "sensor.left_vpd", "sensor.left_lux", "sensor.left_pressure", "sensor.left_chip"]);
+  });
+
+  it("rounds a reading to what its size deserves", () => {
+    const left = sensorCandidates(catalog)[0];
+    expect(left.slots.light[0].reading).toBe(`${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(14849.5224609375)} lx`);
+    expect(left.slots.temperature[0].reading).toBe(`${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(24.1)} °C`);
   });
 
   it("lists every switch, light, fan and humidifier, filling the role only where HA says what it is", () => {
@@ -80,8 +95,9 @@ describe("the draft", () => {
   const sensors = sensorCandidates(catalog), controls = controlCandidates(catalog);
 
   it("takes a single candidate, waits on several, and leaves a missing slot unused", () => {
-    expect(seedSlots(sensors[0])).toEqual({ temperature: "sensor.left_temp", humidity: "sensor.left_rh", vpd: "sensor.left_vpd", light: "sensor.left_lux", leaf: "number.left_offset" });
-    expect(seedSlots(sensors[1])).toMatchObject({ temperature: "", humidity: "sensor.two_rh", vpd: "none", light: "none", leaf: "none" });
+    expect(seedSlots(sensors[0])).toEqual({ temperature: "sensor.left_temp", humidity: "sensor.left_rh", vpd: "sensor.left_vpd", light: "sensor.left_lux" });
+    expect(seedSlots(sensors[1])).toEqual({ temperature: "", humidity: "sensor.two_rh", vpd: "none", light: "none" });
+    expect(seedSlots(sensors[2])).toEqual({ temperature: "sensor.soil_temp", humidity: "none", vpd: "none", light: "none" });
   });
 
   it("names every answer still owed, and needs at least one sensor", () => {
@@ -91,8 +107,10 @@ describe("the draft", () => {
     d.sensors.board2 = seedSlots(sensors[1]);
     d.controls["switch.heater_plug"] = "";
     expect(mapIssues(d, sensors, controls).map((i) => i.text)).toEqual(["Two temps: pick which Temperature entity to use.", "Heater plug: say what it is."]);
-    d.sensors.board2.humidity = "none";
-    expect(mapIssues(d, sensors).some((i) => i.text.includes("needs humidity"))).toBe(true);
+    d.sensors.board2 = { temperature: "none", humidity: "none", vpd: "none", light: "none" };
+    expect(mapIssues(d, sensors).map((i) => i.text)).toContain("Two temps: pick at least one reading, or leave this sensor out.");
+    d.sensors.board2.temperature = "sensor.two_rh";
+    expect(mapIssues(d, sensors).filter((i) => i.step === 1)).toEqual([]);
   });
 
   it("applies to a copy: sensors with their entities, devices with their role, and nothing else touched", () => {
@@ -109,7 +127,7 @@ describe("the draft", () => {
       {
         id: "board1", name: "Left board", kind: "env", pos: null, family: "ESPHome", link: "unknown", linkSource: "detected",
         entities: { temperature: "sensor.left_temp", humidity: "sensor.left_rh", vpd: "sensor.left_vpd", light: "sensor.left_lux" },
-        leafEntity: "number.left_offset", leafUnused: false, avg: true,
+        avg: true,
       },
     ]);
     expect(c.devices.map((x) => [x.id, x.entity, x.type, x.zones])).toEqual([
@@ -128,13 +146,14 @@ describe("the draft", () => {
     expect(mapChanges(openMap(c, "garden"), c, sensors, controls)).toEqual([]);
   });
 
-  it("keeps a board's offset going when it moves into Environment Control, starting from what the board said", () => {
-    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", name: "Left board", leafEntity: "number.left_offset", leafUnused: false, entities: { temperature: "sensor.left_temp", humidity: "sensor.left_rh" } }] }], []);
+  it("leaves a sensor's leaf temperature offset alone, which is Sensor Calibration's", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", name: "Left board", leafEntity: "number.left_offset", leafUnused: false, leaf: 0.5, entities: { temperature: "sensor.left_temp", humidity: "sensor.left_rh" } }] }], []);
     const d = openMap(c, "garden");
-    d.sensors.board1.leaf = "none";
+    d.sensors.board1.humidity = "sensor.left_pressure";
     applyMap(c, d, sensors, controls);
     const s = (c.zones[0].sensors as Record<string, unknown>[])[0];
-    expect([s.leafEntity, s.leafUnused, s.leaf]).toEqual([undefined, true, -1.5]);
+    expect([s.leafEntity, s.leafUnused, s.leaf]).toEqual(["number.left_offset", false, 0.5]);
+    expect(s.entities).toEqual({ temperature: "sensor.left_temp", humidity: "sensor.left_pressure" });
   });
 
   it("takes a device out of this zone only, and drops its entry once it is in no zone", () => {
