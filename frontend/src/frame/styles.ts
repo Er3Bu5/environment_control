@@ -72,6 +72,34 @@ export const styles = css`
   .look[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
   .look[aria-pressed="true"] svg { fill: var(--primary); }
 
+  .btn.danger { background: var(--crit); border-color: var(--crit); color: #FFFFFF; font-weight: 500; }
+  .fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
+  .fixlink:hover { text-decoration: underline; }
+  .fixlink[hidden] { display: none; }
+  .notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .fixgo { flex: none; font-weight: 500; color: var(--primary); }
+  .pill.ok { color: var(--ok); }
+
+  textarea { font: inherit; resize: vertical; }
+  .steps { display: flex; flex-wrap: wrap; gap: 4px 18px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
+  .steps li[aria-current="step"] { color: var(--primary); font-weight: 500; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); max-width: 440px; }
+  .field input, .field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
+  .field input[aria-invalid="true"] { border-color: var(--crit); }
+  .task[aria-current="step"] strong { color: var(--primary); }
+
+  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .dialog h2 { outline: none; }
+  .dialog .row { justify-content: flex-end; }
+  .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+  .review-list { flex: none; border: 1px solid var(--line); border-radius: 8px; }
+  .review-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 10px; font-size: 14px; }
+  .review-row + .review-row { border-top: 1px solid var(--line); }
+  .review-row strong { font-weight: 400; }
+  .review-row b { font-weight: 500; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
+
   ul { list-style: none; margin: 0; padding: 0; }
   li.device { padding: 10px 0; border-top: 1px solid var(--line); }
   .name { font-weight: 500; overflow-wrap: anywhere; }
