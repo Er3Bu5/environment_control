@@ -498,6 +498,118 @@ test.describe("after an update", () => {
   });
 });
 
+test.describe("zone layout and placement", () => {
+  type Zone = { id: string; layout: { w: number; d: number; units: number; rows: number; cols: number }; sensors: { id: string; pos: number[] | null; level?: string; kind?: string }[]; virtual?: { id: string; name: string; pos: number[] }[]; setup?: Record<string, string> };
+  type Stored = { revision: number; zones: Zone[]; devices: { id: string; place?: Record<string, number[]> }[] };
+  const stored = (page: Page) => page.evaluate<Stored>("JSON.parse(JSON.stringify(fakeHA.config))");
+  const dialog = (frame: Frame) => app(frame).getByRole("dialog");
+  const spot = (frame: Frame, name: string) => app(frame).locator(".map").getByRole("button", { name, exact: true }).first();
+  const finish = (frame: Frame) => app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
+
+  async function openFromMenu(page: Page, zone: string, item: "Zone layout" | "Placement"): Promise<Frame> {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: `Set up ${zone}` }).click();
+    await app(frame).getByRole("menuitem", { name: item }).click();
+    return frame;
+  }
+
+  test("Zone layout sets the size, the units and a suggested grid, through a review", async ({ page }) => {
+    const frame = await openFromMenu(page, "Veg", "Zone layout");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Zone layout: Veg" })).toBeVisible();
+    await app(frame).getByLabel("Width in metres").fill("2.4");
+    await finish(frame).click();
+    await app(frame).getByLabel("Units", { exact: true }).fill("8");
+    await expect(app(frame).getByText("This grid holds 4 units, and you have 8.")).toBeVisible();
+    await expect(finish(frame)).toBeDisabled();
+    await app(frame).getByRole("button", { name: "Suggest a grid" }).click();
+    await expect(finish(frame)).toBeEnabled();
+    await finish(frame).click();
+    await expect(dialog(frame)).toContainText("1.2 x 1.2 m");
+    await expect(dialog(frame)).toContainText("2.4 x 1.2 m");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg" })).toBeVisible();
+    const veg = (await stored(page)).zones.find((z) => z.id === "veg");
+    expect(veg?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
+  });
+
+  test("a grid that strands a placed sensor carries on to the map, and can't save until it's placed again", async ({ page }) => {
+    const frame = await openFromMenu(page, "Garden", "Zone layout");
+    await finish(frame).click();
+    await app(frame).getByLabel("Units", { exact: true }).fill("4");
+    await app(frame).getByRole("button", { name: "Fewer rows" }).click();
+    for (let i = 0; i < 2; i++) await app(frame).getByRole("button", { name: "Fewer columns" }).click();
+    await expect(app(frame).locator(".steps")).toContainText("3. Sensors and devices");
+    await expect(app(frame).getByText(/no longer fits?/).first()).toBeVisible();
+    await finish(frame).click();
+    await expect(app(frame).getByRole("button", { name: "Review and apply" })).toBeDisabled();
+    const fix = app(frame).getByRole("button", { name: /^Place .* to save ›$/ });
+    await expect(fix).toBeVisible();
+    await spot(frame, "Unit 4").click();
+    await expect(app(frame).getByRole("button", { name: "Review and apply" })).toBeEnabled();
+  });
+
+  test("a soil probe goes only in a unit, an air sensor anywhere inside at a height, a device or virtual device outside too", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).getByRole("button", { name: "Placement", exact: true })).toBeDisabled();
+    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    const row = (name: string) => app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: name }) });
+    await row("Environment board").getByRole("button").first().click();
+    await row("Soil 1").getByRole("button").first().click();
+    await row("Soil 1").getByLabel("Soil 1 Substrate Normalised VWC, 85.4 %").check();
+    await row("Soil 1").getByLabel("Soil 1 Substrate Pore Water EC, 2.54 mS/cm").check();
+    for (let i = 0; i < 3; i++) await finish(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await app(frame).getByRole("button", { name: "Placement", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Placement: Flower tent" })).toBeVisible();
+
+    await app(frame).locator(".sensor-opt", { hasText: "Soil 1" }).click();
+    await expect(app(frame).getByText("Tap the unit Soil 1 is in.")).toBeVisible();
+    await expect(app(frame).locator(".map").getByRole("button", { name: /^Aisle/ })).toHaveCount(0);
+    await expect(app(frame).locator(".map").getByRole("button", { name: /^Unit \d$/ })).toHaveCount(4);
+    await spot(frame, "Unit 1").click();
+    await expect(app(frame).getByText("Always at substrate height")).toBeVisible();
+
+    await app(frame).locator(".sensor-opt", { hasText: "Environment board" }).click();
+    await expect(app(frame).locator(".map").getByRole("button", { name: /^Outside the wall/ })).toHaveCount(0);
+    await spot(frame, "Aisle between rows 1 and 2").click();
+    await app(frame).getByLabel("In canopy").check();
+
+    await app(frame).getByLabel("Add a virtual device").fill("Drain tank");
+    await app(frame).getByRole("button", { name: "Add", exact: true }).click();
+    await spot(frame, "Outside the wall, by unit 1").click();
+
+    await finish(frame).click();
+    await expect(dialog(frame)).toContainText("Soil 1 position");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
+    expect(z?.setup?.place).toBe("done");
+    expect(z?.sensors.map((x) => [x.id, x.kind, x.pos, x.level ?? null])).toEqual([
+      ["d-board", "env", [0.5, 0], "in"],
+      ["d-soil", "soil", [0, 0], null],
+    ]);
+    expect(z?.virtual).toEqual([{ id: "v-drain_tank", name: "Drain tank", pos: [-1, -1] }]);
+  });
+
+  test("a zone's page shows its map, and names devices that aren't on it", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Garden").click();
+    const map = app(frame).getByRole("group", { name: "Units, sensors and devices in Garden" });
+    await expect(map).toBeVisible();
+    await expect(map.getByRole("img", { name: /^Environment left, / })).toHaveCount(1);
+    await expect(app(frame).getByRole("button", { name: "Place devices ›" })).toHaveCount(await app(frame).getByText(/on the map: /).count());
+  });
+});
+
 test.describe("narrow window", () => {
   test("with HA's sidebar hidden, the menu button opens it, and only then is there one", async ({ page }) => {
     await page.goto(`${PAGE}?narrow=1`);

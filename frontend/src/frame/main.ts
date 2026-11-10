@@ -67,6 +67,31 @@ import {
   sensorCandidates,
   sensorTarget,
 } from "./mapping";
+import {
+  type Item,
+  type LayoutDraft,
+  LEVELS,
+  type Level,
+  type Spot,
+  addVirtual,
+  applyLayout,
+  devsOff,
+  firstToPlace,
+  fits,
+  flowOf,
+  itemOf,
+  layoutChanges,
+  layoutIssues,
+  onMapOnly,
+  openLayout,
+  posText,
+  storedLayout,
+  stranded,
+  suggestGrid,
+  zoneItems,
+  MAX_GRID,
+} from "./layout";
+import { keyView, look, mapView, mk } from "./map-view";
 import { PALETTES, styles } from "./styles";
 
 declare const __VERSION__: string;
@@ -108,7 +133,7 @@ interface Review {
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
-const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices"]);
+const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place"]);
 
 const APPEARANCES: [Appearance, "home" | "sun" | "moon", string][] = [
   ["ha", "home", "Home Assistant"],
@@ -146,6 +171,7 @@ export class EcApp extends LitElement {
     zoneId: { state: true },
     wiz: { state: true },
     mapw: { state: true },
+    lay: { state: true },
     moreOpen: { state: true },
     guide: { state: true },
     modal: { state: true },
@@ -163,6 +189,8 @@ export class EcApp extends LitElement {
   declare private zoneId: string | null;
   declare private wiz: Wizard | null;
   declare private mapw: MapDraft | null;
+  declare private lay: LayoutDraft | null;
+  private layFromGuide = false;
   declare private moreOpen: Set<string>;
   private mapFromGuide = false;
   declare private guide: string | null;
@@ -187,6 +215,7 @@ export class EcApp extends LitElement {
     this.zoneId = null;
     this.wiz = null;
     this.mapw = null;
+    this.lay = null;
     this.moreOpen = new Set();
     this.guide = null;
     this.modal = null;
@@ -249,6 +278,7 @@ export class EcApp extends LitElement {
     if (this.guide && !this.zoneById(this.guide)) this.guide = null;
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
+    if (this.lay && !this.zoneById(this.lay.zoneId)) this.lay = null;
   };
 
   private askCatalog = async (): Promise<void> => {
@@ -311,6 +341,7 @@ export class EcApp extends LitElement {
   private get draftCount(): number {
     if (this.wiz) return this.wizChanges(this.wiz).length;
     if (this.mapw) return this.mapChangeList(this.mapw).length;
+    if (this.lay) return layoutChanges(this.lay, this.config).length;
     return 0;
   }
 
@@ -337,7 +368,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void): void {
     const n = this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || "this zone";
+    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -359,6 +390,7 @@ export class EcApp extends LitElement {
     this.guarded(() => {
       this.wiz = null;
       this.mapw = null;
+      this.lay = null;
       this.guide = null;
       this.go(screen, zoneId);
     });
@@ -391,6 +423,7 @@ export class EcApp extends LitElement {
     this.guarded(() => {
       this.guide = null;
       this.mapw = null;
+      this.lay = null;
       this.wiz = { id: null, name: "", desc: "", fromGuide: false };
       this.go("setup");
     });
@@ -471,6 +504,7 @@ export class EcApp extends LitElement {
     this.guarded(() => {
       this.wiz = null;
       this.mapw = null;
+      this.lay = null;
       this.guide = id;
       this.go("setup");
     });
@@ -480,6 +514,7 @@ export class EcApp extends LitElement {
   private openMapDevices(id: string, fromGuide = false): void {
     this.guarded(() => {
       this.wiz = null;
+      this.lay = null;
       this.menu = null;
       this.mapw = openMap(this.config, id);
       this.mapFromGuide = fromGuide;
@@ -588,6 +623,102 @@ export class EcApp extends LitElement {
     this.toast(r.ok ? "Saved." : `Not saved. ${r.error ?? ""}`.trim());
   }
 
+  /* Zone layout and Placement: one wizard opened at different steps, as the mock has it. Zone layout is size then units,
+     and carries on to the map when the new grid strands something; Placement is the map. */
+  private openLayoutWizard(id: string, flow: (1 | 2 | 3)[], fromGuide = false): void {
+    this.guarded(() => {
+      this.wiz = null;
+      this.mapw = null;
+      this.menu = null;
+      this.lay = openLayout(this.config, id, flow);
+      this.layFromGuide = fromGuide;
+      this.go("setup");
+    });
+  }
+
+  private setLay(change: (d: LayoutDraft) => void): void {
+    if (!this.lay) return;
+    const d = structuredClone(this.lay);
+    change(d);
+    this.lay = d;
+  }
+
+  private layItems(d: LayoutDraft): Item[] {
+    return [...d.sensors, ...d.devs, ...d.virt];
+  }
+
+  /* The list can be long, so a pick brings the map into view for the tap that places it. */
+  private pickItem(id: string): void {
+    this.setLay((d) => (d.pick = id));
+    void this.updateComplete.then(() => this.shadowRoot?.querySelector(".map")?.scrollIntoView({ block: "nearest" }));
+  }
+
+  private placeAt(p: Spot): void {
+    this.setLay((d) => {
+      const s = itemOf(d, d.pick);
+      if (s) s.pos = [p[0], p[1]];
+    });
+  }
+
+  private layBack = (): void => {
+    const d = this.lay;
+    if (!d) return;
+    const flow = flowOf(d), at = flow.indexOf(d.step);
+    if (at > 0) {
+      this.setLay((x) => (x.step = flow[at - 1]));
+      window.scrollTo(0, 0);
+      return;
+    }
+    this.guarded(() => {
+      this.lay = null;
+    });
+  };
+
+  private layDone(zoneId: string): void {
+    this.lay = null;
+    if (this.layFromGuide) this.guide = zoneId;
+    else this.go("zone", zoneId);
+  }
+
+  private layNext = (): void => {
+    const d = this.lay;
+    if (!d) return;
+    const flow = flowOf(d), at = flow.indexOf(d.step);
+    if (at < flow.length - 1) {
+      this.setLay((x) => {
+        x.step = flow[at + 1];
+        if (x.step === 3) x.pick = firstToPlace(x);
+      });
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (layoutIssues(d).length || (d.step === 3 && stranded(d).length)) return;
+    const step: SetupStep = d.flow[0] === 3 ? "place" : "layout";
+    const changes = layoutChanges(d, this.config);
+    if (!changes.length) {
+      void this.mark(d.zoneId, step, "done");
+      this.layDone(d.zoneId);
+      return;
+    }
+    const left = devsOff(d);
+    this.modal = {
+      kind: "review",
+      changes,
+      note: `${left.length ? `Not on the map: ${left.map((x) => x.name).join(", ")}. Placing a device is optional. ` : ""}This only changes Environment Control. Nothing in Home Assistant changes.`,
+      busy: false,
+      error: "",
+      apply: () =>
+        this.save((c) => {
+          applyLayout(c, d);
+          markStep(c, d.zoneId, step, "done");
+        }),
+      after: () => {
+        this.toast(step === "place" ? "Placement saved." : "Zone layout saved.");
+        this.layDone(d.zoneId);
+      },
+    };
+  };
+
   private askRemove(id: string): void {
     const z = this.zoneById(id);
     if (!z) return;
@@ -671,15 +802,33 @@ export class EcApp extends LitElement {
         (z) => html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>
           <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
           ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing}
-          <p class="small muted">${this.zoneCounts(z)}</p>
+          <p class="small muted">${this.zoneCounts(z)} Readings arrive in a later release.</p>
         </button>`,
       )}
     </div>`;
   }
 
+  /* The zone's map as it's placed: sensors, placed devices and virtual devices. A device not placed is named, with a link
+     to Placement, since placing one is optional and only placed ones show. */
+  private zoneMap(z: Zone) {
+    const c = this.config, L = storedLayout(c.zones.find((x) => x.id === z.id)), items = zoneItems(c, z.id);
+    const shown = [...items.sensors, ...items.devs.filter((x) => x.pos), ...items.virt];
+    const left = items.devs.filter((x) => !x.pos);
+    return html`<section class="card">
+      <h2>Map</h2>
+      ${mapView(L, { items: shown, label: `Units, sensors and devices in ${z.name}` })} ${keyView}
+      ${left.length
+        ? html`<p class="small muted">
+            ${plural(left.length, "device")} ${left.length > 1 ? "aren't" : "isn't"} on the map: ${left.map((x) => x.name).join(", ")}. They don't need to be, but only placed devices show
+            here. <button class="fixlink" @click=${() => this.openLayoutWizard(z.id, [3])}>Place devices &rsaquo;</button>
+          </p>`
+        : nothing}
+    </section>`;
+  }
+
   private zoneCounts(z: Zone): string {
     const devices = this.devices.filter((d) => d.zones.includes(z.id)).length;
-    return `${plural(z.sensors.length, "sensor")}, ${plural(devices, "device")}. Readings arrive in a later release.`;
+    return `${plural(z.sensors.length, "sensor")}, ${plural(devices, "device")}.`;
   }
 
   private zone() {
@@ -692,7 +841,8 @@ export class EcApp extends LitElement {
             <span>Not set up yet. Still to confirm: ${left.map((k) => STEP_TITLE[k]).join(", ")}.</span><span class="fixgo">Continue setup &rsaquo;</span>
           </button>`
         : nothing}
-      <section class="card"><p class="muted">${this.zoneCounts(z)} Its map, readings, charts and controls arrive in the releases that follow.</p></section>`;
+      ${this.zoneMap(z)}
+      <section class="card"><p class="muted">${this.zoneCounts(z)} Readings, charts and controls arrive in the releases that follow.</p></section>`;
   }
 
   private entityRow(e: CatalogEntity) {
@@ -781,10 +931,24 @@ export class EcApp extends LitElement {
       </section>`;
   }
 
+  /* A step that can't be done yet says why rather than offering a button that does nothing. */
+  private stepBlocked(z: Zone, k: SetupStep): string {
+    if (k !== "place") return "";
+    const items = zoneItems(this.config, z.id);
+    return items.sensors.length || items.devs.length || items.virt.length ? "" : "Needs sensors from Map devices";
+  }
+
+  private openStep(id: string, k: SetupStep): void {
+    if (k === "details") this.openDetails(id, true);
+    else if (k === "devices") this.openMapDevices(id, true);
+    else if (k === "layout") this.openLayoutWizard(id, [1, 2], true);
+    else if (k === "place") this.openLayoutWizard(id, [3], true);
+  }
+
   private guideScreen(id: string) {
     const z = this.zoneById(id);
     if (!z) return nothing;
-    const next = SETUP_STEPS.find((k) => BUILT.has(k) && z.setup[k] !== "done");
+    const next = SETUP_STEPS.find((k) => BUILT.has(k) && z.setup[k] !== "done" && !this.stepBlocked(z, k));
     return html`<div>
         <h1>Set up ${z.name}</h1>
         <p class="muted small">
@@ -795,15 +959,23 @@ export class EcApp extends LitElement {
       <section class="card">
         <div>
           ${SETUP_STEPS.map((k, i) => {
-            const state = z.setup[k], built = BUILT.has(k);
+            const state = z.setup[k], built = BUILT.has(k), blocked = built && this.stepBlocked(z, k);
             const pill =
-              state === "done" ? html`<span class="pill ok">Done</span>` : !built ? html`<span class="pill dashed">In a later release</span>` : state === "later" ? html`<span class="pill plain">Later</span>` : nothing;
+              state === "done"
+                ? html`<span class="pill ok">Done</span>`
+                : !built
+                  ? html`<span class="pill dashed">In a later release</span>`
+                  : blocked
+                    ? html`<span class="pill dashed">${blocked}</span>`
+                    : state === "later"
+                      ? html`<span class="pill plain">Later</span>`
+                      : nothing;
             return html`<div class="task" id="g-${k}" aria-current=${k === next ? "step" : nothing}>
               <div><strong>${i + 1}. ${STEP_TITLE[k]}</strong><p class="small muted">${STEP_TEXT[k]}</p></div>
               <div class="row">
                 ${pill}
                 ${built
-                  ? html`<button class="btn ${k === next ? "primary" : ""}" @click=${() => (k === "details" ? this.openDetails(z.id, true) : this.openMapDevices(z.id, true))}>${STEP_TITLE[k]}</button>`
+                  ? html`<button class="btn ${k === next ? "primary" : ""}" ?disabled=${!!blocked} @click=${() => this.openStep(z.id, k)}>${STEP_TITLE[k]}</button>`
                   : nothing}
                 ${built && state === "todo" ? html`<button class="btn" @click=${() => this.mark(z.id, k, "later")}>Later</button>` : nothing}
               </div>
@@ -1051,6 +1223,154 @@ export class EcApp extends LitElement {
     </section>`;
   }
 
+  private number(id: string, label: string, value: number, attrs: { min: number; max: number; step: number }, set: (v: number) => void) {
+    return html`<label class="field" for=${id}
+      >${label}<input
+        id=${id}
+        type="number"
+        inputmode="decimal"
+        min=${attrs.min}
+        max=${attrs.max}
+        step=${attrs.step}
+        .value=${Number.isFinite(value) ? String(value) : ""}
+        @input=${(e: Event) => set(Number.parseFloat((e.target as HTMLInputElement).value))}
+    /></label>`;
+  }
+
+  private layWizard(d: LayoutDraft) {
+    const z = this.zoneById(d.zoneId);
+    if (!z) return nothing;
+    const flow = flowOf(d), at = flow.indexOf(d.step), last = at === flow.length - 1;
+    const NAMES = { 1: "Size", 2: "Units", 3: "Sensors and devices" } as const;
+    const steps = flow.length > 1 ? html`<ol class="steps">${flow.map((n, i) => html`<li aria-current=${i === at ? "step" : nothing}>${i + 1}. ${NAMES[n]}</li>`)}</ol>` : nothing;
+    const issues = layoutIssues(d), lost = stranded(d), changes = last ? layoutChanges(d, this.config).length : 0;
+    let body: unknown = nothing;
+    if (d.step === 1)
+      body = html`<p class="muted">Measure the inside of the zone.</p>
+        <div class="fields">
+          ${this.number("lay-w", "Width in metres", d.w, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => (x.w = v)))}
+          ${this.number("lay-d", "Depth in metres", d.d, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => (x.d = v)))}
+        </div>`;
+    if (d.step === 2) {
+      const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
+      const lostSensors = lost.filter((s) => s.pos && s.kind !== "virtual"), lostVirt = lost.filter((s) => s.pos && s.kind === "virtual");
+      const movedOff = d.devs.filter((x) => x.pos && !fits(x, L));
+      const notice = (list: Item[], what: string, then: string) =>
+        list.length
+          ? html`<div class="notice"><strong>${plural(list.length, what)} no longer ${list.length > 1 ? "fit" : "fits"}</strong><span>${list.map((x) => x.name).join(", ")}. ${then}</span></div>`
+          : nothing;
+      const stepper = (key: "rows" | "cols", label: string) => html`<span class="small muted">${label}</span>
+        <span class="stepper"
+          ><button aria-label="Fewer ${label.toLowerCase()}" @click=${() => this.setLay((x) => (x[key] = Math.max(1, x[key] - 1)))}>-</button><span>${d[key]}</span
+          ><button aria-label="More ${label.toLowerCase()}" @click=${() => this.setLay((x) => (x[key] = Math.min(MAX_GRID, x[key] + 1)))}>+</button></span
+        >`;
+      body = html`<div class="fields">${this.number("lay-u", "Units", d.units, { min: 1, max: 200, step: 1 }, (v) => this.setLay((x) => (x.units = v)))}</div>
+        <div class="row">
+          ${stepper("rows", "Rows")}${stepper("cols", "Columns")}
+          <button class="btn" ?disabled=${!(d.units >= 1)} @click=${() => this.setLay((x) => ([x.rows, x.cols] = suggestGrid(Math.round(x.units), x.w, x.d)))}>Suggest a grid</button>
+        </div>
+        ${Number.isFinite(d.w) && d.rows && d.cols ? html`<p class="small muted">Each circle is one unit. Units sit about ${(d.w / d.cols).toFixed(2)} x ${(d.d / d.rows).toFixed(2)} m apart.</p>` : nothing}
+        ${d.units >= 1 && d.units <= 200 ? mapView(L, { items: [], label: `${plural(d.units, "unit")} in ${plural(d.rows, "row")}` }) : nothing}
+        ${issues.map((i) => html`<div class="notice"><span>${i}</span></div>`)}
+        ${notice(lostSensors, "sensor", `You'll place ${lostSensors.length > 1 ? "them" : "it"} again in the next step.`)}
+        ${notice(lostVirt, "virtual device", `You'll place ${lostVirt.length > 1 ? "them" : "it"} again in the next step.`)}
+        ${notice(movedOff, "device", `${movedOff.length > 1 ? "They come" : "It comes"} off the map unless you place ${movedOff.length > 1 ? "them" : "it"} again in the next step.`)}`;
+    }
+    if (d.step === 3) body = this.placement(d, z);
+    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && lost.length > 0);
+    const title = { 1: "Zone layout", 3: "Placement" }[d.flow[0] === 3 ? 3 : 1];
+    return html`<div><h1>${title}: ${z.name}</h1></div>
+      <section class="card">
+        ${steps}${body}
+        <div class="row">
+          <button class="btn" @click=${this.layBack}>${at === 0 ? "Cancel" : "Back"}</button>
+          <button class="btn primary" ?disabled=${blocked} @click=${this.layNext}>${last ? (changes ? "Review and apply" : "Finish") : "Next"}</button>
+          ${d.step === 3 && lost.length ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>` : nothing}
+        </div>
+      </section>`;
+  }
+
+  private placement(d: LayoutDraft, z: Zone) {
+    const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
+    const sel = itemOf(d, d.pick) ?? null;
+    const where = (s: Item, missing: unknown) => (fits(s, L) ? html`<span class="small muted">${posText(s.pos as Spot, L)}</span>` : missing);
+    const opt = (s: Item, missing: unknown) => html`<button class="sensor-opt" aria-pressed=${d.pick === s.id ? "true" : "false"} @click=${() => this.pickItem(s.id)}>
+      <span class="opt-name">${mk(look(s))}${s.name}</span>${where(s, missing)}
+    </button>`;
+    const needs = html`<span class="pill high">Needs placing</span>`;
+    const prompt = !sel
+      ? "Pick a sensor or device."
+      : sel.kind === "soil"
+        ? `Tap the unit ${sel.name} is in.`
+        : onMapOnly(sel.kind)
+          ? `Tap a unit or any +, inside the wall or outside it, for ${sel.name}.`
+          : `Tap a unit or any + inside the wall for ${sel.name}.`;
+    const left = devsOff(d);
+    return html`${d.sensors.length
+        ? html`<div class="small muted">Sensors</div>
+            <div class="sensor-list">${d.sensors.map((s) => opt(s, needs))}</div>`
+        : html`<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${z.name}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
+      ${d.devs.length
+        ? html`<div class="small muted">Devices, optional</div>
+            <div class="sensor-list">${d.devs.map((x) => opt(x, html`<span class="pill plain">Not placed</span>`))}</div>`
+        : nothing}
+      <div class="small muted">Virtual devices, not in Home Assistant</div>
+      ${d.virt.length ? html`<div class="sensor-list">${d.virt.map((v) => opt(v, needs))}</div>` : nothing}
+      <p class="small muted">Something worth seeing on the map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
+      <div class="row">
+        <label class="field" for="lay-vname"
+          >Add a virtual device<input
+            id="lay-vname"
+            type="text"
+            maxlength="40"
+            enterkeyhint="done"
+            autocomplete="off"
+            placeholder="For example Drain tank"
+            .value=${d.vname}
+            @input=${(e: Event) => this.setLay((x) => (x.vname = (e.target as HTMLInputElement).value))}
+            @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.setLay(addVirtual)}
+        /></label>
+        <button class="btn" @click=${() => this.setLay(addVirtual)}>Add</button>
+      </div>
+      ${d.vissue ? html`<p class="small" role="status">${d.vissue}</p>` : nothing}
+      <div class="now"><strong>${prompt}</strong></div>
+      ${mapView(L, {
+        items: this.layItems(d),
+        picked: d.pick,
+        placing: sel,
+        onSpot: (p) => this.placeAt(p),
+        onPick: (id) => this.pickItem(id),
+        outer: true,
+        label: sel ? `Places for ${sel.name}` : "Places for a sensor or device",
+      })}
+      ${sel?.kind === "env"
+        ? html`<div class="now">
+            ${this.chips(
+              `Height of ${sel.name}`,
+              `level-${sel.id}`,
+              (Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: LEVELS[k] })),
+              sel.level ?? "",
+              (v) => this.setLay((x) => {
+                const s = itemOf(x, sel.id);
+                if (s) s.level = v as Level;
+              }),
+            )}
+          </div>`
+        : sel?.kind === "soil"
+          ? html`<div class="now"><strong>Height</strong><span class="small muted">Always at substrate height</span></div>`
+          : nothing}
+      ${sel?.kind === "device" && fits(sel, L)
+        ? html`<div class="now"><strong>On the map</strong><button class="btn" @click=${() => this.setLay((x) => { const s = itemOf(x, sel.id); if (s) s.pos = null; })}>Take ${sel.name} off the map</button></div>`
+        : nothing}
+      ${sel?.kind === "virtual"
+        ? html`<div class="now"><strong>Virtual device</strong><button class="btn" @click=${() => this.setLay((x) => { x.virt = x.virt.filter((v) => v.id !== sel.id); x.pick = null; })}>Remove ${sel.name}</button></div>`
+        : nothing}
+      ${keyView}
+      ${left.length
+        ? html`<div class="notice"><strong>${plural(left.length, "device")} ${left.length > 1 ? "aren't" : "isn't"} on the map</strong><span>${left.map((x) => x.name).join(", ")}. They don't need to be: placing a device is optional, and only placed devices show on ${z.name}'s map.</span></div>`
+        : nothing}`;
+  }
+
   private zoneRow(z: Zone) {
     const open = this.menu === z.id;
     return html`<div class="task">
@@ -1079,6 +1399,8 @@ export class EcApp extends LitElement {
           <div class="menu" id="zmenu-${z.id}" role="menu" ?hidden=${!open}>
             <button role="menuitem" @click=${() => this.openDetails(z.id)}>Zone details</button>
             <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Map devices</button>
+            <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [1, 2])}>Zone layout</button>
+            <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Placement</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -1095,6 +1417,7 @@ export class EcApp extends LitElement {
   private setup() {
     if (this.wiz) return this.wizard(this.wiz);
     if (this.mapw) return this.mapWizard(this.mapw);
+    if (this.lay) return this.layWizard(this.lay);
     if (this.guide) return this.guideScreen(this.guide);
     const appearance = this.theme?.appearance ?? "ha";
     return html`<div>
