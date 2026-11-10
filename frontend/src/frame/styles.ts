@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
 } as const;
 
 export const styles = css`
@@ -274,6 +274,41 @@ export const styles = css`
   .follow:has(input:checked) { border-color: var(--primary); }
   .follow > span:nth-of-type(1) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .now .sched-strip { flex: 1 1 160px; min-width: 120px; }
+
+  /* The zone's Day and Night limits, column under column. */
+  table.limits { table-layout: fixed; }
+  table.limits th:first-child { width: 30%; }
+  /* Targets: the VPD chart and its boxes, as the mock has them. The chart takes a finger's drag for itself. */
+  .tdlinks { display: grid; gap: 8px; }
+  .stepper { display: inline-flex; align-items: center; gap: 8px; }
+  .stepper[hidden] { display: none; }
+  .stepper button { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .vgrid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 1fr); gap: 14px; align-items: start; }
+  .vchart { touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  .vchart svg { max-height: none; }
+  .vchart svg text { font-size: 12px; }
+  .vmain, .vside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .seg.vtabs { display: flex; }
+  .vtabs button { flex: 1 1 auto; }
+  .vrow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); text-align: center; }
+  .vrow[data-on="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+  .vrow-name { grid-column: 1 / -1; padding: 0; border: 0; background: none; color: var(--fg); text-align: left; font-size: 13px; font-weight: 500; }
+  button.vrow-name { cursor: pointer; }
+  .vcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10px; color: var(--muted); }
+  .vcell input { width: 100%; min-width: 0; padding: 6px 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font-size: 14px; font-weight: 500; text-align: center; }
+  .vcell.vt input { color: var(--primary); }
+  .vcell .vdash { padding: 6px 2px; border: 1px dashed var(--line); border-radius: 6px; font-size: 14px; text-align: center; }
+  .vcell.vlast { grid-column: 5; }
+  .vrow[data-vrow="light"] .vcell { grid-row: 2; }
+  .vnote { grid-row: 2; grid-column: 2 / -1; align-self: center; margin: 0; padding: 0 4px; font-size: 11px; line-height: 1.35; color: var(--muted); text-align: left; }
+  .vnote.vleft { grid-column: 1 / 5; }
+  .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
+  .vcell input:disabled { opacity: .6; }
+  @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
+  @media (pointer: coarse) { .vcell input { font-size: 16px; } }
+  /* Room to scroll a typed box up above a phone's keyboard. */
+  :host(.revealing) main { padding-bottom: 70vh; }
 
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }

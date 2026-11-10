@@ -35,6 +35,9 @@ MAX_GRID = 20
 MAX_SIZE_M = 100
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
 PERIOD_MODES = ("helper", "fixed", "detected")
+# Limits as stored: wider than the panel lets you type, since a value read off a helper is kept here as last known.
+BAND_RANGE = {"temperature": (-50, 100), "humidity": (0, 100), "vpd": (0, 10)}
+MAX_LUX = 1_000_000
 DAY_RULES = ("any", "all")
 MINUTES_IN_DAY = 1440
 
@@ -75,6 +78,37 @@ def _on_off_ok(v: Any) -> bool:
     return v is None or (
         isinstance(v, list) and len(v) <= 20 and all(isinstance(e, str) and ON_OFF.match(e) for e in v)
     )
+
+
+def _check_limits(zid: str, z: dict[str, Any]) -> None:
+    """A zone's limits: day and night, each Min, Low, Target, High, Max per reading, and a light limit a period.
+
+    Only the Target may be missing, for a zone that aims for none. Their order isn't checked here: Min, Target and Max
+    can sit on helpers, whose values Home Assistant holds, and the panel won't apply an order that doesn't run upward.
+    """
+    bands = z.get("bands")
+    if bands is not None:
+        if not isinstance(bands, dict) or set(bands) != {"day", "night"}:
+            _fail(f"{zid} has limits that aren't day and night")
+        for period in bands.values():
+            if not isinstance(period, dict) or set(period) != set(BAND_RANGE):
+                _fail(f"{zid} has limits that aren't temperature, humidity and VPD")
+            for k, values in period.items():
+                lo, hi = BAND_RANGE[k]
+                if not isinstance(values, list) or len(values) != 5:
+                    _fail(f"{zid} has {k} limits that aren't Min, Low, Target, High and Max")
+                for i, v in enumerate(values):
+                    if v is None and i == 2:
+                        continue
+                    if not (_is_num(v) and lo <= v <= hi):
+                        _fail(f"{zid} has a {k} limit outside {lo} to {hi}")
+    light = z.get("lightLimits")
+    if light is not None and not (
+        isinstance(light, dict)
+        and set(light) <= {"dayMin", "nightMax"}
+        and all(_is_num(v) and 0 <= v <= MAX_LUX for v in light.values())
+    ):
+        _fail(f"{zid} has light limits that aren't a day minimum and a night maximum in lux")
 
 
 def _spot_ok(p: Any, layout: Any) -> bool:
@@ -209,6 +243,7 @@ def validate_config(c: Any) -> None:
         desc = z.get("description")
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
+        _check_limits(zid, z)
         basis = z.get("leafBasis")
         if basis is not None and not (isinstance(basis, str) and ITEM_ID.match(basis)):
             _fail(f"{zid} draws its VPD chart at an offset this panel doesn't know")

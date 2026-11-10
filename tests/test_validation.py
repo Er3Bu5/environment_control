@@ -78,6 +78,23 @@ CASES = {
         lambda c: c["zones"][0].update(emersonMode="fixed", emerson={"morning": 60, "daylight": 0, "evening": 0}),
         "0 to 59",
     ),
+    "limits for one period only": (lambda c: c["zones"][0]["bands"].pop("night"), "day and night"),
+    "limits missing a reading": (lambda c: c["zones"][0]["bands"]["day"].pop("vpd"), "temperature, humidity and VPD"),
+    "four limits where five go": (
+        lambda c: c["zones"][0]["bands"]["day"].update(temperature=[20, 22, 24, 26]),
+        "Min, Low, Target, High and Max",
+    ),
+    "a limit that isn't a number": (
+        lambda c: c["zones"][0]["bands"]["day"].update(humidity=[50, "60", 62, 65, 70]),
+        "humidity limit outside",
+    ),
+    "a missing Min": (lambda c: c["zones"][0]["bands"]["night"].update(vpd=[None, 0.8, 1, 1.1, 1.2]), "vpd limit"),
+    "a limit far outside": (
+        lambda c: c["zones"][0]["bands"]["day"].update(temperature=[20, 22, 24, 26, 500]),
+        "outside",
+    ),
+    "a light limit below nothing": (lambda c: c["zones"][0].update(lightLimits={"dayMin": -5}), "light limits"),
+    "a light limit that isn't one": (lambda c: c["zones"][0].update(lightLimits={"noon": 5}), "light limits"),
     "unknown day and night source": (lambda c: c["zones"][0].update(periodMode="sundial"), "day and night source"),
     "times from helpers without both linked": (
         lambda c: c["zones"][0].update(periodMode="helper", helpers={"day": "input_datetime.on"}),
@@ -166,4 +183,11 @@ def test_a_mapping_the_panel_makes_is_valid(sample_config) -> None:
         }
     )
     c["devices"].append({"id": "d-0a1b2c3d", "entity": "switch.spare_plug", "type": "Heater", "zones": ["garden"]})
+    validate_config(c)
+
+
+def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
+    c = _bad(
+        sample_config, lambda c: [v.__setitem__(2, None) for p in c["zones"][0]["bands"].values() for v in p.values()]
+    )
     validate_config(c)
