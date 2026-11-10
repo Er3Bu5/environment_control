@@ -59,14 +59,26 @@ export function spotsFor(kind: ItemKind, L: Layout): Spot[] {
   return out;
 }
 
-/* The grid closest to the zone's shape that holds every unit with the fewest empty spaces. */
+/* The grid closest to the zone's shape that holds every unit with the fewest empty spaces, never more than 20 either way. */
 export function suggestGrid(n: number, w: number, d: number): [number, number] {
-  let best: [number, number] = [1, n], score = Infinity;
-  for (let cols = 1; cols <= n; cols++) {
-    const rows = Math.ceil(n / cols), s = Math.abs(Math.log(cols / rows / (w / d))) + ((cols * rows - n) / n) * 2;
+  let best: [number, number] = [Math.ceil(n / MAX_GRID), MAX_GRID], score = Infinity;
+  for (let cols = 1; cols <= Math.min(n, MAX_GRID); cols++) {
+    const rows = Math.ceil(n / cols);
+    if (rows > MAX_GRID) continue;
+    const s = Math.abs(Math.log(cols / rows / (w / d))) + ((cols * rows - n) / n) * 2;
     if (s < score - 1e-9) [score, best] = [s, [rows, cols]];
   }
   return best;
+}
+
+/* A size or unit count typed in, as the mock takes it: clamped, ignored until it is a positive number, and the grid
+   suggested again straight away, so typing more units than the grid holds never leaves it too small. The steppers can
+   still change the grid after. */
+export function typed(d: Layout, key: "w" | "d" | "units", n: number): void {
+  if (!Number.isFinite(n) || n <= 0) return;
+  if (key === "units") d.units = Math.min(MAX_UNITS, Math.round(n));
+  else d[key] = Math.min(MAX_SIZE_M, n);
+  [d.rows, d.cols] = suggestGrid(d.units, d.w, d.d);
 }
 
 /* Spots are evenly spaced right out to the band beyond the wall, with the wall midway between the last two. A mark is an

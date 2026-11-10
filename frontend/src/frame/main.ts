@@ -88,6 +88,7 @@ import {
   storedLayout,
   stranded,
   suggestGrid,
+  typed,
   zoneItems,
   MAX_GRID,
 } from "./layout";
@@ -1248,8 +1249,8 @@ export class EcApp extends LitElement {
     if (d.step === 1)
       body = html`<p class="muted">Measure the inside of the zone.</p>
         <div class="fields">
-          ${this.number("lay-w", "Width in metres", d.w, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => (x.w = v)))}
-          ${this.number("lay-d", "Depth in metres", d.d, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => (x.d = v)))}
+          ${this.number("lay-w", "Width in metres", d.w, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => typed(x, "w", v)))}
+          ${this.number("lay-d", "Depth in metres", d.d, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => typed(x, "d", v)))}
         </div>`;
     if (d.step === 2) {
       const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
@@ -1264,7 +1265,7 @@ export class EcApp extends LitElement {
           ><button aria-label="Fewer ${label.toLowerCase()}" @click=${() => this.setLay((x) => (x[key] = Math.max(1, x[key] - 1)))}>-</button><span>${d[key]}</span
           ><button aria-label="More ${label.toLowerCase()}" @click=${() => this.setLay((x) => (x[key] = Math.min(MAX_GRID, x[key] + 1)))}>+</button></span
         >`;
-      body = html`<div class="fields">${this.number("lay-u", "Units", d.units, { min: 1, max: 200, step: 1 }, (v) => this.setLay((x) => (x.units = v)))}</div>
+      body = html`<div class="fields">${this.number("lay-u", "Units", d.units, { min: 1, max: 200, step: 1 }, (v) => this.setLay((x) => typed(x, "units", v)))}</div>
         <div class="row">
           ${stepper("rows", "Rows")}${stepper("cols", "Columns")}
           <button class="btn" ?disabled=${!(d.units >= 1)} @click=${() => this.setLay((x) => ([x.rows, x.cols] = suggestGrid(Math.round(x.units), x.w, x.d)))}>Suggest a grid</button>
