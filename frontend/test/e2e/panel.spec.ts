@@ -135,11 +135,11 @@ test.describe("talking to HA", () => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await tab(frame, "Veg").click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg", exact: true })).toBeVisible();
     await expect(tab(frame, "Veg")).toHaveAttribute("aria-current", "page");
     await tab(frame, "Overview").click();
     await app(frame).locator(".zone-card", { hasText: "Nursery" }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Nursery" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Nursery", exact: true })).toBeVisible();
   });
 
   test("after HA restarts, the panel reads what's stored again", async ({ page }) => {
@@ -199,7 +199,7 @@ test.describe("zones", () => {
     await expect(dialog(frame)).toContainText("Flower tent");
     await expect(dialog(frame)).toContainText("By the window");
     await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await expect(tab(frame, "Flower tent")).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.description).toBe("By the window");
@@ -241,7 +241,7 @@ test.describe("zones", () => {
     await app(frame).getByRole("button", { name: "Set up Veg tent" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByRole("button", { name: "Finish" }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     expect((await stored(page)).revision).toBe(revision);
   });
 
@@ -321,7 +321,7 @@ test.describe("map devices", () => {
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Map devices: Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Map devices: Flower tent", exact: true })).toBeVisible();
     return frame;
   }
 
@@ -410,7 +410,7 @@ test.describe("map devices", () => {
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await expect.poll(() => hostDialogOpen(page)).toBe(false);
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.devices).toBe("done");
     expect(z?.combine).toEqual({ env: "mean", soil: "mean" });
@@ -457,7 +457,7 @@ test.describe("map devices", () => {
     await next(frame).click();
     await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await tab(frame, "Setup").click();
     const questions = app(frame).locator("section", { hasText: "Questions for you" });
     const ask = questions.locator(".task", { hasText: "Environment board" });
@@ -478,7 +478,7 @@ test.describe("after an update", () => {
     await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
     await expect.poll(() => updatedBarButton(page)).not.toBeNull();
     await tab(frame, "Setup").click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     const button = await updatedBarButton(page);
     await Promise.all([page.waitForEvent("load"), page.mouse.click(button!.x, button!.y)]);
     expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBeUndefined();
@@ -517,7 +517,7 @@ test.describe("zone layout and placement", () => {
 
   test("Zone layout sets the size, the units and a suggested grid, through a review", async ({ page }) => {
     const frame = await openFromMenu(page, "Veg", "Zone layout");
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Zone layout: Veg" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Zone layout: Veg", exact: true })).toBeVisible();
     await app(frame).getByLabel("Width in metres").fill("2.4");
     await finish(frame).click();
     await app(frame).getByLabel("Units", { exact: true }).fill("8");
@@ -529,9 +529,8 @@ test.describe("zone layout and placement", () => {
     await expect(dialog(frame)).toContainText("1.2 x 1.2 m");
     await expect(dialog(frame)).toContainText("2.4 x 1.2 m");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg" })).toBeVisible();
-    const veg = (await stored(page)).zones.find((z) => z.id === "veg");
-    expect(veg?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Veg", exact: true })).toBeVisible();
+    await expect.poll(async () => (await stored(page)).zones.find((z) => z.id === "veg")?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
   });
 
   test("a grid that strands a placed sensor carries on to the map, and can't save until it's placed again", async ({ page }) => {
@@ -568,7 +567,7 @@ test.describe("zone layout and placement", () => {
     for (let i = 0; i < 3; i++) await finish(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
     await app(frame).getByRole("button", { name: "Placement", exact: true }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Placement: Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Placement: Flower tent", exact: true })).toBeVisible();
 
     await app(frame).locator(".sensor-opt", { hasText: "Soil 1" }).click();
     await expect(app(frame).getByText("Tap the unit Soil 1 is in.")).toBeVisible();
@@ -589,7 +588,7 @@ test.describe("zone layout and placement", () => {
     await finish(frame).click();
     await expect(dialog(frame)).toContainText("Soil 1 position");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
-    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent" })).toBeVisible();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.place).toBe("done");
     expect(z?.sensors.map((x) => [x.id, x.kind, x.pos, x.level ?? null])).toEqual([
