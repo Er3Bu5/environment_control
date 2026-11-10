@@ -38,6 +38,10 @@ CASES = {
         lambda c: c["zones"][0]["sensors"][0].update(entities={"door": "sensor.x"}),
         "isn't a sensor entity",
     ),
+    "sensor of a kind the panel doesn't know": (
+        lambda c: c["zones"][0]["sensors"][0].update(kind="radar"),
+        "kind of sensor",
+    ),
     "sensor id with odd characters": (
         lambda c: c["zones"][0]["sensors"][0].update(id="a b/c"),
         "id this panel can't use",
@@ -122,6 +126,20 @@ def test_a_mapping_the_panel_makes_is_valid(sample_config) -> None:
             "avg": True,
             "link": "unknown",
             "linkSource": "detected",
+        }
+    )
+    c["zones"][0]["sensors"].append(
+        {
+            "id": "soilprobe01",
+            "name": "Soil 1",
+            "kind": "soil",
+            "pos": None,
+            "entities": {
+                "moisture": "sensor.soil_1_vwc",
+                "ec": "sensor.soil_1_pore_water_ec",
+                "temperature": "sensor.soil_1_temp",
+            },
+            "avg": True,
         }
     )
     c["devices"].append({"id": "d-0a1b2c3d", "entity": "switch.spare_plug", "type": "Heater", "zones": ["garden"]})

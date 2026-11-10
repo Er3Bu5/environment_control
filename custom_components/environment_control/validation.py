@@ -22,7 +22,9 @@ NUMBER_ENTITY = re.compile(r"^number\.[a-z0-9_]{1,200}$")
 SENSOR_ENTITY = re.compile(r"^sensor\.[a-z0-9_]{1,200}$")
 # A sensor is an HA device id, a device entry an id the panel makes; both stay short and safe in an id or a URL.
 ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light"})
+# Environment readings, then a soil probe's; which a sensor may use follows its class.
+READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light", "moisture", "ec"})
+SENSOR_CLASSES = ("env", "soil")
 MAX_SENSORS_PER_ZONE = 50
 MAX_NAME = 100
 # Leaf temperature offsets kept here, as wide as any board allows and then some.
@@ -85,6 +87,8 @@ def _check_sensor(zid: str, x: Any) -> None:
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.match(x["id"]):
         _fail(f"{zid} has a sensor with an id this panel can't use")
     sid = x["id"]
+    if "kind" in x and x["kind"] not in SENSOR_CLASSES:
+        _fail(f"{sid} is a kind of sensor this panel doesn't know")
     name = x.get("name")
     if name is not None and (not isinstance(name, str) or len(name) > MAX_NAME):
         _fail(f"{sid} has a name that isn't short text")
