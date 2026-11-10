@@ -107,7 +107,6 @@ import {
   bandsOf,
   fmt,
   healthOf,
-  isDay,
   leafOf,
   numberOf,
   readSensor,
@@ -141,6 +140,34 @@ import {
   typeInto,
   zoneVpdAt,
 } from "./calibration";
+import {
+  EM_KEYS,
+  EM_LIMITS,
+  EM_MODES,
+  EM_NAME,
+  type EmMode,
+  PERIOD_MODES,
+  type PeriodMode,
+  type SchedDraft,
+  applySchedConfig,
+  dayLength,
+  emersonApplies,
+  emersonLine,
+  helperSends,
+  minuteHelpers,
+  onOffChoices,
+  openSched,
+  periodOf,
+  reports,
+  reseed,
+  schedChanges,
+  schedIssues,
+  sharing,
+  timeHelpers,
+  timesApply,
+  timesOf,
+  toMin,
+} from "./schedule";
 import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, periodRuns, sensorLine, tickWords, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
@@ -186,7 +213,7 @@ interface Review {
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
-const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate"]);
+const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate", "targets"]);
 
 const APPEARANCES: [Appearance, "home" | "sun" | "moon", string][] = [
   ["ha", "home", "Home Assistant"],
@@ -236,6 +263,7 @@ export class EcApp extends LitElement {
     mapw: { state: true },
     lay: { state: true },
     leafw: { state: true },
+    sched: { state: true },
     typing: { state: true },
     metric: { state: true },
     range: { state: true },
@@ -266,6 +294,9 @@ export class EcApp extends LitElement {
   declare private mapw: MapDraft | null;
   declare private lay: LayoutDraft | null;
   declare private leafw: LeafDraft | null;
+  declare private sched: SchedDraft | null;
+  private schedBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
+  private schedQ = { lights: "", red: "" };
   declare private typing: boolean;
   declare private metric: Metric;
   declare private range: number;
@@ -309,6 +340,7 @@ export class EcApp extends LitElement {
     this.mapw = null;
     this.lay = null;
     this.leafw = null;
+    this.sched = null;
     this.typing = false;
     this.metric = "temperature";
     this.range = 24;
@@ -401,6 +433,7 @@ export class EcApp extends LitElement {
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
     if (this.lay && !this.zoneById(this.lay.zoneId)) this.lay = null;
     if (this.leafw && !this.zoneById(this.leafw.zoneId)) this.leafw = null;
+    if (this.sched && !this.zoneById(this.sched.zoneId)) this.sched = null;
   };
 
   private askCatalog = async (): Promise<void> => {
@@ -411,6 +444,9 @@ export class EcApp extends LitElement {
     /* Sensor Calibration waits for this list, since it says which boards have somewhere to hold an offset. */
     const d = this.leafw;
     if (d && !d.seeded && this.catalog) this.leafw = { ...d, rows: seedRows(this.raw(d.zoneId), this.catalog, this.states), seeded: true };
+    /* Targets, day and night waits for it too: it says which helpers there are and what each holds. */
+    const s = this.sched;
+    if (s && !s.seeded && this.catalog) this.sched = openSched(this.raw(s.zoneId), s.zoneId, this.catalog, this.states, s.fromGuide);
   };
 
   /* On a touch screen the box being typed in sits just above the keyboard, which is where the draft bar would land. */
@@ -475,6 +511,7 @@ export class EcApp extends LitElement {
     if (this.mapw) return this.mapChangeList(this.mapw).length;
     if (this.lay) return layoutChanges(this.lay, this.config).length;
     if (this.leafw) return this.leafChangeList(this.leafw).length;
+    if (this.sched) return this.schedChangeList(this.sched).length;
     return 0;
   }
 
@@ -495,7 +532,7 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", held && !!this.leafw && this.screen === "setup");
+    this.classList.toggle("drafting", held && !!(this.leafw || this.sched) && this.screen === "setup");
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
@@ -516,7 +553,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void): void {
     const n = this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || "this zone";
+    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || (this.sched && this.zoneById(this.sched.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -541,6 +578,7 @@ export class EcApp extends LitElement {
       this.mapw = null;
       this.lay = null;
       this.leafw = null;
+      this.sched = null;
       this.guide = null;
       this.go(screen, zoneId);
     });
@@ -577,6 +615,7 @@ export class EcApp extends LitElement {
       this.mapw = null;
       this.lay = null;
       this.leafw = null;
+      this.sched = null;
       this.wiz = { id: null, name: "", desc: "", fromGuide: false };
       this.go("setup");
     });
@@ -661,6 +700,7 @@ export class EcApp extends LitElement {
       this.mapw = null;
       this.lay = null;
       this.leafw = null;
+      this.sched = null;
       this.guide = id;
       this.go("setup");
     });
@@ -672,6 +712,7 @@ export class EcApp extends LitElement {
       this.wiz = null;
       this.lay = null;
       this.leafw = null;
+      this.sched = null;
       this.menu = null;
       this.mapw = openMap(this.config, id);
       this.mapFromGuide = fromGuide;
@@ -787,6 +828,7 @@ export class EcApp extends LitElement {
       this.wiz = null;
       this.mapw = null;
       this.leafw = null;
+      this.sched = null;
       this.menu = null;
       this.lay = openLayout(this.config, id, flow);
       this.layFromGuide = fromGuide;
@@ -887,6 +929,7 @@ export class EcApp extends LitElement {
       this.lay = null;
       this.menu = null;
       this.guide = null;
+      this.sched = null;
       this.leafw = openLeaf(this.raw(id), id, this.catalog, this.states, fromGuide);
       this.leafBack = back;
       if (!this.catalog) void this.askCatalog();
@@ -1034,6 +1077,136 @@ export class EcApp extends LitElement {
       const v = numberOf(this.states[entity]);
       return v !== null && Math.abs(v - value) < 1e-6;
     };
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = setInterval(() => {
+        if (hit() || Date.now() - start > LEAF_GIVE_UP_MS) {
+          clearInterval(tick);
+          resolve(hit());
+        }
+      }, 100);
+    });
+  }
+
+  /* Targets, day and night: where a zone's times and red lights come from and what they are. A page edited freely, so
+     the draft bar rather than a last button. Its limits arrive with the next step, and the setup step is confirmed
+     then, so readings are never judged against limits still at 0. */
+  private openSchedule(id: string, fromGuide = false): void {
+    this.guarded(() => {
+      const back = { screen: this.screen, zoneId: this.zoneId };
+      this.wiz = null;
+      this.mapw = null;
+      this.lay = null;
+      this.leafw = null;
+      this.menu = null;
+      this.guide = null;
+      this.sched = openSched(this.raw(id), id, this.catalog, this.states, fromGuide);
+      this.schedBack = back;
+      this.schedQ = { lights: "", red: "" };
+      if (!this.catalog) void this.askCatalog();
+      this.go("setup");
+    });
+  }
+
+  private schedChangeList(d: SchedDraft) {
+    return d.seeded ? schedChanges(d, this.raw(d.zoneId), this.states, this.catalog) : [];
+  }
+
+  private setSched(change: (d: SchedDraft) => void): void {
+    if (!this.sched) return;
+    const d = structuredClone(this.sched);
+    change(d);
+    this.sched = d;
+  }
+
+  private schedDone(d: SchedDraft, applied: boolean): void {
+    this.sched = null;
+    if (d.fromGuide) this.guide = d.zoneId;
+    else if (applied) this.go("zone", d.zoneId);
+    else this.go(this.schedBack.screen, this.schedBack.zoneId);
+  }
+
+  private schedExit = (): void => {
+    const d = this.sched;
+    if (!d || d.sending) return;
+    this.guarded(() => this.schedDone(d, false));
+  };
+
+  private schedDiscard = (): void => {
+    const d = this.sched;
+    if (!d || d.sending) return;
+    this.sched = openSched(this.raw(d.zoneId), d.zoneId, this.catalog, this.states, d.fromGuide);
+  };
+
+  private schedReview = (): void => {
+    this.commitTyped();
+    const d = this.sched;
+    if (!d || d.sending) return;
+    const issues = schedIssues(d, this.states, this.catalog);
+    if (issues.length) return void this.jumpToTarget(issues[0].target);
+    const changes = this.schedChangeList(d);
+    if (!changes.length) return;
+    const z = this.zoneById(d.zoneId), others = sharing(this.config.zones, d.zoneId).map((o) => String(o.name ?? o.id));
+    const raw = this.raw(d.zoneId), onHelpers = changes.some((c) => c.kind === "helper");
+    const links = new Set(this.config.zones.flatMap((o) => Object.values((o.helpers ?? {}) as Record<string, unknown>).filter((e): e is string => typeof e === "string")));
+    const fresh = [d.period === "helper" ? [d.onHelper, d.offHelper] : [], d.em === "helper" ? EM_KEYS.map((k) => d.emHelpers[k]) : []].flat().some((e) => e && !links.has(e));
+    const t = timesOf(raw, this.states), moved = timesApply(d) && (!t || toMin(d.day) !== t.dayAt || toMin(d.night) !== t.nightAt);
+    const note = [
+      moved && t ? `Light goes from ${dayLength(t.dayAt, t.nightAt)} to ${dayLength(toMin(d.day), toMin(d.night))} a day.` : "",
+      emersonApplies(d) && timesApply(d) ? `${emersonLine(d.day, d.night, d.emerson)}.` : "",
+      moved && others.length && d.period === "helper" ? `${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "",
+      onHelpers ? "Values on your helpers change there, and anything reading them, like your alerts and light automations, follows straight away, so lights can switch within minutes." : "",
+      fresh ? "Home Assistant asks you to allow each helper this panel hasn't linked before." : "",
+      changes.some((c) => c.kind !== "helper") ? "Where they come from, and anything set here, is saved in Environment Control." : "",
+    ].filter(Boolean).join(" ");
+    this.modal = {
+      kind: "review",
+      changes,
+      note,
+      busy: false,
+      error: "",
+      busyText: onHelpers ? "Applying and verifying..." : "Saving...",
+      apply: () => this.applySched(d),
+      refresh: () => (this.sched ? this.schedChangeList(this.sched) : []),
+      after: () => {
+        const now = this.sched;
+        if (now) this.schedDone(now, true);
+        this.toast(onHelpers ? `${z?.name ?? "Zone"} saved, on your helpers too.` : `${z?.name ?? "Zone"} saved.`);
+      },
+    };
+  };
+
+  /* Environment Control's own record first, so the values after it land on whatever they now come from; then each helper
+     holding something different, counting only once HA reports it. */
+  private async applySched(d: SchedDraft): Promise<Result> {
+    const raw = this.raw(d.zoneId), changes = schedChanges(d, raw, this.states, this.catalog), sends = helperSends(d, raw, this.states, this.catalog);
+    if (changes.some((c) => c.kind !== "helper")) {
+      const r = await this.save((c) => applySchedConfig(c, d));
+      if (!r.ok) return r;
+    }
+    if (!sends.length) return { type: "result", req: 0, ok: true };
+    this.setSched((x) => (x.sending = true));
+    const names: Record<string, string> = { day: "Lights on", night: "Lights off", ...EM_NAME };
+    const outcomes = await Promise.all(
+      sends.map(async (x) => {
+        const r = await this.ask("setting", { zone: d.zoneId, name: x.name, value: x.value });
+        return { x, landed: r.ok && (await this.until(() => reports(x.entity, x.value, this.states))), error: r.ok ? "" : (r.error ?? "") };
+      }),
+    );
+    this.setSched((x) => (x.sending = false));
+    const stuck = outcomes.filter((o) => !o.landed);
+    if (!stuck.length) return { type: "result", req: 0, ok: true };
+    const said = (e: string) => this.states[e]?.state?.slice(0, /^\d\d:\d\d/.test(this.states[e]?.state ?? "") ? 5 : undefined) ?? "nothing";
+    return {
+      type: "result",
+      req: 0,
+      ok: false,
+      error: stuck.map((o) => `${names[o.x.name] ?? o.x.name}: ${o.error ? `not sent. ${o.error}` : `not confirmed. Home Assistant still reports ${said(o.x.entity)}.`}`).join("\n"),
+    };
+  }
+
+  /* Waits for HA to report something, and gives up after a while rather than calling it saved. */
+  private until(hit: () => boolean): Promise<boolean> {
     return new Promise((resolve) => {
       const start = Date.now();
       const tick = setInterval(() => {
@@ -1223,14 +1396,15 @@ export class EcApp extends LitElement {
       </section>`;
     }
     const h = e.h, rows = this.chartRows(z, k, h), n = rows[0].line.length - 1;
-    const raw = this.raw(z.id), judged = this.judged(z), dayAt = Number(raw?.dayAt ?? 0), nightAt = Number(raw?.nightAt ?? 0);
+    const raw = this.raw(z.id), judged = this.judged(z), times = timesOf(raw, this.states);
     const bands = judged && k !== "light" ? { day: bandsOf(raw, "day", k), night: bandsOf(raw, "night", k) } : null;
     const limits = bands ? [bands.day, bands.night].flatMap((b) => (b ? [b[0], b[4]].filter((x): x is number => x !== null) : [])) : [];
     const [lo, hi] = yRange(rows.map((r) => r.line), k, limits);
     const W = Math.max(300, this.chartW || 300), H = W < 520 ? 210 : 260, L = 46, Rm = 8, T = 8, B = 22, PW = W - L - Rm, PH = H - T - B;
     this.chartGeom = { W, L, PW, n };
     const X = (i: number) => L + (n ? i / n : 0) * PW, Y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * PH;
-    const runs = judged ? periodRuns(rows[0].line, dayAt, nightAt) : [];
+    /* A zone following its switches has no times to shade by; that waits for their recorded history. */
+    const runs = judged && times ? periodRuns(rows[0].line, times.dayAt, times.nightAt) : [];
     const parts: TemplateResult[] = [];
     for (const r of runs) {
       const x = X(r.from), w = X(Math.min(n, r.to + 1)) - x;
@@ -1368,14 +1542,20 @@ export class EcApp extends LitElement {
     return d.getHours() * 60 + d.getMinutes();
   }
 
-  private periodNow(z: Zone): "day" | "night" {
-    const r = this.raw(z.id), dayAt = Number(r?.dayAt ?? 0), nightAt = Number(r?.nightAt ?? 0);
-    return isDay(dayAt, nightAt, this.minuteNow()) ? "day" : "night";
+  /* Day or night by the zone's own source: its helpers' live times, times set here, or the switches it follows. Null
+     when it follows switches and none of them is reporting, and then nothing is judged. */
+  private periodNow(z: Zone): "day" | "night" | null {
+    return periodOf(this.raw(z.id), this.states, this.minuteNow());
+  }
+
+  private bandNow(z: Zone, k: Metric) {
+    const p = this.periodNow(z);
+    return p ? bandsOf(this.raw(z.id), p, k) : null;
   }
 
   private stateOf(z: Zone, k: Metric): BandState {
     if (k === "light") return "unset";
-    return bandState(bandsOf(this.raw(z.id), this.periodNow(z), k), this.zoneNow(z.id, k).value, this.judged(z));
+    return bandState(this.bandNow(z, k), this.zoneNow(z.id, k).value, this.judged(z));
   }
 
   private pill(state: BandState) {
@@ -1387,7 +1567,7 @@ export class EcApp extends LitElement {
   }
 
   private track(z: Zone, k: Metric) {
-    const band = bandsOf(this.raw(z.id), this.periodNow(z), k), v = this.zoneNow(z.id, k).value;
+    const band = this.bandNow(z, k), v = this.zoneNow(z.id, k).value;
     if (!this.judged(z) || !band) return html`<div class="track unset" aria-hidden="true"><span class="bandc"></span></div>`;
     const [mn, lo, tg, hi, mx] = band.map((x) => x ?? 0), pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad || 1;
     const x = (n: number) => Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
@@ -1400,7 +1580,14 @@ export class EcApp extends LitElement {
   private periodBlock(z: Zone) {
     const r = this.raw(z.id), light = this.zoneNow(z.id, "light").value;
     if (!this.judged(z)) return html`<div class="period"><div class="period-top"><span><strong>Day and night not set up</strong></span><span class="muted">Set with Targets, day and night</span></div></div>`;
-    const dayAt = Number(r?.dayAt ?? 0), nightAt = Number(r?.nightAt ?? 0), day = this.periodNow(z) === "day", now = this.minuteNow();
+    const period = this.periodNow(z), times = timesOf(r, this.states), lux = light === null ? nothing : html`<span class="lux">${fmt("light", light)} lx</span>`;
+    /* Following switches has no times and no countdown: it's day when they say so. */
+    if (!times)
+      return html`<div class="period"><div class="period-top">
+        <span><strong>${period === "day" ? "Lights on" : period === "night" ? "Lights off" : "Lights not reporting"}</strong>${lux}</span>
+        <span class="muted">${period ? "Following its light switches" : "None of its light switches is reporting, so nothing is judged"}</span>
+      </div></div>`;
+    const { dayAt, nightAt } = times, day = period === "day", now = this.minuteNow();
     const seg = (a: number, b: number) => html`<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
     const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
     const left = ((((day ? nightAt : dayAt) - now) % 1440) + 1440) % 1440;
@@ -1487,7 +1674,7 @@ export class EcApp extends LitElement {
   }
 
   private tile(z: Zone, k: Metric) {
-    const r = this.zoneNow(z.id, k), band = bandsOf(this.raw(z.id), this.periodNow(z), k), words = this.combinedWords(z.id, k);
+    const r = this.zoneNow(z.id, k), band = this.bandNow(z, k), words = this.combinedWords(z.id, k);
     return html`<div class="tile">
       <div class="tile-top">${this.ic(...EcApp.LOOKS[k])}<div><div class="name">${METRIC[k].label}</div><div class="val">${fmt(k, r.value)} <small>${METRIC[k].unit}</small></div></div></div>
       ${words ? html`<div class="tavg">${words}</div>` : nothing}
@@ -1759,6 +1946,7 @@ export class EcApp extends LitElement {
     else if (k === "layout") this.openLayoutWizard(id, [1, 2], true);
     else if (k === "place") this.openLayoutWizard(id, [3], true);
     else if (k === "calibrate") this.openCalibration(id, true);
+    else if (k === "targets") this.openSchedule(id, true);
   }
 
   private guideScreen(id: string) {
@@ -2307,18 +2495,198 @@ export class EcApp extends LitElement {
 
   /* Pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
   private draftBar() {
-    const d = this.leafw;
-    if (!d || this.screen !== "setup") return nothing;
-    const changes = this.leafChangeList(d), n = changes.length;
-    if (!n) return nothing;
-    const z = this.zoneById(d.zoneId), { sensors, homesBy } = this.leafCtx(d.zoneId), issue = leafIssues(d, sensors, homesBy)[0];
-    const blocked = issue ? `Fix first: ${issue.text}` : "";
+    if (this.screen !== "setup") return nothing;
+    let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; discard: () => void; review: () => void } | null = null;
+    if (this.leafw) {
+      const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId);
+      bar = { zoneId: d.zoneId, changes: this.leafChangeList(d), issue: leafIssues(d, sensors, homesBy)[0]?.text, sending: d.sending, discard: this.leafDiscard, review: this.leafReview };
+    } else if (this.sched) {
+      const d = this.sched;
+      bar = { zoneId: d.zoneId, changes: this.schedChangeList(d), issue: schedIssues(d, this.states, this.catalog)[0]?.text, sending: d.sending, discard: this.schedDiscard, review: this.schedReview };
+    }
+    const n = bar?.changes.length ?? 0;
+    if (!bar || !n) return nothing;
+    const z = this.zoneById(bar.zoneId), blocked = bar.issue ? `Fix first: ${bar.issue}` : "";
     return html`<div class="draftbar" role="region" aria-label="Unsaved changes" ?inert=${!!this.modal} ?data-blocked=${!!blocked}>
       <span class="draft-count">${n}</span>
-      <span class="draft-text"><strong>${n === 1 ? `${z?.name ?? ""} · ${changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
-      <button class="draft-discard" ?disabled=${d.sending} @click=${this.leafDiscard}>Discard</button>
-      <button class="draft-review" ?disabled=${!!blocked || d.sending} @click=${this.leafReview}>Review and apply</button>
+      <span class="draft-text"><strong>${n === 1 ? `${z?.name ?? ""} · ${bar.changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
+      <button class="draft-discard" ?disabled=${bar.sending} @click=${bar.discard}>Discard</button>
+      <button class="draft-review" ?disabled=${!!blocked || bar.sending} @click=${bar.review}>Review and apply</button>
     </div>`;
+  }
+
+  /* A helper list as chips: the likeliest few, what's picked, and the rest on request, as Map devices offers a board's
+     other sensors. */
+  private helperChips(legend: string, id: string, options: { entity: string; name: string; state: string | null; unit?: string | null }[], current: string, likely: string[], pick: (e: string) => void, locked: boolean) {
+    const score = (o: { entity: string; name: string; unit?: string | null }) => likely.filter((w) => `${o.entity} ${o.name} ${o.unit ?? ""}`.toLowerCase().includes(w)).length;
+    const sorted = [...options].sort((a, b) => score(b) - score(a)), open = this.moreOpen.has(id);
+    const shown = open ? sorted : sorted.filter((o, i) => i < 4 || o.entity === current);
+    const label = (o: { name: string; state: string | null; unit?: string | null }) => `${o.name}, ${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}`;
+    return html`<div id=${id}>
+      ${options.length
+        ? this.chips(`${legend}${current ? "" : ", pick one"}`, id, shown.map((o) => ({ value: o.entity, label: label(o) })), current, (v) => !locked && pick(v))
+        : html`<p class="small muted">${legend}: Home Assistant has no helper of the right kind yet.</p>`}
+      ${sorted.length > shown.length || open
+        ? html`<button class="fixlink small" aria-expanded=${open ? "true" : "false"} @click=${() => this.toggleMore(id, !open)}>${open ? "Fewer" : `More helpers: ${sorted.length - shown.length}`} &rsaquo;</button>`
+        : nothing}
+    </div>`;
+  }
+
+  /* On and off entities to follow, searchable, with what's picked first. */
+  private followPicker(id: string, which: "lights" | "red", picked: string[], toggle: (e: string) => void, locked: boolean) {
+    const q = this.schedQ[which].trim().toLowerCase(), all = onOffChoices(this.catalog);
+    const list = all
+      .filter((o) => picked.includes(o.entity) || !q || `${o.name} ${o.device ?? ""} ${o.entity}`.toLowerCase().includes(q))
+      .sort((a, b) => Number(picked.includes(b.entity)) - Number(picked.includes(a.entity)))
+      .slice(0, 40);
+    return html`<div id=${id} class="picklist">
+      <label class="field" for="${id}-q"
+        >Search Home Assistant<input
+          id="${id}-q"
+          type="search"
+          autocomplete="off"
+          .value=${this.schedQ[which]}
+          placeholder=${which === "lights" ? "Light controller, plug or switch" : "Red light plug or switch"}
+          @input=${(e: Event) => {
+            this.schedQ = { ...this.schedQ, [which]: (e.target as HTMLInputElement).value };
+            this.requestUpdate();
+          }}
+      /></label>
+      ${list.map(
+        (o) => html`<label class="follow"
+          ><input type="checkbox" .checked=${live(picked.includes(o.entity))} ?disabled=${locked} @change=${() => toggle(o.entity)} /><span
+            >${o.name}${o.device ? html` <span class="muted">· ${o.device}</span>` : nothing}<br /><span class="eid">${o.entity}</span></span
+          ><span class="muted small">${o.state === "on" ? "On" : o.state === "off" ? "Off" : (o.state ?? "")}</span></label
+        >`,
+      )}
+      ${list.length ? nothing : html`<p class="small muted">Nothing on or off matches.</p>`}
+    </div>`;
+  }
+
+  private schedulePage(d: SchedDraft) {
+    const z = this.zoneById(d.zoneId);
+    if (!z) return nothing;
+    const head = html`<div>
+      <h1>Targets, day and night: ${z.name}</h1>
+      <p class="muted small">Where ${z.name}'s times come from, and what they are. Nothing changes until you review and apply.</p>
+    </div>`;
+    const back = html`<button class="btn" ?disabled=${d.sending} @click=${this.schedExit}>Back</button>`;
+    if (!d.seeded)
+      return html`${head}<section class="card">
+          ${this.catalogError
+            ? html`<div class="notice"><span>${this.catalogError}</span><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
+            : html`<p class="muted">Looking up Home Assistant's helpers.</p>`}
+          <div class="row">${back}</div>
+        </section>`;
+    const issues = schedIssues(d, this.states, this.catalog), bad = (t: string) => issues.some((i) => i.target === t), lock = d.sending;
+    const raw = this.raw(d.zoneId), others = sharing(this.config.zones, d.zoneId).map((o) => String(o.name ?? o.id));
+    const seg = (label: string, items: [string, string][], cur: string, pick: (v: string) => void) =>
+      html`<div class="seg" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} ?disabled=${lock} @click=${() => pick(v)}>${l}</button>`)}</div>`;
+    const time = (k: "day" | "night", label: string) => html`<label class="field" for="sin-${k}"
+      >${label}<input
+        id="sin-${k}"
+        type="time"
+        .value=${d[k]}
+        aria-invalid=${bad(`sin-${k}`) ? "true" : "false"}
+        ?disabled=${lock}
+        @change=${(e: Event) => {
+          const v = (e.target as HTMLInputElement).value;
+          if (/^\d\d:\d\d$/.test(v)) this.setSched((x) => (x[k] = v));
+        }}
+    /></label>`;
+    const length = timesApply(d)
+      ? (() => {
+          const on = toMin(d.day), off = toMin(d.night), cut = (a: number, b: number) => html`<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
+          return html`<div class="now">
+            <strong>${dayLength(on, off)} of light, ${dayLength(off, on)} of dark</strong>
+            <div class="strip sched-strip" role="img" aria-label="Lights on ${d.day} to ${d.night}">${on < off ? cut(on, off) : html`${cut(on, 1440)}${cut(0, off)}`}</div>
+          </div>`;
+        })()
+      : nothing;
+    const times = html`<div class="fields">${time("day", "Lights on")}${time("night", "Lights off")}</div>${length}`;
+    const pickTime = (which: "onHelper" | "offHelper") => (e: string) =>
+      this.setSched((x) => {
+        x[which] = e;
+        reseed(x, raw, this.states, this.catalog, "period");
+      });
+    const zoneWords = [z.name.toLowerCase(), z.id.toLowerCase()];
+    const tOptions = timeHelpers(this.catalog).map((e) => ({ entity: e.entity_id, name: e.name, state: e.state }));
+    const periodBody: Record<PeriodMode, unknown> = {
+      helper: html`${this.helperChips("Lights on helper", "sh-on", tOptions, d.onHelper, [...zoneWords, "day", "on"], pickTime("onHelper"), lock)}
+        ${this.helperChips("Lights off helper", "sh-off", tOptions, d.offHelper, [...zoneWords, "night", "off"], pickTime("offHelper"), lock)}
+        ${timesApply(d)
+          ? html`${times}<p class="small muted">These are your helpers. Anything reading them, like your light schedule, follows straight away.${others.length ? ` ${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : ""}</p>`
+          : nothing}`,
+      fixed: html`${times}<p class="small muted">Stored in Environment Control.</p>`,
+      detected: html`${this.followPicker("s-lights", "lights", d.lights, (e) => this.setSched((x) => (x.lights = x.lights.includes(e) ? x.lights.filter((y) => y !== e) : [...x.lights, e])), lock)}
+        ${d.lights.length > 1 ? html`<div class="row"><span class="small muted">It's day when</span>${seg("Day rule", [["any", "Any is on"], ["all", "All are on"]], d.rule, (v) => this.setSched((x) => (x.rule = v as "any" | "all")))}</div>` : nothing}
+        <p class="small muted">Day and night follow the switches, so there are no times to set and no countdown to the next change.</p>`,
+    };
+    const emBox = (k: (typeof EM_KEYS)[number]) => html`<label class="field" for="sem-${k}"
+      >${EM_NAME[k]} (min)<input
+        id="sem-${k}"
+        type="text"
+        inputmode="numeric"
+        enterkeyhint="done"
+        autocomplete="off"
+        data-lin="sem"
+        .value=${String(d.emerson[k])}
+        aria-invalid=${bad(`sem-${k}`) ? "true" : "false"}
+        ?disabled=${lock}
+        @change=${(e: Event) => {
+          const input = e.target as HTMLInputElement, n = Number(input.value.trim());
+          if (input.value.trim() !== "" && Number.isFinite(n)) this.setSched((x) => (x.emerson[k] = n));
+          input.value = String(this.sched?.emerson[k] ?? d.emerson[k]);
+        }}
+        @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+    /></label>`;
+    const emValues = emersonApplies(d)
+      ? html`<div class="fields">${EM_KEYS.map(emBox)}</div>${timesApply(d) ? html`<div class="now"><strong>${emersonLine(d.day, d.night, d.emerson)}</strong></div>` : nothing}`
+      : nothing;
+    const nOptions = minuteHelpers(this.catalog).map((e) => ({ entity: e.entity_id, name: e.name, state: e.state, unit: e.unit }));
+    const pickEm = (k: (typeof EM_KEYS)[number]) => (e: string) =>
+      this.setSched((x) => {
+        x.emHelpers[k] = e;
+        reseed(x, raw, this.states, this.catalog, "emerson");
+      });
+    const emBody: Record<EmMode, unknown> = {
+      none: html`<p class="muted">Not used in ${z.name}.</p>`,
+      helper: html`${EM_KEYS.map((k) => this.helperChips(`${EM_NAME[k]} helper`, `seh-${k}`, nOptions, d.emHelpers[k], [k, "emerson", "extension", "minute"], pickEm(k), lock))}
+        ${emersonApplies(d) ? html`${emValues}<p class="small muted">These are your helpers, and your red light automation reads them.</p>` : nothing}`,
+      fixed: html`${emValues}<p class="small muted">Stored in Environment Control, in whole minutes from ${EM_LIMITS.min} to ${EM_LIMITS.max}. Your automations still switch the red lights.</p>`,
+      detected: html`${this.followPicker("s-red", "red", d.red, (e) => this.setSched((x) => (x.red = x.red.includes(e) ? x.red.filter((y) => y !== e) : [...x.red, e])), lock)}
+        <p class="small muted">The red lights are followed as they switch, so there are no extensions to set. Your automations still switch them.</p>`,
+    };
+    const open = z.setup.targets === "todo" || z.setup.targets === "later";
+    return html`${head}
+      ${open
+        ? html`<div class="notice">Its limits come next, on this same page, in the release that follows. This step is confirmed once they're set, so ${z.name}'s readings aren't judged against limits of 0 meanwhile.</div>`
+        : nothing}
+      <section class="card" id="s-times">
+        <div><h2>Day and night</h2><p class="muted small">How ${z.name} knows when it's day, and when its lights come on and go off.</p></div>
+        ${seg("Day and night source", Object.entries(PERIOD_MODES) as [string, string][], d.period, (v) =>
+          this.setSched((x) => {
+            x.period = v as PeriodMode;
+            reseed(x, raw, this.states, this.catalog, "period");
+          }),
+        )}
+        ${periodBody[d.period]}
+      </section>
+      <section class="card" id="s-emerson">
+        <div><h2>Red lights</h2><p class="muted small">The Emerson effect: red lights either side of the white lights.</p></div>
+        ${seg("Red lights source", Object.entries(EM_MODES) as [string, string][], d.em, (v) =>
+          this.setSched((x) => {
+            x.em = v as EmMode;
+            reseed(x, raw, this.states, this.catalog, "emerson");
+          }),
+        )}
+        ${emBody[d.em]}
+      </section>
+      <div class="issues">
+        ${issues.map((i) => html`<button class="notice fix" @click=${() => this.jumpToTarget(i.target)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
+      </div>
+      ${d.sending ? html`<div class="lstatus" role="status">Sending to Home Assistant...</div>` : nothing}
+      <div class="row">${back}</div>`;
   }
 
   private zoneRow(z: Zone) {
@@ -2352,6 +2720,7 @@ export class EcApp extends LitElement {
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [1, 2])}>Zone layout</button>
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Placement</button>
             <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
+            <button role="menuitem" @click=${() => this.openSchedule(z.id)}>Targets, day and night</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -2367,6 +2736,7 @@ export class EcApp extends LitElement {
 
   private setup() {
     if (this.leafw) return this.calibration(this.leafw);
+    if (this.sched) return this.schedulePage(this.sched);
     if (this.wiz) return this.wizard(this.wiz);
     if (this.mapw) return this.mapWizard(this.mapw);
     if (this.lay) return this.layWizard(this.lay);

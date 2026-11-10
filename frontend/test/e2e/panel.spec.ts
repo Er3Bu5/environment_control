@@ -462,6 +462,141 @@ test.describe("the setting write", () => {
   });
 });
 
+test.describe("targets, day and night", () => {
+  const dialog = (frame: Frame) => app(frame).getByRole("dialog");
+  const bar = (frame: Frame) => app(frame).getByRole("region", { name: "Unsaved changes" });
+  const stored = (page: Page) => page.evaluate<{ zones: Record<string, unknown>[] }>("JSON.parse(fakeHA.disk)");
+  const sets = (page: Page) => page.evaluate<{ domain: string; service: string; data: Record<string, unknown> }[]>("fakeHA.calls");
+  async function open(page: Page, zone: string): Promise<Frame> {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: `Set up ${zone}` }).click();
+    await app(frame).getByRole("menuitem", { name: "Targets, day and night" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: `Targets, day and night: ${zone}`, exact: true })).toBeVisible();
+    return frame;
+  }
+  const time = (frame: Frame, label: string, value: string) => app(frame).getByLabel(label, { exact: true }).fill(value);
+  const source = (frame: Frame, group: string, name: string) => app(frame).getByRole("group", { name: group }).getByRole("button", { name, exact: true }).click();
+
+  test("a time on a helper is sent only on apply, and counts once HA reports it, and the zone then runs by it", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await expect(app(frame).getByLabel("Lights on", { exact: true })).toHaveValue("07:00");
+    await time(frame, "Lights on", "06:30");
+    await expect(bar(frame)).toContainText("Garden · Lights on");
+    expect(await serviceCalls(page)).toBe(0);
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("07:00 → 06:30, on your helper");
+    await expect(dialog(frame)).toContainText("Light goes from 12h 00m to 12h 30m a day.");
+    expect(await serviceCalls(page)).toBe(0);
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect((await sets(page)).map((c) => [c.domain, c.service, c.data])).toEqual([["input_datetime", "set_datetime", { entity_id: "input_datetime.garden_day_time", time: "06:30:00" }]]);
+    await expect(app(frame).locator(".toast")).toHaveText("Garden saved, on your helpers too.");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
+    await expect(app(frame).locator(".period").first()).toContainText("06:30 - 19:00");
+  });
+
+  test("a helper that doesn't report the new value is never shown as saved", async ({ page }) => {
+    test.setTimeout(45_000);
+    const frame = await open(page, "Garden");
+    await page.evaluate("fakeHA.knobs.dropNext = true");
+    await app(frame).getByLabel("Daylight time (min)").fill("15");
+    await app(frame).getByLabel("Daylight time (min)").press("Enter");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toContainText("Daylight time: not confirmed. Home Assistant still reports 10.", { timeout: 15_000 });
+    await expect(dialog(frame).getByRole("button", { name: "Apply 1 change" })).toBeEnabled();
+  });
+
+  test("set here keeps the times in Environment Control and drops the helper links, sending nothing", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await source(frame, "Day and night source", "Set here");
+    await time(frame, "Lights on", "08:00");
+    await time(frame, "Lights off", "20:00");
+    await source(frame, "Red lights source", "Not used");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("From a helper → Set here");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    const z = (await stored(page)).zones.find((x) => x.id === "garden") as Record<string, unknown>;
+    expect([z.periodMode, z.dayAt, z.nightAt, z.emersonMode, "emerson" in z]).toEqual(["fixed", 480, 1200, "none", false]);
+    expect(Object.keys(z.helpers as object)).not.toContain("day");
+    expect(Object.keys(z.helpers as object)).not.toContain("morning");
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("detected follows the zone's switches, and says so when none of them is reporting", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await source(frame, "Day and night source", "Detected");
+    await app(frame).getByLabel("Search Home Assistant").first().fill("tent");
+    await app(frame).locator(".follow", { hasText: "light.tent_light" }).locator("input").check();
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    const z = (await stored(page)).zones.find((x) => x.id === "garden") as Record<string, unknown>;
+    expect([z.periodMode, z.lights]).toEqual(["detected", ["light.tent_light"]]);
+    await expect(app(frame).locator(".period").first()).toContainText("Lights not reporting");
+    await page.evaluate(`(() => { fakeHA.states["light.tent_light"] = { entity_id: "light.tent_light", state: "on", attributes: {}, context: {} }; fakeHA.publish(); })()`);
+    await expect(app(frame).locator(".period").first()).toContainText("Lights on");
+    await expect(app(frame).locator(".period").first()).toContainText("Following its light switches");
+  });
+
+  test("problems stop the review, each with its fix", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await source(frame, "Day and night source", "Set here");
+    await time(frame, "Lights on", "19:00");
+    await expect(bar(frame)).toContainText("Fix first: Lights on and lights off need two different times.");
+    await expect(bar(frame).getByRole("button", { name: "Review and apply" })).toBeDisabled();
+    await source(frame, "Red lights source", "Set here");
+    await app(frame).getByLabel("Evening extension (min)").fill("75");
+    await app(frame).getByLabel("Evening extension (min)").press("Enter");
+    await app(frame).getByRole("button", { name: /Evening extension has to be between 0 and 59 minutes/ }).click();
+    await expect(app(frame).getByLabel("Evening extension (min)")).toBeFocused();
+  });
+
+  test("a helper never linked before waits for you in the host's own dialog", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    await app(frame).locator("#sh-on").getByRole("button", { name: /^More helpers/ }).click();
+    await app(frame).locator("#sh-on").getByLabel(/^Reservoir refill time,/).check();
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("Home Assistant asks you to allow each helper this panel hasn't linked before.");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog(frame)).toContainText("Not allowed, so nothing was saved.");
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("zones sharing lights helpers are named, since changing one moves the other", async ({ page }) => {
+    const frame = await open(page, "Veg");
+    await expect(app(frame).locator("#s-times")).toContainText("Nursery uses the same helpers, so it moves too.");
+    await time(frame, "Lights on", "15:30");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("Nursery uses the same helpers, so it moves too.");
+  });
+
+  test("from a new zone's guide it opens, and applying doesn't confirm the step before its limits exist", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await app(frame).locator("#g-targets").getByRole("button", { name: "Targets, day and night" }).click();
+    await expect(app(frame).locator(".notice").first()).toContainText("This step is confirmed once they're set");
+    await time(frame, "Lights on", "06:00");
+    await time(frame, "Lights off", "18:00");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    await expect(app(frame).locator("#g-targets .pill.ok")).toHaveCount(0);
+    const z = (await stored(page)).zones.find((x) => x.name === "Flower tent") as Record<string, unknown>;
+    expect([z.dayAt, z.nightAt, (z.setup as Record<string, string>).targets]).toEqual([360, 1080, "todo"]);
+  });
+});
+
 test.describe("zones", () => {
   const stored = (page: Page) => page.evaluate<{ revision: number; zones: { id: string; name: string; description?: string; setup?: Record<string, string> }[]; devices: { id: string; zones: string[] }[] }>("JSON.parse(JSON.stringify(fakeHA.config))");
   const dialog = (frame: Frame) => app(frame).getByRole("dialog");
@@ -1149,7 +1284,7 @@ test.describe("what Home Assistant has", () => {
     await tab(frame, "Devices").click();
     await expect.poll(() => frameText(frame)).toContain("Environment board");
     const text = await frameText(frame);
-    for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "1 entity, such as a helper or template", "Spare plug"]) {
+    for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "entities, such as helpers and templates", "Spare plug"]) {
       expect(text).toContain(want);
     }
     expect(await serviceCalls(page)).toBe(0);
