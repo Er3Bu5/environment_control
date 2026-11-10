@@ -16,6 +16,8 @@ import FRAME_HTML from "./frame.js";
 const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
 const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
 const SENSOR = /^sensor\.[a-z0-9_]{1,200}$/;
+/* On and off entities a zone can follow for day and night or for red lights: read, never switched from here. */
+const ON_OFF = /^(switch|light|input_boolean)\.[a-z0-9_]{1,200}$/;
 const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
 const NUMBER = /^number\.[a-z0-9_]{1,200}$/;
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -227,6 +229,7 @@ class EnvironmentControlPanel extends HTMLElement {
     for (const d of this.config.devices || []) if (d && typeof d.entity === "string" && Array.isArray(d.zones) && d.zones.length) out.add(d.entity);
     for (const z of this.config.zones || []) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
     for (const e of this.readings()) out.add(e);
+    for (const z of this.config.zones || []) for (const e of [...((z && z.lights) || []), ...((z && z.redLights) || [])]) if (typeof e === "string" && ON_OFF.test(e)) out.add(e);
     for (const z of this.config.zones || []) for (const e of helperLinks(z)) out.add(e);
     return out;
   }
