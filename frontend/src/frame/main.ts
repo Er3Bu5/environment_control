@@ -93,6 +93,27 @@ import {
   MAX_GRID,
 } from "./layout";
 import { keyView, look, mapView, mk } from "./map-view";
+import {
+  BAND_WORDS,
+  type BandState,
+  type HaState,
+  METRIC,
+  type Metric,
+  type SensorReading,
+  type ZoneReading,
+  ago,
+  bandState,
+  bandsOf,
+  fmt,
+  healthOf,
+  isDay,
+  leafOf,
+  numberOf,
+  readSensor,
+  readState,
+  sensorsOf,
+  zoneReading,
+} from "./readings";
 import { PALETTES, styles } from "./styles";
 
 declare const __VERSION__: string;
@@ -173,6 +194,11 @@ export class EcApp extends LitElement {
     wiz: { state: true },
     mapw: { state: true },
     lay: { state: true },
+    states: { state: true },
+    now: { state: true },
+    level: { state: true },
+    picked: { state: true },
+    linkFilter: { state: true },
     moreOpen: { state: true },
     guide: { state: true },
     modal: { state: true },
@@ -191,6 +217,12 @@ export class EcApp extends LitElement {
   declare private wiz: Wizard | null;
   declare private mapw: MapDraft | null;
   declare private lay: LayoutDraft | null;
+  declare private states: Record<string, HaState>;
+  declare private now: number;
+  declare private level: "all" | Level;
+  declare private picked: string | null;
+  declare private linkFilter: string;
+  private clock: ReturnType<typeof setInterval> | undefined;
   private layFromGuide = false;
   declare private moreOpen: Set<string>;
   private mapFromGuide = false;
@@ -217,6 +249,11 @@ export class EcApp extends LitElement {
     this.wiz = null;
     this.mapw = null;
     this.lay = null;
+    this.states = {};
+    this.now = Date.now();
+    this.level = "all";
+    this.picked = null;
+    this.linkFilter = "all";
     this.moreOpen = new Set();
     this.guide = null;
     this.modal = null;
@@ -230,6 +267,8 @@ export class EcApp extends LitElement {
     window.addEventListener("message", this.onMessage);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
+    /* Staleness and "reported ago" move with time even when nothing new arrives. */
+    this.clock = setInterval(() => (this.now = Date.now()), 15_000);
     parent.postMessage({ v: 1, type: "ready" }, "*");
   }
 
@@ -237,6 +276,7 @@ export class EcApp extends LitElement {
     window.removeEventListener("message", this.onMessage);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
+    clearInterval(this.clock);
     super.disconnectedCallback();
   }
 
@@ -266,6 +306,15 @@ export class EcApp extends LitElement {
     const m = readHostMessage(e.data);
     if (!m) return;
     if (m.type === "init" || m.type === "config") this.stored = { revision: m.revision, zones: m.zones, devices: m.devices };
+    if (m.type === "init" || m.type === "states") {
+      const next: Record<string, HaState> = m.type === "init" ? {} : { ...this.states };
+      for (const [e, raw] of Object.entries(m.states)) {
+        const st = readState(raw);
+        if (st) next[e] = st;
+        else delete next[e];
+      }
+      [this.states, this.now] = [next, Date.now()];
+    }
     if (m.type === "init" || m.type === "theme") this.applyTheme(m.theme);
     if (m.type === "init" || m.type === "narrow") this.narrow = m.narrow;
     if (m.type === "init" && !this.catalog) void this.askCatalog();
@@ -790,6 +839,99 @@ export class EcApp extends LitElement {
     return html`<button class="btn primary add" @click=${this.openNewZone}>${icon("plus")}${label}</button>`;
   }
 
+  /* Live readings. */
+  private raw(id: string | null): Record<string, unknown> | undefined {
+    return this.config.zones.find((z) => z.id === id);
+  }
+
+  private methodOf(id: string): Method {
+    const c = this.raw(id)?.combine as Record<string, unknown> | undefined;
+    return c && typeof c.env === "string" && c.env in METHODS ? (c.env as Method) : "mean";
+  }
+
+  private readingsOf(id: string): SensorReading[] {
+    return sensorsOf(this.raw(id)).filter((s) => s.kind === "env").map((s) => readSensor(s, this.states, this.now));
+  }
+
+  private zoneNow(id: string, k: Metric): ZoneReading {
+    return zoneReading(this.readingsOf(id), k, this.methodOf(id));
+  }
+
+  /* A zone made before setup steps were recorded counts as having its targets; a new one waits for Targets. */
+  private judged(z: Zone): boolean {
+    return !this.raw(z.id)?.setup || z.setup.targets === "done";
+  }
+
+  private minuteNow(): number {
+    const d = new Date(this.now);
+    return d.getHours() * 60 + d.getMinutes();
+  }
+
+  private periodNow(z: Zone): "day" | "night" {
+    const r = this.raw(z.id), dayAt = Number(r?.dayAt ?? 0), nightAt = Number(r?.nightAt ?? 0);
+    return isDay(dayAt, nightAt, this.minuteNow()) ? "day" : "night";
+  }
+
+  private stateOf(z: Zone, k: Metric): BandState {
+    if (k === "light") return "unset";
+    return bandState(bandsOf(this.raw(z.id), this.periodNow(z), k), this.zoneNow(z.id, k).value, this.judged(z));
+  }
+
+  private pill(state: BandState) {
+    return html`<span class="pill ${state === "unset" ? "plain" : state}">${BAND_WORDS[state]}</span>`;
+  }
+
+  private ic(name: "thermo" | "drop" | "gauge" | "sun", color: string) {
+    return html`<span class="ic" style="--c:${color}">${icon(name)}</span>`;
+  }
+
+  private track(z: Zone, k: Metric) {
+    const band = bandsOf(this.raw(z.id), this.periodNow(z), k), v = this.zoneNow(z.id, k).value;
+    if (!this.judged(z) || !band) return html`<div class="track unset" aria-hidden="true"><span class="bandc"></span></div>`;
+    const [mn, lo, tg, hi, mx] = band.map((x) => x ?? 0), pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad || 1;
+    const x = (n: number) => Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
+    return html`<div class="track" aria-hidden="true">
+      <span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span>
+      ${band[2] === null ? nothing : html`<span class="tick" style="left:${x(tg)}%"></span>`}${v === null ? nothing : html`<span class="dot ${this.stateOf(z, k)}" style="left:${x(v)}%"></span>`}
+    </div>`;
+  }
+
+  private periodBlock(z: Zone) {
+    const r = this.raw(z.id), light = this.zoneNow(z.id, "light").value;
+    if (!this.judged(z)) return html`<div class="period"><div class="period-top"><span><strong>Day and night not set up</strong></span><span class="muted">Set with Targets, day and night</span></div></div>`;
+    const dayAt = Number(r?.dayAt ?? 0), nightAt = Number(r?.nightAt ?? 0), day = this.periodNow(z) === "day", now = this.minuteNow();
+    const seg = (a: number, b: number) => html`<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
+    const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const left = ((((day ? nightAt : dayAt) - now) % 1440) + 1440) % 1440;
+    return html`<div class="period">
+      <div class="period-top">
+        <span><strong>${day ? "Lights on" : "Lights off"}</strong>${light === null ? nothing : html`<span class="lux">${fmt("light", light)} lx</span>`}</span>
+        <span class="muted">${hhmm(dayAt)} - ${hhmm(nightAt)}, ${Math.floor(left / 60)}h ${String(left % 60).padStart(2, "0")}m left</span>
+      </div>
+      <div class="strip" role="img" aria-label="Lights on ${hhmm(dayAt)} to ${hhmm(nightAt)}, time now ${hhmm(now)}">
+        ${dayAt < nightAt ? seg(dayAt, nightAt) : html`${seg(dayAt, 1440)}${seg(0, nightAt)}`}<b style="left:${now / 14.4}%"></b>
+      </div>
+    </div>`;
+  }
+
+  private static readonly LOOKS: Record<Metric, ["thermo" | "drop" | "gauge" | "sun", string]> = {
+    temperature: ["thermo", "var(--temp)"],
+    humidity: ["drop", "var(--hum)"],
+    vpd: ["gauge", "var(--vpd)"],
+    light: ["sun", "var(--sun)"],
+  };
+
+  /* Which sensors made a reading, and which were left out and why, so a combined number never hides a dead sensor. */
+  private combinedWords(id: string, k: Metric): string {
+    const r = this.zoneNow(id, k), all = this.readingsOf(id);
+    if (all.length < 2) return r.missing.length ? `${r.missing[0].name} has no data.` : "";
+    const parts = r.used.map((s) => `${s.name} ${fmt(k, s.values[k])}`);
+    const out = [`${METHODS[r.method]} of ${r.used.length}${parts.length ? `: ${parts.join(", ")}` : ""}`];
+    for (const s of r.missing) out.push(`${s.name} ${s.health === "stale" ? "is stale" : "has no data"}, left out`);
+    if (r.notCounted.length) out.push(`${r.notCounted.map((s) => s.name).join(", ")} not counted`);
+    return `${out.join(". ")}.`;
+  }
+
   private overview() {
     if (!this.stored) return html`<p class="muted">Waiting for Home Assistant.</p>`;
     if (!this.zones.length)
@@ -798,52 +940,160 @@ export class EcApp extends LitElement {
         <p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p>
         <div class="row">${this.addButton("Add a zone")}</div>
       </section>`;
-    return html`<div class="cards">
-      ${this.zones.map(
-        (z) => html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>
-          <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
-          ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing}
-          <p class="small muted">${this.zoneCounts(z)} Readings arrive in a later release.</p>
-        </button>`,
-      )}
+    const METRICS: Metric[] = ["temperature", "humidity", "vpd"];
+    const issues = this.zones
+      .filter((z) => this.judged(z) && this.readingsOf(z.id).length)
+      .flatMap((z) => METRICS.map((k) => ({ z, k, state: this.stateOf(z, k) })))
+      .filter((x) => !["ok", "unset"].includes(x.state));
+    const group = (list: typeof issues, title: string, cls: string) =>
+      list.length
+        ? html`<div class="notice ${cls}">
+            <strong>${title}</strong>${list.map((x) => html`<button class="fixlink" @click=${() => this.go("zone", x.z.id)}>${x.z.name} ${METRIC[x.k].short} ${BAND_WORDS[x.state].toLowerCase()} &rsaquo;</button>`)}
+          </div>`
+        : nothing;
+    const judgedAny = this.zones.some((z) => this.judged(z) && this.readingsOf(z.id).length);
+    return html`${issues.length
+        ? html`${group(issues.filter((x) => x.state.startsWith("crit")), "Critical", "critical")}${group(issues.filter((x) => !x.state.startsWith("crit")), "Outside ideal zone", "")}`
+        : judgedAny
+          ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
+          : nothing}
+      <div class="cards">
+        ${this.zones.map((z) => {
+          const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
+          return html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>
+            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
+            ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
+            <div class="rows">
+              ${METRICS.map(
+                (k) => html`<div class="mrow">
+                  ${this.ic(...EcApp.LOOKS[k])}
+                  <div><div class="t1">${METRIC[k].label}</div><div class="t2">${fmt(k, this.zoneNow(z.id, k).value)}<span>${METRIC[k].unit}</span></div></div>
+                  ${this.track(z, k)}
+                  <div class="pillcell">${this.pill(this.readingsOf(z.id).length ? this.stateOf(z, k) : "unset")}</div>
+                </div>`,
+              )}
+              <div class="mrow">
+                ${this.ic(...EcApp.LOOKS.light)}
+                <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
+              </div>
+            </div>
+            ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
+            <p class="small muted">${this.zoneCounts(z)}</p>
+          </button>`;
+        })}
+      </div>`;
+  }
+
+  private tile(z: Zone, k: Metric) {
+    const r = this.zoneNow(z.id, k), band = bandsOf(this.raw(z.id), this.periodNow(z), k), words = this.combinedWords(z.id, k);
+    return html`<div class="tile">
+      <div class="tile-top">${this.ic(...EcApp.LOOKS[k])}<div><div class="name">${METRIC[k].label}</div><div class="val">${fmt(k, r.value)} <small>${METRIC[k].unit}</small></div></div></div>
+      ${words ? html`<div class="tavg">${words}</div>` : nothing}
+      ${k === "vpd" && this.readingsOf(z.id).length ? html`<div class="tavg">${this.leafLine(z)}</div>` : nothing}
+      ${this.track(z, k)}
+      ${this.judged(z) && band
+        ? html`<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => html`<span><b>${band[i] === null ? "-" : band[i]}</b>${l}</span>`)}</div>
+            <div>${this.pill(this.stateOf(z, k))}</div>`
+        : html`<button class="fixlink small" @click=${() => this.openGuide(z.id)}>Targets not set up yet &rsaquo;</button>`}
     </div>`;
   }
 
-  /* The zone's map as it's placed: sensors, placed devices and virtual devices. A device not placed is named, with a link
-     to Placement, since placing one is optional and only placed ones show. */
+  /* The offset each VPD uses, said once when every sensor shares one. */
+  private leafLine(z: Zone): string {
+    const offsets = new Set(sensorsOf(this.raw(z.id)).filter((s) => s.kind === "env").map((s) => leafOf(s, this.states)));
+    if (offsets.size !== 1) return "Leaf temperature offset per sensor.";
+    const x = [...offsets][0];
+    return `Leaf temperature offset ${x > 0 ? "+" : ""}${x.toFixed(1)} °C.`;
+  }
+
+  private lightCard(z: Zone) {
+    const r = this.zoneNow(z.id, "light"), all = this.readingsOf(z.id);
+    return html`<div class="lcard">
+      <div class="name">${all.length >= 2 ? `Light (${METHODS[r.method]})` : "Light"}</div>
+      <div class="val">${fmt("light", r.value)} <small>lx</small></div>
+      <div class="tavg">Its 4 hour line arrives with charts.</div>
+    </div>`;
+  }
+
+  /* What tapping a mark tells: where it is, its height, its reading and when it last reported. */
+  private markDetail(z: Zone) {
+    const c = this.config, items = zoneItems(c, z.id), L = storedLayout(this.raw(z.id));
+    const it = [...items.sensors, ...items.devs, ...items.virt].find((x) => x.id === this.picked && x.pos);
+    if (!it) return html`<div class="detail muted">Tap a sensor or device to see where it is and how it's doing.</div>`;
+    const where = posText(it.pos as Spot, L);
+    if (it.kind === "virtual") return html`<div class="detail"><strong>${it.name}</strong><span>${where}.</span><span class="muted">Virtual device. Home Assistant doesn't have it, so it's only shown on the map.</span></div>`;
+    if (it.kind === "device") {
+      const entity = this.storedEntity(it.id), st = entity ? this.states[entity] : undefined;
+      const state = !st || st.state === "unavailable" || st.state === "unknown" ? "Unavailable" : st.state === "on" ? "On" : st.state === "off" ? "Off" : st.state;
+      return html`<div class="detail"><strong>${it.name}</strong><span>${where}. ${it.type ?? "Not said what it is"}.</span><span>${state}.</span><span class="muted">${entity ?? ""}</span></div>`;
+    }
+    const s = sensorsOf(this.raw(z.id)).find((x) => x.id === it.id);
+    if (!s) return nothing;
+    if (s.kind === "soil") {
+      const v = (k: string, unit: string) => {
+        const e = s.entities[k], n = e ? numberOf(this.states[e]) : null;
+        return n === null ? "--" : `${n.toFixed(k === "ec" ? 2 : 1)} ${unit}`;
+      };
+      return html`<div class="detail"><strong>${it.name}</strong><span>${where}. In the substrate.</span><span>Moisture ${v("moisture", "%")}, pwEC ${v("ec", "mS/cm")}, ${v("temperature", "°C")}.</span><span class="muted">Soil probe readings arrive in full with irrigation.</span></div>`;
+    }
+    const r = readSensor(s, this.states, this.now);
+    const reading = r.health === "dead" ? "No data. Left out of the zone's readings." : r.health === "stale" ? "Stale. Left out of the zone's readings." : `${fmt("temperature", r.values.temperature)} °C, ${fmt("humidity", r.values.humidity)} % RH, VPD ${fmt("vpd", r.values.vpd)} kPa${s.avg ? "" : ". Not counted in the zone's readings"}`;
+    const x = leafOf(s, this.states);
+    return html`<div class="detail">
+      <strong>${it.name}</strong><span>${where}. ${it.level ? LEVELS[it.level] : "Height not set"}.</span><span>${reading}.</span>
+      <span class="muted">${ago(r.at, this.now)}</span>
+      <span class="muted">${x === 0 ? "Leaf the same as air" : `Leaf ${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`}, from ${s.leafEntity && !s.leafUnused ? "the board" : "Environment Control"}.</span>
+    </div>`;
+  }
+
+  /* The zone's map as it's placed, with a height filter. Devices have no height, so they show only under All. */
   private zoneMap(z: Zone) {
-    const c = this.config, L = storedLayout(c.zones.find((x) => x.id === z.id)), items = zoneItems(c, z.id);
-    const shown = [...items.sensors, ...items.devs.filter((x) => x.pos), ...items.virt];
+    const c = this.config, L = storedLayout(this.raw(z.id)), items = zoneItems(c, z.id);
+    const shown = [
+      ...items.sensors.filter((s) => this.level === "all" || (s.kind === "env" && s.level === this.level)),
+      ...(this.level === "all" ? [...items.devs.filter((x) => x.pos), ...items.virt] : []),
+    ];
     const left = items.devs.filter((x) => !x.pos);
     return html`<section class="card">
-      <h2>Map</h2>
-      ${mapView(L, { items: shown, label: `Units, sensors and devices in ${z.name}` })} ${keyView}
+      <div class="card-head">
+        <h2>Placement</h2>
+        ${this.chips("Height", `level-filter-${z.id}`, [{ value: "all", label: "All" }, ...(Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: LEVELS[k] }))], this.level, (v) => (this.level = v as "all" | Level))}
+      </div>
+      ${mapView(L, { items: shown, picked: this.picked, onPick: (id) => (this.picked = this.picked === id ? null : id), label: `Units, sensors and devices in ${z.name}` })}
+      ${keyView}
       ${left.length
         ? html`<p class="small muted">
             ${plural(left.length, "device")} ${left.length > 1 ? "aren't" : "isn't"} on the map: ${left.map((x) => x.name).join(", ")}. They don't need to be, but only placed devices show
             here. <button class="fixlink" @click=${() => this.openLayoutWizard(z.id, [3])}>Place devices &rsaquo;</button>
           </p>`
         : nothing}
+      ${this.markDetail(z)}
     </section>`;
   }
 
   private zoneCounts(z: Zone): string {
-    const devices = this.devices.filter((d) => d.zones.includes(z.id)).length;
-    return `${plural(z.sensors.length, "sensor")}, ${plural(devices, "device")}.`;
+    const devices = this.devices.filter((d) => d.zones.includes(z.id)).length, placed = z.sensors.filter((s) => s.placed).length;
+    return `${plural(devices, "device")}. ${placed} of ${plural(z.sensors.length, "sensor")} placed.`;
   }
 
   private zone() {
     const z = this.zoneById(this.zoneId);
     if (!z) return nothing;
-    const left = stepsLeft(z);
-    return html`<div><h1>${z.name}</h1>${z.description ? html`<p class="muted">${z.description}</p>` : nothing}</div>
+    const left = stepsLeft(z), L = storedLayout(this.raw(z.id));
+    return html`<div>
+        <h1>${z.name}</h1>
+        ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
+        <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
+      </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
             <span>Not set up yet. Still to confirm: ${left.map((k) => STEP_TITLE[k]).join(", ")}.</span><span class="fixgo">Continue setup &rsaquo;</span>
           </button>`
         : nothing}
+      ${this.periodBlock(z)}
+      <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
       ${this.zoneMap(z)}
-      <section class="card"><p class="muted">${this.zoneCounts(z)} Readings, charts and controls arrive in the releases that follow.</p></section>`;
+      <p class="small muted">Charts, controls and activity arrive in the releases that follow.</p>`;
   }
 
   private entityRow(e: CatalogEntity) {
@@ -868,32 +1118,88 @@ export class EcApp extends LitElement {
     </li>`;
   }
 
+  /* Every mapped device and sensor: what it is and how it reaches Home Assistant, as the mock's Devices has it. */
   private devicesScreen() {
-    const head = html`<div>
-      <h1>Devices</h1>
-      <p class="muted small">
-        What Home Assistant has, for Setup to pick from. How each device is connected is read from Home Assistant, and anything it
-        can't tell says not known, so Setup can ask you. Nothing here changes anything.
-      </p>
-    </div>`;
-    if (this.catalogError)
-      return html`${head}<section class="card"><p>${this.catalogError}</p><div class="row"><button class="btn" @click=${this.askCatalog}>Try again</button></div></section>`;
-    if (!this.catalog) return html`${head}<p class="muted">Asking Home Assistant.</p>`;
+    const c = this.config, zoneName = (id: string) => this.zones.find((z) => z.id === id)?.name ?? id;
+    type Row = { name: string; zones: string[]; role: string; family: string; link: LinkKind; source: string; path: string; hub: string; state: string; down: boolean };
+    const rows: Row[] = [];
+    const str = (v: unknown) => (typeof v === "string" ? v : "");
+    for (const d of c.devices) {
+      if (!Array.isArray(d.zones) || !d.zones.length) continue;
+      const st = typeof d.entity === "string" ? this.states[d.entity] : undefined, down = !st || st.state === "unavailable" || st.state === "unknown";
+      const bri = st && typeof st.attributes.brightness === "number" ? `, ${Math.round((st.attributes.brightness / 255) * 100)}%` : "";
+      const mode = st && typeof st.attributes.mode === "string" ? `, ${st.attributes.mode} mode` : "";
+      rows.push({
+        name: str(d.name) || str(d.entity), zones: d.zones as string[], role: str(d.type), family: str(d.family), link: (str(d.link) || "unknown") as LinkKind, source: str(d.linkSource),
+        path: str(d.path), hub: str(d.hub), state: down ? "Unavailable" : st.state === "on" ? `On${bri}${mode}` : st.state === "off" ? "Off" : st.state, down,
+      });
+    }
+    const seen = new Set<string>();
+    for (const z of c.zones)
+      for (const s of sensorsOf(z)) {
+        const raw = (Array.isArray(z.sensors) ? z.sensors : []).find((x) => typeof x === "object" && x !== null && (x as { id?: unknown }).id === s.id) as Record<string, unknown>;
+        if (seen.has(s.id)) {
+          rows.find((r) => r.name === s.name)?.zones.push(z.id as string);
+          continue;
+        }
+        seen.add(s.id);
+        const h = s.kind === "env" ? readSensor(s, this.states, this.now).health : healthOf(this.states[s.entities.moisture ?? s.entities.temperature ?? ""], this.now);
+        rows.push({
+          name: s.name, zones: [z.id as string], role: s.kind === "soil" ? "Soil probe" : "Environment sensor", family: str(raw?.family), link: (str(raw?.link) || "unknown") as LinkKind,
+          source: str(raw?.linkSource), path: "", hub: "", state: h === "ok" ? "Online" : h === "stale" ? "Stale" : "No data", down: h !== "ok",
+        });
+      }
+    const filters: [string, string][] = [["all", "All"], ["ethernet", "Ethernet"], ["wifi", "WiFi"], ["zigbee", "Zigbee"], ["cloud", "Cloud"], ["unknown", "Not known"]];
+    const shown = rows.filter((r) => this.linkFilter === "all" || (this.linkFilter === "cloud" ? r.path === "cloud" : r.link === this.linkFilter));
+    const src: Record<string, string> = { detected: "Detected", confirmed: "You confirmed" };
+    return html`<div><h1>Devices</h1><p class="muted small">What each mapped device and sensor is, and how it reaches Home Assistant.</p></div>
+      <section class="card">
+        ${this.chips("Link", "link-filter", filters.map(([value, label]) => ({ value, label })), this.linkFilter, (v) => (this.linkFilter = v))}
+        <div class="tbl-wrap">
+          <table style="min-width:640px">
+            <thead><tr><th>Device</th><th>Role</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead>
+            <tbody>
+              ${shown.length
+                ? shown.map(
+                    (r) => html`<tr>
+                      <td>${r.name}<span class="sub">${r.zones.map(zoneName).join(", ")}</span></td>
+                      <td>${r.role || html`<span class="pill dead">Not known yet</span>`}</td>
+                      <td>${r.family}</td>
+                      <td><span class="pill ${r.link === "unknown" ? "dead" : "plain"}">${LINK_LABEL[r.link]}</span><span class="sub">${r.link === "unknown" ? "Setup will ask" : (src[r.source] ?? "")}</span></td>
+                      <td>${PATH_LABEL[r.path as PathKind] ?? ""}${r.hub ? html`<span class="sub">via ${r.hub}</span>` : nothing}</td>
+                      <td>${r.down ? html`<span class="pill dead">${r.state}</span>` : r.state}</td>
+                    </tr>`,
+                  )
+                : html`<tr><td colspan="6" class="muted">${this.linkFilter === "all" ? "Nothing is in a zone yet. Map devices adds them." : "Nothing on this link."}</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card">
+        <details>
+          <summary>Everything in Home Assistant</summary>
+          ${this.catalogList()}
+        </details>
+      </section>`;
+  }
+
+  private catalogList() {
+    if (this.catalogError) return html`<p>${this.catalogError}</p><div class="row"><button class="btn" @click=${this.askCatalog}>Try again</button></div>`;
+    if (!this.catalog) return html`<p class="muted">Asking Home Assistant.</p>`;
     const byArea = new Map<string, CatalogDevice[]>();
     for (const d of this.catalog.devices) byArea.set(d.area ?? "No area", [...(byArea.get(d.area ?? "No area") ?? []), d]);
     const loose = this.catalog.entities;
-    return html`${head}
-      <section class="card">
-        <p class="small muted">${plural(this.catalog.devices.length, "device")} in Home Assistant.</p>
-        ${[...byArea].map(([area, list]) => html`<h3>${area}</h3><ul>${list.map((d) => this.deviceRow(d))}</ul>`)}
-        ${loose.length
-          ? html`<h3>Belonging to no device</h3>
-              <details>
-                <summary>${loose.length === 1 ? "1 entity, such as a helper or template" : `${loose.length} entities, such as helpers and templates`}</summary>
-                <ul>${loose.map((e) => this.entityRow(e))}</ul>
-              </details>`
-          : nothing}
-      </section>`;
+    return html`<p class="small muted">
+        ${plural(this.catalog.devices.length, "device")} in Home Assistant. How each is connected is read from Home Assistant, and anything it can't tell says not known.
+      </p>
+      ${[...byArea].map(([area, list]) => html`<h3>${area}</h3><ul>${list.map((d) => this.deviceRow(d))}</ul>`)}
+      ${loose.length
+        ? html`<h3>Belonging to no device</h3>
+            <details>
+              <summary>${loose.length === 1 ? "1 entity, such as a helper or template" : `${loose.length} entities, such as helpers and templates`}</summary>
+              <ul>${loose.map((e) => this.entityRow(e))}</ul>
+            </details>`
+        : nothing}`;
   }
 
   private wizard(w: Wizard) {
