@@ -16,8 +16,11 @@ _spec.loader.exec_module(next_beta)
     [
         ([], "0.1.0b1"),
         (["v0.1.0b1", "v0.1.0b2"], "0.1.0b3"),
-        # Numeric, not text: b10 is newer than b9.
-        (["v0.1.0b9", "v0.1.0b10", "v0.1.0b2"], "0.1.0b11"),
+        # Never a two-digit beta, which GitHub's release list doesn't sort as newest: after b9, the next patch's b1.
+        (["v0.1.0b8", "v0.1.0b9"], "0.1.1b1"),
+        # A b10 already out (2026-11-10) is read as newest, numerically, and also moves on to the next patch.
+        (["v0.1.0b9", "v0.1.0b10", "v0.1.0b2"], "0.1.1b1"),
+        (["v0.1.0b10", "v0.1.1b1"], "0.1.1b2"),
         # A full release is newer than its own betas, so the next beta is of the next patch.
         (["v0.1.0b7", "v0.1.0"], "0.1.1b1"),
         # A beta of a newer version, started by hand, carries on.

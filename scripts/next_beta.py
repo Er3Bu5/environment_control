@@ -38,15 +38,24 @@ def newest(tags: list[str]) -> str | None:
     return max(found, key=_key) if found else None
 
 
+# GitHub lists releases in an undocumented order that isn't numeric: it put v0.1.0b10 below v0.1.0b4, so HA's
+# Marketplace, reading the top of that list, kept offering b9 (2026-11-10). A beta number therefore never reaches two
+# digits: after b9 comes the next patch's b1, which sorts first however the tags are compared.
+MAX_BETA = 9
+
+
 def next_beta(tags: list[str]) -> str:
-    """After a beta comes the next beta of the same version; after a full release, the first beta of the next patch."""
+    """After a beta comes the next beta of the same version, up to b9; after b9 or a full release, the first beta of
+    the next patch."""
     latest = newest(tags)
     if latest is None:
         return "0.1.0b1"
     m = TAG.match(latest)
     assert m
     major, minor, patch, beta = m.groups()
-    return f"{major}.{minor}.{patch}b{int(beta) + 1}" if beta else f"{major}.{minor}.{int(patch) + 1}b1"
+    if beta and int(beta) < MAX_BETA:
+        return f"{major}.{minor}.{patch}b{int(beta) + 1}"
+    return f"{major}.{minor}.{int(patch) + 1}b1"
 
 
 def ships(paths: list[str]) -> bool:
