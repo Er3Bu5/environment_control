@@ -242,6 +242,157 @@ test.describe("the calibration write", () => {
   });
 });
 
+test.describe("sensor calibration", () => {
+  const LEFT = "number.environment_left_leaf_temperature_offset";
+  const dialog = (frame: Frame) => app(frame).getByRole("dialog");
+  const box = (frame: Frame, name: string) => app(frame).getByLabel(`${name} degrees from air`);
+  const bar = (frame: Frame) => app(frame).getByRole("region", { name: "Unsaved changes" });
+  const row = (frame: Frame, name: string) => app(frame).locator(".lrow", { has: frame.locator("strong", { hasText: name }) });
+  const stored = (page: Page) => page.evaluate<{ revision: number; zones: Record<string, unknown>[] }>("JSON.parse(fakeHA.disk)");
+  const sets = (page: Page) => page.evaluate<{ data: { entity_id: string; value: number } }[]>("fakeHA.calls.filter((c) => c.service === 'set_value')");
+  async function openGarden(page: Page): Promise<Frame> {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
+    return frame;
+  }
+  const type = async (frame: Frame, name: string, value: string) => {
+    await box(frame, name).fill(value);
+    await box(frame, name).press("Enter");
+  };
+
+  test("shows each offset where it's held, and nothing is sent until applied, then only once the board reports it is it saved", async ({ page }) => {
+    const frame = await openGarden(page);
+    await expect(box(frame, "Environment left")).toHaveValue("1.0");
+    await expect(row(frame, "Environment left").getByRole("button", { name: "Below air" })).toHaveAttribute("aria-pressed", "true");
+    await expect(row(frame, "Environment under")).toContainText("kept in Environment Control");
+    await type(frame, "Environment left", "1.5");
+    await expect(bar(frame)).toContainText("Garden · Environment left: leaf temperature offset");
+    expect(await serviceCalls(page)).toBe(0);
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("1.0 °C below air → 1.5 °C below air, on the board");
+    expect(await serviceCalls(page)).toBe(0);
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame).getByRole("button", { name: "Applying and verifying..." })).toBeDisabled();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect((await sets(page)).map((c) => c.data)).toEqual([{ entity_id: LEFT, value: -1.5 }]);
+    await expect(app(frame).locator(".toast")).toHaveText("Leaf temperature offsets saved on the boards.");
+    await expect(box(frame, "Environment left")).toHaveValue("1.5");
+    await expect(bar(frame)).toHaveCount(0);
+  });
+
+  test("a board that doesn't report the new value is never shown as saved, and only what's left is offered again", async ({ page }) => {
+    test.setTimeout(45_000);
+    const frame = await openGarden(page);
+    await page.evaluate("fakeHA.knobs.dropNext = true");
+    await type(frame, "Environment left", "2");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toContainText("Some changes were not applied.", { timeout: 15_000 });
+    await expect(dialog(frame)).toContainText("Environment left: not confirmed. The board still reports 1.0 °C below air.");
+    await expect(dialog(frame).getByRole("button", { name: "Apply 1 change" })).toBeEnabled();
+    await expect(row(frame, "Environment left").locator(".lstatus")).toHaveText("Not confirmed. The board still reports 1.0 °C below air.");
+    /* Trying again sends it again, and this time the board takes it. */
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect((await sets(page)).map((c) => c.data.value)).toEqual([-2, -2]);
+  });
+
+  test("a value past the board's limits stops the save, and its Fix goes to the box", async ({ page }) => {
+    const frame = await openGarden(page);
+    await type(frame, "Environment left", "6");
+    await expect(bar(frame)).toContainText("Fix first: Environment left can be at most 5 °C below air.");
+    await expect(bar(frame).getByRole("button", { name: "Review and apply" })).toBeDisabled();
+    await type(frame, "Environment left", "+3");
+    await expect(row(frame, "Environment left").getByRole("button", { name: "Above air" })).toHaveAttribute("aria-pressed", "true");
+    await app(frame).getByRole("button", { name: /Environment left can be at most 2 °C above air/ }).click();
+    await expect(box(frame, "Environment left")).toBeFocused();
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("an offline board can't be edited and says why", async ({ page }) => {
+    await page.goto(PAGE);
+    await page.evaluate(`fakeHA.offline(${JSON.stringify(LEFT)}, true)`);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
+    await expect(box(frame, "Environment left")).toBeDisabled();
+    await expect(row(frame, "Environment left")).toContainText("This board is offline, so its offset can't change until it's back.");
+  });
+
+  test("an offset kept here and the chart's choice are saved in Environment Control, with nothing sent to a board", async ({ page }) => {
+    const frame = await openGarden(page);
+    await type(frame, "Environment under", "1");
+    await app(frame).locator(".lbasis").getByLabel("Environment right").check();
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("VPD chart uses");
+    await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    const garden = (await stored(page)).zones.find((z) => z.id === "garden") as { leafBasis?: string; sensors: { id: string; leaf?: number }[] };
+    expect(garden.leafBasis).toBe("g-right");
+    expect(garden.sensors.find((x) => x.id === "g-under")?.leaf).toBe(-1);
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("leaving with an offset typed asks first", async ({ page }) => {
+    const frame = await openGarden(page);
+    await type(frame, "Environment left", "1.5");
+    await tab(frame, "Overview").click();
+    await expect(app(frame).getByRole("alertdialog")).toContainText("You have 1 unsaved change in Garden.");
+    await app(frame).getByRole("button", { name: "Keep editing" }).click();
+    await expect(box(frame, "Environment left")).toHaveValue("1.5");
+    expect(await leaveAsks(page)).toBe(true);
+  });
+
+  test("the VPD tile's Change opens it, and Back returns to the zone", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Garden").click();
+    await app(frame).locator(".tile", { hasText: "VPD" }).getByRole("button", { name: "Change" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
+  });
+
+  test("a new zone's board asks where its offset is held; linking it saves the link, and a new value then goes to that board", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Setup").click();
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).locator("#g-calibrate")).toContainText("Needs sensors from Map devices");
+    await app(frame).getByRole("button", { name: "Map devices", exact: true }).click();
+    await app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: "Environment board" }) }).getByRole("button").first().click();
+    const next = app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
+    for (let i = 0; i < 3; i++) await next.click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await app(frame).locator("#g-calibrate").getByRole("button", { name: "Sensor Calibration" }).click();
+    await expect(app(frame).getByRole("button", { name: "Say where Environment board's offset is held." })).toBeVisible();
+    await expect(app(frame).getByRole("button", { name: "Confirm" })).toBeDisabled();
+    await expect(box(frame, "Environment board")).toBeDisabled();
+    await app(frame).getByLabel("On the board, Leaf offset").check();
+    await expect(box(frame, "Environment board")).toHaveValue("1.5");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(dialog(frame)).toContainText("Not said yet → On the board, Leaf offset");
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect(await serviceCalls(page)).toBe(0);
+    const tent = (await stored(page)).zones.find((z) => z.name === "Flower tent") as { setup: Record<string, string>; sensors: { leafEntity?: string }[] };
+    expect([tent.sensors[0].leafEntity, tent.setup.calibrate]).toEqual(["number.environment_board_leaf_offset", "done"]);
+    await type(frame, "Environment board", "1");
+    await bar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    expect((await sets(page)).map((c) => c.data)).toEqual([{ entity_id: "number.environment_board_leaf_offset", value: -1 }]);
+  });
+});
+
 test.describe("zones", () => {
   const stored = (page: Page) => page.evaluate<{ revision: number; zones: { id: string; name: string; description?: string; setup?: Record<string, string> }[]; devices: { id: string; zones: string[] }[] }>("JSON.parse(JSON.stringify(fakeHA.config))");
   const dialog = (frame: Frame) => app(frame).getByRole("dialog");

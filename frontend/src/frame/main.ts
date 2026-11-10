@@ -115,6 +115,31 @@ import {
   zoneReading,
 } from "./readings";
 import { PALETTES, styles } from "./styles";
+import {
+  KEPT,
+  LEAF_GIVE_UP_MS,
+  type Home,
+  type LeafDraft,
+  applyLeafConfig,
+  basisOf,
+  boardSends,
+  chartLeaf,
+  countedOf,
+  envSensors,
+  homesOf,
+  leafChanges,
+  leafIssues,
+  leafValue,
+  limitsOf,
+  openLeaf,
+  phrase,
+  pickSrc,
+  placesOf,
+  previewText,
+  seedRows,
+  typeInto,
+  zoneVpdAt,
+} from "./calibration";
 
 declare const __VERSION__: string;
 
@@ -152,10 +177,14 @@ interface Review {
   error: string;
   apply: () => Promise<Result>;
   after: () => void;
+  /* Said while applying: a write to a board waits for the board to report it. */
+  busyText?: string;
+  /* What's left after a partial failure, worked out again, so only that is tried again. */
+  refresh?: () => Change[];
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
-const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place"]);
+const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate"]);
 
 const APPEARANCES: [Appearance, "home" | "sun" | "moon", string][] = [
   ["ha", "home", "Home Assistant"],
@@ -194,6 +223,8 @@ export class EcApp extends LitElement {
     wiz: { state: true },
     mapw: { state: true },
     lay: { state: true },
+    leafw: { state: true },
+    typing: { state: true },
     states: { state: true },
     now: { state: true },
     level: { state: true },
@@ -217,6 +248,9 @@ export class EcApp extends LitElement {
   declare private wiz: Wizard | null;
   declare private mapw: MapDraft | null;
   declare private lay: LayoutDraft | null;
+  declare private leafw: LeafDraft | null;
+  declare private typing: boolean;
+  private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
   declare private level: "all" | Level;
@@ -249,6 +283,8 @@ export class EcApp extends LitElement {
     this.wiz = null;
     this.mapw = null;
     this.lay = null;
+    this.leafw = null;
+    this.typing = false;
     this.states = {};
     this.now = Date.now();
     this.level = "all";
@@ -267,6 +303,8 @@ export class EcApp extends LitElement {
     window.addEventListener("message", this.onMessage);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
+    this.addEventListener("focusin", this.onFocus);
+    this.addEventListener("focusout", this.onFocus);
     /* Staleness and "reported ago" move with time even when nothing new arrives. */
     this.clock = setInterval(() => (this.now = Date.now()), 15_000);
     parent.postMessage({ v: 1, type: "ready" }, "*");
@@ -276,6 +314,8 @@ export class EcApp extends LitElement {
     window.removeEventListener("message", this.onMessage);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
+    this.removeEventListener("focusin", this.onFocus);
+    this.removeEventListener("focusout", this.onFocus);
     clearInterval(this.clock);
     super.disconnectedCallback();
   }
@@ -329,6 +369,7 @@ export class EcApp extends LitElement {
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
     if (this.lay && !this.zoneById(this.lay.zoneId)) this.lay = null;
+    if (this.leafw && !this.zoneById(this.leafw.zoneId)) this.leafw = null;
   };
 
   private askCatalog = async (): Promise<void> => {
@@ -336,6 +377,16 @@ export class EcApp extends LitElement {
     const r = await this.ask("catalog");
     if (r.ok && r.catalog) [this.catalog, this.catalogError] = [r.catalog, null];
     else this.catalogError = r.error ?? "Home Assistant couldn't list its devices.";
+    /* Sensor Calibration waits for this list, since it says which boards have somewhere to hold an offset. */
+    const d = this.leafw;
+    if (d && !d.seeded && this.catalog) this.leafw = { ...d, rows: seedRows(this.raw(d.zoneId), this.catalog, this.states), seeded: true };
+  };
+
+  /* On a touch screen the box being typed in sits just above the keyboard, which is where the draft bar would land. */
+  private onFocus = (e: FocusEvent): void => {
+    const el = e.composedPath()[0];
+    const field = el instanceof HTMLInputElement && el.type === "text";
+    this.typing = e.type === "focusin" && field && matchMedia("(pointer: coarse)").matches;
   };
 
   private applyTheme(t: Theme): void {
@@ -392,6 +443,7 @@ export class EcApp extends LitElement {
     if (this.wiz) return this.wizChanges(this.wiz).length;
     if (this.mapw) return this.mapChangeList(this.mapw).length;
     if (this.lay) return layoutChanges(this.lay, this.config).length;
+    if (this.leafw) return this.leafChangeList(this.leafw).length;
     return 0;
   }
 
@@ -399,6 +451,8 @@ export class EcApp extends LitElement {
      lose anything, and only when that changes. */
   protected updated(changed: PropertyValues): void {
     const held = this.draftCount > 0;
+    this.classList.toggle("drafting", held && !!this.leafw && this.screen === "setup");
+    this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
       parent.postMessage({ v: 1, type: "draft", open: held }, "*");
@@ -418,7 +472,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void): void {
     const n = this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || "this zone";
+    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -441,6 +495,7 @@ export class EcApp extends LitElement {
       this.wiz = null;
       this.mapw = null;
       this.lay = null;
+      this.leafw = null;
       this.guide = null;
       this.go(screen, zoneId);
     });
@@ -474,6 +529,7 @@ export class EcApp extends LitElement {
       this.guide = null;
       this.mapw = null;
       this.lay = null;
+      this.leafw = null;
       this.wiz = { id: null, name: "", desc: "", fromGuide: false };
       this.go("setup");
     });
@@ -536,7 +592,9 @@ export class EcApp extends LitElement {
     this.modal = { ...r, busy: true, error: "" };
     const result = await r.apply();
     if (!result.ok) {
-      this.modal = { ...r, busy: false, error: result.error ?? "Not saved." };
+      const changes = r.refresh ? r.refresh() : r.changes;
+      this.modal = changes.length ? { ...r, changes, busy: false, error: result.error ?? "Not saved." } : null;
+      if (!changes.length) this.toast(result.error ?? "Not saved.");
       return;
     }
     this.modal = null;
@@ -555,6 +613,7 @@ export class EcApp extends LitElement {
       this.wiz = null;
       this.mapw = null;
       this.lay = null;
+      this.leafw = null;
       this.guide = id;
       this.go("setup");
     });
@@ -565,6 +624,7 @@ export class EcApp extends LitElement {
     this.guarded(() => {
       this.wiz = null;
       this.lay = null;
+      this.leafw = null;
       this.menu = null;
       this.mapw = openMap(this.config, id);
       this.mapFromGuide = fromGuide;
@@ -679,6 +739,7 @@ export class EcApp extends LitElement {
     this.guarded(() => {
       this.wiz = null;
       this.mapw = null;
+      this.leafw = null;
       this.menu = null;
       this.lay = openLayout(this.config, id, flow);
       this.layFromGuide = fromGuide;
@@ -768,6 +829,174 @@ export class EcApp extends LitElement {
       },
     };
   };
+
+  /* Sensor Calibration: a page edited freely, so a draft bar rather than a last button. Opened from the guide, the zone
+     menu, the VPD tile or a sensor on the map, and Back returns wherever it was opened from. */
+  private openCalibration(id: string, fromGuide = false): void {
+    this.guarded(() => {
+      const back = { screen: this.screen, zoneId: this.zoneId };
+      this.wiz = null;
+      this.mapw = null;
+      this.lay = null;
+      this.menu = null;
+      this.guide = null;
+      this.leafw = openLeaf(this.raw(id), id, this.catalog, this.states, fromGuide);
+      this.leafBack = back;
+      if (!this.catalog) void this.askCatalog();
+      this.go("setup");
+    });
+  }
+
+  private leafCtx(zoneId: string) {
+    const raw = this.raw(zoneId), sensors = envSensors(raw);
+    const homesBy: Record<string, Home[]> = Object.fromEntries(sensors.map((s) => [s.id, homesOf(s, this.catalog, this.states)]));
+    return { raw, sensors, homesBy, storedBasis: typeof raw?.leafBasis === "string" ? raw.leafBasis : "" };
+  }
+
+  private leafChangeList(d: LeafDraft) {
+    if (!d.seeded) return [];
+    const { sensors, homesBy, storedBasis } = this.leafCtx(d.zoneId);
+    return leafChanges(d, sensors, homesBy, storedBasis);
+  }
+
+  private setLeaf(change: (d: LeafDraft) => void): void {
+    if (!this.leafw) return;
+    const d = structuredClone(this.leafw);
+    change(d);
+    this.leafw = d;
+  }
+
+  private leafDone(d: LeafDraft): void {
+    this.leafw = null;
+    if (d.fromGuide) this.guide = d.zoneId;
+    else this.go(this.leafBack.screen, this.leafBack.zoneId);
+  }
+
+  private leafExit = (): void => {
+    const d = this.leafw;
+    if (!d || d.sending) return;
+    this.guarded(() => this.leafDone(d));
+  };
+
+  private leafDiscard = (): void => {
+    const d = this.leafw;
+    if (!d || d.sending) return;
+    this.leafw = openLeaf(this.raw(d.zoneId), d.zoneId, this.catalog, this.states, d.fromGuide);
+  };
+
+  /* Confirming as it stands is how the step counts as done when nothing needed changing. */
+  private leafConfirm = async (): Promise<void> => {
+    const d = this.leafw;
+    if (!d) return;
+    await this.mark(d.zoneId, "calibrate", "done");
+    this.toast("Sensor Calibration confirmed.");
+    if (d.fromGuide) this.leafDone(d);
+  };
+
+  /* A box being typed in keeps what's typed until it's left, so a tap on Review commits it first. */
+  private commitTyped(): void {
+    const el = this.shadowRoot?.activeElement;
+    if (el instanceof HTMLInputElement && el.dataset.lin) el.blur();
+  }
+
+  private async jumpToTarget(target: string): Promise<void> {
+    await this.updateComplete;
+    const el = this.shadowRoot?.querySelector(`#${target}`) as HTMLElement | null;
+    el?.scrollIntoView({ block: "center" });
+    (el?.matches("input, button") ? el : (el?.querySelector("input, button") as HTMLElement | null))?.focus({ preventScroll: true });
+  }
+
+  private leafReview = (): void => {
+    this.commitTyped();
+    const d = this.leafw;
+    if (!d || d.sending) return;
+    const { sensors, homesBy } = this.leafCtx(d.zoneId);
+    const issues = leafIssues(d, sensors, homesBy);
+    if (issues.length) return void this.jumpToTarget(issues[0].target);
+    const changes = this.leafChangeList(d);
+    if (!changes.length) return;
+    const boards = changes.some((c) => c.kind === "board"), here = changes.some((c) => c.kind !== "board");
+    this.modal = {
+      kind: "review",
+      changes,
+      note: [
+        boards ? "Offsets on a board are written to the board, and count once it reports them. Its VPD, and anything reading it such as your alerts, follow straight away." : "",
+        here ? "The rest is saved in Environment Control. Nothing else in Home Assistant changes." : "",
+      ].filter(Boolean).join(" "),
+      busy: false,
+      error: "",
+      busyText: boards ? "Applying and verifying..." : "Saving...",
+      apply: () => this.applyLeaf(d),
+      refresh: () => (this.leafw ? this.leafChangeList(this.leafw) : []),
+      after: () => {
+        const now = this.leafw;
+        if (now) this.leafw = openLeaf(this.raw(now.zoneId), now.zoneId, this.catalog, this.states, now.fromGuide);
+        this.toast(boards ? "Leaf temperature offsets saved on the boards." : "Leaf temperature offsets saved.");
+      },
+    };
+  };
+
+  /* Environment Control's own record first, then each board that holds something different, each counting only once the
+     board reports the new value. Nothing assumes a write landed. */
+  private async applyLeaf(d: LeafDraft): Promise<Result> {
+    const { sensors, homesBy, storedBasis } = this.leafCtx(d.zoneId);
+    const changes = leafChanges(d, sensors, homesBy, storedBasis), sends = boardSends(d, sensors, homesBy);
+    if (changes.some((c) => c.kind !== "board")) {
+      const r = await this.save((c) => {
+        applyLeafConfig(c, d, sensors, homesBy);
+        if (!sends.length) markStep(c, d.zoneId, "calibrate", "done");
+      });
+      if (!r.ok) return r;
+    }
+    if (!sends.length) return { type: "result", req: 0, ok: true };
+    this.setLeaf((x) => {
+      x.sending = true;
+      for (const s of sends) if (x.rows[s.sensor.id]) x.rows[s.sensor.id].status = "sending";
+    });
+    const outcomes = await Promise.all(
+      sends.map(async (s) => {
+        const r = await this.ask("calibrate", { sensor: s.sensor.id, value: s.value });
+        return { s, landed: r.ok && (await this.untilReported(s.entity, s.value)), error: r.ok ? "" : (r.error ?? "") };
+      }),
+    );
+    this.setLeaf((x) => {
+      x.sending = false;
+      for (const o of outcomes) if (x.rows[o.s.sensor.id]) x.rows[o.s.sensor.id].status = o.landed ? "" : "stuck";
+    });
+    const stuck = outcomes.filter((o) => !o.landed);
+    if (stuck.length)
+      return {
+        type: "result",
+        req: 0,
+        ok: false,
+        error: stuck.map((o) => `${o.s.sensor.name}: ${o.error ? `not sent. ${o.error}` : `not confirmed. The board still reports ${this.reported(o.s.entity)}.`}`).join("\n"),
+      };
+    await this.mark(d.zoneId, "calibrate", "done");
+    return { type: "result", req: 0, ok: true };
+  }
+
+  private reported(entity: string): string {
+    const v = numberOf(this.states[entity]);
+    if (v === null) return "nothing";
+    return Math.abs(v) < 1e-9 ? "the same as air" : phrase(v);
+  }
+
+  /* Waits for HA to report the board holding the value, and gives up after a while rather than calling it saved. */
+  private untilReported(entity: string, value: number): Promise<boolean> {
+    const hit = () => {
+      const v = numberOf(this.states[entity]);
+      return v !== null && Math.abs(v - value) < 1e-6;
+    };
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = setInterval(() => {
+        if (hit() || Date.now() - start > LEAF_GIVE_UP_MS) {
+          clearInterval(tick);
+          resolve(hit());
+        }
+      }, 100);
+    });
+  }
 
   private askRemove(id: string): void {
     const z = this.zoneById(id);
@@ -989,7 +1218,9 @@ export class EcApp extends LitElement {
     return html`<div class="tile">
       <div class="tile-top">${this.ic(...EcApp.LOOKS[k])}<div><div class="name">${METRIC[k].label}</div><div class="val">${fmt(k, r.value)} <small>${METRIC[k].unit}</small></div></div></div>
       ${words ? html`<div class="tavg">${words}</div>` : nothing}
-      ${k === "vpd" && this.readingsOf(z.id).length ? html`<div class="tavg">${this.leafLine(z)}</div>` : nothing}
+      ${k === "vpd" && this.readingsOf(z.id).length
+        ? html`<div class="tavg">${this.leafLine(z)} <button class="fixlink small" @click=${() => this.openCalibration(z.id)}>Change &rsaquo;</button></div>`
+        : nothing}
       ${this.track(z, k)}
       ${this.judged(z) && band
         ? html`<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => html`<span><b>${band[i] === null ? "-" : band[i]}</b>${l}</span>`)}</div>
@@ -1042,7 +1273,10 @@ export class EcApp extends LitElement {
     return html`<div class="detail">
       <strong>${it.name}</strong><span>${where}. ${it.level ? LEVELS[it.level] : "Height not set"}.</span><span>${reading}.</span>
       <span class="muted">${ago(r.at, this.now)}</span>
-      <span class="muted">${x === 0 ? "Leaf the same as air" : `Leaf ${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`}, from ${s.leafEntity && !s.leafUnused ? "the board" : "Environment Control"}.</span>
+      <span class="muted"
+        >${x === 0 ? "Leaf the same as air" : `Leaf ${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`}, from ${s.leafEntity && !s.leafUnused ? "the board" : "Environment Control"}.
+        <button class="fixlink small" @click=${() => this.openCalibration(z.id)}>Change &rsaquo;</button></span
+      >
     </div>`;
   }
 
@@ -1240,6 +1474,7 @@ export class EcApp extends LitElement {
 
   /* A step that can't be done yet says why rather than offering a button that does nothing. */
   private stepBlocked(z: Zone, k: SetupStep): string {
+    if (k === "calibrate") return envSensors(this.raw(z.id)).length ? "" : "Needs sensors from Map devices";
     if (k !== "place") return "";
     const items = zoneItems(this.config, z.id);
     return items.sensors.length || items.devs.length || items.virt.length ? "" : "Needs sensors from Map devices";
@@ -1250,6 +1485,7 @@ export class EcApp extends LitElement {
     else if (k === "devices") this.openMapDevices(id, true);
     else if (k === "layout") this.openLayoutWizard(id, [1, 2], true);
     else if (k === "place") this.openLayoutWizard(id, [3], true);
+    else if (k === "calibrate") this.openCalibration(id, true);
   }
 
   private guideScreen(id: string) {
@@ -1678,6 +1914,140 @@ export class EcApp extends LitElement {
         : nothing}`;
   }
 
+  private calibration(d: LeafDraft) {
+    const z = this.zoneById(d.zoneId);
+    if (!z) return nothing;
+    const { raw, sensors, homesBy } = this.leafCtx(d.zoneId);
+    const head = html`<div><h1>Sensor Calibration: ${z.name}</h1></div>`;
+    const back = html`<button class="btn" ?disabled=${d.sending} @click=${this.leafExit}>Back</button>`;
+    if (!sensors.length)
+      return html`${head}<section class="card">
+          <p class="muted">${z.name} has no environment sensors yet, and only those have a leaf temperature offset.</p>
+          <div class="row">${back}<button class="btn" @click=${() => this.openMapDevices(z.id)}>Map devices</button></div>
+        </section>`;
+    if (!d.seeded)
+      return html`${head}<section class="card">
+          ${this.catalogError
+            ? html`<div class="notice"><span>${this.catalogError}</span><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
+            : html`<p class="muted">Looking up ${z.name}'s boards in Home Assistant.</p>`}
+          <div class="row">${back}</div>
+        </section>`;
+    const issues = leafIssues(d, sensors, homesBy), changes = this.leafChangeList(d).length;
+    const open = z.setup.calibrate === "todo" || z.setup.calibrate === "later";
+    const onBoard = sensors.some((s) => (homesBy[s.id] ?? []).length);
+    const vpd = zoneVpdAt(d, sensors, this.methodOf(z.id), this.states, this.now), saved = this.zoneNow(z.id, "vpd").value;
+    const level = (id: string) => {
+      const x = (Array.isArray(raw?.sensors) ? raw.sensors : []).find((v) => typeof v === "object" && v !== null && (v as { id?: unknown }).id === id) as { level?: unknown } | undefined;
+      return typeof x?.level === "string" && x.level in LEVELS ? LEVELS[x.level as Level] : "Height not set";
+    };
+    const counted = countedOf(sensors), basis = basisOf(sensors, d.basis);
+    const chartAt = chartLeaf(d, sensors), at = Math.abs(chartAt) < 1e-9 ? "the leaf the same as air" : phrase(chartAt);
+    const same = new Set(counted.map((s) => (d.rows[s.id] ? leafValue(d.rows[s.id]) : 0))).size === 1;
+    return html`${head}
+      ${open
+        ? html`<div class="notice">
+            Not confirmed yet. ${onBoard ? "Check each sensor's offset, then Confirm. A board keeps the offset it already holds, and one kept here starts at 0." : "Each offset starts at 0. Check them, then Confirm."}
+            Applying a change confirms it too.
+          </div>`
+        : nothing}
+      <section class="card" id="cal-leaf">
+        <div>
+          <h2>Leaf temperature offset</h2>
+          <p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p>
+        </div>
+        <div class="now">
+          <strong>${z.name} VPD ${vpd === null ? "--" : `${fmt("vpd", vpd)} kPa`}</strong>${vpd !== null && fmt("vpd", vpd) !== fmt("vpd", saved) ? html`<span class="small muted">Now ${fmt("vpd", saved)} kPa</span>` : nothing}
+        </div>
+        <div class="lrows">${repeat(sensors, (s) => s.id, (s) => this.leafRow(d, s, homesBy[s.id] ?? [], issues, level(s.id)))}</div>
+        <div class="issues">
+          ${issues.map((i) => html`<button class="notice fix" @click=${() => this.jumpToTarget(i.target)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
+        </div>
+        ${counted.length >= 2
+          ? html`<div class="lbasis">
+              ${this.chips("VPD chart uses", `lbasis-${z.id}`, [{ value: "", label: "Average" }, ...counted.map((s) => ({ value: s.id, label: s.name }))], basis, (v) => this.setLeaf((x) => (x.basis = v)))}
+              <div class="small muted">${same ? `Every sensor matches, so the chart is drawn at ${at}.` : `Drawn at ${at}. Each sensor's own VPD still uses its own offset.`}</div>
+            </div>`
+          : nothing}
+        ${onBoard ? html`<p class="small muted">Offsets on a board are changed on the board itself. Its VPD, and anything reading it such as your alerts, follow straight away.</p>` : nothing}
+      </section>
+      <div class="row">
+        ${back}${open && !changes ? html`<button class="btn primary" ?disabled=${issues.length > 0} @click=${this.leafConfirm}>Confirm</button>` : nothing}
+      </div>`;
+  }
+
+  private leafRow(d: LeafDraft, s: ReturnType<typeof envSensors>[number], homes: Home[], issues: { id: string; target: string }[], height: string) {
+    const r = d.rows[s.id];
+    if (!r) return nothing;
+    const h = homes.find((x) => x.entity === r.src), offline = !!h?.offline, locked = d.sending || offline || r.src === "";
+    const L = limitsOf(r.src, homes), places = placesOf(L.step), bad = issues.some((i) => i.target === `lin-${s.id}`);
+    const commit = (e: Event) => {
+      const input = e.target as HTMLInputElement;
+      this.setLeaf((x) => typeInto(x.rows[s.id], input.value));
+      input.value = (this.leafw?.rows[s.id]?.mag ?? r.mag).toFixed(places);
+    };
+    const dir = (to: -1 | 1, label: string) =>
+      html`<button aria-pressed=${r.dir === to ? "true" : "false"} ?disabled=${locked} @click=${() => this.setLeaf((x) => (x.rows[s.id].dir = to))}>${label}</button>`;
+    const status = offline
+      ? "This board is offline, so its offset can't change until it's back."
+      : r.status === "sending"
+        ? "Sending to the board..."
+        : r.status === "stuck" && h
+          ? `Not confirmed. The board still reports ${this.reported(h.entity)}.`
+          : "";
+    return html`<div class="lrow" id="lr-${s.id}">
+      <div class="lrow-top"><strong>${s.name}</strong><span class="pill plain">${height}</span></div>
+      ${homes.length
+        ? html`<div id="lsrc-${s.id}">
+            ${this.chips(
+              `Where ${s.name}'s offset is held${r.src === "" ? ", pick one" : ""}`,
+              `lsrc-${s.id}`,
+              [...homes.map((x) => ({ value: x.entity, label: `On the board, ${x.name}` })), { value: KEPT, label: "Kept in Environment Control" }],
+              r.src,
+              (v) => this.setLeaf((x) => pickSrc(x.rows[s.id], s, v, homes)),
+            )}
+          </div>`
+        : html`<div class="small muted">This sensor has nowhere to hold an offset, so it's kept in Environment Control.</div>`}
+      <div class="lfield">
+        <label class="lcell"
+          ><input
+            id="lin-${s.id}"
+            data-lin=${s.id}
+            type="text"
+            inputmode="decimal"
+            enterkeyhint="done"
+            autocomplete="off"
+            .value=${r.mag.toFixed(places)}
+            aria-label="${s.name} degrees from air"
+            aria-invalid=${bad ? "true" : "false"}
+            ?disabled=${locked}
+            @change=${commit}
+            @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          /><span>°C</span></label
+        >
+        <div class="seg" role="group" aria-label="${s.name} leaf against air">${dir(-1, "Below air")}${dir(1, "Above air")}</div>
+      </div>
+      <div class="small muted">${previewText(s, leafValue(r), this.states, this.now)}</div>
+      ${r.src !== "" ? html`<div class="small muted">${h && h.name !== h.entity ? `${h.entity}. ` : ""}Between ${-L.min} °C below and ${L.max} °C above air, in steps of ${L.step}.</div>` : nothing}
+      <div class="lstatus" role="status">${status}</div>
+    </div>`;
+  }
+
+  /* Pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
+  private draftBar() {
+    const d = this.leafw;
+    if (!d || this.screen !== "setup") return nothing;
+    const changes = this.leafChangeList(d), n = changes.length;
+    if (!n) return nothing;
+    const z = this.zoneById(d.zoneId), { sensors, homesBy } = this.leafCtx(d.zoneId), issue = leafIssues(d, sensors, homesBy)[0];
+    const blocked = issue ? `Fix first: ${issue.text}` : "";
+    return html`<div class="draftbar" role="region" aria-label="Unsaved changes" ?inert=${!!this.modal} ?data-blocked=${!!blocked}>
+      <span class="draft-count">${n}</span>
+      <span class="draft-text"><strong>${n === 1 ? `${z?.name ?? ""} · ${changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
+      <button class="draft-discard" ?disabled=${d.sending} @click=${this.leafDiscard}>Discard</button>
+      <button class="draft-review" ?disabled=${!!blocked || d.sending} @click=${this.leafReview}>Review and apply</button>
+    </div>`;
+  }
+
   private zoneRow(z: Zone) {
     const open = this.menu === z.id;
     return html`<div class="task">
@@ -1708,6 +2078,7 @@ export class EcApp extends LitElement {
             <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Map devices</button>
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [1, 2])}>Zone layout</button>
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Placement</button>
+            <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -1722,6 +2093,7 @@ export class EcApp extends LitElement {
   }
 
   private setup() {
+    if (this.leafw) return this.calibration(this.leafw);
     if (this.wiz) return this.wizard(this.wiz);
     if (this.mapw) return this.mapWizard(this.mapw);
     if (this.lay) return this.layWizard(this.lay);
@@ -1796,11 +2168,16 @@ export class EcApp extends LitElement {
             )}
           </div>
           ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}
-          ${m.error ? html`<div class="notice" role="alert"><strong>Not saved.</strong><span>${m.error}</span></div>` : nothing}
+          ${m.error
+            ? html`<div class="notice" role="alert">
+                <strong>${m.refresh ? "Some changes were not applied." : "Not saved."}</strong>${m.error.split("\n").map((line) => html`<span>${line}</span>`)}
+                ${m.refresh ? html`<span>Anything that went through is saved. What's left is still here to try again.</span>` : nothing}
+              </div>`
+            : nothing}
         </div>
         <div class="row">
           <button class="btn" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
-          <button class="btn primary" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? "Saving..." : `Apply ${plural(n, "change")}`}</button>
+          <button class="btn primary" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
         </div>
       </div>
     </div>`;
@@ -1814,7 +2191,7 @@ export class EcApp extends LitElement {
       setup: () => this.setup(),
     };
     return html`${this.chrome()}<main ?inert=${!!this.modal}><div class="wrap">${screens[this.screen]()}</div></main>
-      ${this.modalView()}${this.toastText ? html`<div class="toast" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
+      ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
   }
 }
 
