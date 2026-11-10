@@ -1663,9 +1663,9 @@ export class EcApp extends LitElement {
       });
       return d;
     };
-    const many = rows.length > 1;
-    for (const r of [...rows].reverse())
-      parts.push(svg`<path d=${path(r.line)} fill="none" stroke=${r.color} stroke-width=${r.width} stroke-opacity=${many && r.width === 1 ? 0.55 : 1}></path>`);
+    /* Every line at full strength: faded, a sensor's 1px line vanished into the ideal band in dark mode. The combined line
+       is told apart by its weight and colour, and it's drawn last, on top. */
+    for (const r of [...rows].reverse()) parts.push(svg`<path d=${path(r.line)} fill="none" stroke=${r.color} stroke-width=${r.width}></path>`);
     const at = this.chartAt, shown = at ?? n;
     if (at !== null) {
       parts.push(svg`<line x1=${X(at)} x2=${X(at)} y1=${T} y2=${T + PH} stroke="var(--muted)"></line>`);
