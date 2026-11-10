@@ -40,9 +40,9 @@ export const mk = (k: Look) => html`<span class="mk ${k.fill ? "fill" : ""} ${k.
 export const keyView = html`<div class="key">
   <span><i class="unit"></i>Unit</span>
   ${(Object.keys(LEVELS) as Level[]).map((k) => html`<span>${mk({ icon: "chip", c: LEVEL_COLOR[k], fill: true })}Sensor, ${LEVELS[k].toLowerCase()}</span>`)}
-  <span>${mk({ icon: "probe", c: "var(--soil)", fill: true })}Soil probe, in the substrate</span>
+  <span>${mk({ icon: "probe", c: "var(--soil)", fill: true })}Soil probe</span>
   ${Object.values(CLASS_LOOK).map((k) => html`<span>${mk({ icon: k.icon, c: k.c })}${k.label}</span>`)}
-  <span>${mk({ icon: "plug", c: "var(--muted)" })}Not said what it is</span>
+  <span>${mk({ icon: "plug", c: "var(--muted)" })}Unknown device type</span>
   <span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device</span>
   <span><i class="wall"></i>Wall</span>
 </div>`;

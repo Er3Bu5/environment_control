@@ -78,6 +78,7 @@ import {
   applyLayout,
   devsOff,
   firstToPlace,
+  noHeight,
   fits,
   flowOf,
   itemOf,
@@ -794,7 +795,7 @@ export class EcApp extends LitElement {
     });
   }
 
-  /* Map devices: a draft of which sensors and devices a zone has, against the backend's catalog of what HA has. */
+  /* Device identification: a draft of which sensors and devices a zone has, against the backend's catalog of what HA has. */
   private openMapDevices(id: string, fromGuide = false): void {
     this.guarded(() => {
       this.wiz = null;
@@ -982,7 +983,7 @@ export class EcApp extends LitElement {
       window.scrollTo(0, 0);
       return;
     }
-    if (layoutIssues(d).length || (d.step === 3 && stranded(d).length)) return;
+    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length))) return;
     const step: SetupStep = d.flow[0] === 3 ? "place" : "layout";
     const changes = layoutChanges(d, this.config);
     if (!changes.length) {
@@ -1003,7 +1004,7 @@ export class EcApp extends LitElement {
           markStep(c, d.zoneId, step, "done");
         }),
       after: () => {
-        this.toast(step === "place" ? "Placement saved." : "Zone layout saved.");
+        this.toast(step === "place" ? "Device placement saved." : "Zone layout saved.");
         this.layDone(d.zoneId);
       },
     };
@@ -1452,7 +1453,7 @@ export class EcApp extends LitElement {
     const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
     const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
     const rows: [string, string][] = [
-      ["Placement", z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}` : ""],
+      ["Layout", z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}` : ""],
       ["Sensors", z.sensors.length ? `${z.sensors.length} unmapped` : ""],
       ["Devices", devicesWord],
       ["Targets", "Day and night values kept here"],
@@ -1942,7 +1943,7 @@ export class EcApp extends LitElement {
     if (it.kind === "device") {
       const entity = this.storedEntity(it.id), st = entity ? this.states[entity] : undefined;
       const state = !st || st.state === "unavailable" || st.state === "unknown" ? "Unavailable" : st.state === "on" ? "On" : st.state === "off" ? "Off" : st.state;
-      return html`<div class="detail"><strong>${it.name}</strong><span>${where}. ${it.type ?? "Not said what it is"}.</span><span>${state}.</span><span class="muted">${entity ?? ""}</span></div>`;
+      return html`<div class="detail"><strong>${it.name}</strong><span>${where}. ${it.type ?? "Unknown device type"}.</span><span>${state}.</span><span class="muted">${entity ?? ""}</span></div>`;
     }
     const s = sensorsOf(this.raw(z.id)).find((x) => x.id === it.id);
     if (!s) return nothing;
@@ -1951,7 +1952,7 @@ export class EcApp extends LitElement {
         const e = s.entities[k], n = e ? numberOf(this.states[e]) : null;
         return n === null ? "--" : `${n.toFixed(k === "ec" ? 2 : 1)} ${unit}`;
       };
-      return html`<div class="detail"><strong>${it.name}</strong><span>${where}. In the substrate.</span><span>Moisture ${v("moisture", "%")}, pwEC ${v("ec", "mS/cm")}, ${v("temperature", "°C")}.</span><span class="muted">Soil probe readings arrive in full with irrigation.</span></div>`;
+      return html`<div class="detail"><strong>${it.name}</strong><span>${where}.</span><span>Moisture ${v("moisture", "%")}, pwEC ${v("ec", "mS/cm")}, ${v("temperature", "°C")}.</span><span class="muted">Soil probe readings arrive in full with irrigation.</span></div>`;
     }
     const r = readSensor(s, this.states, this.now);
     const reading = r.health === "dead" ? "No data. Left out of the zone's readings." : r.health === "stale" ? "Stale. Left out of the zone's readings." : `${fmt("temperature", r.values.temperature)} °C, ${fmt("humidity", r.values.humidity)} % RH, VPD ${fmt("vpd", r.values.vpd)} kPa${s.avg ? "" : ". Not counted in the zone's readings"}`;
@@ -1976,7 +1977,7 @@ export class EcApp extends LitElement {
     const left = items.devs.filter((x) => !x.pos);
     return html`<section class="card">
       <div class="card-head">
-        <h2>Placement</h2>
+        <h2>Device placement</h2>
         ${this.chips("Height", `level-filter-${z.id}`, [{ value: "all", label: "All" }, ...(Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: LEVELS[k] }))], this.level, (v) => (this.level = v as "all" | Level))}
       </div>
       ${mapView(L, { items: shown, picked: this.picked, onPick: (id) => (this.picked = this.picked === id ? null : id), label: `Units, sensors and devices in ${z.name}` })}
@@ -2094,7 +2095,7 @@ export class EcApp extends LitElement {
                       <td>${r.down ? html`<span class="pill dead">${r.state}</span>` : r.state}</td>
                     </tr>`,
                   )
-                : html`<tr><td colspan="6" class="muted">${this.linkFilter === "all" ? "Nothing is in a zone yet. Map devices adds them." : "Nothing on this link."}</td></tr>`}
+                : html`<tr><td colspan="6" class="muted">${this.linkFilter === "all" ? "Nothing is in a zone yet. Device identification adds them." : "Nothing on this link."}</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -2164,10 +2165,10 @@ export class EcApp extends LitElement {
 
   /* A step that can't be done yet says why rather than offering a button that does nothing. */
   private stepBlocked(z: Zone, k: SetupStep): string {
-    if (k === "calibrate") return envSensors(this.raw(z.id)).length ? "" : "Needs sensors from Map devices";
+    if (k === "calibrate") return envSensors(this.raw(z.id)).length ? "" : "Needs sensors from Device identification";
     if (k !== "place") return "";
     const items = zoneItems(this.config, z.id);
-    return items.sensors.length || items.devs.length || items.virt.length ? "" : "Needs sensors from Map devices";
+    return items.sensors.length || items.devs.length || items.virt.length ? "" : "Needs sensors from Device identification";
   }
 
   private openStep(id: string, k: SetupStep): void {
@@ -2345,7 +2346,7 @@ export class EcApp extends LitElement {
     const steps = html`<ol class="steps">
       ${["Sensors", "Devices", "Check"].map((n, i) => html`<li aria-current=${m.step === i + 1 ? "step" : nothing}>${i + 1}. ${n}</li>`)}
     </ol>`;
-    const head = html`<div><h1>Map devices: ${z.name}</h1></div>`;
+    const head = html`<div><h1>Device identification: ${z.name}</h1></div>`;
     if (!this.catalog)
       return html`${head}<section class="card">
           ${steps}${this.catalogError
@@ -2511,15 +2512,20 @@ export class EcApp extends LitElement {
         ${notice(movedOff, "device", `${movedOff.length > 1 ? "They come" : "It comes"} off the map unless you place ${movedOff.length > 1 ? "them" : "it"} again in the next step.`)}`;
     }
     if (d.step === 3) body = this.placement(d, z);
-    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && lost.length > 0);
-    const title = { 1: "Zone layout", 3: "Placement" }[d.flow[0] === 3 ? 3 : 1];
+    const heightless = d.step === 3 ? noHeight(d) : [];
+    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0));
+    const title = { 1: "Zone layout", 3: "Device placement" }[d.flow[0] === 3 ? 3 : 1];
     return html`<div><h1>${title}: ${z.name}</h1></div>
       <section class="card">
         ${steps}${body}
         <div class="row">
           <button class="btn" @click=${this.layBack}>${at === 0 ? "Cancel" : "Back"}</button>
           <button class="btn primary" ?disabled=${blocked} @click=${this.layNext}>${last ? (changes ? "Review and apply" : "Finish") : "Next"}</button>
-          ${d.step === 3 && lost.length ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>` : nothing}
+          ${d.step === 3 && lost.length
+            ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
+            : heightless.length
+              ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
+              : nothing}
         </div>
       </section>`;
   }
@@ -2527,7 +2533,8 @@ export class EcApp extends LitElement {
   private placement(d: LayoutDraft, z: Zone) {
     const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
     const sel = itemOf(d, d.pick) ?? null;
-    const where = (s: Item, missing: unknown) => (fits(s, L) ? html`<span class="small muted">${posText(s.pos as Spot, L)}</span>` : missing);
+    const where = (s: Item, missing: unknown) =>
+      !fits(s, L) ? missing : s.kind === "env" && !s.level ? html`<span class="pill high">Needs a height</span>` : html`<span class="small muted">${posText(s.pos as Spot, L)}</span>`;
     const opt = (s: Item, missing: unknown) => html`<button class="sensor-opt" aria-pressed=${d.pick === s.id ? "true" : "false"} @click=${() => this.pickItem(s.id)}>
       <span class="opt-name">${mk(look(s))}${s.name}</span>${where(s, missing)}
     </button>`;
@@ -2543,7 +2550,7 @@ export class EcApp extends LitElement {
     return html`${d.sensors.length
         ? html`<div class="small muted">Sensors</div>
             <div class="sensor-list">${d.sensors.map((s) => opt(s, needs))}</div>`
-        : html`<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${z.name}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
+        : html`<div class="notice"><strong>No sensors yet</strong><span>Device identification picks ${z.name}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
       ${d.devs.length
         ? html`<div class="small muted">Devices, optional</div>
             <div class="sensor-list">${d.devs.map((x) => opt(x, html`<span class="pill plain">Not placed</span>`))}</div>`
@@ -2590,9 +2597,7 @@ export class EcApp extends LitElement {
               }),
             )}
           </div>`
-        : sel?.kind === "soil"
-          ? html`<div class="now"><strong>Height</strong><span class="small muted">Always at substrate height</span></div>`
-          : nothing}
+        : nothing}
       ${sel?.kind === "device" && fits(sel, L)
         ? html`<div class="now"><strong>On the map</strong><button class="btn" @click=${() => this.setLay((x) => { const s = itemOf(x, sel.id); if (s) s.pos = null; })}>Take ${sel.name} off the map</button></div>`
         : nothing}
@@ -2614,7 +2619,7 @@ export class EcApp extends LitElement {
     if (!sensors.length)
       return html`${head}<section class="card">
           <p class="muted">${z.name} has no environment sensors yet, and only those have a leaf temperature offset.</p>
-          <div class="row">${back}<button class="btn" @click=${() => this.openMapDevices(z.id)}>Map devices</button></div>
+          <div class="row">${back}<button class="btn" @click=${() => this.openMapDevices(z.id)}>Device identification</button></div>
         </section>`;
     if (!d.seeded)
       return html`${head}<section class="card">
@@ -3199,9 +3204,9 @@ export class EcApp extends LitElement {
           </button>
           <div class="menu" id="zmenu-${z.id}" role="menu" ?hidden=${!open}>
             <button role="menuitem" @click=${() => this.openDetails(z.id)}>Zone details</button>
-            <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Map devices</button>
+            <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Device identification</button>
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [1, 2])}>Zone layout</button>
-            <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Placement</button>
+            <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Device placement</button>
             <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
             <button role="menuitem" @click=${() => this.openSchedule(z.id)}>Targets, day and night</button>
             <hr />

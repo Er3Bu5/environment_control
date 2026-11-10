@@ -1,4 +1,4 @@
-/* Map devices: which of Home Assistant's devices are a zone's sensors, and which of its entities the zone runs.
+/* Device identification: which of Home Assistant's devices are a zone's sensors, and which of its entities the zone runs.
 
    Candidates come from the backend's catalog. A sensor is one physical device, and its readings are matched to slots by
    HA's own device class and unit, never by name. Where a device has two candidates for a slot, Setup asks; where it has
