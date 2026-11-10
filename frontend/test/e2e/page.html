@@ -72,6 +72,13 @@ const CATALOG = {
   entities: [{ entity_id: "input_boolean.lights_override", name: "Lights override", domain: "input_boolean", device_class: null, unit: null, state: "off", category: null, area: null, integration: "input_boolean", family: "Input boolean" }],
 };
 let catalogDown = params.get("catalog") === "fail";
+/* HA's helpers, which the real catalog lists as entities on no device: the seed's, with their limits and date flags. */
+for (const [e, st] of Object.entries(fakeHA.states)) {
+  const domain = e.split(".")[0], a = st.attributes || {};
+  if (domain !== "input_number" && domain !== "input_datetime") continue;
+  CATALOG.entities.push({ entity_id: e, name: a.friendly_name || e, domain, device_class: null, unit: a.unit_of_measurement || null, state: st.state, category: null, area: null, integration: domain, family: "Helper",
+    ...(domain === "input_number" ? { min: a.min, max: a.max, step: a.step } : { has_date: a.has_date, has_time: a.has_time }) });
+}
 /* HA's entity registry says which device each entity is on. A sensor's id is its device id, and each board's offset
    number sits on that board, so the host's same-device check has the registry it reads in HA. The catalog's environment
    board holds an offset too, for zones set up from scratch. */

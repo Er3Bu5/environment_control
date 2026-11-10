@@ -269,6 +269,12 @@ export const styles = css`
   .lcard .lline { display: block; width: calc(100% + 24px); margin: auto -12px -12px; height: 60px; }
   .mrow .lspark { grid-column: 3 / -1; display: block; width: 100%; height: 34px; }
 
+  /* Targets, day and night: switches to follow, and the length of the day as a strip. */
+  .follow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 14px; }
+  .follow:has(input:checked) { border-color: var(--primary); }
+  .follow > span:nth-of-type(1) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .now .sched-strip { flex: 1 1 160px; min-width: 120px; }
+
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }
   .eid { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

@@ -78,6 +78,18 @@ CASES = {
         lambda c: c["zones"][0].update(emersonMode="fixed", emerson={"morning": 60, "daylight": 0, "evening": 0}),
         "0 to 59",
     ),
+    "unknown day and night source": (lambda c: c["zones"][0].update(periodMode="sundial"), "day and night source"),
+    "times from helpers without both linked": (
+        lambda c: c["zones"][0].update(periodMode="helper", helpers={"day": "input_datetime.on"}),
+        "doesn't link both",
+    ),
+    "a time past midnight's minutes": (lambda c: c["zones"][0].update(dayAt=1440), "minutes into the day"),
+    "a time that isn't whole minutes": (lambda c: c["zones"][0].update(nightAt=60.5), "minutes into the day"),
+    "unknown day rule": (lambda c: c["zones"][0].update(rule="most"), "day rule"),
+    "red lights from helpers without all three linked": (
+        lambda c: c["zones"][0].update(emersonMode="helper", helpers={"morning": "input_number.m"}),
+        "all three",
+    ),
     "follows a non on/off entity": (lambda c: c["zones"][0].update(lights=["sensor.x"]), "on or off"),
     "description too long": (lambda c: c["zones"][0].update(description="x" * 201), "short text"),
     "leaf offset not a number entity": (

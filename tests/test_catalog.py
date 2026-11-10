@@ -165,6 +165,27 @@ async def test_a_number_comes_with_its_own_limits(hass, loaded, room, hass_ws_cl
     assert not {"min", "max", "step"} & set(found[temp])
 
 
+async def test_helpers_come_with_their_limits_and_whether_they_hold_a_date(hass, loaded, room, hass_ws_client) -> None:
+    entities = er.async_get(hass)
+    minutes = entities.async_get_or_create("input_number", "input_number", "morning_extension")
+    hass.states.async_set(minutes.entity_id, "5", {"min": 0, "max": 59, "step": 1, "unit_of_measurement": "min"})
+    on = entities.async_get_or_create("input_datetime", "input_datetime", "lights_on")
+    hass.states.async_set(on.entity_id, "07:00:00", {"has_date": False, "has_time": True})
+    result = await _catalog(hass, await hass_ws_client(hass))
+    loose = {e["entity_id"]: e for e in result["entities"]}
+    assert {k: loose[minutes.entity_id][k] for k in ("min", "max", "step", "unit")} == {
+        "min": 0,
+        "max": 59,
+        "step": 1,
+        "unit": "min",
+    }
+    assert {k: loose[on.entity_id][k] for k in ("has_date", "has_time", "state")} == {
+        "has_date": False,
+        "has_time": True,
+        "state": "07:00:00",
+    }
+
+
 async def test_no_identifier_address_serial_or_firmware_leaves_the_backend(hass, loaded, room, hass_ws_client) -> None:
     text = json.dumps(await _catalog(hass, await hass_ws_client(hass)))
     for private in (

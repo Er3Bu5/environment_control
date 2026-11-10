@@ -23,7 +23,19 @@ from .const import MAX_CATALOG_DEVICES, MAX_CATALOG_ENTITIES
 
 # The domains setup can use: readings and settings from sensors, and the things a zone switches, dims or detects day by.
 DOMAINS = frozenset(
-    {"binary_sensor", "climate", "fan", "humidifier", "input_boolean", "light", "number", "sensor", "switch"}
+    {
+        "binary_sensor",
+        "climate",
+        "fan",
+        "humidifier",
+        "input_boolean",
+        "input_datetime",
+        "input_number",
+        "light",
+        "number",
+        "sensor",
+        "switch",
+    }
 )
 
 # Integrations whose devices all use one link. Extended as needed; anything else falls to the evidence below.
@@ -90,12 +102,18 @@ def _entity(hass: HomeAssistant, entry: er.RegistryEntry, areas: ar.AreaRegistry
         "category": entry.entity_category.value if entry.entity_category else None,
         "area": _area_name(areas, entry.area_id),
     }
-    # A number's own limits, so Sensor Calibration can hold a value to them before the number is linked.
-    if entry.domain == "number":
+    # A number's own limits, so a value can be held to them before the number is linked: a board's offset, or a
+    # helper a zone's limits or red light extensions will be written to.
+    if entry.domain in ("number", "input_number"):
         for k in ("min", "max", "step"):
             v = attrs.get(k)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 out[k] = v
+    # Whether a date and time helper holds a time, a date or both: lights on and off take a time-only one.
+    if entry.domain == "input_datetime":
+        for k in ("has_date", "has_time"):
+            if isinstance(attrs.get(k), bool):
+                out[k] = attrs[k]
     return out
 
 
