@@ -322,6 +322,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "save") this.save(m);
     else if (m.type === "calibrate") this.calibrate(m);
     else if (m.type === "history") this.history(m);
+    else if (m.type === "setting") this.setting(m);
     /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
     else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
@@ -336,6 +337,45 @@ class EnvironmentControlPanel extends HTMLElement {
     } catch {
       this.reply(m.req, false, "Home Assistant couldn't list its devices. Try again in a moment.");
     }
+  }
+  /* The setting write: a zone and the name of one of its settings, never an entity. The helper is the one the stored
+     setup links that zone to for that setting, which a person said yes to when the link was saved. Lights on and off
+     go to a time-only date and time helper as a time; everything else goes to a number helper, inside its own limits
+     and step. A yes means HA took the call: the frame waits for the helper to report the value. */
+  /** @param {any} m */
+  async setting(m) {
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    if (typeof m.zone !== "string" || !ITEM_ID.test(m.zone) || !SETTINGS.includes(m.name)) return refuse("Not a setting this panel knows.");
+    /** @type {any[]} */
+    const zones = this.config.zones || [];
+    const z = zones.find((x) => x && x.id === m.zone), entity = z && linkAt(z, m.name);
+    if (typeof entity !== "string" || !HELPER.test(entity)) return refuse("That setting isn't linked to a helper.");
+    const time = m.name === "day" || m.name === "night";
+    if (entity.startsWith("input_datetime.") !== time) return refuse("That helper isn't the right kind for that setting.");
+    const st = this._hass.states[entity];
+    if (!st || st.state === "unavailable" || st.state === "unknown") return refuse(`Home Assistant has no ${entity} it can set.`);
+    const a = st.attributes || {};
+    /** @type {[string, string, Record<string, unknown>]} */
+    let call;
+    if (time) {
+      if (a.has_date !== false || a.has_time !== true) return refuse("That helper holds a date as well as a time.");
+      if (typeof m.value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(m.value)) return refuse("That isn't a time.");
+      call = ["input_datetime", "set_datetime", { entity_id: entity, time: `${m.value}:00` }];
+    } else {
+      const num = (/** @type {unknown} */ v) => typeof v === "number" && Number.isFinite(v);
+      if (!num(m.value)) return refuse("That isn't a number.");
+      if (!num(a.min) || !num(a.max) || !num(a.step) || a.step <= 0) return refuse("That helper doesn't say its limits.");
+      const steps = (m.value - a.min) / a.step;
+      if (m.value < a.min || m.value > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max}, in steps of ${a.step}.`);
+      call = ["input_number", "set_value", { entity_id: entity, value: m.value }];
+    }
+    try {
+      await this._hass.callService(...call);
+    } catch (err) {
+      return refuse(String((err && /** @type {any} */ (err).message) || err));
+    }
+    this.reply(m.req, true);
   }
   /* A chart's readings: only a mapped sensor's own readings, over a range the panel draws. The backend checks both again
      and buckets them, so a week of 10 second readings never reaches the frame. */
