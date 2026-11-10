@@ -100,6 +100,31 @@ export const styles = css`
   .review-row b { font-weight: 500; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
 
+  .combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
+  .inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
+  .dev-sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .picklist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .pickwrap { border: 1px solid var(--line); border-radius: 8px; background: var(--tile); min-width: 0; }
+  .pickwrap:has(.pickrow[aria-pressed="true"]) { border-color: var(--primary); }
+  .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; background: none; text-align: left; }
+  .tick { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid var(--off); border-radius: 6px; font-size: 14px; }
+  .pickrow[aria-pressed="true"] .tick { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .pick-text strong { font-weight: 500; overflow-wrap: anywhere; }
+  .ents { display: flex; flex-direction: column; gap: 10px; padding: 0 10px 12px 42px; min-width: 0; }
+  .pill.high { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
+  /* Choices are radio chips rather than selects: the choice stays in view, and no system picker opens over the page. */
+  fieldset.chips { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  fieldset.chips legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
+  .chiprow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); font-size: 13px; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
+  .chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+  .chip:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
+  .chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .chip.wait { border-style: dashed; color: var(--muted); }
+  .review strong { font-weight: 500; }
+  .review { display: flex; flex-direction: column; gap: 10px; }
+
   ul { list-style: none; margin: 0; padding: 0; }
   li.device { padding: 10px 0; border-top: 1px solid var(--line); }
   .name { font-weight: 500; overflow-wrap: anywhere; }

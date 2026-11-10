@@ -31,10 +31,35 @@ import {
   readDevices,
   readZones,
   removeZone,
+  confirmLink,
   setDetails,
   stepsLeft,
+  unknownLinks,
   zoneNameIssue,
 } from "./model";
+import {
+  type ControlCandidate,
+  type Issue,
+  type MapDraft,
+  METHODS,
+  type Method,
+  ROLES,
+  type Role,
+  SLOTS,
+  SLOT_NAME,
+  type SensorCandidate,
+  type Slot,
+  applyMap,
+  controlCandidates,
+  controlTarget,
+  countedSensors,
+  mapChanges,
+  mapIssues,
+  openMap,
+  seedSlots,
+  sensorCandidates,
+  sensorTarget,
+} from "./mapping";
 import { PALETTES, styles } from "./styles";
 
 declare const __VERSION__: string;
@@ -71,10 +96,12 @@ interface Review {
   note: string;
   busy: boolean;
   error: string;
+  apply: () => Promise<Result>;
+  after: () => void;
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
-const BUILT: ReadonlySet<SetupStep> = new Set(["details"]);
+const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices"]);
 
 const APPEARANCES: [Appearance, "home" | "sun" | "moon", string][] = [
   ["ha", "home", "Home Assistant"],
@@ -111,6 +138,7 @@ export class EcApp extends LitElement {
     screen: { state: true },
     zoneId: { state: true },
     wiz: { state: true },
+    mapw: { state: true },
     guide: { state: true },
     modal: { state: true },
     menu: { state: true },
@@ -126,6 +154,8 @@ export class EcApp extends LitElement {
   declare private screen: Screen;
   declare private zoneId: string | null;
   declare private wiz: Wizard | null;
+  declare private mapw: MapDraft | null;
+  private mapFromGuide = false;
   declare private guide: string | null;
   declare private modal: Guard | Review | null;
   declare private menu: string | null;
@@ -147,6 +177,7 @@ export class EcApp extends LitElement {
     this.screen = "overview";
     this.zoneId = null;
     this.wiz = null;
+    this.mapw = null;
     this.guide = null;
     this.modal = null;
     this.menu = null;
@@ -207,6 +238,7 @@ export class EcApp extends LitElement {
     if (this.screen === "zone" && !this.zoneById(this.zoneId)) this.go("overview");
     if (this.guide && !this.zoneById(this.guide)) this.guide = null;
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
+    if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
   };
 
   private askCatalog = async (): Promise<void> => {
@@ -250,8 +282,26 @@ export class EcApp extends LitElement {
     return out;
   }
 
+  private get sensorsFound(): SensorCandidate[] {
+    return this.catalog ? sensorCandidates(this.catalog) : [];
+  }
+
+  private get controlsFound(): ControlCandidate[] {
+    return this.catalog ? controlCandidates(this.catalog) : [];
+  }
+
+  private get config() {
+    return this.stored ? copyConfig(this.stored.zones, this.stored.devices) : { zones: [], devices: [] };
+  }
+
+  private mapChangeList(m: MapDraft): Change[] {
+    return mapChanges(m, this.config, this.sensorsFound, this.controlsFound);
+  }
+
   private get draftCount(): number {
-    return this.wiz ? this.wizChanges(this.wiz).length : 0;
+    if (this.wiz) return this.wizChanges(this.wiz).length;
+    if (this.mapw) return this.mapChangeList(this.mapw).length;
+    return 0;
   }
 
   /* The frame can't raise the browser's leave prompt or stop HA's sidebar, so it tells the host whether leaving now would
@@ -277,7 +327,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void): void {
     const n = this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || "this zone";
+    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -298,6 +348,7 @@ export class EcApp extends LitElement {
   private leaveTo(screen: Screen, zoneId: string | null = null): void {
     this.guarded(() => {
       this.wiz = null;
+      this.mapw = null;
       this.guide = null;
       this.go(screen, zoneId);
     });
@@ -329,6 +380,7 @@ export class EcApp extends LitElement {
   private openNewZone = (): void => {
     this.guarded(() => {
       this.guide = null;
+      this.mapw = null;
       this.wiz = { id: null, name: "", desc: "", fromGuide: false };
       this.go("setup");
     });
@@ -353,12 +405,30 @@ export class EcApp extends LitElement {
     if (!w || zoneNameIssue(w.name, this.zones, w.id)) return;
     const changes = this.wizChanges(w);
     if (changes.length) {
+      let created = "";
       this.modal = {
         kind: "review",
         changes,
         note: w.id ? "This only changes Environment Control. Nothing in Home Assistant changes." : "It starts at 1.2 x 1.2 m with 4 units until you set its layout. Nothing in Home Assistant changes.",
         busy: false,
         error: "",
+        apply: () =>
+          this.save((c) => {
+            if (w.id) {
+              setDetails(c, w.id, w.name, w.desc);
+              markStep(c, w.id, "details", "done");
+            } else created = addZone(c, w.name, w.desc);
+          }),
+        after: () => {
+          this.wiz = null;
+          if (created) {
+            this.guide = created;
+            this.toast(`${w.name.trim()} created.`);
+          } else {
+            this.toast("Zone details saved.");
+            if (!w.fromGuide) this.go("zone", w.id);
+          }
+        },
       };
       return;
     }
@@ -368,29 +438,16 @@ export class EcApp extends LitElement {
   };
 
   private applyReview = async (): Promise<void> => {
-    const r = this.modal, w = this.wiz;
-    if (!r || r.kind !== "review" || r.busy || !w) return;
+    const r = this.modal;
+    if (!r || r.kind !== "review" || r.busy) return;
     this.modal = { ...r, busy: true, error: "" };
-    let created = "";
-    const result = await this.save((c) => {
-      if (w.id) {
-        setDetails(c, w.id, w.name, w.desc);
-        markStep(c, w.id, "details", "done");
-      } else created = addZone(c, w.name, w.desc);
-    });
+    const result = await r.apply();
     if (!result.ok) {
       this.modal = { ...r, busy: false, error: result.error ?? "Not saved." };
       return;
     }
     this.modal = null;
-    this.wiz = null;
-    if (created) {
-      this.guide = created;
-      this.toast(`${w.name.trim()} created.`);
-    } else {
-      this.toast("Zone details saved.");
-      if (!w.fromGuide) this.go("zone", w.id);
-    }
+    r.after();
   };
 
   private async mark(id: string, step: SetupStep, state: "done" | "later"): Promise<void> {
@@ -403,9 +460,117 @@ export class EcApp extends LitElement {
   private openGuide(id: string): void {
     this.guarded(() => {
       this.wiz = null;
+      this.mapw = null;
       this.guide = id;
       this.go("setup");
     });
+  }
+
+  /* Map devices: a draft of which sensors and devices a zone has, against the backend's catalog of what HA has. */
+  private openMapDevices(id: string, fromGuide = false): void {
+    this.guarded(() => {
+      this.wiz = null;
+      this.menu = null;
+      this.mapw = openMap(this.config, id);
+      this.mapFromGuide = fromGuide;
+      if (!this.catalog) void this.askCatalog();
+      this.go("setup");
+    });
+  }
+
+  private setMap(change: (m: MapDraft) => void): void {
+    if (!this.mapw) return;
+    const m = structuredClone(this.mapw);
+    change(m);
+    this.mapw = m;
+  }
+
+  private toggleSensor(s: SensorCandidate): void {
+    this.setMap((m) => {
+      if (s.id in m.sensors) delete m.sensors[s.id];
+      else m.sensors[s.id] = seedSlots(s);
+    });
+  }
+
+  private toggleControl(c: ControlCandidate): void {
+    this.setMap((m) => {
+      if (c.entity in m.controls) delete m.controls[c.entity];
+      else m.controls[c.entity] = c.detected;
+    });
+  }
+
+  private async jumpTo(issue: Issue): Promise<void> {
+    this.setMap((m) => (m.step = issue.step));
+    await this.updateComplete;
+    const el = this.shadowRoot?.querySelector(`#${issue.target}`) as HTMLElement | null;
+    el?.scrollIntoView({ block: "center" });
+    (el?.matches("input, button") ? el : (el?.querySelector("button, input") as HTMLElement | null))?.focus({ preventScroll: true });
+  }
+
+  private mapBack = (): void => {
+    const m = this.mapw;
+    if (!m) return;
+    if (m.step > 1) {
+      this.setMap((d) => (d.step = (d.step - 1) as 1 | 2));
+      window.scrollTo(0, 0);
+      return;
+    }
+    this.guarded(() => {
+      this.mapw = null;
+    });
+  };
+
+  private mapDone(zoneId: string): void {
+    this.mapw = null;
+    if (this.mapFromGuide) this.guide = zoneId;
+    else this.go("zone", zoneId);
+  }
+
+  private mapNext = (): void => {
+    const m = this.mapw;
+    if (!m) return;
+    const sensors = this.sensorsFound, controls = this.controlsFound, issues = mapIssues(m, sensors, controls);
+    if (m.step < 3) {
+      const here = issues.find((i) => i.step === m.step);
+      if (here) return void this.jumpTo(here);
+      this.setMap((d) => (d.step = (d.step + 1) as 2 | 3));
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (issues.length) return void this.jumpTo(issues[0]);
+    const changes = this.mapChangeList(m);
+    if (!changes.length) {
+      void this.mark(m.zoneId, "devices", "done");
+      this.mapDone(m.zoneId);
+      return;
+    }
+    const added = Object.keys(m.controls).filter((e) => !this.devices.some((d) => d.zones.length && this.storedEntity(d.id) === e)).length;
+    this.modal = {
+      kind: "review",
+      changes,
+      note: `This only changes Environment Control. Nothing in Home Assistant changes.${added ? " Home Assistant asks you before any device becomes controllable." : ""}`,
+      busy: false,
+      error: "",
+      apply: () =>
+        this.save((c) => {
+          applyMap(c, m, sensors, controls);
+          markStep(c, m.zoneId, "devices", "done");
+        }),
+      after: () => {
+        this.toast("Mapping saved.");
+        this.mapDone(m.zoneId);
+      },
+    };
+  };
+
+  private storedEntity(deviceId: string): string | undefined {
+    const raw = this.stored?.devices.find((d) => typeof d === "object" && d !== null && (d as { id?: unknown }).id === deviceId) as { entity?: unknown } | undefined;
+    return typeof raw?.entity === "string" ? raw.entity : undefined;
+  }
+
+  private async answerLink(id: string, link: "ethernet" | "wifi"): Promise<void> {
+    const r = await this.save((c) => confirmLink(c, id, link));
+    this.toast(r.ok ? "Saved." : `Not saved. ${r.error ?? ""}`.trim());
   }
 
   private askRemove(id: string): void {
@@ -622,7 +787,9 @@ export class EcApp extends LitElement {
               <div><strong>${i + 1}. ${STEP_TITLE[k]}</strong><p class="small muted">${STEP_TEXT[k]}</p></div>
               <div class="row">
                 ${pill}
-                ${built && k === "details" ? html`<button class="btn ${k === next ? "primary" : ""}" @click=${() => this.openDetails(z.id, true)}>${STEP_TITLE[k]}</button>` : nothing}
+                ${built
+                  ? html`<button class="btn ${k === next ? "primary" : ""}" @click=${() => (k === "details" ? this.openDetails(z.id, true) : this.openMapDevices(z.id, true))}>${STEP_TITLE[k]}</button>`
+                  : nothing}
                 ${built && state === "todo" ? html`<button class="btn" @click=${() => this.mark(z.id, k, "later")}>Later</button>` : nothing}
               </div>
             </div>`;
@@ -630,6 +797,209 @@ export class EcApp extends LitElement {
         </div>
         <div class="row"><button class="btn" @click=${() => this.leaveTo("zone", z.id)}>${stepsLeft(z).length ? "Finish for now" : "Done"}</button></div>
       </section>`;
+  }
+
+  private chips(legend: string, name: string, options: { value: string; label: string; wait?: boolean }[], current: string, pick: (v: string) => void) {
+    return html`<fieldset class="chips">
+      <legend>${legend}</legend>
+      <div class="chiprow">
+        ${options.map(
+          (o) => html`<label class="chip ${o.wait ? "wait" : ""}"
+            ><input type="radio" name=${name} .value=${o.value} .checked=${current === o.value} @change=${() => pick(o.value)} />${o.label}</label
+          >`,
+        )}
+      </div>
+    </fieldset>`;
+  }
+
+  private slotChoice(m: MapDraft, s: SensorCandidate, k: Slot) {
+    const opts = s.slots[k], cur = m.sensors[s.id][k];
+    const none = k === "leaf" ? "None, kept in Environment Control" : opts.length ? "Not used" : "None found";
+    return this.chips(
+      `${SLOT_NAME[k]}${cur === "" ? ", pick one" : ""}`,
+      `${s.id}-${k}`,
+      [...opts.map((o) => ({ value: o.entity, label: `${o.entity} (${o.reading})` })), { value: "none", label: none }],
+      cur,
+      (v) => this.setMap((d) => (d.sensors[s.id][k] = v)),
+    );
+  }
+
+  private nearZone(z: Zone, area: string | null): boolean {
+    return !!area && area.toLowerCase() === z.name.toLowerCase();
+  }
+
+  private sensorRow(m: MapDraft, z: Zone, s: SensorCandidate) {
+    const on = s.id in m.sensors, waiting = on && SLOTS.some((k) => m.sensors[s.id][k] === "");
+    const elsewhere = this.zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
+    const pill = waiting
+      ? html`<span class="pill high">Pick one</span>`
+      : this.nearZone(z, s.area)
+        ? html`<span class="pill plain">Suggested</span>`
+        : elsewhere.length
+          ? html`<span class="pill plain">In ${elsewhere[0]}</span>`
+          : nothing;
+    const has = SLOTS.filter((k) => s.slots[k].length).map((k) => SLOT_NAME[k]).join(", ");
+    return html`<div class="pickwrap" id=${sensorTarget(s.id)}>
+      <button class="pickrow" aria-pressed=${on ? "true" : "false"} @click=${() => this.toggleSensor(s)}>
+        <span class="tick">${on ? "✓" : ""}</span>
+        <span class="pick-text"><strong>${s.name}</strong><span class="dev-sub">${s.family}, ${LINK_LABEL[s.link]}. ${has}</span></span>${pill}
+      </button>
+      ${on
+        ? html`<div class="ents">
+            ${SLOTS.map((k) => this.slotChoice(m, s, k))}
+            <label class="inavg"
+              ><input type="checkbox" .checked=${m.avg[s.id] === false} @change=${(e: Event) => this.setMap((d) => (d.avg[s.id] = !(e.target as HTMLInputElement).checked))} />
+              Exclude from average</label
+            >
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
+  private controlRow(m: MapDraft, z: Zone, c: ControlCandidate) {
+    const on = c.entity in m.controls, role = m.controls[c.entity] ?? "";
+    const others = this.devices.filter((d) => this.storedEntity(d.id) === c.entity).flatMap((d) => d.zones).filter((id) => id !== z.id);
+    const otherNames = this.zones.filter((o) => others.includes(o.id)).map((o) => o.name);
+    const pill = on && !role ? html`<span class="pill high">What is it?</span>` : this.nearZone(z, c.area) ? html`<span class="pill plain">Suggested</span>` : nothing;
+    return html`<div class="pickwrap" id=${controlTarget(c.entity)}>
+      <button class="pickrow" aria-pressed=${on ? "true" : "false"} @click=${() => this.toggleControl(c)}>
+        <span class="tick">${on ? "✓" : ""}</span>
+        <span class="pick-text"><strong>${c.name}</strong><span class="dev-sub">${c.family}, ${LINK_LABEL[c.link]}. ${c.entity}</span></span>${pill}
+      </button>
+      ${on
+        ? html`<div class="ents">
+            ${this.chips(
+              role ? "This is a" : "This is a, pick one",
+              `role-${c.entity}`,
+              ROLES.map((r) => ({ value: r, label: r })),
+              role,
+              (v) => this.setMap((d) => (d.controls[c.entity] = v as Role)),
+            )}
+            ${otherNames.length ? html`<p class="dev-sub">Shared. Also in ${otherNames.join(", ")}.</p>` : nothing}
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
+  private mapList<T>(items: T[], near: (x: T) => boolean, row: (x: T) => unknown, empty: string) {
+    if (!items.length) return html`<p class="small muted">${empty}</p>`;
+    const close = items.filter(near), rest = items.filter((x) => !near(x));
+    return html`${close.map(row)}${rest.length ? html`<p class="small muted">${close.length ? "Everything else in Home Assistant" : "Everything in Home Assistant"}</p>${rest.map(row)}` : nothing}`;
+  }
+
+  private mapWizard(m: MapDraft) {
+    const z = this.zoneById(m.zoneId);
+    if (!z) return nothing;
+    const steps = html`<ol class="steps">
+      ${["Sensors", "Devices", "Check"].map((n, i) => html`<li aria-current=${m.step === i + 1 ? "step" : nothing}>${i + 1}. ${n}</li>`)}
+    </ol>`;
+    const head = html`<div><h1>Map devices: ${z.name}</h1></div>`;
+    if (!this.catalog)
+      return html`${head}<section class="card">
+          ${steps}${this.catalogError
+            ? html`<p>${this.catalogError}</p>
+                <div class="row"><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
+            : html`<p class="muted">Asking Home Assistant what it has.</p>`}
+          <div class="row"><button class="btn" @click=${this.mapBack}>Cancel</button></div>
+        </section>`;
+    const sensors = this.sensorsFound, controls = this.controlsFound, issues = mapIssues(m, sensors, controls);
+    const here = issues.filter((i) => i.step === m.step), blocked = m.step === 3 ? issues.length > 0 : here.length > 0;
+    const q = m.q.trim().toLowerCase(), hit = (t: string) => !q || t.toLowerCase().includes(q);
+    const search = html`<label class="field" for="map-q"
+      >Search Home Assistant<input
+        id="map-q"
+        type="search"
+        placeholder="Name, entity or integration"
+        .value=${m.q}
+        @input=${(e: Event) => this.setMap((d) => (d.q = (e.target as HTMLInputElement).value))}
+    /></label>`;
+    let body: unknown = nothing;
+    if (m.step === 1) {
+      const shown = sensors.filter((s) => hit(`${s.name} ${s.family} ${SLOTS.flatMap((k) => s.slots[k].map((o) => o.entity)).join(" ")}`));
+      const gone = Object.keys(m.sensors).filter((id) => !sensors.some((s) => s.id === id));
+      const counted = countedSensors(m);
+      body = html`<p class="muted">Pick the sensors in ${z.name}. Each one is a physical device, and its readings are matched for you by what Home Assistant says each entity measures.</p>
+        ${search}
+        <div class="picklist">
+          ${gone.map(
+            (id) => html`<div class="pickwrap" id=${sensorTarget(id)}>
+              <button class="pickrow" aria-pressed="true" @click=${() => this.setMap((d) => delete d.sensors[id])}>
+                <span class="tick">✓</span><span class="pick-text"><strong>${id}</strong><span class="dev-sub">Mapped, but Home Assistant no longer has it.</span></span
+                ><span class="pill dashed">Not in Home Assistant</span>
+              </button>
+            </div>`,
+          )}
+          ${this.mapList(shown, (s) => this.nearZone(z, s.area) || s.id in m.sensors, (s) => this.sensorRow(m, z, s), q ? "Nothing matches that search." : "Home Assistant has no temperature or humidity sensors.")}
+        </div>
+        ${counted >= 2
+          ? html`<div class="combine">
+              ${this.chips(
+                `How should these ${counted} sensors combine into the zone's reading?`,
+                "combine",
+                Object.entries(METHODS).map(([value, label]) => ({ value, label })),
+                m.combine,
+                (v) => this.setMap((d) => (d.combine = v as Method)),
+              )}
+            </div>`
+          : nothing}`;
+    }
+    if (m.step === 2) {
+      const shown = controls.filter((c) => hit(`${c.name} ${c.family} ${c.entity}`));
+      const gone = Object.keys(m.controls).filter((e) => !controls.some((c) => c.entity === e));
+      body = html`<p class="muted">Pick what runs in ${z.name}: climate hardware and lights. Shared hardware can be in several zones.</p>
+        ${search}
+        <div class="picklist">
+          ${gone.map(
+            (e) => html`<div class="pickwrap" id=${controlTarget(e)}>
+              <button class="pickrow" aria-pressed="true" @click=${() => this.setMap((d) => delete d.controls[e])}>
+                <span class="tick">✓</span><span class="pick-text"><strong>${e}</strong><span class="dev-sub">Mapped, but Home Assistant no longer has it.</span></span
+                ><span class="pill dashed">Not in Home Assistant</span>
+              </button>
+            </div>`,
+          )}
+          ${this.mapList(shown, (c) => this.nearZone(z, c.area) || c.entity in m.controls, (c) => this.controlRow(m, z, c), q ? "Nothing matches that search." : "Home Assistant has no switches, lights, fans or humidifiers.")}
+        </div>`;
+    }
+    if (m.step === 3) {
+      const ss = Object.keys(m.sensors).map((id) => sensors.find((s) => s.id === id)?.name ?? id);
+      const cs = Object.entries(m.controls).map(([e, role]) => `${controls.find((c) => c.entity === e)?.name ?? e} (${role || "not set"})`);
+      body = html`<div class="review">
+          <div><strong>${plural(ss.length, "sensor")}</strong><p class="small muted">${ss.join(", ") || "None"}</p></div>
+          <div><strong>${plural(cs.length, "device")}</strong><p class="small muted">${cs.join(", ") || "None"}</p></div>
+        </div>
+        ${issues.map((i) => html`<button class="notice fix" @click=${() => this.jumpTo(i)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
+        <p class="small muted">Applying only changes Environment Control. Home Assistant asks you before any device becomes controllable.</p>`;
+    }
+    const last = m.step === 3, changes = last ? this.mapChangeList(m).length : 0;
+    return html`${head}<section class="card">
+        ${steps}${body}
+        <div class="row">
+          <button class="btn" @click=${this.mapBack}>${m.step === 1 ? "Cancel" : "Back"}</button>
+          <button class="btn primary" ?disabled=${blocked} @click=${this.mapNext}>${last ? (changes ? "Review and apply" : "Finish") : "Next"}</button>
+          ${here.length ? html`<button class="fixlink" @click=${() => this.jumpTo(here[0])}>${here[0].text} &rsaquo;</button>` : nothing}
+        </div>
+      </section>`;
+  }
+
+  private questions() {
+    const asks = unknownLinks(this.config);
+    if (!asks.length) return nothing;
+    return html`<section class="card">
+      <h2>Questions for you</h2>
+      <div>
+        ${asks.map(
+          (a) => html`<div class="task">
+            <div>
+              <strong>${a.name}</strong>
+              <p class="small muted">Home Assistant doesn't say whether this ${a.kind === "sensor" ? "board" : "device"} is wired or on WiFi. How is it connected?</p>
+            </div>
+            <div class="row">
+              <button class="btn" @click=${() => this.answerLink(a.id, "ethernet")}>Ethernet</button><button class="btn" @click=${() => this.answerLink(a.id, "wifi")}>WiFi</button>
+            </div>
+          </div>`,
+        )}
+      </div>
+    </section>`;
   }
 
   private zoneRow(z: Zone) {
@@ -659,6 +1029,7 @@ export class EcApp extends LitElement {
           </button>
           <div class="menu" id="zmenu-${z.id}" role="menu" ?hidden=${!open}>
             <button role="menuitem" @click=${() => this.openDetails(z.id)}>Zone details</button>
+            <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Map devices</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -674,12 +1045,14 @@ export class EcApp extends LitElement {
 
   private setup() {
     if (this.wiz) return this.wizard(this.wiz);
+    if (this.mapw) return this.mapWizard(this.mapw);
     if (this.guide) return this.guideScreen(this.guide);
     const appearance = this.theme?.appearance ?? "ha";
     return html`<div>
         <h1>Setup</h1>
         <p class="muted small">Admins only. Installed, version ${__VERSION__}. Changes here are saved in Environment Control.</p>
       </div>
+      ${this.questions()}
       <section class="card">
         <div class="card-head"><h2>Zones</h2>${this.addButton("Add zone")}</div>
         ${this.zones.length ? html`<div>${this.zones.map((z) => this.zoneRow(z))}</div>` : html`<p class="muted small">No zones yet.</p>`}
