@@ -28,11 +28,18 @@ export const styles = css`
 
   /* The page menu's button sits at the top left of the page, and each page's heading is centred beside it. */
   .wrap { position: relative; }
-  .navmenu { position: absolute; left: 0; top: 0; z-index: 12; }
-  .navmenu .menu { left: 0; right: auto; }
+  /* Its own rule for a menu's wrapper says position: relative, which put this button in the page's flow, on a row of
+     its own above the heading. Both classes together outrank that. */
+  .zmenu.navmenu { position: absolute; right: 0; top: 0; z-index: 12; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
   .navmenu + * { min-height: 36px; padding-inline: 48px; text-align: center; }
-  .pagehead { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .navmenu + * h1 { line-height: 34px; }
+  /* A zone's heading row: View targets at the left, the name and its details in the middle, and the menu button, which
+     sits over the right-hand column, all on one line. */
+  .navmenu + .pagehead { padding-inline: 0; }
+  .pagehead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(44px, 1fr); align-items: start; gap: 8px; }
+  .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
+  .pagehead > .btn { grid-column: 1; grid-row: 1; justify-self: start; }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }

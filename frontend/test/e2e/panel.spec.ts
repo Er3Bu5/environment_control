@@ -190,6 +190,13 @@ test.describe("talking to HA", () => {
     const head = app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true });
     const [h, w] = [await head.boundingBox(), await app(frame).locator(".wrap").boundingBox()];
     expect(Math.abs(h!.x + h!.width / 2 - (w!.x + w!.width / 2))).toBeLessThan(2);
+    /* One row: View targets at the left edge, the heading in the middle, the menu button at the right edge. */
+    const [m, t] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox()];
+    const midY = (b: { y: number; height: number }) => b.y + b.height / 2;
+    expect(Math.abs(midY(m!) - midY(h!))).toBeLessThan(4);
+    expect(Math.abs(midY(t!) - midY(h!))).toBeLessThan(4);
+    expect(Math.abs(m!.x + m!.width - (w!.x + w!.width))).toBeLessThan(2);
+    expect(Math.abs(t!.x - w!.x)).toBeLessThan(2);
     /* The zone's cards each take the page's full width, one under the other. */
     const card = (name: string) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name, exact: true }) });
     const [place, controls] = [await card("Device placement").boundingBox(), await card("Controls").boundingBox()];
