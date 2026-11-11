@@ -63,10 +63,16 @@ import {
   countedSensors,
   mapChanges,
   mapIssues,
+  nameIt,
   openMap,
+  removeVirtual,
   seedSlots,
   sensorCandidates,
   sensorTarget,
+  shownName,
+  swapControl,
+  addVirtual,
+  virtualTarget,
 } from "./mapping";
 import {
   type Item,
@@ -74,19 +80,14 @@ import {
   LEVELS,
   type Level,
   type Spot,
-  addVirtual,
   applyLayout,
+  carryPlacement,
   devsOff,
   firstToPlace,
   noHeight,
+  MAX_VIRTUAL,
   VIRTUAL_TYPES,
   type VirtualType,
-  removeVirtual,
-  resetVirtualName,
-  saveVirtualName,
-  typeVirtualName,
-  unsavedNames,
-  retypeVirtual,
   fits,
   flowOf,
   itemOf,
@@ -378,6 +379,7 @@ export class EcApp extends LitElement {
   private layFromGuide = false;
   declare private moreOpen: Set<string>;
   private mapFromGuide = false;
+  private mapToPlace: { back: { screen: Screen; zoneId: string | null }; fromGuide: boolean; draft: LayoutDraft } | null = null;
   declare private guide: string | null;
   declare private modal: Guard | Review | TargetsView | null;
   declare private menu: string | null;
@@ -614,7 +616,8 @@ export class EcApp extends LitElement {
 
   private get draftCount(): number {
     if (this.wiz) return this.wizChanges(this.wiz).length;
-    if (this.mapw) return this.mapChangeList(this.mapw).length;
+    /* Opened from Device placement, it holds that draft underneath, and leaving loses both. */
+    if (this.mapw) return this.mapChangeList(this.mapw).length + (this.mapToPlace ? layoutChanges(this.mapToPlace.draft, this.config).length : 0);
     if (this.lay) return layoutChanges(this.lay, this.config).length;
     /* Sensor Calibration opened from the chart keeps the page's own draft underneath, and leaving loses both. */
     if (this.leafw) return this.leafChangeList(this.leafw).length + (this.sched ? this.schedChangeList(this.sched).length : 0);
@@ -835,6 +838,7 @@ export class EcApp extends LitElement {
   /* Device identification: a draft of which sensors and devices a zone has, against the backend's catalog of what HA has. */
   private openMapDevices(id: string, fromGuide = false): void {
     this.guarded(() => {
+      this.mapToPlace = null;
       this.wiz = null;
       this.lay = null;
       this.leafw = null;
@@ -847,6 +851,19 @@ export class EcApp extends LitElement {
       void this.askCatalog();
       this.go("setup");
     });
+  }
+
+  /* From Device placement, to add or edit a device. What's been placed so far isn't lost: the placement draft is held
+     while Device identification is open, and comes back, with the devices as they then are, when it closes. */
+  private editDevicesFromPlacement(): void {
+    const d = this.lay;
+    if (!d) return;
+    this.mapToPlace = { back: this.editBack, fromGuide: this.layFromGuide, draft: d };
+    this.lay = null;
+    this.mapw = { ...openMap(this.config, d.zoneId), step: 2 };
+    this.mapFromGuide = false;
+    void this.askCatalog();
+    window.scrollTo(0, 0);
   }
 
   private setMap(change: (m: MapDraft) => void): void {
@@ -931,14 +948,20 @@ export class EcApp extends LitElement {
       window.scrollTo(0, 0);
       return;
     }
-    this.guarded(() => {
-      this.mapw = null;
-      this.backFromEditor(m.zoneId, this.mapFromGuide);
-    });
+    this.guarded(() => this.mapDone(m.zoneId));
   };
 
   private mapDone(zoneId: string): void {
     this.mapw = null;
+    const place = this.mapToPlace;
+    this.mapToPlace = null;
+    if (place && this.zoneById(zoneId)) {
+      this.editBack = place.back;
+      this.lay = carryPlacement(openLayout(this.config, zoneId, [3]), place.draft);
+      this.layFromGuide = place.fromGuide;
+      window.scrollTo(0, 0);
+      return;
+    }
     this.backFromEditor(zoneId, this.mapFromGuide);
   }
 
@@ -1069,7 +1092,7 @@ export class EcApp extends LitElement {
       window.scrollTo(0, 0);
       return;
     }
-    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length || unsavedNames(d).length))) return;
+    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length))) return;
     const step: SetupStep = d.flow[0] === 3 ? "place" : "layout";
     const changes = layoutChanges(d, this.config);
     if (!changes.length) {
@@ -2540,6 +2563,31 @@ export class EcApp extends LitElement {
     });
   }
 
+  /* A sensor's or device's name in this panel. It starts as Home Assistant's and follows it; typed over, it's kept
+     here and HA's name is left alone. The arrow puts HA's name back. */
+  private nameField(id: string, key: string, haName: string, m: MapDraft) {
+    const own = key in m.names;
+    return html`<div class="field">
+      <label for=${id}>Name</label>
+      <span class="resettable"
+        ><input
+          id=${id}
+          type="text"
+          maxlength="100"
+          autocomplete="off"
+          enterkeyhint="done"
+          aria-invalid=${own && !m.names[key].trim() ? "true" : "false"}
+          .value=${live(shownName(m, key, haName))}
+          @input=${(e: Event) => this.setMap((d) => nameIt(d, key, (e.target as HTMLInputElement).value, haName))}
+          @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        />${own
+          ? html`<button class="reset" aria-label="Put back Home Assistant's name, ${haName}" title="Put back ${haName}" @click=${() => this.setMap((d) => delete d.names[key])}>${icon("reset")}</button>`
+          : nothing}</span
+      >
+      ${own ? html`<span class="small muted">Home Assistant calls it ${haName}. Its name there isn't changed.</span>` : nothing}
+    </div>`;
+  }
+
   private sensorRow(m: MapDraft, z: Zone, s: SensorCandidate) {
     const on = s.id in m.sensors, cls = m.cls[s.id] ?? s.detected, waiting = on && classSlots(m, s.id).some((k) => m.sensors[s.id][k] === "");
     const elsewhere = this.zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
@@ -2554,10 +2602,11 @@ export class EcApp extends LitElement {
     return html`<div class="pickwrap" id=${sensorTarget(s.id)}>
       <button class="pickrow" aria-pressed=${on ? "true" : "false"} @click=${() => this.toggleSensor(s)}>
         <span class="tick">${on ? "✓" : ""}</span>
-        <span class="pick-text"><strong>${s.name}</strong><span class="dev-sub">${s.family}, ${LINK_LABEL[s.link]}. ${CLASSES[s.detected]}: ${has}</span></span>${pill}
+        <span class="pick-text"><strong>${on ? shownName(m, s.id, s.name).trim() || s.name : s.name}</strong><span class="dev-sub">${s.family}, ${LINK_LABEL[s.link]}. ${CLASSES[s.detected]}: ${has}</span></span>${pill}
       </button>
       ${on
         ? html`<div class="ents">
+            ${this.nameField(`name-${sensorTarget(s.id)}`, s.id, s.name, m)}
             ${this.chips(
               "Class",
               `class-${s.id}`,
@@ -2583,10 +2632,11 @@ export class EcApp extends LitElement {
     return html`<div class="pickwrap" id=${controlTarget(c.entity)}>
       <button class="pickrow" aria-pressed=${on ? "true" : "false"} @click=${() => this.toggleControl(c)}>
         <span class="tick">${on ? "✓" : ""}</span>
-        <span class="pick-text"><strong>${c.name}</strong><span class="dev-sub">${c.family}, ${LINK_LABEL[c.link]}. ${c.entity}</span></span>${pill}
+        <span class="pick-text"><strong>${on ? shownName(m, c.entity, c.name).trim() || c.name : c.name}</strong><span class="dev-sub">${c.family}, ${LINK_LABEL[c.link]}. ${c.entity}</span></span>${pill}
       </button>
       ${on
         ? html`<div class="ents">
+            ${this.nameField(`name-${controlTarget(c.entity)}`, c.entity, c.name, m)}
             ${this.chips(
               role ? "This is a" : "This is a, pick one",
               `role-${c.entity}`,
@@ -2595,9 +2645,61 @@ export class EcApp extends LitElement {
               (v) => this.setMap((d) => (d.controls[c.entity] = v as Role)),
             )}
             ${otherNames.length ? html`<p class="dev-sub">Shared. Also in ${otherNames.join(", ")}.</p>` : nothing}
+            ${this.helperChips(
+              "Home Assistant entity",
+              `swap-${controlTarget(c.entity)}`,
+              /* Anything not already a device here or in another zone, and the one it's on now. */
+              this.controlsFound.filter((o) => o.entity === c.entity || (!(o.entity in m.controls) && !this.devices.some((d) => this.storedEntity(d.id) === o.entity))).map((o) => ({ entity: o.entity, name: o.name, state: null })),
+              c.entity,
+              [],
+              (e) => e && this.setMap((d) => swapControl(d, c.entity, e)),
+              false,
+              { find: "Search to move it to another entity", said: "On", plain: true },
+            )}
+            <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${otherNames.join(" and ")} too` : ""}.</p>
           </div>`
         : nothing}
     </div>`;
+  }
+
+  /* A virtual device, something worth seeing on the map that Home Assistant doesn't have: its name, its type and
+     whether it stays. It's only drawn, so there's nothing else to say about it. */
+  private virtualRow(m: MapDraft, v: MapDraft["virt"][number]) {
+    const id = virtualTarget(v.id), name = v.name.trim();
+    const taken = !!name && m.virt.some((x) => x.id !== v.id && x.name.trim().toLowerCase() === name.toLowerCase());
+    return html`<div class="pickwrap virt" id=${id}>
+      <div class="pickrow">
+        <span class="pick-text"><strong>${name || "New virtual device"}</strong><span class="dev-sub">Virtual, ${v.type}. Only drawn on the map.</span></span>
+        ${!name ? html`<span class="pill high">Name it</span>` : taken ? html`<span class="pill high">Name taken</span>` : nothing}
+      </div>
+      <div class="ents">
+        <label class="field" for="${id}-name"
+          >Name<input
+            id="${id}-name"
+            type="text"
+            maxlength="40"
+            autocomplete="off"
+            enterkeyhint="done"
+            placeholder="For example Drain tank"
+            aria-invalid=${!name || taken ? "true" : "false"}
+            .value=${live(v.name)}
+            @input=${(e: Event) => this.setMap((d) => { const x = d.virt.find((y) => y.id === v.id); if (x) x.name = (e.target as HTMLInputElement).value; })}
+            @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        /></label>
+        ${this.chips(`Type of ${name || "this virtual device"}`, `vtype-${v.id}`, VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), v.type, (t) => this.setMap((d) => { const x = d.virt.find((y) => y.id === v.id); if (x) x.type = t as VirtualType; }))}
+        <div class="row"><button class="btn danger" @click=${() => this.setMap((d) => removeVirtual(d, v.id))}>Remove ${name || "this virtual device"}</button></div>
+      </div>
+    </div>`;
+  }
+
+  private async addVirtualDevice(): Promise<void> {
+    let id: string | null = null;
+    this.setMap((d) => (id = addVirtual(d)));
+    if (!id) return;
+    await this.updateComplete;
+    const box = this.shadowRoot?.querySelector(`#${virtualTarget(id)}-name`) as HTMLElement | null;
+    box?.scrollIntoView({ block: "center" });
+    box?.focus({ preventScroll: true });
   }
 
   private mapList<T>(items: T[], near: (x: T) => boolean, row: (x: T) => unknown, empty: string) {
@@ -2678,14 +2780,25 @@ export class EcApp extends LitElement {
             </div>`,
           )}
           ${this.mapList(shown, (c) => this.nearZone(z, c.area) || c.entity in m.controls, (c) => this.controlRow(m, z, c), q ? "Nothing matches that search." : "Home Assistant has no switches, lights, fans or humidifiers.")}
+        </div>
+        <div class="virt-head">
+          <h2>Virtual devices</h2>
+          <p class="small muted">Something worth seeing on ${z.name}'s map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
+        </div>
+        ${m.virt.length ? html`<div class="picklist">${repeat(m.virt, (v) => v.id, (v) => this.virtualRow(m, v))}</div>` : nothing}
+        <div class="row">
+          <button class="btn" ?disabled=${m.virt.length >= MAX_VIRTUAL} @click=${() => void this.addVirtualDevice()}>Add a virtual device</button>
+          ${m.virt.length >= MAX_VIRTUAL ? html`<span class="small muted">A zone can have up to ${MAX_VIRTUAL} virtual devices.</span>` : nothing}
         </div>`;
     }
     if (m.step === 3) {
-      const ss = Object.keys(m.sensors).map((id) => `${sensors.find((s) => s.id === id)?.name ?? id} (${CLASSES[m.cls[id] ?? "env"].toLowerCase()})`);
-      const cs = Object.entries(m.controls).map(([e, role]) => `${controls.find((c) => c.entity === e)?.name ?? e} (${role || "not set"})`);
+      const ss = Object.keys(m.sensors).map((id) => `${shownName(m, id, sensors.find((s) => s.id === id)?.name ?? id).trim() || id} (${CLASSES[m.cls[id] ?? "env"].toLowerCase()})`);
+      const cs = Object.entries(m.controls).map(([e, role]) => `${shownName(m, e, controls.find((c) => c.entity === e)?.name ?? e).trim() || e} (${role || "not set"})`);
+      const vs = m.virt.map((v) => `${v.name.trim() || "not named"} (${v.type.toLowerCase()})`);
       body = html`<div class="review">
           <div><strong>${plural(ss.length, "sensor")}</strong><p class="small muted">${ss.join(", ") || "None"}</p></div>
           <div><strong>${plural(cs.length, "device")}</strong><p class="small muted">${cs.join(", ") || "None"}</p></div>
+          ${vs.length ? html`<div><strong>${plural(vs.length, "virtual device")}</strong><p class="small muted">${vs.join(", ")}</p></div>` : nothing}
         </div>
         ${issues.map((i) => html`<button class="notice fix" @click=${() => this.jumpTo(i)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
         <p class="small muted">Applying only changes Environment Control. Home Assistant asks you before any device becomes controllable.</p>`;
@@ -2777,8 +2890,7 @@ export class EcApp extends LitElement {
     }
     if (d.step === 3) body = this.placement(d, z);
     const heightless = d.step === 3 ? noHeight(d) : [];
-    const unsaved = d.step === 3 ? unsavedNames(d) : [];
-    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0 || unsaved.length > 0));
+    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0));
     const title = { 1: "Zone layout", 3: "Device placement" }[d.flow[0] === 3 ? 3 : 1];
     return html`<div><h1>${title}: ${z.name}</h1></div>
       <section class="card">
@@ -2790,9 +2902,7 @@ export class EcApp extends LitElement {
             ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
             : heightless.length
               ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
-              : unsaved.length
-                ? html`<button class="fixlink" @click=${() => this.pickItem(unsaved[0].id)}>Save or put back ${unsaved[0].name}'s new name first &rsaquo;</button>`
-                : nothing}
+              : nothing}
         </div>
       </section>`;
   }
@@ -2822,26 +2932,14 @@ export class EcApp extends LitElement {
         ? html`<div class="small muted">Devices, optional</div>
             <div class="sensor-list">${d.devs.map((x) => opt(x, html`<span class="pill plain">Not placed</span>`))}</div>`
         : nothing}
-      <div class="small muted">Virtual devices, not in Home Assistant</div>
-      ${d.virt.length ? html`<div class="sensor-list">${d.virt.map((v) => opt(v, needs))}</div>` : nothing}
-      <p class="small muted">Something worth seeing on the map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
+      ${d.virt.length
+        ? html`<div class="small muted">Virtual devices, not in Home Assistant</div>
+            <div class="sensor-list">${d.virt.map((v) => opt(v, needs))}</div>`
+        : nothing}
       <div class="row">
-        <label class="field" for="lay-vname"
-          >Add a virtual device<input
-            id="lay-vname"
-            type="text"
-            maxlength="40"
-            enterkeyhint="done"
-            autocomplete="off"
-            placeholder="For example Drain tank"
-            .value=${d.vname}
-            @input=${(e: Event) => this.setLay((x) => (x.vname = (e.target as HTMLInputElement).value))}
-            @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.setLay(addVirtual)}
-        /></label>
-        <button class="btn" @click=${() => this.setLay(addVirtual)}>Add</button>
+        <button class="btn" @click=${() => this.editDevicesFromPlacement()}>Add or edit devices</button>
+        <span class="small muted">Sensors, devices and virtual devices are added, named and removed in Device identification.</span>
       </div>
-      ${this.chips("Its type", "lay-vtype", VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), d.vtype, (v) => this.setLay((x) => (x.vtype = v as VirtualType)))}
-      ${d.vissue ? html`<p class="small" role="status">${d.vissue}</p>` : nothing}
       <div class="now"><strong>${prompt}</strong></div>
       ${mapView(L, {
         items: this.layItems(d),
@@ -2868,32 +2966,6 @@ export class EcApp extends LitElement {
         : nothing}
       ${sel?.kind === "device" && fits(sel, L)
         ? html`<div class="now"><strong>On the map</strong><button class="btn" @click=${() => this.setLay((x) => { const s = itemOf(x, sel.id); if (s) s.pos = null; })}>Take ${sel.name} off the map</button></div>`
-        : nothing}
-      ${sel?.kind === "virtual"
-        ? html`<div class="now vedit">
-            <div class="vname">
-              <div class="field">
-                <label for="lay-vrename">Name</label>
-                <span class="resettable"
-                  ><input
-                    id="lay-vrename"
-                    type="text"
-                    maxlength="40"
-                    enterkeyhint="done"
-                    autocomplete="off"
-                    .value=${live(d.vtyped[sel.id] ?? sel.name)}
-                    @input=${(e: Event) => this.setLay((x) => typeVirtualName(x, sel.id, (e.target as HTMLInputElement).value))}
-                    @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.setLay((x) => saveVirtualName(x, sel.id))}
-                  />${sel.id in d.vtyped
-                    ? html`<button class="reset" aria-label="Put the name back to ${sel.name}" title="Put back ${sel.name}" @click=${() => this.setLay((x) => resetVirtualName(x, sel.id))}>${icon("reset")}</button>`
-                    : nothing}</span
-                >
-              </div>
-              ${sel.id in d.vtyped ? html`<button class="btn" aria-label="Save name" @click=${() => this.setLay((x) => saveVirtualName(x, sel.id))}>Save</button>` : nothing}
-            </div>
-            ${this.chips(`Type of ${sel.name}`, `vtype-${sel.id}`, VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), sel.type ?? "Other", (v) => this.setLay((x) => retypeVirtual(x, sel.id, v as VirtualType)))}
-            <button class="btn danger" @click=${() => this.setLay((x) => removeVirtual(x, sel.id))}>Remove ${sel.name}</button>
-          </div>`
         : nothing}
       ${keyView}
       ${left.length
@@ -3053,18 +3125,20 @@ export class EcApp extends LitElement {
     pick: (e: string) => void,
     locked: boolean,
     /* none: a choice for no helper at all, such as Set here. */
-    opts: { none?: string; first?: number } = {},
+    /* find and said word the box and what's picked for a list that isn't helpers; plain leaves readings out. */
+    opts: { none?: string; first?: number; find?: string; said?: string; plain?: boolean } = {},
   ) {
     const open = this.pickQ?.id === id, q = open ? (this.pickQ?.q ?? "") : "";
     const score = (o: { entity: string; name: string; unit?: string | null }) => likely.filter((w) => `${o.entity} ${o.name} ${o.unit ?? ""}`.toLowerCase().includes(w)).length;
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const label = (o: { name: string; state: string | null; unit?: string | null }) => `${o.name}, ${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}`;
+    const reads = (o: { state: string | null; unit?: string | null }) => `${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}`;
+    const label = (o: { entity: string; name: string; state: string | null; unit?: string | null }) => (opts.plain ? `${o.name}, ${o.entity}` : `${o.name}, ${reads(o)}`);
     const matches = options
       .filter((o) => words.every((w) => `${o.entity} ${o.name}`.toLowerCase().includes(w)))
       .sort((a, b) => Number(b.fits !== false) - Number(a.fits !== false) || score(b) - score(a))
       .slice(0, words.length ? 8 : 6);
     const none = opts.none && (!words.length || words.every((w) => opts.none?.toLowerCase().includes(w)));
-    const items = [...(none ? [{ value: "", text: opts.none as string, sub: "Stored in Environment Control" }] : []), ...matches.map((o) => ({ value: o.entity, text: o.name, sub: `${o.name === o.entity ? "" : `${o.entity}, `}${o.state ?? "--"}${o.unit ? ` ${o.unit}` : ""}` }))];
+    const items = [...(none ? [{ value: "", text: opts.none as string, sub: "Stored in Environment Control" }] : []), ...matches.map((o) => ({ value: o.entity, text: o.name, sub: opts.plain ? o.entity : `${o.name === o.entity ? "" : `${o.entity}, `}${reads(o)}` }))];
     const active = open ? Math.min(this.pickQ?.active ?? -1, items.length - 1) : -1;
     const now = options.find((o) => o.entity === current);
     /* Picking leaves the box, so a phone's keyboard closes and the draft bar comes back. */
@@ -3107,7 +3181,7 @@ export class EcApp extends LitElement {
           aria-controls="${id}-list"
           aria-autocomplete="list"
           aria-activedescendant=${active >= 0 ? `${id}-o${active}` : nothing}
-          placeholder=${now ? "Search to change it" : "Search your helpers"}
+          placeholder=${opts.find ?? (now ? "Search to change it" : "Search your helpers")}
           .value=${live(q)}
           ?disabled=${locked}
           @focus=${() => (this.pickQ = { id, q: "", active: -1 })}
@@ -3134,7 +3208,7 @@ export class EcApp extends LitElement {
             ${items.length ? nothing : html`<li class="muted small" role="presentation">Nothing matches.</li>`}
           </ul>`
         : nothing}
-      <p class="small ${current ? "" : "muted"}">${now ? html`Linked: <strong>${label(now)}</strong>` : current ? html`Linked: <strong>${current}</strong>` : opts.none ?? "None picked yet"}</p>
+      <p class="small ${current ? "" : "muted"}">${now ? html`${opts.said ?? "Linked"}: <strong>${label(now)}</strong>` : current ? html`${opts.said ?? "Linked"}: <strong>${current}</strong>` : opts.none ?? "None picked yet"}</p>
     </div>`;
   }
 

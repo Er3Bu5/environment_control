@@ -281,7 +281,8 @@ def validate_config(c: Any) -> None:
                 if v.get("type") is not None and v.get("type") not in VIRTUAL_TYPES:
                     _fail(f"{vid} is a kind of virtual device this panel doesn't know")
                 seen.add(vid)
-                if not _spot_ok(v.get("pos"), z.get("layout")):
+                # One added in Device identification has no spot until Device placement gives it one.
+                if v.get("pos") is not None and not _spot_ok(v.get("pos"), z.get("layout")):
                     _fail(f"{vid} is placed outside {zid}'s map")
 
     for d in devices:

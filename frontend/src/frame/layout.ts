@@ -131,12 +131,6 @@ export interface LayoutDraft extends Layout {
   devs: Item[];
   virt: Item[];
   pick: string | null;
-  vname: string;
-  vtype: VirtualType;
-  vissue: string;
-  /* A new name typed for a virtual device and not yet saved, by its id. Kept here so it survives every redraw: the
-     page redraws whenever a reading arrives, which used to put the old name back in the box mid-word. */
-  vtyped: Record<string, string>;
 }
 
 const spot = (v: unknown): Spot | null => (Array.isArray(v) && v.length === 2 && num(v[0]) && num(v[1]) ? [v[0], v[1]] : null);
@@ -187,9 +181,29 @@ export const flowOf = (d: LayoutDraft): (1 | 2 | 3)[] => (d.flow.includes(2) && 
 export function openLayout(c: RawConfig, zoneId: string, flow: (1 | 2 | 3)[]): LayoutDraft {
   const z = c.zones.find((x) => x.id === zoneId);
   const items = zoneItems(c, zoneId);
-  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null, vname: "", vtype: "Other", vissue: "", vtyped: {} };
+  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null };
   if (flow[0] === 3) draft.pick = firstToPlace(draft);
   return draft;
+}
+
+/* A placement draft carried across a visit to Device identification: the zone's sensors and devices as they now are,
+   each where the draft had put it. One that's gone is dropped, a new one waits to be placed, and a sensor whose class
+   changed is placed again, since a soil probe and an air sensor can't sit in the same spots. */
+export function carryPlacement(now: LayoutDraft, held: LayoutDraft): LayoutDraft {
+  const carry = (list: Item[], was: Item[]) => {
+    for (const it of list) {
+      const old = was.find((x) => x.id === it.id);
+      if (!old || old.kind !== it.kind) continue;
+      it.pos = old.pos ? [old.pos[0], old.pos[1]] : null;
+      if (old.level) it.level = old.level;
+    }
+  };
+  carry(now.sensors, held.sensors);
+  carry(now.devs, held.devs);
+  carry(now.virt, held.virt);
+  Object.assign(now, { flow: held.flow, step: 3, w: held.w, d: held.d, units: held.units, rows: held.rows, cols: held.cols });
+  now.pick = (stranded(now)[0] ?? null)?.id ?? null;
+  return now;
 }
 
 export function firstToPlace(d: LayoutDraft): string | null {
@@ -208,66 +222,6 @@ export function layoutIssues(d: LayoutDraft): string[] {
   if (!(Number.isInteger(d.units) && d.units >= 1 && d.units <= MAX_UNITS)) out.push(`Units go from 1 to ${MAX_UNITS}, whole numbers.`);
   else if (d.rows * d.cols < d.units) out.push(`This grid holds ${d.rows * d.cols} units, and you have ${d.units}.`);
   return out;
-}
-
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
-
-/* Virtual devices are things worth seeing on the map that Home Assistant doesn't have, like a drain tank. */
-const nameIssue = (d: LayoutDraft, name: string, self: string | null) =>
-  !name ? "A virtual device needs a name." : d.virt.some((v) => v.id !== self && v.name.toLowerCase() === name.toLowerCase()) ? `There's already a virtual device called ${name}.` : "";
-
-export function addVirtual(d: LayoutDraft): void {
-  const name = d.vname.trim().slice(0, 40);
-  d.vissue = nameIssue(d, name, null) || (d.virt.length >= MAX_VIRTUAL ? `A zone can have up to ${MAX_VIRTUAL} virtual devices.` : "");
-  if (d.vissue) return;
-  const base = `v-${slug(name) || "device"}`;
-  let id = base;
-  for (let n = 2; d.virt.some((v) => v.id === id); n++) id = `${base}_${n}`;
-  d.virt.push({ id, name, kind: "virtual", pos: null, type: d.vtype });
-  d.vname = "";
-  d.vtype = "Other";
-  d.pick = id;
-}
-
-/* A rename keeps the virtual device's id, so nothing that points at it moves. A blank or taken name is refused and said. */
-export function renameVirtual(d: LayoutDraft, id: string, typed: string): void {
-  const v = d.virt.find((x) => x.id === id), name = typed.trim().slice(0, 40);
-  if (!v) return;
-  d.vissue = nameIssue(d, name, id);
-  if (!d.vissue) v.name = name;
-}
-
-/* Typing only changes the box. The name changes on Save, and Reset puts the box back to the name as last saved. */
-export function typeVirtualName(d: LayoutDraft, id: string, typed: string): void {
-  const v = d.virt.find((x) => x.id === id);
-  if (!v) return;
-  if (typed === v.name) delete d.vtyped[id];
-  else d.vtyped[id] = typed;
-}
-
-export function saveVirtualName(d: LayoutDraft, id: string): void {
-  if (!(id in d.vtyped)) return;
-  renameVirtual(d, id, d.vtyped[id]);
-  if (!d.vissue) delete d.vtyped[id];
-}
-
-export function resetVirtualName(d: LayoutDraft, id: string): void {
-  delete d.vtyped[id];
-  d.vissue = "";
-}
-
-/* Virtual devices whose box holds a name that was never saved, which the wizard won't apply past. */
-export const unsavedNames = (d: LayoutDraft): Item[] => d.virt.filter((v) => v.id in d.vtyped);
-
-export function retypeVirtual(d: LayoutDraft, id: string, type: VirtualType): void {
-  const v = d.virt.find((x) => x.id === id);
-  if (v) v.type = type;
-}
-
-export function removeVirtual(d: LayoutDraft, id: string): void {
-  d.virt = d.virt.filter((v) => v.id !== id);
-  delete d.vtyped[id];
-  if (d.pick === id) d.pick = null;
 }
 
 export interface Change {
@@ -292,13 +246,11 @@ export function layoutChanges(d: LayoutDraft, c: RawConfig): Change[] {
     const old = items.devs.find((y) => y.id === x.id);
     add(`${x.name} position`, where(old?.pos ?? null, was), fits(x, d) ? where(x.pos, d) : "Not placed");
   }
+  /* Virtual devices are added, named and removed in Device identification. Here they're only placed. */
   for (const v of d.virt) {
     const old = items.virt.find((y) => y.id === v.id);
-    add(`${v.name}, virtual`, old ? where(old.pos, was) : "Not added", fits(v, d) ? where(v.pos, d) : "Not placed");
-    if (old) add(`${old.name}, virtual, name`, old.name, v.name);
-    add(`${v.name}, virtual, type`, old?.type ?? "Not added", v.type ?? "Other");
+    add(`${v.name}, virtual`, where(old?.pos ?? null, was), fits(v, d) ? where(v.pos, d) : "Not placed");
   }
-  for (const v of items.virt) if (!d.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, where(v.pos, was), "Removed");
   return out;
 }
 
@@ -314,7 +266,8 @@ export function applyLayout(c: RawConfig, d: LayoutDraft): void {
     if (drafted.kind === "env" && drafted.level) s.level = drafted.level;
     if (drafted.kind === "soil") delete s.level;
   }
-  const virt = d.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...(v.pos as Spot)], type: v.type ?? "Other" }));
+  /* One not on the map yet, or no longer on it, stays in the zone with no spot, to be placed. */
+  const virt = d.virt.map((v) => ({ id: v.id, name: v.name, type: v.type ?? "Other", ...(fits(v, L) ? { pos: [...(v.pos as Spot)] } : {}) }));
   if (virt.length) z.virtual = virt;
   else delete z.virtual;
   for (const dev of c.devices) {

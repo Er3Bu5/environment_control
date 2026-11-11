@@ -1,16 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  addVirtual,
   noHeight,
-  removeVirtual,
-  renameVirtual,
-  resetVirtualName,
-  saveVirtualName,
-  typeVirtualName,
-  unsavedNames,
-  retypeVirtual,
   allowed,
   applyLayout,
+  carryPlacement,
   devsOff,
   flowOf,
   layoutChanges,
@@ -145,68 +138,36 @@ describe("the draft", () => {
     expect(flowOf(d)).toEqual([1, 2, 3]);
   });
 
-  it("adds a virtual device by a new name only", () => {
-    const d = openLayout(config(), "z", [3]);
-    d.vname = "drain TANK";
-    addVirtual(d);
-    expect(d.vissue).toBe("There's already a virtual device called drain TANK.");
-    d.vname = "Res lid";
-    addVirtual(d);
-    expect([d.vissue, d.virt.at(-1)?.id, d.pick]).toEqual(["", "v-res_lid", "v-res_lid"]);
-  });
-
-  it("gives a virtual device a type, Other until said, and the new one the type picked when adding", () => {
-    const d = openLayout(config(), "z", [3]);
-    expect(d.virt[0].type).toBe("Other");
-    d.vname = "Res lid";
-    d.vtype = "Tank";
-    addVirtual(d);
-    expect([d.virt.at(-1)?.type, d.vtype]).toEqual(["Tank", "Other"]);
-  });
-
-  it("keeps a typed name apart from the saved one until Save, and Reset puts the saved one back", () => {
-    const c = config(), d = openLayout(c, "z", [3]);
-    typeVirtualName(d, "v-tank", "Waste");
-    expect([d.virt[0].name, d.vtyped["v-tank"], unsavedNames(d).map((v) => v.id), layoutChanges(d, c).length]).toEqual(["Drain tank", "Waste", ["v-tank"], 0]);
-    resetVirtualName(d, "v-tank");
-    expect([d.virt[0].name, unsavedNames(d).length]).toEqual(["Drain tank", 0]);
-    /* Typed back to the saved name, there's nothing to save. */
-    typeVirtualName(d, "v-tank", "Waste");
-    typeVirtualName(d, "v-tank", "Drain tank");
-    expect(unsavedNames(d)).toEqual([]);
-    typeVirtualName(d, "v-tank", " Waste tank ");
-    saveVirtualName(d, "v-tank");
-    expect([d.virt[0].name, d.vissue, unsavedNames(d).length]).toEqual(["Waste tank", "", 0]);
-  });
-
-  it("keeps a name that can't be saved in the box, saying why, and forgets it with the device", () => {
-    const d = openLayout(config(), "z", [3]);
-    typeVirtualName(d, "v-tank", "  ");
-    saveVirtualName(d, "v-tank");
-    expect([d.vissue, d.virt[0].name, d.vtyped["v-tank"]]).toEqual(["A virtual device needs a name.", "Drain tank", "  "]);
-    resetVirtualName(d, "v-tank");
-    expect(d.vissue).toBe("");
-    typeVirtualName(d, "v-tank", "Gone");
-    removeVirtual(d, "v-tank");
-    expect(d.vtyped).toEqual({});
-  });
-
-  it("renames a virtual device keeping its id, refusing a blank or taken name, and retypes and removes it", () => {
-    const c = config(), d = openLayout(c, "z", [3]);
-    renameVirtual(d, "v-tank", "  ");
-    expect([d.vissue, d.virt[0].name]).toEqual(["A virtual device needs a name.", "Drain tank"]);
-    renameVirtual(d, "v-tank", "Waste tank");
-    retypeVirtual(d, "v-tank", "Tank");
-    expect([d.vissue, d.virt[0].id, d.virt[0].name, d.virt[0].type]).toEqual(["", "v-tank", "Waste tank", "Tank"]);
-    expect(layoutChanges(d, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual([
-      "Drain tank, virtual, name: Drain tank > Waste tank",
-      "Waste tank, virtual, type: Other > Tank",
-    ]);
+  it("only places a virtual device: one not on the map yet stays in the zone, waiting for its spot", () => {
+    const c = config();
+    (c.zones[0].virtual as Record<string, unknown>[]).push({ id: "v-lid", name: "Lid", type: "Tank" });
+    const d = openLayout(c, "z", [3]);
+    expect(d.virt.map((v) => [v.id, v.pos, v.type])).toEqual([["v-tank", [-1, 0], "Other"], ["v-lid", null, "Tank"]]);
+    expect(stranded(d).map((s) => s.id)).toEqual(["probe", "v-lid"]);
+    d.virt[0].pos = [2, 0];
+    expect(layoutChanges(d, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual(["Drain tank, virtual: Outside the wall, by unit 1 > Outside the wall, by unit 4"]);
     applyLayout(c, d);
-    expect((c.zones[0] as Record<string, unknown>).virtual).toEqual([{ id: "v-tank", name: "Waste tank", pos: [-1, 0], type: "Tank" }]);
-    d.pick = "v-tank";
-    removeVirtual(d, "v-tank");
-    expect([d.virt, d.pick]).toEqual([[], null]);
+    expect((c.zones[0] as Record<string, unknown>).virtual).toEqual([
+      { id: "v-tank", name: "Drain tank", type: "Other", pos: [2, 0] },
+      { id: "v-lid", name: "Lid", type: "Tank" },
+    ]);
+  });
+
+  it("carries what was placed across a visit to Device identification, with the devices as they then are", () => {
+    const c = config(), held = openLayout(c, "z", [3]);
+    held.sensors[1].pos = [1, 1];
+    held.sensors[0].level = "above";
+    held.devs[1].pos = [-1, 2];
+    /* Meanwhile a virtual device was added, the heater taken out of the zone, and the probe became an air sensor. */
+    const z = c.zones[0] as Record<string, unknown>;
+    (z.virtual as Record<string, unknown>[]).push({ id: "v-lid", name: "Lid", type: "Tank" });
+    (z.sensors as Record<string, unknown>[])[1].kind = "env";
+    c.devices = c.devices.filter((x) => x.id !== "d-heat");
+    const now = carryPlacement(openLayout(c, "z", [3]), held);
+    expect(now.sensors.map((s) => [s.id, s.pos, s.level])).toEqual([["air", [0.5, 1], "above"], ["probe", null, undefined]]);
+    expect(now.devs.map((x) => [x.id, x.pos])).toEqual([["d-fan", [-1, 2]]]);
+    expect(now.virt.map((v) => [v.id, v.pos])).toEqual([["v-tank", [-1, 0]], ["v-lid", null]]);
+    expect([now.step, now.pick]).toEqual([3, "probe"]);
   });
 
   it("asks a height of every environment sensor on the map, and of no soil probe", () => {
@@ -224,18 +185,16 @@ describe("the draft", () => {
     d.sensors[0].level = "above";
     d.devs[1].pos = [-1, 2];
     d.devs[0].pos = null;
-    d.virt = [];
     expect(layoutChanges(d, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual([
       "Air height: In canopy > Above canopy",
       "Probe position: Not placed > Unit 5",
       "Heater position: Outside the wall > Not placed",
       "Fan position: Not placed > Outside the wall, by unit 3",
-      "Drain tank, virtual: Outside the wall, by unit 1 > Removed",
     ]);
     applyLayout(c, d);
     const z = c.zones[0] as Record<string, unknown>;
     expect(z.other).toBe(1);
-    expect(z.virtual).toBeUndefined();
+    expect(z.virtual).toEqual([{ id: "v-tank", name: "Drain tank", type: "Other", pos: [-1, 0] }]);
     expect((z.sensors as Record<string, unknown>[]).map((s) => [s.pos, s.level])).toEqual([[[0.5, 1], "above"], [[1, 1], undefined]]);
     expect(c.devices.map((x) => x.place)).toEqual([undefined, { other: [0, 0], z: [-1, 2] }, undefined, undefined]);
     expect(layoutChanges(openLayout(c, "z", [3]), c)).toEqual([]);

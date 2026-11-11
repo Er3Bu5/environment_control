@@ -174,7 +174,8 @@ class FakeHA {
         const shape = v && typeof v === "object" && Object.keys(v).every((k) => ["id", "name", "pos", "type"].includes(k));
         if (!shape || typeof v.id !== "string" || !/^v-[a-z0-9_]{1,40}$/.test(v.id) || vids.has(v.id) || typeof v.name !== "string" || !v.name.trim() || v.name.length > 40) this.fail(`${z.id} has a virtual device that isn't a name and a spot`);
         vids.add(v.id);
-        if (!spotOk(v.pos, z.layout)) this.fail(`${v.id} is placed outside ${z.id}'s map`);
+        /* One added in Device identification has no spot until Device placement gives it one. */
+        if (v.pos != null && !spotOk(v.pos, z.layout)) this.fail(`${v.id} is placed outside ${z.id}'s map`);
       }
     }
   }

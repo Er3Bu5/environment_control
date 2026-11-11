@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Catalog, CatalogEntity } from "../../src/frame/messages";
 import {
+  addVirtual,
   applyMap,
   controlCandidates,
   deviceId,
   mapChanges,
   mapIssues,
+  nameIt,
   openMap,
+  removeVirtual,
   seedSlots,
   sensorCandidates,
+  shownName,
+  swapControl,
 } from "../../src/frame/mapping";
 import { copyConfig } from "../../src/frame/model";
 
@@ -178,6 +183,99 @@ describe("the draft", () => {
     d.controls["switch.heater_plug"] = "Heater";
     applyMap(c, d, sensors, controls);
     expect(mapChanges(openMap(c, "garden"), c, sensors, controls)).toEqual([]);
+  });
+
+  it("keeps a name given here in place of Home Assistant's, and follows HA's again once it's put back", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [] }], []);
+    let d = openMap(c, "garden");
+    d.sensors.board1 = seedSlots(sensors[0]);
+    d.controls["switch.heater_plug"] = "Heater";
+    nameIt(d, "board1", "Canopy left", "Left board");
+    nameIt(d, "switch.heater_plug", " Heater ", "Heater plug");
+    expect([shownName(d, "board1", "Left board"), shownName(d, "humidifier.dehu", "Dehu")]).toEqual(["Canopy left", "Dehu"]);
+    expect(mapChanges(d, c, sensors, controls).filter((x) => x.label.endsWith("name")).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual([
+      "Left board name: Left board > Canopy left",
+      "Heater plug name: Heater plug > Heater",
+    ]);
+    applyMap(c, d, sensors, controls);
+    const sensor = () => (c.zones[0].sensors as Record<string, unknown>[])[0];
+    expect([sensor().name, sensor().nameSource, c.devices[0].name, c.devices[0].nameSource]).toEqual(["Canopy left", "confirmed", "Heater", "confirmed"]);
+    /* Reopened, the names are still its own, and a second apply doesn't hand them back to Home Assistant. */
+    d = openMap(c, "garden");
+    expect(d.names).toEqual({ board1: "Canopy left", "switch.heater_plug": "Heater" });
+    expect(mapChanges(d, c, sensors, controls)).toEqual([]);
+    applyMap(c, d, sensors, controls);
+    expect(sensor().name).toBe("Canopy left");
+    /* Typed back to what Home Assistant calls it, there's nothing to keep, and the name follows HA's again. */
+    nameIt(d, "board1", "Left board", "Left board");
+    delete d.names["switch.heater_plug"];
+    applyMap(c, d, sensors, controls);
+    expect([sensor().name, sensor().nameSource, c.devices[0].name, c.devices[0].nameSource]).toEqual(["Left board", undefined, "Heater plug", undefined]);
+  });
+
+  it("won't apply a name left blank", () => {
+    const d = openMap(copyConfig([{ id: "garden", name: "Garden", sensors: [] }], []), "garden");
+    d.sensors.board1 = seedSlots(sensors[0]);
+    d.controls["humidifier.dehu"] = "Dehumidifier";
+    nameIt(d, "board1", "  ", "Left board");
+    nameIt(d, "humidifier.dehu", "", "Dehu");
+    expect(mapIssues(d, sensors, controls).map((i) => [i.step, i.text])).toEqual([
+      [1, "Left board: give it a name, or put Home Assistant's back."],
+      [2, `${controls.find((x) => x.entity === "humidifier.dehu")?.name}: give it a name, or put Home Assistant's back.`],
+    ]);
+  });
+
+  it("moves a device to another entity as one change, keeping its name, its type and its place on the map", () => {
+    const c = copyConfig(
+      [{ id: "garden", name: "Garden", sensors: [{ id: "board1", entities: { temperature: "sensor.left_temp" } }] }, { id: "veg", name: "Veg", sensors: [] }],
+      [{ id: deviceId("switch.heater_plug"), entity: "switch.heater_plug", name: "Heater", nameSource: "confirmed", type: "Heater", zones: ["garden", "veg"], place: { garden: [0, 1], veg: [1, 1] } }],
+    );
+    const d = openMap(c, "garden");
+    swapControl(d, "switch.heater_plug", "fan.dehu_fan");
+    expect([d.controls, d.names["fan.dehu_fan"], d.swap]).toEqual([{ "fan.dehu_fan": "Heater" }, "Heater", { "fan.dehu_fan": "switch.heater_plug" }]);
+    expect(mapChanges(d, c, sensors, controls).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual(["Heater entity: switch.heater_plug > fan.dehu_fan"]);
+    applyMap(c, d, sensors, controls);
+    expect(c.devices.map((x) => [x.id, x.entity, x.name, x.type, x.zones, x.place])).toEqual([
+      [deviceId("fan.dehu_fan"), "fan.dehu_fan", "Heater", "Heater", ["garden", "veg"], { garden: [0, 1], veg: [1, 1] }],
+    ]);
+    /* Moved on again and then back to where it started, nothing has changed. */
+    const again = openMap(c, "garden");
+    swapControl(again, "fan.dehu_fan", "light.group_lights");
+    swapControl(again, "light.group_lights", "fan.dehu_fan");
+    expect([again.swap, mapChanges(again, c, sensors, controls)]).toEqual([{}, []]);
+    /* It can't take the place of a device that's already in the zone. */
+    again.controls["humidifier.dehu"] = "Dehumidifier";
+    swapControl(again, "fan.dehu_fan", "humidifier.dehu");
+    expect(Object.keys(again.controls)).toEqual(["fan.dehu_fan", "humidifier.dehu"]);
+  });
+
+  it("adds, names, retypes and removes virtual devices, keeping the spot of one already placed", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", entities: { temperature: "sensor.left_temp" } }], virtual: [{ id: "v-tank", name: "Drain tank", type: "Tank", pos: [-1, 0] }] }], []);
+    const d = openMap(c, "garden");
+    expect(d.virt).toEqual([{ id: "v-tank", name: "Drain tank", type: "Tank" }]);
+    const id = addVirtual(d) as string;
+    expect(mapIssues(d, sensors, controls).map((i) => [i.step, i.text])).toEqual([[2, "A virtual device needs a name."]]);
+    const fresh = d.virt.find((v) => v.id === id) as (typeof d.virt)[number];
+    fresh.name = "drain TANK";
+    expect(mapIssues(d, sensors, controls).map((i) => i.text)).toEqual(["There's already a virtual device called drain TANK."]);
+    Object.assign(fresh, { name: " Res lid ", type: "Other" });
+    d.virt[0].name = "Waste tank";
+    expect(mapChanges(d, c, sensors, controls).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual([
+      "Drain tank, virtual, name: Drain tank > Waste tank",
+      "Res lid, virtual: Not added > Added, Other",
+    ]);
+    applyMap(c, d, sensors, controls);
+    expect(c.zones[0].virtual).toEqual([
+      { id: "v-tank", name: "Waste tank", type: "Tank", pos: [-1, 0] },
+      { id: "v-res_lid", name: "Res lid", type: "Other" },
+    ]);
+    const next = openMap(c, "garden");
+    expect(mapChanges(next, c, sensors, controls)).toEqual([]);
+    removeVirtual(next, "v-tank");
+    expect(mapChanges(next, c, sensors, controls).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual(["Waste tank, virtual: On the map > Removed"]);
+    removeVirtual(next, "v-res_lid");
+    applyMap(c, next, sensors, controls);
+    expect(c.zones[0].virtual).toBeUndefined();
   });
 
   it("leaves a sensor's leaf temperature offset alone, which is Sensor Calibration's", () => {
