@@ -16,9 +16,13 @@ on:
 permissions: {}
 
 # One beta at a time, each numbered once the one before it is published or turned down, so two never take one number.
+# Merges made while one is under way wait their turn, oldest first: queue: max keeps every waiting run, where the
+# default keeps only the newest and cancels the ones between. A run whose merge a newer release already holds (one
+# started again by hand, say) makes no beta, so older code never goes out under a newer number.
 concurrency:
   group: beta
   cancel-in-progress: false
+  queue: max
 
 jobs:
   plan:
@@ -42,9 +46,11 @@ jobs:
           python3 scripts/next_beta.py "$GITHUB_SHA" > "$RUNNER_TEMP/next"
           cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
           get() { sed -n "s/^$1=//p" "$RUNNER_TEMP/next"; }
-          ship=$(get ship) version=$(get version) since=$(get since)
+          ship=$(get ship) version=$(get version) since=$(get since) included=$(get included)
           if [ "$ship" = true ]; then
             echo "Beta $version, waiting for approval in the release environment." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$included" = true ]; then
+            echo "$since already includes this merge, so no beta." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Nothing that ships changed since $since, so no beta." >> "$GITHUB_STEP_SUMMARY"
           fi
