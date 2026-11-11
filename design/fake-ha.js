@@ -11,7 +11,7 @@ class FakeHA {
     this.registry = seed.registry || { entities: {}, areas: {} };
     /* HA's device registry: an entity with no area of its own is in its device's. */
     this.registry.devices = this.registry.devices || {};
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {} };
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
     this.calls = [];
     this.saves = [];
     this.panels = new Set();
@@ -99,7 +99,9 @@ class FakeHA {
       case "light.turn_on": return ["on", { brightness: data.brightness_pct === undefined ? (a.brightness || 255) : Math.round((this.snapped(data.entity_id, data.brightness_pct) / 100) * 255) }];
       case "light.turn_off": return ["off", { brightness: null }];
       case "humidifier.set_mode": return [s.state, { mode: data.mode }];
-      case "humidifier.set_humidity": return [s.state, { humidity: data.humidity }];
+      /* Some dehumidifiers drop into a mode of their own whenever their target changes, one their integration can't
+         ask for by name: knobs.targetModes[entity] = that mode. */
+      case "humidifier.set_humidity": return [s.state, { humidity: data.humidity, ...(this.knobs.targetModes[data.entity_id] ? { mode: this.knobs.targetModes[data.entity_id] } : {}) }];
       case "input_datetime.set_datetime": return [String(data.time).length === 5 ? `${data.time}:00` : String(data.time), {}];
       case "number.set_value": return [Number(data.value).toFixed(1), {}];
       default: return service === "turn_on" ? ["on", {}] : service === "turn_off" ? ["off", {}] : [String(data.value), {}];

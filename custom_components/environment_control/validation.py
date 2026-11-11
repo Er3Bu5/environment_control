@@ -27,6 +27,7 @@ READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light", "moisture"
 SENSOR_CLASSES = ("env", "soil")
 MAX_SENSORS_PER_ZONE = 50
 MAX_NAME = 100
+MAX_MODE_NAME = 40
 # Leaf temperature offsets kept here, as wide as any board allows and then some.
 LEAF_RANGE = (-10, 10)
 LEVELS = ("above", "in", "under")
@@ -305,6 +306,18 @@ def validate_config(c: Any) -> None:
         entity = d.get("entity")
         if entity is not None and not (isinstance(entity, str) and CONTROLLABLE.match(entity)):
             _fail(f"{did} has an entity this panel can't control")
+        # A mode the device has that Home Assistant doesn't list. Only its name: the panel reaches it by moving the
+        # device's own target humidity, which it may already set.
+        extra = d.get("nudgeMode")
+        if extra is not None and not (
+            isinstance(extra, str)
+            and extra.strip()
+            and len(extra) <= MAX_MODE_NAME
+            and extra.isprintable()
+            and isinstance(entity, str)
+            and entity.startswith("humidifier.")
+        ):
+            _fail(f"{did} has an extra mode that isn't a short name on a humidifier or dehumidifier")
         place = d.get("place")
         if place is None:
             continue

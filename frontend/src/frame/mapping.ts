@@ -149,7 +149,10 @@ export interface MapDraft {
   /* A device moved to another of Home Assistant's entities: the new entity, and the one it took over from. The device
      keeps its name, its type and its place on the map. */
   swap: Record<string, string>;
+  /* A mode a humidifier or dehumidifier has that Home Assistant doesn't list, by its entity. */
+  extra: Record<string, string>;
 }
+export const MAX_MODE_NAME = 40;
 
 export const MAX_NAME = 100;
 export const MAX_VIRTUAL_NAME = 40;
@@ -172,7 +175,7 @@ export const classSlots = (d: MapDraft, id: string): readonly Slot[] => CLASS_SL
 
 export function openMap(c: RawConfig, zoneId: string): MapDraft {
   const z = c.zones.find((x) => x.id === zoneId);
-  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, cls: {}, avg: {}, combine: { env: "mean", soil: "mean" }, controls: {}, names: {}, virt: [], swap: {} };
+  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, cls: {}, avg: {}, combine: { env: "mean", soil: "mean" }, controls: {}, names: {}, virt: [], swap: {}, extra: {} };
   if (!z) return draft;
   const named = (x: Record<string, unknown>, key: string) => {
     if (x.nameSource === "confirmed" && str(x.name)) draft.names[key] = str(x.name);
@@ -193,6 +196,7 @@ export function openMap(c: RawConfig, zoneId: string): MapDraft {
     if (Array.isArray(d.zones) && d.zones.includes(zoneId) && str(d.entity)) {
       draft.controls[str(d.entity)] = (ROLES as readonly string[]).includes(str(d.type)) ? (d.type as Role) : "";
       named(d, str(d.entity));
+      if (str(d.nudgeMode).trim()) draft.extra[str(d.entity)] = str(d.nudgeMode).trim();
     }
   return draft;
 }
@@ -231,7 +235,11 @@ export function swapControl(d: MapDraft, from: string, to: string): void {
     d.names[to] = d.names[from];
     delete d.names[from];
   }
+  /* The extra mode is the hardware's, so it goes along only to another humidifier or dehumidifier. */
+  if (from in d.extra && takesExtraMode(to)) d.extra[to] = d.extra[from];
+  delete d.extra[from];
 }
+export const takesExtraMode = (entity: string) => entity.startsWith("humidifier.");
 
 export interface Issue {
   text: string;
@@ -297,6 +305,7 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
     const name = was.names[from] ?? controlName(from);
     add(`${name} entity`, from, to);
     add(`${name} is a`, was.controls[from] || "Not set", d.controls[to] || "Not set");
+    add(`${name} extra mode`, was.extra[from] ?? "None", d.extra[to]?.trim() || "None");
     add(`${name} name`, was.names[from] ?? controlName(from), d.names[to]?.trim() ?? controlName(to));
   }
   for (const e of new Set([...Object.keys(was.controls), ...Object.keys(d.controls)])) {
@@ -305,6 +314,7 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
     add(controlName(e), had ? "In this zone" : "Not in this zone", has ? "In this zone" : "Not in this zone");
     if (has) add(`${controlName(e)} is a`, had ? was.controls[e] || "Not set" : "Not set", d.controls[e] || "Not set");
     if (has) add(`${controlName(e)} name`, was.names[e] ?? controlName(e), d.names[e]?.trim() ?? controlName(e));
+    if (has) add(`${controlName(e)} extra mode`, was.extra[e] ?? "None", d.extra[e]?.trim() || "None");
   }
   for (const v of d.virt) {
     const old = was.virt.find((x) => x.id === v.id), name = v.name.trim() || "Virtual device";
@@ -406,6 +416,9 @@ export function applyMap(c: RawConfig, d: MapDraft, sensors: SensorCandidate[], 
     const confirmed = dev.linkSource === "confirmed";
     if (cand) Object.assign(dev, { name: cand.name, family: cand.family, link: confirmed ? dev.link : cand.link, linkSource: confirmed ? "confirmed" : "detected", path: cand.path, hub: cand.hub });
     rename(dev, entity);
+    const extra = takesExtraMode(entity) ? (d.extra[entity]?.trim().slice(0, MAX_MODE_NAME) ?? "") : "";
+    if (extra) dev.nudgeMode = extra;
+    else delete dev.nudgeMode;
   }
   /* A device in no zone isn't mapped, so its entry goes. */
   c.devices = c.devices.filter((x) => !Array.isArray(x.zones) || x.zones.length);

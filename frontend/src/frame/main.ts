@@ -71,6 +71,8 @@ import {
   sensorTarget,
   shownName,
   swapControl,
+  takesExtraMode,
+  MAX_MODE_NAME,
   addVirtual,
   virtualTarget,
 } from "./mapping";
@@ -107,7 +109,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, humidityChoices, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, humidityChoices, modeChoices, nudgeTargets, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -2128,9 +2130,9 @@ export class EcApp extends LitElement {
   /* The frame names a device and what to do, never an entity or a service: the host looks the device up in the setup it
      fetched itself and checks the action against what HA says the entity takes. A yes from the host means HA took the
      call, not that the device did it, so the row waits for the device to report. */
-  private async control(d: ControlDevice, action: Action, value?: number | string): Promise<void> {
+  private async control(d: ControlDevice, action: Action, value?: number | string, note?: string): Promise<void> {
     const want = wantOf(action, value), from = valueOf(this.states[d.entity], want);
-    const c: Ctl = { status: "sending", want, since: Date.now(), from };
+    const c: Ctl = { status: "sending", want, since: Date.now(), from, ...(note ? { note } : {}) };
     const drag = { ...this.ctlDrag };
     delete drag[`${d.id}:${action}`];
     [this.ctl, this.ctlDrag] = [{ ...this.ctl, [d.id]: c }, drag];
@@ -2148,6 +2150,49 @@ export class EcApp extends LitElement {
     setTimeout(() => {
       if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want, from } };
     }, CTL_GIVE_UP_MS);
+  }
+
+  /* Waits for the device to answer the command just sent: true once it has, false if it didn't or wasn't sent. */
+  private async answered(d: ControlDevice): Promise<boolean> {
+    for (let i = 0; i < (CTL_GIVE_UP_MS + 2000) / 100; i++) {
+      const c = this.ctl[d.id];
+      if (!c || c.status === "done") return true;
+      if (c.status !== "sending") return false;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  }
+
+  /* The device's extra mode, which Home Assistant can't ask for by name. It's reached the way it is by hand: the target
+     humidity is moved one step and put back, each a command the device answers before the next is sent, and then the
+     device is given time to report the mode. Nothing is assumed: if it never reports it, the row says so. */
+  private async reachExtraMode(d: ControlDevice): Promise<void> {
+    const steps = nudgeTargets(deviceView(d.entity, this.states[d.entity])), mode = d.extraMode;
+    if (!steps) {
+      this.ctl = { ...this.ctl, [d.id]: { status: "error", error: `${d.name} has no target humidity to move, which is how ${mode} mode is reached.` } };
+      return;
+    }
+    const note = `Moving the target one step and back, which puts ${d.name} in ${mode} mode.`;
+    for (const target of steps) {
+      await this.control(d, "humidity", target, note);
+      if (!(await this.answered(d))) return;
+    }
+    const want = { mode }, c: Ctl = { status: "sending", want, since: Date.now(), note };
+    if (wanted(this.states[d.entity], want)) {
+      this.ctl = { ...this.ctl, [d.id]: { status: "done", want, at: Date.now() } };
+      return;
+    }
+    this.ctl = { ...this.ctl, [d.id]: c };
+    setTimeout(() => {
+      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want } };
+    }, CTL_GIVE_UP_MS);
+  }
+
+  /* The device reports a mode Home Assistant doesn't list: Device identification, at that device, with the mode filled
+     in as its extra one, to be reviewed and applied like any other change. */
+  private async addExtraMode(zoneId: string, entity: string, mode: string): Promise<void> {
+    await this.fixRole(zoneId, entity);
+    this.setMap((m) => (m.extra[entity] = mode));
   }
 
   /* A dial being turned: the number chosen so far, which nothing is sent for until the finger lifts or the buttons and
@@ -2196,7 +2241,7 @@ export class EcApp extends LitElement {
     const others = d.zones.filter((id) => id !== z.id).map((id) => this.zoneById(id)?.name ?? id);
     const extra = [
       v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "",
-      v.offList && v.mode ? `${cap(v.mode)} isn't in its mode list.` : "",
+      v.offList && v.mode && v.mode !== d.extraMode ? `${cap(v.mode)} isn't in its mode list.` : "",
       others.length ? `Shared with ${others.join(" and ")}.` : "",
     ].filter(Boolean).join(" ");
     /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
@@ -2243,13 +2288,15 @@ export class EcApp extends LitElement {
       controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
     } else if (!v.down && v.kind === "humidifier") {
       const choices = humidityChoices(v);
-      modes = v.modes.length
+      const offered = modeChoices(v, d.extraMode);
+      modes = offered.length
           ? html`<fieldset class="chips ctl-modes">
               <legend class="sr">${d.name} mode</legend>
               <div class="chiprow">
-                ${v.modes.map(
+                ${offered.map(
                   (m) => html`<label class="chip"
-                    ><input type="radio" name=${`mode-${d.id}`} .checked=${live(v.mode === m)} ?disabled=${busy} @change=${() => void this.control(d, "mode", m)} />${cap(m)}</label
+                    ><input type="radio" name=${`mode-${d.id}`} .checked=${live(v.mode === m)} ?disabled=${busy}
+                      @change=${() => void (v.modes.includes(m) ? this.control(d, "mode", m) : this.reachExtraMode(d))} />${cap(m)}</label
                   >`,
                 )}
               </div>
@@ -2263,6 +2310,9 @@ export class EcApp extends LitElement {
         <div class="dev-name">${d.name}</div>
         <div class="dev-sub">${v.down ? html`<span class="pill dead">${v.text}</span>` : `${v.text}.`} ${extra}</div>
         <div class="dev-sub">${[d.family, LINK_LABEL[d.link as LinkKind]].filter(Boolean).join(", ")}</div>
+        ${v.offList && v.mode && v.mode !== d.extraMode
+          ? html`<button class="fixlink" @click=${() => void this.addExtraMode(z.id, d.entity, v.mode as string)}>Add ${cap(v.mode)} as a mode &rsaquo;</button>`
+          : nothing}
         ${modes}
       </div>
       <div class="dev-ctl">
@@ -2669,6 +2719,24 @@ export class EcApp extends LitElement {
               false,
               { find: "Search to move it to another entity", said: "On", plain: true },
             )}
+            ${takesExtraMode(c.entity)
+              ? html`<label class="field" for="extra-${controlTarget(c.entity)}"
+                  >Extra mode, optional<input
+                    id="extra-${controlTarget(c.entity)}"
+                    type="text"
+                    maxlength=${MAX_MODE_NAME}
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    enterkeyhint="done"
+                    placeholder="For example normal"
+                    .value=${live(m.extra[c.entity] ?? "")}
+                    @input=${(e: Event) => this.setMap((d) => { const typed = (e.target as HTMLInputElement).value; if (typed.trim()) d.extra[c.entity] = typed; else delete d.extra[c.entity]; })}
+                  /><span class="small muted"
+                    >A mode the device has that Home Assistant doesn't list, named as the device reports it. Controls offers it, and reaches it by moving the target humidity one step and back.</span
+                  ></label
+                >`
+              : nothing}
             <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${otherNames.join(" and ")} too` : ""}.</p>
           </div>`
         : nothing}
