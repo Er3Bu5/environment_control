@@ -177,3 +177,31 @@ export function ctlLine(c: Ctl | undefined, d: ControlDevice, v: DeviceView): { 
   }
   return { text: c.by === "automation" ? "Put back by Home Assistant straight after, most likely a failsafe or the light schedule." : `${d.name} went back on its own.`, tone: "warn" };
 }
+
+/* The dial a number is set on: a 270 degree arc, open at the bottom, in a 120 unit box. t runs 0 to 1 along it. */
+const DIAL = { mid: 60, r: 48, from: 135, sweep: 270 };
+const unit = (t: number) => Math.min(1, Math.max(0, t));
+export const dialT = (n: number, min: number, max: number) => (max > min ? unit((n - min) / (max - min)) : 0);
+export function dialAt(t: number): [number, number] {
+  const a = ((DIAL.from + DIAL.sweep * unit(t)) * Math.PI) / 180;
+  return [DIAL.mid + DIAL.r * Math.cos(a), DIAL.mid + DIAL.r * Math.sin(a)];
+}
+export function dialArc(t0: number, t1: number): string {
+  const [x0, y0] = dialAt(t0), [x1, y1] = dialAt(t1);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${DIAL.r} ${DIAL.r} 0 ${(unit(t1) - unit(t0)) * DIAL.sweep > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+/* The number under a point in the dial's box. A point in the gap at the bottom goes to whichever end is nearer, so a
+   drag past either end stops there and never jumps to the other. */
+export function dialValue(x: number, y: number, min: number, max: number): number {
+  const deg = ((Math.atan2(y - DIAL.mid, x - DIAL.mid) * 180) / Math.PI + 360) % 360, rel = (deg - DIAL.from + 360) % 360;
+  const t = rel <= DIAL.sweep ? rel / DIAL.sweep : rel > (DIAL.sweep + 360) / 2 ? 0 : 1;
+  return Math.round(min + t * (max - min));
+}
+/* The plus and minus buttons go to the next whole step, so 78 goes up to 80 and down to 75 in steps of 5. */
+export const stepUp = (n: number, step: number, max: number) => Math.min(max, Math.floor(n / step) * step + step);
+export const stepDown = (n: number, step: number, min: number) => Math.max(min, Math.ceil(n / step) * step - step);
+/* A light controller is set in 5% steps, as the boards here round to; a target humidity in whole percents. A drag or
+   the arrow keys still reach any whole percent. */
+export const DIAL_STEP = { brightness: 5, humidity: 1 } as const;
+/* The buttons and keys send once they've been left alone this long, so five presses are one command, not five. */
+export const DIAL_SETTLE_MS = 700;

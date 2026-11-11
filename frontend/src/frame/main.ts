@@ -103,7 +103,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, humidityChoices, onReport, valueOf, wantOf, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, humidityChoices, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -383,6 +383,7 @@ export class EcApp extends LitElement {
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
   declare private ctlDrag: Record<string, number>;
+  private dialTimers: Record<string, number> = {};
   private nextReq = 1;
   private waiting = new Map<number, (r: Result) => void>();
   private draftHeld = false;
@@ -2071,6 +2072,34 @@ export class EcApp extends LitElement {
     }, CTL_GIVE_UP_MS);
   }
 
+  /* A dial being turned: the number chosen so far, which nothing is sent for until the finger lifts or the buttons and
+     keys are left alone. */
+  private dialTo(key: string, n: number): void {
+    if (this.ctlDrag[key] !== n) this.ctlDrag = { ...this.ctlDrag, [key]: n };
+  }
+
+  private dialDrop(key: string): void {
+    clearTimeout(this.dialTimers[key]);
+    const drag = { ...this.ctlDrag };
+    delete drag[key];
+    this.ctlDrag = drag;
+  }
+
+  private dialSend(d: ControlDevice, action: "brightness" | "humidity"): void {
+    const key = `${d.id}:${action}`, n = this.ctlDrag[key];
+    clearTimeout(this.dialTimers[key]);
+    if (n === undefined) return;
+    /* Turned back to where the device already is, there's nothing to ask for. */
+    if (wanted(this.states[d.entity], wantOf(action, n))) this.dialDrop(key);
+    else void this.control(d, action, n);
+  }
+
+  private dialSettle(d: ControlDevice, action: "brightness" | "humidity"): void {
+    const key = `${d.id}:${action}`;
+    clearTimeout(this.dialTimers[key]);
+    this.dialTimers[key] = window.setTimeout(() => this.dialSend(d, action), DIAL_SETTLE_MS);
+  }
+
   /* A device whose role isn't said yet: Device identification, at that device. The list waits for HA's catalog. */
   private async fixRole(zoneId: string, entity: string): Promise<void> {
     this.openMapDevices(zoneId);
@@ -2092,19 +2121,47 @@ export class EcApp extends LitElement {
       v.offList && v.mode ? `${cap(v.mode)} isn't in its mode list.` : "",
       others.length ? `Shared with ${others.join(" and ")}.` : "",
     ].filter(Boolean).join(" ");
-    const range = (action: "brightness" | "humidity", label: string, min: number, max: number, at: number, words: (n: number) => string) => {
-      const key = `${d.id}:${action}`, dragged = this.ctlDrag[key];
-      return html`<label class="ctl-range">
-        <span>${words(dragged ?? at)}</span>
-        <input type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(dragged ?? at))} ?disabled=${busy}
-          @input=${(e: Event) => (this.ctlDrag = { ...this.ctlDrag, [key]: Number((e.target as HTMLInputElement).value) })}
-          @change=${(e: Event) => void this.control(d, action, Number((e.target as HTMLInputElement).value))} />
-      </label>`;
+    /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
+       it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
+    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null) => {
+      const key = `${d.id}:${action}`, shown = this.ctlDrag[key] ?? at, step = DIAL_STEP[action];
+      const t = shown === null ? null : dialT(shown, min, max), [tx, ty] = dialAt(t ?? 0);
+      const under = (e: PointerEvent) => {
+        const box = ((e.currentTarget as Element).closest("svg") as SVGSVGElement).getBoundingClientRect();
+        return dialValue(((e.clientX - box.left) / box.width) * 120, ((e.clientY - box.top) / box.height) * 120, min, max);
+      };
+      const held = (e: PointerEvent) => (e.currentTarget as Element).hasPointerCapture(e.pointerId);
+      const [dx, dy] = dot === null || dot < min || dot > max ? [null, null] : dialAt(dialT(dot, min, max));
+      return html`<div class="dial ${busy ? "busy" : ""}" style="--c:${lk.c}">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <path class="trk" d=${dialArc(0, 1)}></path>
+          ${t === null ? nothing : svg`<path class="fil" d=${dialArc(0, t)}></path>`}
+          ${dx === null ? nothing : svg`<circle class="unit-dot" cx=${dx} cy=${dy} r="2.6"></circle>`}
+          ${t === null ? nothing : svg`<circle class="thumb" cx=${tx} cy=${ty} r="6.5"></circle>`}
+          <path class="hit" d=${dialArc(0, 1)}
+            @pointerdown=${(e: PointerEvent) => {
+              if (busy) return;
+              e.preventDefault();
+              (e.currentTarget as Element).setPointerCapture(e.pointerId);
+              this.dialTo(key, under(e));
+            }}
+            @pointermove=${(e: PointerEvent) => held(e) && this.dialTo(key, under(e))}
+            @pointerup=${(e: PointerEvent) => held(e) && this.dialSend(d, action)}
+            @pointercancel=${() => this.dialDrop(key)}></path>
+        </svg>
+        <div class="dial-mid"><span class="dial-cap">${caption}</span><span class="dial-num">${shown === null ? "Off" : html`${shown}<small>%</small>`}</span></div>
+        <input class="sr" type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(shown ?? max))} ?disabled=${busy}
+          @input=${(e: Event) => this.dialTo(key, Number((e.target as HTMLInputElement).value))}
+          @change=${() => this.dialSettle(d, action)} />
+        <div class="dial-steps">
+          <button aria-label="Lower ${label}" ?disabled=${busy || shown === null || shown <= min} @click=${() => { this.dialTo(key, stepDown(shown ?? min, step, min)); this.dialSettle(d, action); }}>&minus;</button>
+          <button aria-label="Raise ${label}" ?disabled=${busy || (shown !== null && shown >= max)} @click=${() => { this.dialTo(key, stepUp(shown ?? 0, step, max)); this.dialSettle(d, action); }}>+</button>
+        </div>
+      </div>`;
     };
     let controls: unknown = nothing;
     if (!v.down && v.kind === "dimmer") {
-      const dragged = this.ctlDrag[`${d.id}:brightness`];
-      controls = range("brightness", `${d.name} brightness`, 1, 100, v.brightness ?? 100, (n) => (dragged === undefined && v.brightness === null ? "" : `${n}%`));
+      controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
     } else if (!v.down && v.kind === "humidifier") {
       const choices = humidityChoices(v);
       controls = html`${v.modes.length
@@ -2119,7 +2176,7 @@ export class EcApp extends LitElement {
               </div>
             </fieldset>`
           : nothing}
-        ${choices.length > 1 && v.setpoint !== null ? range("humidity", `${d.name} target humidity`, choices[0], choices[choices.length - 1], v.setpoint, (n) => `Target ${n}%`) : nothing}`;
+        ${choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh) : nothing}`;
     }
     return html`<div class="dev" data-device=${d.id}>
       <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>

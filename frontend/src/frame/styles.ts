@@ -218,9 +218,27 @@ export const styles = css`
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
   .sw.on i { background: var(--primary); }
-  .sw:disabled, .ctl-range input:disabled, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
-  .ctl-range { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-  .ctl-range input { width: 130px; accent-color: var(--primary); }
+  .sw:disabled, .dial.busy, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+  /* The dial: an arc open at the bottom, with the plus and minus buttons tucked into the gap. Only the arc itself
+     takes a finger, so a thumb scrolling the page over the middle of it changes nothing. */
+  .dial { position: relative; width: 140px; display: grid; justify-items: center; flex: none; }
+  .dial svg { display: block; width: 140px; height: 140px; overflow: visible; }
+  .dial path { fill: none; stroke-width: 10; stroke-linecap: round; }
+  .dial .trk { stroke: color-mix(in srgb, var(--fg) 12%, transparent); }
+  .dial .fil { stroke: var(--c); }
+  .dial .hit { stroke: transparent; stroke-width: 28; stroke-linecap: butt; pointer-events: stroke; touch-action: none; cursor: pointer; }
+  .dial.busy .hit { pointer-events: none; }
+  .dial .thumb { fill: #fff; stroke: #0000004d; stroke-width: 1; pointer-events: none; }
+  .dial .unit-dot { fill: var(--fg); opacity: .55; pointer-events: none; }
+  .dial:has(input:focus-visible) .thumb { stroke: var(--fg); stroke-width: 2.5; }
+  .dial-mid { position: absolute; inset: 0 0 auto 0; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; pointer-events: none; }
+  .dial-cap { font-size: 11px; color: var(--muted); }
+  .dial-num { font-size: 28px; line-height: 1; font-weight: 400; }
+  .dial-num small { margin-left: 1px; font-size: 13px; color: var(--muted); }
+  .dial-steps { display: flex; gap: 8px; margin-top: -24px; }
+  .dial-steps button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--card); font-size: 18px; line-height: 1; }
+  .dial-steps button:disabled { opacity: .45; cursor: not-allowed; }
+  .dial.busy .dial-steps button:disabled { opacity: 1; }
   .ctl-modes .chiprow { justify-content: flex-end; }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
   .ctl-status.crit { color: var(--crit); }
