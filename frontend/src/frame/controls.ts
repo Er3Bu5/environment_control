@@ -121,27 +121,57 @@ export function wanted(st: HaState | undefined, want: Want): boolean {
   return true;
 }
 
+/* The one number a command asks for, and what the device reports for it. */
+const asked = (want: Want): number | undefined => want.brightness ?? want.humidity;
+export function valueOf(st: HaState | undefined, want: Want): number | null {
+  if (!st) return null;
+  if (want.brightness !== undefined) return pctOf(st.attributes.brightness);
+  return want.humidity !== undefined && num(st.attributes.humidity) ? st.attributes.humidity : null;
+}
+
+/* from is what the device reported for that number when the command went, so a move can be told from no answer.
+   asked is set on a done command the device answered with a different number. */
 export type Ctl =
-  | { status: "sending"; want: Want; since: number }
-  | { status: "stuck"; want: Want }
-  | { status: "done"; want: Want; at: number }
+  | { status: "sending"; want: Want; since: number; from?: number | null }
+  | { status: "stuck"; want: Want; from?: number | null }
+  | { status: "done"; want: Want; at: number; asked?: number }
   | { status: "error"; error: string }
   | { status: "back"; by: "automation" | "other" };
 
+const withValue = (want: Want, n: number): Want => (want.brightness !== undefined ? { ...want, brightness: n } : { ...want, humidity: n });
+
 /* What a new report from HA means for a control that was used. A sent or unconfirmed command counts once the device
-   reports it, however late. A confirmed one that's undone soon after, by anything but a person, was put back. */
+   reports it, however late. A device may also answer with a number of its own: a light controller that rounds to 5%
+   steps reports 80 when asked for 78, and never reports 78 at all. So a number that moved, to anything, is the device's
+   answer, and the row says where it went. A confirmed command that's undone soon after, by anything but a person, was
+   put back. */
 export function onReport(c: Ctl | undefined, st: HaState | undefined, by: string | undefined, now: number): Ctl | undefined {
   if (!c) return c;
-  if ((c.status === "sending" || c.status === "stuck") && wanted(st, c.want)) return { status: "done", want: c.want, at: now };
-  if (c.status === "done" && now - c.at < CTL_FLIP_MS && !wanted(st, c.want) && by !== "user") return { status: "back", by: by === "automation" ? "automation" : "other" };
+  if (c.status === "sending" || c.status === "stuck") {
+    if (wanted(st, c.want)) return { status: "done", want: c.want, at: now };
+    const want = asked(c.want), got = valueOf(st, c.want);
+    if (want !== undefined && got !== null && got !== c.from && (!c.want.state || st?.state === c.want.state)) return { status: "done", want: withValue(c.want, got), at: now, asked: want };
+    return c;
+  }
+  if (c.status !== "done") return c;
+  /* A light that reports its way through a fade lands on the number asked a moment later. */
+  if (c.asked !== undefined && valueOf(st, c.want) === c.asked) return { status: "done", want: withValue(c.want, c.asked), at: c.at };
+  if (now - c.at < CTL_FLIP_MS && !wanted(st, c.want) && by !== "user") return { status: "back", by: by === "automation" ? "automation" : "other" };
   return c;
 }
 
 export function ctlLine(c: Ctl | undefined, d: ControlDevice, v: DeviceView): { text: string; tone: "" | "crit" | "warn" } | null {
-  if (!c || c.status === "done") return null;
+  if (!c) return null;
+  if (c.status === "done") {
+    const got = asked(c.want);
+    return c.asked === undefined || got === undefined ? null : { text: `Went to ${got}%, not ${c.asked}%. ${d.name} keeps to its own steps and limits.`, tone: "" };
+  }
   if (c.status === "sending") return { text: `Sent. Waiting for ${d.name} to report back.`, tone: "" };
   if (c.status === "error") return { text: `Not sent. ${c.error}`, tone: "crit" };
   if (c.status === "stuck") {
+    const want = asked(c.want), got = c.want.brightness !== undefined ? v.brightness : v.setpoint;
+    /* A number the device won't take leaves it where it was, with no report, which looks the same as a dropped command. */
+    if (want !== undefined && got !== null && (!c.want.state || v.on)) return { text: `Not confirmed. ${d.name} still reports ${got}%. It may not take ${want}%, so try another value.`, tone: "crit" };
     const why = /tuya/i.test(d.family) ? "A Tuya plug can drop a command without saying, so try again." : "Try again, or check the device.";
     return { text: `Not confirmed. ${d.name} still reports ${v.text.toLowerCase()}. ${why}`, tone: "crit" };
   }
