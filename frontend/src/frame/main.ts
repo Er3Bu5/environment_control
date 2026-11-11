@@ -266,6 +266,9 @@ interface TargetsView {
   zoneId: string;
 }
 
+/* The page menu's own id among the menus. A zone's id is letters, digits and underscores, so it can't be one. */
+const NAV = "-nav";
+
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
 const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate", "targets"]);
 
@@ -539,10 +542,9 @@ export class EcApp extends LitElement {
     /* A helper search box goes to the top instead, so its matches have room below it, above the keyboard. */
     if (search)
       setTimeout(() => {
-        const input = el as HTMLInputElement, bar = this.shadowRoot?.querySelector(".topbar");
+        const input = el as HTMLInputElement;
         if (this.shadowRoot?.activeElement !== input) return;
-        const head = bar && getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
-        window.scrollBy(0, (input.closest(".field") ?? input).getBoundingClientRect().top - head - 8);
+        window.scrollBy(0, (input.closest(".field") ?? input).getBoundingClientRect().top - 8);
       }, 300);
   };
 
@@ -557,9 +559,8 @@ export class EcApp extends LitElement {
     if (window.innerWidth !== this.fullView.w || h > this.fullView.h) this.fullView = { w: window.innerWidth, h };
     const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect();
     const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
-    const edge = h < this.fullView.h * 0.8 ? h : assumed, bar = this.shadowRoot?.querySelector(".topbar");
-    const head = bar && getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
-    window.scrollBy(0, row.top - Math.max(head + 8, edge - row.height - 8));
+    const edge = h < this.fullView.h * 0.8 ? h : assumed;
+    window.scrollBy(0, row.top - Math.max(8, edge - row.height - 8));
   }
 
   private applyTheme(t: Theme): void {
@@ -1577,22 +1578,29 @@ export class EcApp extends LitElement {
   };
 
   /* Drawing. */
-  private chrome() {
-    const tab = (label: string, screen: Screen, zoneId: string | null = null) => {
+  /* Where to go: one button that opens the list of pages, in place of a title bar and a row of tabs. Every zone is in
+     it, so a new zone appears there as soon as it's added. With Home Assistant's own sidebar hidden, as on a phone, the
+     way to open that is here too. */
+  private navMenu() {
+    const open = this.menu === NAV;
+    const item = (label: string, screen: Screen, zoneId: string | null = null) => {
       const current = this.screen === screen && (screen !== "zone" || this.zoneId === zoneId);
-      return html`<button aria-current=${current ? "page" : nothing} @click=${() => this.leaveTo(screen, zoneId)}>${label}</button>`;
+      return html`<button role="menuitem" aria-current=${current ? "page" : nothing} @click=${() => { this.menu = null; this.leaveTo(screen, zoneId); }}>${label}</button>`;
     };
-    return html`<header class="topbar" ?inert=${!!this.modal}>
-      <div class="bar">
+    return html`<nav class="zmenu navmenu" aria-label="Environment Control">
+      <button class="btn burger" data-zmenu=${NAV} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${NAV}" aria-label="Menu" @click=${() => this.toggleMenu(NAV)}>
+        ${icon("menu")}
+      </button>
+      <div class="menu" id="zmenu-${NAV}" role="menu" ?hidden=${!open}>
+        ${item("Overview", "overview")}
+        ${this.zones.length ? html`<hr />${this.zones.map((z) => item(z.name, "zone", z.id))}` : nothing}
+        <hr />
+        ${item("Devices", "devices")}${item("Setup", "setup")}
         ${this.narrow
-          ? html`<button class="btn burger" aria-label="Open Home Assistant's sidebar" @click=${() => parent.postMessage({ v: 1, type: "sidebar" }, "*")}>${icon("menu")}</button>`
+          ? html`<hr /><button role="menuitem" aria-label="Open Home Assistant's sidebar" @click=${() => { this.menu = null; parent.postMessage({ v: 1, type: "sidebar" }, "*"); }}>Home Assistant</button>`
           : nothing}
-        <span>Environment Control</span>
       </div>
-      <nav class="tabs" aria-label="Environment Control">
-        ${tab("Overview", "overview")}${this.zones.map((z) => tab(z.name, "zone", z.id))}${tab("Devices", "devices")}${tab("Setup", "setup")}
-      </nav>
-    </header>`;
+    </nav>`;
   }
 
   private addButton(label: string) {
@@ -1934,9 +1942,9 @@ export class EcApp extends LitElement {
   }
 
   private overview() {
-    if (!this.stored) return html`<p class="muted">Waiting for Home Assistant.</p>`;
+    if (!this.stored) return html`<div><h1>Overview</h1></div><p class="muted">Waiting for Home Assistant.</p>`;
     if (!this.zones.length)
-      return html`<section class="card">
+      return html`<div><h1>Overview</h1></div><section class="card">
         <h2>No zones yet</h2>
         <p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p>
         <div class="row">${this.addButton("Add a zone")}</div>
@@ -1953,7 +1961,7 @@ export class EcApp extends LitElement {
           </div>`
         : nothing;
     const judgedAny = this.zones.some((z) => this.judged(z) && this.readingsOf(z.id).length);
-    return html`${issues.length
+    return html`<div><h1>Overview</h1></div>${issues.length
         ? html`${group(issues.filter((x) => x.state.startsWith("crit")), "Critical", "critical")}${group(issues.filter((x) => !x.state.startsWith("crit")), "Outside ideal zone", "")}`
         : judgedAny
           ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
@@ -2203,12 +2211,13 @@ export class EcApp extends LitElement {
         </div>
       </div>`;
     };
-    let controls: unknown = nothing;
+    /* Modes sit under the device's name and its dial beside them, so a row is as tall as its dial and no taller. */
+    let controls: unknown = nothing, modes: unknown = nothing;
     if (!v.down && v.kind === "dimmer") {
       controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
     } else if (!v.down && v.kind === "humidifier") {
       const choices = humidityChoices(v);
-      controls = html`${v.modes.length
+      modes = v.modes.length
           ? html`<fieldset class="chips ctl-modes">
               <legend class="sr">${d.name} mode</legend>
               <div class="chiprow">
@@ -2219,8 +2228,8 @@ export class EcApp extends LitElement {
                 )}
               </div>
             </fieldset>`
-          : nothing}
-        ${choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh) : nothing}`;
+          : nothing;
+      controls = choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh) : nothing;
     }
     return html`<div class="dev" data-device=${d.id}>
       <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
@@ -2228,6 +2237,7 @@ export class EcApp extends LitElement {
         <div class="dev-name">${d.name}</div>
         <div class="dev-sub">${v.down ? html`<span class="pill dead">${v.text}</span>` : `${v.text}.`} ${extra}</div>
         <div class="dev-sub">${[d.family, LINK_LABEL[d.link as LinkKind]].filter(Boolean).join(", ")}</div>
+        ${modes}
       </div>
       <div class="dev-ctl">
         ${controls}
@@ -2267,7 +2277,7 @@ export class EcApp extends LitElement {
     const z = this.zoneById(this.zoneId);
     if (!z) return nothing;
     const left = stepsLeft(z), L = storedLayout(this.raw(z.id));
-    return html`<div class="card-head">
+    return html`<div class="pagehead">
         <div>
           <h1>${z.name}</h1>
           ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
@@ -3634,7 +3644,7 @@ export class EcApp extends LitElement {
       devices: () => this.devicesScreen(),
       setup: () => this.setup(),
     };
-    return html`${this.chrome()}<main ?inert=${!!this.modal}><div class="wrap">${screens[this.screen]()}</div></main>
+    return html`<main ?inert=${!!this.modal}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
       ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
   }
 }

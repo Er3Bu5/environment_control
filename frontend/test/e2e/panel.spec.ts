@@ -12,7 +12,16 @@ async function panelFrame(page: Page): Promise<Frame> {
 }
 const frameText = (frame: Frame) => frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.textContent ?? "");
 const app = (frame: Frame) => frame.locator("ec-app");
-const tab = (frame: Frame, name: string) => app(frame).getByRole("navigation").getByRole("button", { name, exact: true });
+/* The pages are in a menu behind one button. A test names a page the way it always did; going there opens the menu. */
+const tab = (frame: Frame, name: string) => app(frame).getByRole("navigation").getByRole("menuitem", { name, exact: true });
+async function openNav(frame: Frame): Promise<void> {
+  const button = app(frame).getByRole("navigation").getByRole("button", { name: "Menu", exact: true });
+  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+}
+async function goTo(frame: Frame, name: string): Promise<void> {
+  await openNav(frame);
+  await tab(frame, name).click();
+}
 const leaveAsks = (page: Page) =>
   page.evaluate(() => {
     const e = new Event("beforeunload", { cancelable: true });
@@ -140,26 +149,59 @@ test.describe("talking to HA", () => {
   test("the frame shows what HA has stored: a tab and a card per zone, and the release on Setup", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await openNav(frame);
     for (const name of ["Garden", "Veg", "Nursery"]) await expect(tab(frame, name)).toBeVisible();
     await expect(app(frame).locator(".zone-card")).toHaveCount(3);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await expect.poll(() => frameText(frame)).toContain("Installed, version 0.0.0.");
   });
 
   test("a zone's tab opens its page, and Overview's card does too", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Veg").click();
+    await goTo(frame, "Veg");
     await expect(app(frame).getByRole("heading", { level: 1, name: "Veg", exact: true })).toBeVisible();
+    await openNav(frame);
     await expect(tab(frame, "Veg")).toHaveAttribute("aria-current", "page");
-    await tab(frame, "Overview").click();
+    await goTo(frame, "Overview");
     await app(frame).locator(".zone-card", { hasText: "Nursery" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Nursery", exact: true })).toBeVisible();
+  });
+
+  test("the pages are in a menu behind one button, in place of a title bar and tabs, and a page's heading is centred", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const button = app(frame).getByRole("navigation").getByRole("button", { name: "Menu", exact: true }), items = app(frame).getByRole("navigation").getByRole("menuitem");
+    await expect(app(frame).locator(".topbar, .tabs")).toHaveCount(0);
+    await expect(items).toHaveCount(0);
+    await button.click();
+    await expect(items).toHaveText(["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]);
+    await expect(tab(frame, "Overview")).toHaveAttribute("aria-current", "page");
+    /* Escape and a tap elsewhere both close it. */
+    await page.keyboard.press("Escape");
+    await expect(items).toHaveCount(0);
+    await button.click();
+    const view = page.viewportSize()!;
+    await page.mouse.click(view.width - 20, view.height - 20);
+    await expect(items).toHaveCount(0);
+    await goTo(frame, "Garden");
+    await expect(items).toHaveCount(0);
+    const head = app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true });
+    const [h, w] = [await head.boundingBox(), await app(frame).locator(".wrap").boundingBox()];
+    expect(Math.abs(h!.x + h!.width / 2 - (w!.x + w!.width / 2))).toBeLessThan(2);
+    /* The zone's cards each take the page's full width, one under the other. */
+    const card = (name: string) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name, exact: true }) });
+    const [place, controls] = [await card("Device placement").boundingBox(), await card("Controls").boundingBox()];
+    expect([Math.round(place!.width), Math.round(controls!.width)]).toEqual([Math.round(w!.width), Math.round(w!.width)]);
+    expect(controls!.y).toBeGreaterThan(place!.y + place!.height);
+    /* A dehumidifier's modes sit under its name, so on a wide page its row is no taller than its dial. */
+    if (w!.width > 900) expect((await card("Controls").locator(".dev", { hasText: "Auxiliary dehumidifier" }).boundingBox())!.height).toBeLessThan(175);
   });
 
   test("after HA restarts, the panel reads what's stored again", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Nursery")).toBeVisible();
     await page.evaluate(`(() => {
       fakeHA.knobs.restartMs = 100;
@@ -268,7 +310,7 @@ test.describe("sensor calibration", () => {
   async function openGarden(page: Page): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Garden" }).click();
     await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
@@ -306,7 +348,7 @@ test.describe("sensor calibration", () => {
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(dialog(frame)).toHaveCount(0);
     expect(((await stored(page)).zones.find((z) => z.id === "garden") as { setup?: Record<string, string> }).setup).toEqual({ calibrate: "done" });
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     const tile = app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) });
     await expect(tile).toContainText("Max");
     await expect(tile).not.toContainText("Targets not set up yet");
@@ -345,7 +387,7 @@ test.describe("sensor calibration", () => {
     await page.goto(PAGE);
     await page.evaluate(`fakeHA.offline(${JSON.stringify(LEFT)}, true)`);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Garden" }).click();
     await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
     await expect(box(frame, "Environment left")).toBeDisabled();
@@ -369,7 +411,7 @@ test.describe("sensor calibration", () => {
   test("leaving with an offset typed asks first", async ({ page }) => {
     const frame = await openGarden(page);
     await type(frame, "Environment left", "1.5");
-    await tab(frame, "Overview").click();
+    await goTo(frame, "Overview");
     await expect(app(frame).getByRole("alertdialog")).toContainText("You have 1 unsaved change in Garden.");
     await app(frame).getByRole("button", { name: "Keep editing" }).click();
     await expect(box(frame, "Environment left")).toHaveValue("1.5");
@@ -379,7 +421,7 @@ test.describe("sensor calibration", () => {
   test("the VPD tile's Change opens it, and Back returns to the zone", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await app(frame).locator(".tile", { hasText: "VPD" }).getByRole("button", { name: "Change" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
     await app(frame).getByRole("button", { name: "Back", exact: true }).click();
@@ -389,7 +431,7 @@ test.describe("sensor calibration", () => {
   test("a new zone's board asks where its offset is held; linking it saves the link, and a new value then goes to that board", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
@@ -498,7 +540,7 @@ test.describe("targets, day and night", () => {
   async function open(page: Page, zone: string): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: `Set up ${zone}` }).click();
     await app(frame).getByRole("menuitem", { name: "Targets, day and night" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: `Targets, day and night: ${zone}`, exact: true })).toBeVisible();
@@ -522,7 +564,7 @@ test.describe("targets, day and night", () => {
     expect((await sets(page)).map((c) => [c.domain, c.service, c.data])).toEqual([["input_datetime", "set_datetime", { entity_id: "input_datetime.garden_day_time", time: "06:30:00" }]]);
     await expect(app(frame).locator(".toast")).toHaveText("Garden saved, on your helpers too.");
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(app(frame).locator(".period").first()).toContainText("06:30 - 19:00");
   });
 
@@ -566,7 +608,7 @@ test.describe("targets, day and night", () => {
     const z = (await stored(page)).zones.find((x) => x.id === "garden") as Record<string, unknown>;
     expect([z.periodMode, z.lights]).toEqual(["detected", ["light.tent_light"]]);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(app(frame).locator(".period").first()).toContainText("Lights not reporting");
     await page.evaluate(`(() => { fakeHA.states["light.tent_light"] = { entity_id: "light.tent_light", state: "on", attributes: {}, context: {} }; fakeHA.publish(); })()`);
     await expect(app(frame).locator(".period").first()).toContainText("Lights on");
@@ -640,7 +682,7 @@ test.describe("targets, day and night", () => {
     ]);
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24.5", "25", "27", "29"]);
     /* A limit that doesn't exist reads as a dash, never as a gap. */
@@ -650,7 +692,7 @@ test.describe("targets, day and night", () => {
   test("the zone's table reads a helper live, so it shows what your alerts read", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     /* The limits are a tap away in a dialog, not a card on the page. */
     await expect(app(frame).locator(".tbl-wrap")).toHaveCount(0);
     await app(frame).getByRole("button", { name: "View targets" }).click();
@@ -697,7 +739,7 @@ test.describe("targets, day and night", () => {
     expect(z.helpers.bands.day.temperature).toEqual({ min: "input_number.garden_day_temperature_min_threshold", max: "input_number.garden_day_temperature_max_threshold" });
     expect(await serviceCalls(page)).toBe(0);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "-", "27", "28"]);
   });
@@ -760,10 +802,10 @@ test.describe("targets, day and night", () => {
     const helper = "input_number.nursery_day_temperature_min_threshold";
     const frame = await panelFrame(page);
     /* The helper changes in HA after the panel has listed HA's helpers, so the page has to look again when it opens. */
-    await tab(frame, "Devices").click();
+    await goTo(frame, "Devices");
     await expect.poll(() => frameText(frame)).toContain("Environment board");
     await page.evaluate(`(() => { fakeHA.states[${JSON.stringify(helper)}].state = "21"; CATALOG.entities.find((e) => e.entity_id === ${JSON.stringify(helper)}).state = "21"; })()`);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
     await app(frame).getByRole("menuitem", { name: "Targets, day and night" }).click();
     await pick(frame, "Period", "Day");
@@ -794,8 +836,8 @@ test.describe("targets, day and night", () => {
     await expect
       .poll(() =>
         frame.evaluate(() => {
-          const root = document.querySelector("ec-app")?.shadowRoot, row = root?.activeElement?.closest(".vrow")?.getBoundingClientRect(), bar = root?.querySelector(".topbar")?.getBoundingClientRect();
-          return !!row && !!bar && row.bottom <= window.innerHeight * 0.5 && row.top >= bar.bottom;
+          const root = document.querySelector("ec-app")?.shadowRoot, row = root?.activeElement?.closest(".vrow")?.getBoundingClientRect();
+          return !!row && row.bottom <= window.innerHeight * 0.5 && row.top >= 0;
         }),
       )
       .toBe(true);
@@ -858,7 +900,7 @@ test.describe("targets, day and night", () => {
   test("a new zone's 0s can't be confirmed; with its times and limits set it is, and its readings are judged from then on", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
@@ -881,7 +923,7 @@ test.describe("targets, day and night", () => {
     await expect(app(frame).locator("#g-targets .pill.ok")).toHaveText("Done");
     const z = await zoneOf(page, "Flower tent");
     expect([z.dayAt, z.nightAt, z.setup.targets, z.bands.night.vpd]).toEqual([360, 1080, "done", [0.65, 0.8, 0.9, 1, 1.15]]);
-    await tab(frame, "Flower tent").click();
+    await goTo(frame, "Flower tent");
     await expect(app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) })).not.toContainText("Targets not set up yet");
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "20.2", "22.2", "24.95", "27.7", "29.7"]);
@@ -896,7 +938,7 @@ test.describe("zones", () => {
   test("adding a zone needs a new name, shows what it saves, and opens its setup guide", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     const name = app(frame).getByLabel("Zone name"), review = app(frame).getByRole("button", { name: "Review and apply" });
     await expect(review).toBeDisabled();
@@ -911,6 +953,7 @@ test.describe("zones", () => {
     await expect(dialog(frame)).toContainText("By the window");
     await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    await openNav(frame);
     await expect(tab(frame, "Flower tent")).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.description).toBe("By the window");
@@ -921,15 +964,15 @@ test.describe("zones", () => {
   test("leaving with a draft asks first, and the host knows a draft is open", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Seedlings");
     await expect.poll(() => leaveAsks(page)).toBe(true);
-    await tab(frame, "Overview").click();
+    await goTo(frame, "Overview");
     await expect(alert(frame)).toContainText("Discard unsaved changes?");
     await alert(frame).getByRole("button", { name: "Keep editing" }).click();
     await expect(app(frame).getByLabel("Zone name")).toHaveValue("Seedlings");
-    await tab(frame, "Overview").click();
+    await goTo(frame, "Overview");
     await alert(frame).getByRole("button", { name: "Discard and continue" }).click();
     await expect(app(frame).locator(".zone-card")).toHaveCount(3);
     await expect.poll(() => leaveAsks(page)).toBe(false);
@@ -939,16 +982,17 @@ test.describe("zones", () => {
   test("Zone details renames from the menu, and Finish with nothing changed saves nothing", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByLabel("Zone name").fill("Veg tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await openNav(frame);
     await expect(tab(frame, "Veg tent")).toBeVisible();
     const revision = (await stored(page)).revision;
     expect((await stored(page)).zones.find((z) => z.id === "veg")?.name).toBe("Veg tent");
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg tent" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByRole("button", { name: "Finish" }).click();
@@ -959,7 +1003,7 @@ test.describe("zones", () => {
   test("removing a zone needs its name typed exactly, and shared devices stay in their other zones", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
     await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
     const remove = alert(frame).getByRole("button", { name: "Remove zone" });
@@ -979,19 +1023,21 @@ test.describe("zones", () => {
   test("Escape keeps the zone, and a zone named with markup is drawn as text", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill('<img src=x onerror="window.pwned=1">');
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await openNav(frame);
     await expect(tab(frame, '<img src=x onerror="window.pwned=1">')).toBeVisible();
     expect(await frame.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
     expect(await frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.querySelectorAll("img").length)).toBe(0);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
     await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
     await page.keyboard.press("Escape");
     await expect(alert(frame)).toHaveCount(0);
+    await openNav(frame);
     await expect(tab(frame, "Veg")).toBeVisible();
   });
 
@@ -1026,7 +1072,7 @@ test.describe("map devices", () => {
   async function newZoneMap(page: Page): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
@@ -1204,7 +1250,7 @@ test.describe("map devices", () => {
     await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     const questions = app(frame).locator("section", { hasText: "Questions for you" });
     const ask = questions.locator(".task", { hasText: "Environment board" });
     await ask.getByRole("button", { name: "Ethernet" }).click();
@@ -1218,12 +1264,13 @@ test.describe("after an update", () => {
   test("a page that stayed open asks for a reload, keeps working underneath, and Reload reloads", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
     expect(await updatedBarButton(page)).toBeNull();
     await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
     await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
     await expect.poll(() => updatedBarButton(page)).not.toBeNull();
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     const button = await updatedBarButton(page);
     await Promise.all([page.waitForEvent("load"), page.mouse.click(button!.x, button!.y)]);
@@ -1234,6 +1281,7 @@ test.describe("after an update", () => {
   test("with the release HA registers, or no panel list at all, there is no bar", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
     await page.evaluate(`panelModuleUrl = location.origin + "/custom_components/environment_control/frontend/host.js"; fakeHA.publish()`);
     await page.waitForTimeout(200);
@@ -1255,7 +1303,7 @@ test.describe("zone layout and placement", () => {
   async function openFromMenu(page: Page, zone: string, item: "Zone layout" | "Device placement"): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: `Set up ${zone}` }).click();
     await app(frame).getByRole("menuitem", { name: item }).click();
     return frame;
@@ -1290,7 +1338,7 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await app(frame).getByRole("button", { name: "Back", exact: true }).click();
@@ -1322,7 +1370,7 @@ test.describe("zone layout and placement", () => {
   test("the zone page's map shows everything placed, with no height filter", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     const card = app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "Device placement", exact: true }) });
     await expect(card.locator(".map")).toBeVisible();
     await expect(card.getByRole("radio")).toHaveCount(0);
@@ -1346,7 +1394,7 @@ test.describe("zone layout and placement", () => {
   test("a soil probe goes only in a unit, an air sensor anywhere inside at a height, a device or virtual device outside too", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
@@ -1440,7 +1488,7 @@ test.describe("zone layout and placement", () => {
   test("a zone's page shows its map, and names devices that aren't on it", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     const map = app(frame).getByRole("group", { name: "Units, sensors and devices in Garden" });
     await expect(map).toBeVisible();
     await expect(map.getByRole("button", { name: /^Select Environment left, / })).toHaveCount(1);
@@ -1470,7 +1518,7 @@ test.describe("live readings", () => {
       "sensor.two_probe_top_temp": ["22"], "sensor.two_probe_low_temp": ["21"], "sensor.two_probe_humidity": ["70"],
     });
     const frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
@@ -1482,7 +1530,7 @@ test.describe("live readings", () => {
     for (let i = 0; i < 3; i++) await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
-    await tab(frame, "Flower tent").click();
+    await goTo(frame, "Flower tent");
     return frame;
   }
 
@@ -1493,7 +1541,7 @@ test.describe("live readings", () => {
     await expect(tile(frame, "Humidity").locator(".val")).toContainText("65.0");
     await expect(tile(frame, "Temperature")).toContainText("Targets not set up yet");
     await expect(app(frame).locator(".lcard .val")).toContainText("40,000");
-    await tab(frame, "Overview").click();
+    await goTo(frame, "Overview");
     const card = app(frame).locator(".zone-card", { hasText: "Flower tent" });
     await expect(card.locator(".mrow", { hasText: "Temperature" })).toContainText("23.0");
     await expect(card).toContainText("No targets yet");
@@ -1518,7 +1566,7 @@ test.describe("live readings", () => {
   test("tapping a sensor on the map says where it is, what it reads and when it last reported", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await app(frame).locator(".map").getByRole("button", { name: /^Select Environment under, / }).click();
     await expect(app(frame).locator(".detail")).toContainText("Environment under");
     await expect(app(frame).locator(".detail")).toContainText("Under canopy.");
@@ -1526,7 +1574,7 @@ test.describe("live readings", () => {
 
   test("Devices lists each mapped device and sensor with its link and state", async ({ page }) => {
     const frame = await twoSensorZone(page);
-    await tab(frame, "Devices").click();
+    await goTo(frame, "Devices");
     const table = app(frame).locator("table");
     await expect(table.locator("tr", { hasText: "Environment board" })).toContainText("Environment sensor");
     await expect(table.locator("tr", { hasText: "Environment board" })).toContainText("Online");
@@ -1556,6 +1604,7 @@ test.describe("history", () => {
       fakeHA.restart();
     })()`);
     const frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Garden")).toBeVisible();
     return frame;
   }
@@ -1565,7 +1614,7 @@ test.describe("history", () => {
 
   test("every sensor gets a line and the combined line ends on the same value as the tile", async ({ page }) => {
     const frame = await garden(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(card(frame).locator(".chart svg")).toBeVisible();
     await expect(card(frame).locator("tbody tr")).toHaveCount(4);
     const tile = (await app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) }).locator(".val").textContent())?.replace("°C", "").trim();
@@ -1576,7 +1625,7 @@ test.describe("history", () => {
 
   test("every sensor's line is drawn at full strength, so it shows against the ideal band", async ({ page }) => {
     const frame = await garden(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     const lines = card(frame).locator(".chart svg path");
     await expect(lines).toHaveCount(4);
     for (const l of await lines.all()) expect(await l.getAttribute("stroke-opacity")).toBeNull();
@@ -1584,7 +1633,7 @@ test.describe("history", () => {
 
   test("a metric and range ask for exactly the readings drawn, and VPD asks for temperature and humidity where a board has none", async ({ page }) => {
     const frame = await garden(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(card(frame).locator(".chart svg")).toBeVisible();
     await card(frame).getByRole("button", { name: "VPD", exact: true }).click();
     await card(frame).getByRole("button", { name: "7d", exact: true }).click();
@@ -1598,7 +1647,7 @@ test.describe("history", () => {
 
   test("moving across the chart, or the arrow keys, reads a point in time, and Escape goes back to now", async ({ page }) => {
     const frame = await garden(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     const head = card(frame).locator("thead th").nth(1);
     await expect(head).toHaveText("Now");
     const chart = card(frame).locator(".chart svg"), box = await chart.boundingBox();
@@ -1616,7 +1665,7 @@ test.describe("history", () => {
   test("light shows only Now, and Overview draws each zone's last 4 hours of light", async ({ page }) => {
     const frame = await garden(page);
     await expect(app(frame).getByRole("img", { name: "Light (Average) in Garden over the last 4 hours" })).toBeVisible();
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await card(frame).getByRole("button", { name: "Light", exact: true }).click();
     await expect(card(frame).locator("thead")).not.toContainText("Min");
     await expect(row(frame, "Environment left").locator("td")).toHaveCount(2);
@@ -1630,14 +1679,14 @@ test.describe("history", () => {
       fakeHA.states["sensor.gr_t"] = { ...fakeHA.states["sensor.gr_t"], state: "unavailable" };
       fakeHA.publish();
     })()`);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(row(frame, "Environment right").locator("td")).toHaveText(["Environment right", "--", "--", "--"]);
     await expect(card(frame).locator(".chart-note")).toContainText("Home Assistant has kept 12 hours of these readings");
   });
 
   test("switching metric or range keeps the card's place on the page while the new readings load", async ({ page }) => {
     const frame = await garden(page);
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(card(frame).locator(".chart svg")).toBeVisible();
     await page.evaluate("historyDelayMs = 1500");
     await card(frame).locator(".chart").scrollIntoViewIfNeeded();
@@ -1656,7 +1705,7 @@ test.describe("history", () => {
   test("when the history can't be read it says so", async ({ page }) => {
     const frame = await garden(page);
     await page.evaluate("historyDown = true");
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(card(frame)).toContainText("Couldn't read the history. Recorder busy");
   });
 
@@ -1686,22 +1735,25 @@ test.describe("narrow window", () => {
   test("with HA's sidebar hidden, the menu button opens it, and only then is there one", async ({ page }) => {
     await page.goto(`${PAGE}?narrow=1`);
     let frame = await panelFrame(page);
-    await app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" }).click();
+    await openNav(frame);
+    await app(frame).getByRole("menuitem", { name: "Open Home Assistant's sidebar" }).click();
     await expect.poll(() => page.evaluate<number>("sidebarToggles")).toBe(1);
     await page.goto(PAGE);
     frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
-    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
+    await expect(app(frame).getByRole("menuitem", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
   });
 
   test("the host passes a change of width on, so the button comes and goes", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
+    await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
     await page.evaluate("panel.narrow = true");
-    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toBeVisible();
+    await expect(app(frame).getByRole("menuitem", { name: "Open Home Assistant's sidebar" })).toBeVisible();
     await page.evaluate("panel.narrow = false");
-    await expect(app(frame).getByRole("button", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
+    await expect(app(frame).getByRole("menuitem", { name: "Open Home Assistant's sidebar" })).toHaveCount(0);
   });
 });
 
@@ -1709,7 +1761,7 @@ test.describe("what Home Assistant has", () => {
   test("the catalog shows each device by area with how it is connected, and says so when that isn't known", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Devices").click();
+    await goTo(frame, "Devices");
     await expect.poll(() => frameText(frame)).toContain("Environment board");
     const text = await frameText(frame);
     for (const want of ["Garden", "Veg", "No area", "WiFi", "Zigbee", "Through Hue bridge", "Link not known", "Cloud", "entities, such as helpers and templates", "Spare plug"]) {
@@ -1721,7 +1773,7 @@ test.describe("what Home Assistant has", () => {
   test("a device named with markup is drawn as text, never run", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, "Devices").click();
+    await goTo(frame, "Devices");
     await expect.poll(() => frameText(frame)).toContain('<img src=x onerror="window.pwned=1">');
     expect(await frame.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
     expect(await frame.evaluate(() => document.querySelector("ec-app")?.shadowRoot?.querySelectorAll("img").length)).toBe(0);
@@ -1730,7 +1782,7 @@ test.describe("what Home Assistant has", () => {
   test("when Home Assistant can't list its devices the panel says so, and Try again asks again", async ({ page }) => {
     await page.goto(`${PAGE}?catalog=fail`);
     const frame = await panelFrame(page);
-    await tab(frame, "Devices").click();
+    await goTo(frame, "Devices");
     await app(frame).getByText("Everything in Home Assistant").click();
     await expect.poll(() => frameText(frame)).toContain("couldn't list its devices");
     await page.evaluate("catalogDown = false");
@@ -1753,7 +1805,7 @@ test.describe("appearance", () => {
   test("an appearance picked in the frame is kept by the host and survives reopening the panel", async ({ page }) => {
     await page.goto(PAGE);
     let frame = await panelFrame(page);
-    await tab(frame, "Setup").click();
+    await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Dark", exact: true }).click();
     await expect.poll(() => frame.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
     await expect(app(frame).getByRole("button", { name: "Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -1891,7 +1943,7 @@ test.describe("manual controls", () => {
   async function openZone(page: Page, zone = "Garden"): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    await tab(frame, zone).click();
+    await goTo(frame, zone);
     await expect(controls(frame)).toBeVisible();
     return frame;
   }
