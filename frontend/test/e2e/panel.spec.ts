@@ -41,6 +41,21 @@ async function updatedBarButton(page: Page): Promise<{ x: number; y: number } | 
 const route = (page: Page) => page.evaluate<string>("haRoute");
 const serviceCalls = (page: Page) => page.evaluate<number>("fakeHA.calls.length");
 /* The host's dialog lives in its closed shadow root, out of the page's reach. DevTools can still see it. */
+async function hostDialogText(page: Page): Promise<string> {
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+  type N = { nodeName: string; nodeType: number; nodeValue?: string; attributes?: string[]; children?: N[]; shadowRoots?: N[] };
+  const out: string[] = [];
+  const walk = (n: N, inside: boolean) => {
+    if (n.nodeName === "IFRAME" || n.nodeName === "STYLE") return;
+    const here = inside || (n.nodeName === "DIALOG" && (n.attributes || []).includes("open"));
+    if (here && n.nodeType === 3 && n.nodeValue?.trim()) out.push(n.nodeValue.trim());
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c, here);
+  };
+  walk(root as N, false);
+  await cdp.detach();
+  return out.join(" ");
+}
 async function hostDialogOpen(page: Page): Promise<boolean> {
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
@@ -1111,6 +1126,21 @@ test.describe("map devices", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("the host's dialog reads an entity's area from its device when the entity has none of its own", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await page.evaluate(`fakeHA.registry.entities["switch.spare_plug"] = { entity_id: "switch.spare_plug", platform: "tuya_local", area_id: null, device_id: "d-spare" };
+      fakeHA.registry.devices["d-spare"] = { id: "d-spare", area_id: "reservoir" };`);
+    await pickAll(frame);
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    const text = await hostDialogText(page);
+    expect(text).toContain("switch.spare_plug");
+    expect(text).toContain("In the Reservoir area in Home Assistant, not in the Flower tent area.");
+    expect(text).not.toContain("Has no area in Home Assistant.");
+    await page.keyboard.press("Escape");
+  });
+
   test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
     const frame = await newZoneMap(page);
     const before = (await stored(page)).revision;
@@ -1841,6 +1871,23 @@ test.describe("manual controls", () => {
       ["humidifier.set_mode", { entity_id: "humidifier.auxiliary_dehumidifier", mode: "eco" }],
       ["humidifier.set_humidity", { entity_id: "humidifier.auxiliary_dehumidifier", humidity: 45 }],
     ]);
+  });
+
+  test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate("fakeHA.knobs.steps['light.garden_light_controller_overhead'] = { step: 5, floor: 15 }");
+    const lamp = row(frame, "Overhead light controller"), slider = controls(frame).getByLabel("Overhead light controller brightness");
+    await slider.fill("63");
+    await expect(lamp.getByRole("status")).toHaveText("Went to 65%, not 63%. Overhead light controller keeps to its own steps and limits.", { timeout: 3000 });
+    await expect(lamp).toContainText("On, 65%.");
+    await expect(slider).toBeEnabled();
+    await expect(slider).toHaveValue("65");
+    /* Asked for a number it rounds back to where it already is, it reports nothing new. */
+    await slider.fill("67");
+    await expect(lamp.getByRole("status")).toHaveText("Not confirmed. Overhead light controller still reports 65%. It may not take 67%, so try another value.", { timeout: 15_000 });
+    await slider.fill("40");
+    await expect(lamp).toContainText("On, 40%.");
+    await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
   test("a device that goes offline disables its controls and keeps no dial for it", async ({ page }) => {

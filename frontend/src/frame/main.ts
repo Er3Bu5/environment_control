@@ -100,7 +100,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, humidityChoices, onReport, wantOf, wanted, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, humidityChoices, onReport, valueOf, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -2047,7 +2047,8 @@ export class EcApp extends LitElement {
      fetched itself and checks the action against what HA says the entity takes. A yes from the host means HA took the
      call, not that the device did it, so the row waits for the device to report. */
   private async control(d: ControlDevice, action: Action, value?: number | string): Promise<void> {
-    const want = wantOf(action, value), c: Ctl = { status: "sending", want, since: Date.now() };
+    const want = wantOf(action, value), from = valueOf(this.states[d.entity], want);
+    const c: Ctl = { status: "sending", want, since: Date.now(), from };
     const drag = { ...this.ctlDrag };
     delete drag[`${d.id}:${action}`];
     [this.ctl, this.ctlDrag] = [{ ...this.ctl, [d.id]: c }, drag];
@@ -2057,12 +2058,13 @@ export class EcApp extends LitElement {
       this.ctl = { ...this.ctl, [d.id]: { status: "error", error: r.error ?? "Home Assistant didn't take it." } };
       return;
     }
-    if (wanted(this.states[d.entity], want)) {
-      this.ctl = { ...this.ctl, [d.id]: { status: "done", want, at: Date.now() } };
+    const reported = onReport(c, this.states[d.entity], undefined, Date.now());
+    if (reported && reported !== c) {
+      this.ctl = { ...this.ctl, [d.id]: reported };
       return;
     }
     setTimeout(() => {
-      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want } };
+      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want, from } };
     }, CTL_GIVE_UP_MS);
   }
 
