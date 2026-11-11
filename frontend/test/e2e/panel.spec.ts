@@ -1572,7 +1572,11 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByRole("button", { name: "Add or edit devices" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
     await expect(app(frame).locator('.steps li[aria-current="step"]')).toHaveText("2. Devices");
-    await app(frame).getByRole("button", { name: "Add a virtual device" }).click();
+    /* In the accent colour, above everything Home Assistant lists, so it's found without scrolling. */
+    const add = app(frame).getByRole("button", { name: "Add a virtual device" });
+    await expect(add).toHaveClass(/\bprimary\b/);
+    expect((await add.boundingBox())!.y).toBeLessThan((await app(frame).getByLabel("Search Home Assistant").boundingBox())!.y);
+    await add.click();
     const tank = app(frame).locator(".pickwrap.virt"), name = tank.getByLabel("Name", { exact: true });
     await expect(name).toBeFocused();
     await expect(finish(frame)).toBeDisabled();

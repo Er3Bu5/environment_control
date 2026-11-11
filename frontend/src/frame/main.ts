@@ -2849,7 +2849,13 @@ export class EcApp extends LitElement {
     if (m.step === 2) {
       const shown = controls.filter((c) => hit(`${c.name} ${c.family} ${c.entity}`));
       const gone = Object.keys(m.controls).filter((e) => !controls.some((c) => c.entity === e));
-      body = html`<p class="muted">Pick what runs in ${z.name}: climate hardware and lights. Shared hardware can be in several zones.</p>
+      /* Adding one is at the top, where it's found without scrolling past everything Home Assistant has. The new one
+         is drawn with the other virtual devices, under the list, and the page goes to it. */
+      body = html`<div class="row">
+          <button class="btn primary add" ?disabled=${m.virt.length >= MAX_VIRTUAL} @click=${() => void this.addVirtualDevice()}>${icon("plus")}Add a virtual device</button>
+          ${m.virt.length >= MAX_VIRTUAL ? html`<span class="small muted">A zone can have up to ${MAX_VIRTUAL} virtual devices.</span>` : nothing}
+        </div>
+        <p class="muted">Pick what runs in ${z.name}: climate hardware and lights. Shared hardware can be in several zones.</p>
         ${search}
         <div class="picklist">
           ${gone.map(
@@ -2866,11 +2872,9 @@ export class EcApp extends LitElement {
           <h2>Virtual devices</h2>
           <p class="small muted">Something worth seeing on ${z.name}'s map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
         </div>
-        ${m.virt.length ? html`<div class="picklist">${repeat(m.virt, (v) => v.id, (v) => this.virtualRow(m, v))}</div>` : nothing}
-        <div class="row">
-          <button class="btn" ?disabled=${m.virt.length >= MAX_VIRTUAL} @click=${() => void this.addVirtualDevice()}>Add a virtual device</button>
-          ${m.virt.length >= MAX_VIRTUAL ? html`<span class="small muted">A zone can have up to ${MAX_VIRTUAL} virtual devices.</span>` : nothing}
-        </div>`;
+        ${m.virt.length
+          ? html`<div class="picklist">${repeat(m.virt, (v) => v.id, (v) => this.virtualRow(m, v))}</div>`
+          : html`<p class="small muted">None yet. Add one with the button at the top of this step.</p>`}`;
     }
     if (m.step === 3) {
       const ss = Object.keys(m.sensors).map((id) => `${shownName(m, id, sensors.find((s) => s.id === id)?.name ?? id).trim() || id} (${CLASSES[m.cls[id] ?? "env"].toLowerCase()})`);
