@@ -1111,6 +1111,26 @@ test.describe("map devices", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("Device identification's step headers move between its steps", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    const step = (name: string) => app(frame).locator(".steps").getByRole("button", { name, exact: true });
+    const current = app(frame).locator('.steps li[aria-current="step"]');
+    await expect(current).toHaveText("1. Sensors");
+    /* With something still to answer, a jump forward stops where Next would. */
+    await row(frame, "Two probe board").getByRole("button").first().click();
+    await step("3. Check").click();
+    await expect(current).toHaveText("1. Sensors");
+    await row(frame, "Two probe board").getByRole("button").first().click();
+    await pickAll(frame);
+    await expect(current).toHaveText("3. Check");
+    await step("1. Sensors").click();
+    await expect(current).toHaveText("1. Sensors");
+    await step("3. Check").click();
+    await expect(current).toHaveText("3. Check");
+    await step("2. Devices").click();
+    await expect(current).toHaveText("2. Devices");
+  });
+
   test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
     const frame = await newZoneMap(page);
     const before = (await stored(page)).revision;
@@ -1233,6 +1253,38 @@ test.describe("zone layout and placement", () => {
     await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
   });
 
+  test("a wizard's step headers go to their step: back freely, forward only past steps that are answered", async ({ page }) => {
+    const frame = await openFromMenu(page, "Garden", "Zone layout");
+    const step = (name: string) => app(frame).locator(".steps").getByRole("button", { name, exact: true });
+    const current = app(frame).locator('.steps li[aria-current="step"]');
+    await expect(current).toHaveText("1. Size");
+    await step("2. Units").click();
+    await expect(current).toHaveText("2. Units");
+    await step("1. Size").click();
+    await expect(current).toHaveText("1. Size");
+    await step("2. Units").click();
+    /* Fewer units strand a sensor, so placing joins the steps. A grid too small for the units, which Next wouldn't
+       pass, holds a jump forward too. */
+    await app(frame).getByLabel("Units", { exact: true }).fill("4");
+    await app(frame).getByRole("button", { name: "Fewer columns" }).click();
+    await expect(app(frame).getByText(/^This grid holds \d+ units, and you have 4\.$/)).toBeVisible();
+    await step("3. Sensors and devices").click();
+    await expect(current).toHaveText("2. Units");
+    await app(frame).getByRole("button", { name: "Suggest a grid" }).click();
+    await step("3. Sensors and devices").click();
+    await expect(current).toHaveText("3. Sensors and devices");
+  });
+
+  test("the zone page's map shows everything placed, with no height filter", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, "Garden").click();
+    const card = app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "Device placement", exact: true }) });
+    await expect(card.locator(".map")).toBeVisible();
+    await expect(card.getByRole("radio")).toHaveCount(0);
+    await expect(card).not.toContainText("Above canopy In canopy");
+  });
+
   test("a grid that strands a placed sensor carries on to the map, and can't save until it's placed again", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await finish(frame).click();
@@ -1274,6 +1326,17 @@ test.describe("zone layout and placement", () => {
     await spot(frame, "Unit 1").click();
     /* A soil probe is in the substrate, so it's asked no height. */
     await expect(app(frame).getByRole("group", { name: /^Height of Soil 1/ })).toHaveCount(0);
+    /* A tap on the one that's picked lets go of it, in the list and on the map. */
+    const soil = app(frame).locator(".sensor-opt", { hasText: "Soil 1" }), mark = app(frame).locator(".map").getByRole("button", { name: /^Select Soil 1/ });
+    await expect(soil).toHaveAttribute("aria-pressed", "true");
+    await soil.click();
+    await expect(soil).toHaveAttribute("aria-pressed", "false");
+    await expect(app(frame).getByText("Pick a sensor or device.")).toBeVisible();
+    await expect(app(frame).locator(".map").getByRole("button", { name: /^Unit \d$/ })).toHaveCount(0);
+    await mark.click();
+    await expect(soil).toHaveAttribute("aria-pressed", "true");
+    await mark.click();
+    await expect(soil).toHaveAttribute("aria-pressed", "false");
 
     await app(frame).locator(".sensor-opt", { hasText: "Environment board" }).click();
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Outside the wall/ })).toHaveCount(0);

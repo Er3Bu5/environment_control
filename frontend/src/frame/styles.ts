@@ -87,6 +87,9 @@ export const styles = css`
   textarea { font: inherit; resize: vertical; }
   .steps { display: flex; flex-wrap: wrap; gap: 4px 18px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
   .steps li[aria-current="step"] { color: var(--primary); font-weight: 500; }
+  .steps button { padding: 6px 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+  .steps button:hover { color: var(--fg); text-decoration: underline; }
+  .steps li[aria-current="step"] { padding: 6px 0; }
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); max-width: 440px; }
   .field input, .field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
   .field input[aria-invalid="true"] { border-color: var(--crit); }
