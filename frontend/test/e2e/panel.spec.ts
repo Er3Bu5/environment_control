@@ -641,18 +641,29 @@ test.describe("targets, day and night", () => {
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24.5", "25", "27", "29"]);
-    await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "", "", "", ""]);
+    /* A limit that doesn't exist reads as a dash, never as a gap. */
+    await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "-", "-", "-", "-"]);
   });
 
   test("the zone's table reads a helper live, so it shows what your alerts read", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await tab(frame, "Garden").click();
+    /* The limits are a tap away in a dialog, not a card on the page. */
+    await expect(app(frame).locator(".tbl-wrap")).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await expect(dialog(frame).getByRole("heading", { name: "Targets: Garden" })).toBeVisible();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "25", "27", "28"]);
     await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "22.5", "24", "25", "27", "28"]);
-    await app(frame).getByRole("button", { name: "Set targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Close" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    /* History leads the page, then Device placement, then Controls. */
+    expect(await app(frame).locator("main h2").allTextContents()).toEqual(["History", "Device placement", "Controls"]);
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
   });
 
@@ -687,6 +698,7 @@ test.describe("targets, day and night", () => {
     expect(await serviceCalls(page)).toBe(0);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "-", "27", "28"]);
   });
 
@@ -871,6 +883,7 @@ test.describe("targets, day and night", () => {
     expect([z.dayAt, z.nightAt, z.setup.targets, z.bands.night.vpd]).toEqual([360, 1080, "done", [0.65, 0.8, 0.9, 1, 1.15]]);
     await tab(frame, "Flower tent").click();
     await expect(app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) })).not.toContainText("Targets not set up yet");
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "20.2", "22.2", "24.95", "27.7", "29.7"]);
   });
 });
@@ -1258,7 +1271,8 @@ test.describe("zone layout and placement", () => {
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
-    await app(frame).getByRole("button", { name: "Set targets" }).click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
   });

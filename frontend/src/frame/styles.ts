@@ -95,6 +95,7 @@ export const styles = css`
   .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
   .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
   .dialog h2 { outline: none; }
+  .dialog.wide { width: min(760px, 100%); }
   .dialog .row { justify-content: flex-end; }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
   .review-list { flex: none; border: 1px solid var(--line); border-radius: 8px; }
@@ -205,7 +206,7 @@ export const styles = css`
   @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   /* Controls sit beside the map on a wide screen and above it on a narrow one, as the mock has them. */
-  .split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); gap: 12px; align-items: start; }
+  .split { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 5fr); gap: 12px; align-items: start; }
   @media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); } }
   .cgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .ctl-reading { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }

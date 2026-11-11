@@ -217,7 +217,7 @@ import {
   timesOf,
   toMin,
 } from "./schedule";
-import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, periodRuns, sensorLine, tickWords, whenWords, yRange } from "./chart";
+import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
@@ -259,6 +259,11 @@ interface Review {
   busyText?: string;
   /* What's left after a partial failure, worked out again, so only that is tried again. */
   refresh?: () => Change[];
+}
+
+interface TargetsView {
+  kind: "targets";
+  zoneId: string;
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
@@ -376,7 +381,7 @@ export class EcApp extends LitElement {
   declare private moreOpen: Set<string>;
   private mapFromGuide = false;
   declare private guide: string | null;
-  declare private modal: Guard | Review | null;
+  declare private modal: Guard | Review | TargetsView | null;
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
@@ -1679,16 +1684,17 @@ export class EcApp extends LitElement {
         if (b[2] !== null) parts.push(svg`<line x1=${x} x2=${x + w} y1=${Y(tg)} y2=${Y(tg)} stroke="var(--muted)" stroke-dasharray="3 3"></line>`);
       }
     }
-    const span = hi - lo, dp = k === "vpd" ? 2 : k !== "light" && span < 5 ? 1 : 0;
-    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(dp));
-    for (let t = 0; t <= 4; t++) {
-      const v = lo + (span * t) / 4, y = Y(v);
+    /* Both axes are labelled at round numbers and round clock times, wherever those fall inside the plot. */
+    const yt = niceTicks(lo, hi);
+    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(yt.dp));
+    for (const v of yt.at) {
+      const y = Y(v);
       parts.push(svg`<line x1=${L} x2=${W - Rm} y1=${y} y2=${y} stroke="var(--line)"></line><text x=${L - 6} y=${y + 4} text-anchor="end">${axis(v)}</text>`);
     }
-    const ticks = W < 520 ? 3 : 6;
-    for (let t = 0; t <= ticks; t++) {
-      const ix = Math.round((t / ticks) * n);
-      parts.push(svg`<text x=${X(ix)} y=${H - 6} text-anchor=${t === 0 ? "start" : t === ticks ? "end" : "middle"}>${tickWords(rows[0].line[ix].t, R.hours)}</text>`);
+    const t0 = rows[0].line[0].t, t1 = rows[0].line[n].t;
+    for (const t of n ? timeTicks(t0, t1, R.hours, W < 520) : []) {
+      const x = L + ((t - t0) / (t1 - t0)) * PW;
+      parts.push(svg`<line x1=${x} x2=${x} y1=${T + PH} y2=${T + PH + 4} stroke="var(--line)"></line><text x=${x} y=${H - 6} text-anchor=${x < L + 18 ? "start" : x > W - Rm - 18 ? "end" : "middle"}>${tickWords(t, R.hours)}</text>`);
     }
     const path = (line: Point[]) => {
       let d = "", pen = false;
@@ -2223,10 +2229,13 @@ export class EcApp extends LitElement {
     const z = this.zoneById(this.zoneId);
     if (!z) return nothing;
     const left = stepsLeft(z), L = storedLayout(this.raw(z.id));
-    return html`<div>
-        <h1>${z.name}</h1>
-        ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
-        <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
+    return html`<div class="card-head">
+        <div>
+          <h1>${z.name}</h1>
+          ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
+          <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
+        </div>
+        <button class="btn" @click=${() => this.viewTargets(z.id)}>View targets</button>
       </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
@@ -2235,12 +2244,8 @@ export class EcApp extends LitElement {
         : nothing}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
-      <div class="split">${this.controlsCard(z)}${this.zoneMap(z)}</div>
       ${this.historyCard(z)}
-      <section class="card">
-        <div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" @click=${() => this.openSchedule(z.id)}>Set targets</button></div></div>
-        ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
-      </section>
+      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>
       <p class="small muted">Activity arrives in a release that follows.</p>`;
   }
 
@@ -3408,10 +3413,16 @@ export class EcApp extends LitElement {
   }
 
   /* The zone's limits as it is judged by them, day and night. */
+  /* The zone's limits, a tap away from its page rather than a card on it: they're looked up now and then, where the
+     readings, history and controls are what the page is opened for. */
+  private viewTargets(zoneId: string): void {
+    this.modal = { kind: "targets", zoneId };
+  }
+
   private targetsTable(z: Zone) {
     const raw = this.raw(z.id), b = liveBands(raw, this.states), onHelpers = Object.values(storedLinks(raw)).some(Boolean);
     const row = (p: Period, name: string, k: BandKey) => html`<tr><td>${name}<span class="sub">${METRIC[k].unit}</span></td>${b[p][k].map((v) => html`<td>${v === null ? "-" : v}</td>`)}</tr>`;
-    const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : ""}</td>`)}</tr>`;
+    const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : "-"}</td>`)}</tr>`;
     const table = (p: Period, title: string) => html`<div class="tbl-wrap">
       <table class="limits">
         <thead><tr><th>${title}</th>${LIMIT_NAME.map((n) => html`<th>${n}</th>`)}</tr></thead>
@@ -3533,6 +3544,22 @@ export class EcApp extends LitElement {
           <div class="row">
             <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
             <button class="btn danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (m.kind === "targets") {
+      const z = this.zoneById(m.zoneId);
+      if (!z) return nothing;
+      return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && this.closeModal()}>
+        <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+          <h2 id="dlg-title" tabindex="-1">Targets: ${z.name}</h2>
+          <div class="review-scroll">
+            ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
+          </div>
+          <div class="row">
+            <button class="btn" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+            <button class="btn primary" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;

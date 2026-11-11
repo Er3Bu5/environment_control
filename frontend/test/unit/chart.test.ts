@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combinedLine, endingNow, entitiesFor, extremes, keptNote, nightRuns, sensorLine, yRange } from "../../src/frame/chart";
+import { combinedLine, endingNow, entitiesFor, extremes, keptNote, niceTicks, nightRuns, sensorLine, timeTicks, yRange } from "../../src/frame/chart";
 import type { History } from "../../src/frame/messages";
 import { type StoredSensor, calcVpd, combine, zoneReading } from "../../src/frame/readings";
 
@@ -89,5 +89,25 @@ describe("reading a range", () => {
     expect(keptNote(hist({ "sensor.t": { first: END - 3600, values: [] } }), 1)).toBe("");
     expect(keptNote(hist({ "sensor.t": { first: END - 1800, values: [] } }), 1)).toMatch(/^Home Assistant has kept under an hour of these readings, back to /);
     expect(keptNote(hist({ "sensor.t": { first: null, values: [] } }), 1)).toBe("Home Assistant has no recorded readings for this range.");
+  });
+});
+
+describe("the chart's axes are labelled at round values", () => {
+  it("labels the y axis in steps of 1, 2 or 5, with the decimals the step needs", () => {
+    expect(niceTicks(0.54, 1.41)).toEqual({ at: [0.6, 0.8, 1, 1.2, 1.4], dp: 1 });
+    expect(niceTicks(21.3, 28.9)).toEqual({ at: [22, 24, 26, 28], dp: 0 });
+    expect(niceTicks(0.92, 1.08)).toEqual({ at: [0.95, 1, 1.05], dp: 2 });
+    expect(niceTicks(0, 41000)).toEqual({ at: [0, 10000, 20000, 30000, 40000], dp: 0 });
+    expect(niceTicks(5, 5)).toEqual({ at: [5], dp: 0 });
+  });
+
+  it("labels the x axis on the hour within a day and at midnight beyond, fewer when narrow", () => {
+    const at = (h: number, m = 0, day = 11) => new Date(2026, 10, day, h, m).getTime() / 1000;
+    const clock = (ts: number[]) => ts.map((t) => { const d = new Date(t * 1000); return `${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`; });
+    expect(clock(timeTicks(at(13, 7), at(19, 7), 6, false))).toEqual(["11 14:00", "11 15:00", "11 16:00", "11 17:00", "11 18:00", "11 19:00"]);
+    expect(clock(timeTicks(at(13, 7), at(19, 7), 6, true))).toEqual(["11 14:00", "11 16:00", "11 18:00"]);
+    expect(clock(timeTicks(at(19, 7, 10), at(19, 7), 24, false))).toEqual(["10 20:00", "11 0:00", "11 4:00", "11 8:00", "11 12:00", "11 16:00"]);
+    expect(clock(timeTicks(at(19, 7, 8), at(19, 7), 72, false))).toEqual(["9 0:00", "10 0:00", "11 0:00"]);
+    expect(clock(timeTicks(at(19, 7, 4), at(19, 7), 168, true))).toEqual(["5 0:00", "7 0:00", "9 0:00", "11 0:00"]);
   });
 });
