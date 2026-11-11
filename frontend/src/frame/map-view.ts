@@ -10,7 +10,7 @@ export const MARK = 36;
 const LEVEL_COLOR: Record<Level, string> = { above: "var(--above)", in: "var(--in)", under: "var(--under)" };
 
 /* Device classes, as the mock groups controls: what a device's role makes it, and how its mark looks. */
-const CLASS_LOOK: Record<string, { icon: IconName; c: string; label: string; types: string[] }> = {
+export const CLASS_LOOK: Record<string, { icon: IconName; c: string; label: string; types: string[] }> = {
   humidity: { icon: "drop", c: "var(--hum)", label: "Humidity", types: ["Dehumidifier", "Humidifier"] },
   temperature: { icon: "thermo", c: "var(--temp)", label: "Temperature", types: ["Air conditioner", "Heater"] },
   airflow: { icon: "fan", c: "var(--air)", label: "Airflow", types: ["Fan"] },

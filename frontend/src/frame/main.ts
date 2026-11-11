@@ -99,7 +99,8 @@ import {
   zoneItems,
   MAX_GRID,
 } from "./layout";
-import { keyView, look, mapView, mk } from "./map-view";
+import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, humidityChoices, onReport, wantOf, wanted, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -270,6 +271,7 @@ const APPEARANCE_SAYS: Record<Appearance, string> = {
   light: "Light, whatever Home Assistant uses.",
   dark: "Dark, whatever Home Assistant uses.",
 };
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const LINK_LABEL: Record<LinkKind, string> = {
   ethernet: "Ethernet",
   wifi: "WiFi",
@@ -328,6 +330,8 @@ export class EcApp extends LitElement {
     menu: { state: true },
     toastText: { state: true },
     confirmText: { state: true },
+    ctl: { state: true },
+    ctlDrag: { state: true },
   };
   static styles = styles;
   declare private stored: Stored | null;
@@ -373,6 +377,9 @@ export class EcApp extends LitElement {
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
+  /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
+  declare private ctl: Record<string, Ctl>;
+  declare private ctlDrag: Record<string, number>;
   private nextReq = 1;
   private waiting = new Map<number, (r: Result) => void>();
   private draftHeld = false;
@@ -412,6 +419,8 @@ export class EcApp extends LitElement {
     this.menu = null;
     this.toastText = "";
     this.confirmText = "";
+    this.ctl = {};
+    this.ctlDrag = {};
   }
 
   connectedCallback(): void {
@@ -472,6 +481,7 @@ export class EcApp extends LitElement {
       }
       [this.states, this.now] = [next, Date.now()];
     }
+    if (m.type === "states") this.controlsReported(Object.keys(m.states));
     if (m.type === "init" || m.type === "theme") this.applyTheme(m.theme);
     if (m.type === "init" || m.type === "narrow") this.narrow = m.narrow;
     if (m.type === "init" && !this.catalog) void this.askCatalog();
@@ -2019,6 +2029,134 @@ export class EcApp extends LitElement {
     return `${plural(devices, "device")}. ${placed} of ${plural(z.sensors.length, "sensor")} placed.`;
   }
 
+  /* A report from HA for a device whose control was used: a sent command counts once the device reports it, and a
+     confirmed one undone straight after says it was put back. */
+  private controlsReported(entities: string[]): void {
+    let next: Record<string, Ctl> | null = null;
+    for (const d of this.config.devices) {
+      const id = typeof d.id === "string" ? d.id : "", e = typeof d.entity === "string" ? d.entity : "";
+      const was = this.ctl[id];
+      if (!was || !entities.includes(e)) continue;
+      const st = this.states[e], now = onReport(was, st, st?.by, Date.now());
+      if (now && now !== was) (next ??= { ...this.ctl })[id] = now;
+    }
+    if (next) this.ctl = next;
+  }
+
+  /* The frame names a device and what to do, never an entity or a service: the host looks the device up in the setup it
+     fetched itself and checks the action against what HA says the entity takes. A yes from the host means HA took the
+     call, not that the device did it, so the row waits for the device to report. */
+  private async control(d: ControlDevice, action: Action, value?: number | string): Promise<void> {
+    const want = wantOf(action, value), c: Ctl = { status: "sending", want, since: Date.now() };
+    const drag = { ...this.ctlDrag };
+    delete drag[`${d.id}:${action}`];
+    [this.ctl, this.ctlDrag] = [{ ...this.ctl, [d.id]: c }, drag];
+    const r = await this.ask("device", { id: d.id, action, ...(value === undefined ? {} : { value }) });
+    if (this.ctl[d.id] !== c) return;
+    if (!r.ok) {
+      this.ctl = { ...this.ctl, [d.id]: { status: "error", error: r.error ?? "Home Assistant didn't take it." } };
+      return;
+    }
+    if (wanted(this.states[d.entity], want)) {
+      this.ctl = { ...this.ctl, [d.id]: { status: "done", want, at: Date.now() } };
+      return;
+    }
+    setTimeout(() => {
+      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want } };
+    }, CTL_GIVE_UP_MS);
+  }
+
+  /* A device whose role isn't said yet: Device identification, at that device. The list waits for HA's catalog. */
+  private async fixRole(zoneId: string, entity: string): Promise<void> {
+    this.openMapDevices(zoneId);
+    const target = controlTarget(entity);
+    for (let i = 0; i < 50 && this.mapw && !this.shadowRoot?.querySelector(`#${target}`); i++) {
+      this.setMap((m) => (m.step = 2));
+      await this.updateComplete;
+      if (!this.shadowRoot?.querySelector(`#${target}`)) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (this.mapw) await this.jumpTo({ step: 2, target, text: "" });
+  }
+
+  private deviceControl(z: Zone, d: ControlDevice, cls: string) {
+    const st = this.states[d.entity], v = deviceView(d.entity, st), c = this.ctl[d.id], busy = v.down || c?.status === "sending";
+    const lk = CLASS_LOOK[cls], line = ctlLine(c, d, v);
+    const others = d.zones.filter((id) => id !== z.id).map((id) => this.zoneById(id)?.name ?? id);
+    const extra = [
+      v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "",
+      v.offList && v.mode ? `${cap(v.mode)} isn't in its mode list.` : "",
+      others.length ? `Shared with ${others.join(" and ")}.` : "",
+    ].filter(Boolean).join(" ");
+    const range = (action: "brightness" | "humidity", label: string, min: number, max: number, at: number, words: (n: number) => string) => {
+      const key = `${d.id}:${action}`, dragged = this.ctlDrag[key];
+      return html`<label class="ctl-range">
+        <span>${words(dragged ?? at)}</span>
+        <input type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(dragged ?? at))} ?disabled=${busy}
+          @input=${(e: Event) => (this.ctlDrag = { ...this.ctlDrag, [key]: Number((e.target as HTMLInputElement).value) })}
+          @change=${(e: Event) => void this.control(d, action, Number((e.target as HTMLInputElement).value))} />
+      </label>`;
+    };
+    let controls: unknown = nothing;
+    if (!v.down && v.kind === "dimmer") {
+      const dragged = this.ctlDrag[`${d.id}:brightness`];
+      controls = range("brightness", `${d.name} brightness`, 1, 100, v.brightness ?? 100, (n) => (dragged === undefined && v.brightness === null ? "" : `${n}%`));
+    } else if (!v.down && v.kind === "humidifier") {
+      const choices = humidityChoices(v);
+      controls = html`${v.modes.length
+          ? html`<fieldset class="chips ctl-modes">
+              <legend class="sr">${d.name} mode</legend>
+              <div class="chiprow">
+                ${v.modes.map(
+                  (m) => html`<label class="chip"
+                    ><input type="radio" name=${`mode-${d.id}`} .checked=${live(v.mode === m)} ?disabled=${busy} @change=${() => void this.control(d, "mode", m)} />${cap(m)}</label
+                  >`,
+                )}
+              </div>
+            </fieldset>`
+          : nothing}
+        ${choices.length > 1 && v.setpoint !== null ? range("humidity", `${d.name} target humidity`, choices[0], choices[choices.length - 1], v.setpoint, (n) => `Target ${n}%`) : nothing}`;
+    }
+    return html`<div class="dev" data-device=${d.id}>
+      <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
+      <div class="dev-text">
+        <div class="dev-name">${d.name}</div>
+        <div class="dev-sub">${v.down ? html`<span class="pill dead">${v.text}</span>` : `${v.text}.`} ${extra}</div>
+        <div class="dev-sub">${[d.family, LINK_LABEL[d.link as LinkKind]].filter(Boolean).join(", ")}</div>
+      </div>
+      <div class="dev-ctl">
+        ${controls}
+        <button class="sw ${v.on ? "on" : ""}" role="switch" aria-checked=${v.on ? "true" : "false"} aria-label=${d.name} ?disabled=${busy}
+          @click=${() => void this.control(d, v.on ? "turn_off" : "turn_on")}><i></i></button>
+      </div>
+      ${line ? html`<div class="ctl-status ${line.tone}" role="status">${line.text}</div>` : nothing}
+    </div>`;
+  }
+
+  /* The zone's climate hardware and lights, grouped as the map's key groups them, each group beside the reading it moves. */
+  private controlsCard(z: Zone) {
+    const { groups, unknown } = zoneControls(this.config, z.id), sensed = this.readingsOf(z.id).length > 0;
+    const reading = (k: Metric) =>
+      html`<span class="ctl-reading">${fmt(k, this.zoneNow(z.id, k).value)} ${METRIC[k].unit}${k !== "light" && this.judged(z) && this.bandNow(z, k) ? this.pill(this.stateOf(z, k)) : nothing}</span>`;
+    return html`<section class="card" id="controls">
+      <div><h2>Controls</h2><p class="muted small">A tap is sent to Home Assistant, and a control only moves once the device reports back.</p></div>
+      ${unknown.map(
+        (d) => html`<button class="notice fix" @click=${() => void this.fixRole(z.id, d.entity)}>
+          <span>${d.name} isn't shown until you say what it is.</span><span class="fixgo">Fix &rsaquo;</span>
+        </button>`,
+      )}
+      ${groups.map(
+        (g) => html`<div class="cgroup">
+          <div class="card-head"><h3>${g.title}</h3>${g.metric && sensed ? reading(g.metric as Metric) : nothing}</div>
+          <div class="devs">${repeat(g.devices, (d) => d.id, (d) => this.deviceControl(z, d, g.key))}</div>
+        </div>`,
+      )}
+      ${groups.length || unknown.length
+        ? nothing
+        : html`<p class="small muted">No devices in ${z.name} yet.</p>
+            <div class="row"><button class="btn" @click=${() => this.openMapDevices(z.id)}>Device identification</button></div>`}
+    </section>`;
+  }
+
   private zone() {
     const z = this.zoneById(this.zoneId);
     if (!z) return nothing;
@@ -2035,12 +2173,13 @@ export class EcApp extends LitElement {
         : nothing}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
-      ${this.zoneMap(z)}${this.historyCard(z)}
+      <div class="split">${this.controlsCard(z)}${this.zoneMap(z)}</div>
+      ${this.historyCard(z)}
       <section class="card">
         <div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" @click=${() => this.openSchedule(z.id)}>Set targets</button></div></div>
         ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
       </section>
-      <p class="small muted">Controls and activity arrive in the releases that follow.</p>`;
+      <p class="small muted">Activity arrives in a release that follows.</p>`;
   }
 
   private entityRow(e: CatalogEntity) {

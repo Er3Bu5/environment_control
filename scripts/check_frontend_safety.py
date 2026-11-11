@@ -1,7 +1,7 @@
 """The browser side keeps its sandbox: what the frame can do, and what only the host may do.
 
 - The host's frame is sandboxed with allow-scripts and nothing else, and allow-same-origin appears nowhere shipped.
-- callService appears only in the host, and only as often as the write table below allows (calibration, settings).
+- callService appears only in the host, as often as the write table below allows (calibration, settings, devices).
 - The host accepts exactly the frame messages listed below, so each new path into the host is added on purpose.
 - The frame's source has no network, no eval and no service calls; the built frame carries the no-network CSP.
 Usage: python3 scripts/check_frontend_safety.py [repo_root]
@@ -15,11 +15,23 @@ from pathlib import Path
 
 # The write paths the host may call, as a count of callService sites. Each milestone that adds a write adds it here,
 # in the same change as its tests. Milestone 5 added the calibration write, number.set_value on a board's leaf offset;
-# Targets adds the setting write, input_number.set_value or input_datetime.set_datetime on a zone's linked helper.
-HOST_CALL_SERVICE_SITES = 2
+# Targets adds the setting write, input_number.set_value or input_datetime.set_datetime on a zone's linked helper;
+# manual controls add the device write, the plan's v1 table: on or off, brightness, humidifier mode and target humidity.
+HOST_CALL_SERVICE_SITES = 3
 # The messages the host acts on from the frame. Each is a way into the code that holds the login, so adding one is a
 # deliberate change here, made with its tests.
-HOST_ACCEPTS = {"ready", "draft", "appearance", "catalog", "sidebar", "save", "calibrate", "history", "setting"}
+HOST_ACCEPTS = {
+    "ready",
+    "draft",
+    "appearance",
+    "catalog",
+    "sidebar",
+    "save",
+    "calibrate",
+    "history",
+    "setting",
+    "device",
+}
 FRAME_BANNED = {
     "callService": r"\bcallService\b",
     "fetch": r"\bfetch\s*\(",
