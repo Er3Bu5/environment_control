@@ -9,7 +9,9 @@ class FakeHA {
     this.config = JSON.parse(JSON.stringify(seed.config));
     this.failsafes = seed.failsafes || {};
     this.registry = seed.registry || { entities: {}, areas: {} };
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set() };
+    /* HA's device registry: an entity with no area of its own is in its device's. */
+    this.registry.devices = this.registry.devices || {};
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {} };
     this.calls = [];
     this.saves = [];
     this.panels = new Set();
@@ -40,6 +42,7 @@ class FakeHA {
       themes: { darkMode: this.darkMode },
       entities: this.registry.entities,
       areas: this.registry.areas,
+      devices: this.registry.devices,
       callService: (domain, service, data) => this.callService(domain, service, data),
       connection: this.connection,
     };
@@ -84,10 +87,16 @@ class FakeHA {
     }
     if (key === "input_datetime.set_datetime" && !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(String(data.time))) this.fail(`Time ${data.time} is not valid`);
   }
+  /* A light controller can round to its own steps on the device, as yours do to 5% with a floor: it then only ever
+     reports the rounded number, never the one asked. knobs.steps[entity] = { step, floor }, in percent. */
+  snapped(entity, pct) {
+    const k = this.knobs.steps[entity];
+    return k ? Math.max(k.floor || 0, Math.round(pct / k.step) * k.step) : pct;
+  }
   outcome(domain, service, data, s) {
     const a = s.attributes;
     switch (`${domain}.${service}`) {
-      case "light.turn_on": return ["on", { brightness: data.brightness_pct === undefined ? (a.brightness || 255) : Math.round((data.brightness_pct / 100) * 255) }];
+      case "light.turn_on": return ["on", { brightness: data.brightness_pct === undefined ? (a.brightness || 255) : Math.round((this.snapped(data.entity_id, data.brightness_pct) / 100) * 255) }];
       case "light.turn_off": return ["off", { brightness: null }];
       case "humidifier.set_mode": return [s.state, { mode: data.mode }];
       case "humidifier.set_humidity": return [s.state, { humidity: data.humidity }];

@@ -527,7 +527,9 @@ class EnvironmentControlPanel extends HTMLElement {
   /** @param {{entity: string, zones: string[], helper?: boolean}} item @param {any} config */
   describe(item, config) {
     const st = this._hass.states[item.entity], reg = (this._hass.entities || {})[item.entity] || {}, areas = this._hass.areas || {};
-    const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
+    /* An entity with no area of its own is in its device's area, which is where HA keeps it for most hardware. */
+    const areaId = reg.area_id || ((this._hass.devices || {})[reg.device_id] || {}).area_id;
+    const area = areaId && areas[areaId] ? areas[areaId].name : null;
     /** @type {string[]} */
     const zones = item.zones.map((id) => (config.zones.find((/** @type {any} */ z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
     const domain = item.entity.split(".")[0], a = st.attributes || {};

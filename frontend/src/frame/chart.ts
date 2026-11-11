@@ -102,6 +102,32 @@ export function yRange(lines: Point[][], k: Metric, limits: number[]): [number, 
   return [k === "light" ? Math.max(0, lo - pad) : lo - pad, hi + pad];
 }
 
+/* Round numbers to label the y axis with: steps of 1, 2 or 5 times a power of ten, about four of them, so the axis
+   reads 0.6, 0.8, 1.0 and not 0.54, 0.76, 0.98. Each comes with the decimals its step needs. */
+export function niceTicks(lo: number, hi: number, about = 4): { at: number[]; dp: number } {
+  if (!(hi > lo)) return { at: [lo], dp: 0 };
+  const raw = (hi - lo) / about, mag = 10 ** Math.floor(Math.log10(raw)), n = raw / mag;
+  const step = (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * mag, dp = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  const at: number[] = [];
+  for (let i = Math.ceil(lo / step - 1e-9); i * step <= hi + step * 1e-9; i++) at.push(Number((i * step).toFixed(dp)));
+  return { at, dp };
+}
+
+/* Round clock times to label the x axis with: on the hour within a day, at midnight beyond, fewer on a narrow chart. */
+export function timeTicks(from: number, to: number, hours: number, narrow: boolean): number[] {
+  const stepH = hours <= 6 ? (narrow ? 2 : 1) : hours <= 24 ? (narrow ? 6 : 4) : hours <= 72 || !narrow ? 24 : 48;
+  /* Counted back from the newest one, so today's midnight is always labelled, and stepped on the local clock, so a
+     tick stays on the hour across a daylight saving change. */
+  const d = new Date(to * 1000);
+  d.setHours(stepH >= 24 ? 0 : Math.floor(d.getHours() / stepH) * stepH, 0, 0, 0);
+  const out: number[] = [];
+  for (let i = 0; i < 400 && d.getTime() / 1000 >= from; i++) {
+    out.unshift(d.getTime() / 1000);
+    d.setHours(d.getHours() - stepH);
+  }
+  return out;
+}
+
 /* Runs of buckets in one period, day or night, as [first, last] index pairs: limits change with the period, and the
    night runs are shaded. Times are minutes from midnight, local, wrap-safe like every day test here. */
 export function periodRuns(points: Point[], dayAt: number, nightAt: number): { from: number; to: number; day: boolean }[] {

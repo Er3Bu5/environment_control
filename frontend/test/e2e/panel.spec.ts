@@ -41,6 +41,21 @@ async function updatedBarButton(page: Page): Promise<{ x: number; y: number } | 
 const route = (page: Page) => page.evaluate<string>("haRoute");
 const serviceCalls = (page: Page) => page.evaluate<number>("fakeHA.calls.length");
 /* The host's dialog lives in its closed shadow root, out of the page's reach. DevTools can still see it. */
+async function hostDialogText(page: Page): Promise<string> {
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+  type N = { nodeName: string; nodeType: number; nodeValue?: string; attributes?: string[]; children?: N[]; shadowRoots?: N[] };
+  const out: string[] = [];
+  const walk = (n: N, inside: boolean) => {
+    if (n.nodeName === "IFRAME" || n.nodeName === "STYLE") return;
+    const here = inside || (n.nodeName === "DIALOG" && (n.attributes || []).includes("open"));
+    if (here && n.nodeType === 3 && n.nodeValue?.trim()) out.push(n.nodeValue.trim());
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c, here);
+  };
+  walk(root as N, false);
+  await cdp.detach();
+  return out.join(" ");
+}
 async function hostDialogOpen(page: Page): Promise<boolean> {
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
@@ -626,18 +641,29 @@ test.describe("targets, day and night", () => {
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24.5", "25", "27", "29"]);
-    await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "", "", "", ""]);
+    /* A limit that doesn't exist reads as a dash, never as a gap. */
+    await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "-", "-", "-", "-"]);
   });
 
   test("the zone's table reads a helper live, so it shows what your alerts read", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await tab(frame, "Garden").click();
+    /* The limits are a tap away in a dialog, not a card on the page. */
+    await expect(app(frame).locator(".tbl-wrap")).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await expect(dialog(frame).getByRole("heading", { name: "Targets: Garden" })).toBeVisible();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "25", "27", "28"]);
     await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "22.5", "24", "25", "27", "28"]);
-    await app(frame).getByRole("button", { name: "Set targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Close" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    /* History leads the page, then Device placement, then Controls. */
+    expect(await app(frame).locator("main h2").allTextContents()).toEqual(["History", "Device placement", "Controls"]);
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
   });
 
@@ -672,6 +698,7 @@ test.describe("targets, day and night", () => {
     expect(await serviceCalls(page)).toBe(0);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "-", "27", "28"]);
   });
 
@@ -856,6 +883,7 @@ test.describe("targets, day and night", () => {
     expect([z.dayAt, z.nightAt, z.setup.targets, z.bands.night.vpd]).toEqual([360, 1080, "done", [0.65, 0.8, 0.9, 1, 1.15]]);
     await tab(frame, "Flower tent").click();
     await expect(app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) })).not.toContainText("Targets not set up yet");
+    await app(frame).getByRole("button", { name: "View targets" }).click();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "20.2", "22.2", "24.95", "27.7", "29.7"]);
   });
 });
@@ -1111,6 +1139,21 @@ test.describe("map devices", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("the host's dialog reads an entity's area from its device when the entity has none of its own", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await page.evaluate(`fakeHA.registry.entities["switch.spare_plug"] = { entity_id: "switch.spare_plug", platform: "tuya_local", area_id: null, device_id: "d-spare" };
+      fakeHA.registry.devices["d-spare"] = { id: "d-spare", area_id: "reservoir" };`);
+    await pickAll(frame);
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    const text = await hostDialogText(page);
+    expect(text).toContain("switch.spare_plug");
+    expect(text).toContain("In the Reservoir area in Home Assistant, not in the Flower tent area.");
+    expect(text).not.toContain("Has no area in Home Assistant.");
+    await page.keyboard.press("Escape");
+  });
+
   test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
     const frame = await newZoneMap(page);
     const before = (await stored(page)).revision;
@@ -1248,7 +1291,8 @@ test.describe("zone layout and placement", () => {
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await tab(frame, "Garden").click();
-    await app(frame).getByRole("button", { name: "Set targets" }).click();
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
   });
@@ -1352,10 +1396,29 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByRole("group", { name: "Its type" }).getByLabel("Tank").check();
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
     await spot(frame, "Outside the wall, by unit 1").click();
-    /* Picked, a virtual device can be renamed, retyped and removed right here. */
-    await app(frame).getByLabel("Name", { exact: true }).fill("Waste tank");
-    await app(frame).getByLabel("Name", { exact: true }).press("Enter");
+    /* Picked, a virtual device can be renamed, retyped and removed right here. A typed name stays in the box through
+       the redraw every new reading causes, and only becomes the name on Save. */
+    const name = app(frame).getByLabel("Name", { exact: true }), save = app(frame).getByRole("button", { name: "Save name" });
+    await expect(save).toHaveCount(0);
+    await name.fill("Waste");
+    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Drain tank" })).toHaveCount(1);
+    await expect(name).toHaveValue("Waste");
+    await expect(finish(frame)).toBeDisabled();
+    await expect(app(frame).getByRole("button", { name: /Save or put back Drain tank's new name first/ })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Put the name back to Drain tank" }).click();
+    await expect(name).toHaveValue("Drain tank");
+    await expect(save).toHaveCount(0);
+    await expect(finish(frame)).toBeEnabled();
+    await name.fill("Waste tank");
+    await save.click();
     await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank" })).toContainText("Tank");
+    await expect(save).toHaveCount(0);
+    await name.fill("Waste tank 2");
+    await name.press("Enter");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank 2" })).toHaveCount(1);
+    await name.fill("Waste tank");
+    await name.press("Enter");
     await app(frame).getByLabel("Add a virtual device").fill("Spare bucket");
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
     await app(frame).getByRole("button", { name: "Remove Spare bucket" }).click();
@@ -1893,17 +1956,88 @@ test.describe("manual controls", () => {
 
   test("dims a light controller, and sets a dehumidifier's mode and target, each shown once reported", async ({ page }) => {
     const frame = await openZone(page);
-    await controls(frame).getByLabel("Overhead light controller brightness").fill("40");
+    await controls(frame).getByRole("slider", { name: "Overhead light controller brightness", exact: true }).fill("40");
     await expect(row(frame, "Overhead light controller")).toContainText("On, 40%.");
     await row(frame, "Auxiliary dehumidifier").getByText("Eco", { exact: true }).click();
     await expect(row(frame, "Auxiliary dehumidifier")).toContainText("On, eco mode.");
-    await controls(frame).getByLabel("Auxiliary dehumidifier target humidity").fill("45");
-    await expect(row(frame, "Auxiliary dehumidifier")).toContainText("Target 45%");
+    await controls(frame).getByRole("slider", { name: "Auxiliary dehumidifier target humidity", exact: true }).fill("45");
+    /* The dial shows the number being chosen at once, so wait for the command and the device's report. */
+    await expect.poll(() => serviceCalls(page)).toBe(3);
+    await expect(row(frame, "Auxiliary dehumidifier").getByRole("slider")).toBeEnabled();
+    await expect(row(frame, "Auxiliary dehumidifier").locator(".dial")).toContainText("Target45%");
     expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data])).toEqual([
       ["light.turn_on", { entity_id: "light.garden_light_controller_overhead", brightness_pct: 40 }],
       ["humidifier.set_mode", { entity_id: "humidifier.auxiliary_dehumidifier", mode: "eco" }],
       ["humidifier.set_humidity", { entity_id: "humidifier.auxiliary_dehumidifier", humidity: 45 }],
     ]);
+  });
+
+  test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate("fakeHA.knobs.steps['light.garden_light_controller_overhead'] = { step: 5, floor: 15 }");
+    const lamp = row(frame, "Overhead light controller"), slider = controls(frame).getByRole("slider", { name: "Overhead light controller brightness", exact: true });
+    await slider.fill("63");
+    await expect(lamp.getByRole("status")).toHaveText("Went to 65%, not 63%. Overhead light controller keeps to its own steps and limits.", { timeout: 3000 });
+    await expect(lamp).toContainText("On, 65%.");
+    await expect(slider).toBeEnabled();
+    await expect(slider).toHaveValue("65");
+    /* Asked for a number it rounds back to where it already is, it reports nothing new. */
+    await slider.fill("67");
+    await expect(lamp.getByRole("status")).toHaveText("Not confirmed. Overhead light controller still reports 65%. It may not take 67%, so try another value.", { timeout: 15_000 });
+    await slider.fill("40");
+    await expect(lamp).toContainText("On, 40%.");
+    await expect(lamp.getByRole("status")).toHaveCount(0);
+  });
+
+  test("a dial's buttons step in the light's own steps and send one command once left alone, and its middle takes no tap", async ({ page }) => {
+    const frame = await openZone(page);
+    const lamp = row(frame, "Overhead light controller"), num = lamp.locator(".dial-num");
+    await lamp.scrollIntoViewIfNeeded();
+    const box = (await lamp.locator(".dial svg").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const raise = lamp.getByRole("button", { name: "Raise Overhead light controller brightness" });
+    await raise.click();
+    await raise.click();
+    /* The number moves ahead of the light only while it's being chosen, and nothing is sent yet. */
+    await expect(num).toHaveText("90%");
+    expect(await serviceCalls(page)).toBe(0);
+    await expect(lamp).toContainText("On, 90%.");
+    await expect(lamp.getByRole("status")).toHaveCount(0);
+    await lamp.getByRole("button", { name: "Lower Overhead light controller brightness" }).click();
+    await expect(lamp).toContainText("On, 85%.");
+    expect((await calls(page)).map((c) => c.data.brightness_pct)).toEqual([90, 85]);
+  });
+
+  test("dragging a dial's arc chooses the number under the pointer, sent when it lifts", async ({ page }) => {
+    const frame = await openZone(page);
+    const lamp = row(frame, "Overhead light controller"), num = lamp.locator(".dial-num");
+    await lamp.scrollIntoViewIfNeeded();
+    const box = (await lamp.locator(".dial svg").boundingBox())!;
+    /* Where a brightness sits on the arc: 270 degrees from bottom left, in the dial's 120 unit box. */
+    const at = (pct: number): [number, number] => {
+      const a = ((135 + (270 * (pct - 1)) / 99) * Math.PI) / 180;
+      return [box.x + ((60 + 48 * Math.cos(a)) / 120) * box.width, box.y + ((60 + 48 * Math.sin(a)) / 120) * box.height];
+    };
+    await page.mouse.move(...at(60));
+    await page.mouse.down();
+    await expect(num).toHaveText("60%");
+    await page.mouse.move(...at(45), { steps: 4 });
+    await page.mouse.move(...at(30), { steps: 4 });
+    await expect(num).toHaveText("30%");
+    await expect(lamp).toContainText("On, 80%.");
+    expect(await serviceCalls(page)).toBe(0);
+    await page.mouse.up();
+    await expect(lamp).toContainText("On, 30%.");
+    expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data])).toEqual([["light.turn_on", { entity_id: "light.garden_light_controller_overhead", brightness_pct: 30 }]]);
+    /* Turned and brought back to where the light already is, nothing is asked for. */
+    await page.mouse.move(...at(30));
+    await page.mouse.down();
+    await page.mouse.move(...at(50), { steps: 4 });
+    await page.mouse.move(...at(30), { steps: 4 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    expect(await serviceCalls(page)).toBe(1);
+    await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
   test("a device that goes offline disables its controls and keeps no dial for it", async ({ page }) => {

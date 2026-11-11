@@ -82,7 +82,10 @@ import {
   VIRTUAL_TYPES,
   type VirtualType,
   removeVirtual,
-  renameVirtual,
+  resetVirtualName,
+  saveVirtualName,
+  typeVirtualName,
+  unsavedNames,
   retypeVirtual,
   fits,
   flowOf,
@@ -100,7 +103,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, humidityChoices, onReport, wantOf, wanted, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, humidityChoices, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -214,7 +217,7 @@ import {
   timesOf,
   toMin,
 } from "./schedule";
-import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, periodRuns, sensorLine, tickWords, whenWords, yRange } from "./chart";
+import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
@@ -256,6 +259,11 @@ interface Review {
   busyText?: string;
   /* What's left after a partial failure, worked out again, so only that is tried again. */
   refresh?: () => Change[];
+}
+
+interface TargetsView {
+  kind: "targets";
+  zoneId: string;
 }
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
@@ -371,13 +379,14 @@ export class EcApp extends LitElement {
   declare private moreOpen: Set<string>;
   private mapFromGuide = false;
   declare private guide: string | null;
-  declare private modal: Guard | Review | null;
+  declare private modal: Guard | Review | TargetsView | null;
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
   declare private ctlDrag: Record<string, number>;
+  private dialTimers: Record<string, number> = {};
   private nextReq = 1;
   private waiting = new Map<number, (r: Result) => void>();
   private draftHeld = false;
@@ -1060,7 +1069,7 @@ export class EcApp extends LitElement {
       window.scrollTo(0, 0);
       return;
     }
-    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length))) return;
+    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length || unsavedNames(d).length))) return;
     const step: SetupStep = d.flow[0] === 3 ? "place" : "layout";
     const changes = layoutChanges(d, this.config);
     if (!changes.length) {
@@ -1719,16 +1728,17 @@ export class EcApp extends LitElement {
         if (b[2] !== null) parts.push(svg`<line x1=${x} x2=${x + w} y1=${Y(tg)} y2=${Y(tg)} stroke="var(--muted)" stroke-dasharray="3 3"></line>`);
       }
     }
-    const span = hi - lo, dp = k === "vpd" ? 2 : k !== "light" && span < 5 ? 1 : 0;
-    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(dp));
-    for (let t = 0; t <= 4; t++) {
-      const v = lo + (span * t) / 4, y = Y(v);
+    /* Both axes are labelled at round numbers and round clock times, wherever those fall inside the plot. */
+    const yt = niceTicks(lo, hi);
+    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(yt.dp));
+    for (const v of yt.at) {
+      const y = Y(v);
       parts.push(svg`<line x1=${L} x2=${W - Rm} y1=${y} y2=${y} stroke="var(--line)"></line><text x=${L - 6} y=${y + 4} text-anchor="end">${axis(v)}</text>`);
     }
-    const ticks = W < 520 ? 3 : 6;
-    for (let t = 0; t <= ticks; t++) {
-      const ix = Math.round((t / ticks) * n);
-      parts.push(svg`<text x=${X(ix)} y=${H - 6} text-anchor=${t === 0 ? "start" : t === ticks ? "end" : "middle"}>${tickWords(rows[0].line[ix].t, R.hours)}</text>`);
+    const t0 = rows[0].line[0].t, t1 = rows[0].line[n].t;
+    for (const t of n ? timeTicks(t0, t1, R.hours, W < 520) : []) {
+      const x = L + ((t - t0) / (t1 - t0)) * PW;
+      parts.push(svg`<line x1=${x} x2=${x} y1=${T + PH} y2=${T + PH + 4} stroke="var(--line)"></line><text x=${x} y=${H - 6} text-anchor=${x < L + 18 ? "start" : x > W - Rm - 18 ? "end" : "middle"}>${tickWords(t, R.hours)}</text>`);
     }
     const path = (line: Point[]) => {
       let d = "", pen = false;
@@ -2085,7 +2095,8 @@ export class EcApp extends LitElement {
      fetched itself and checks the action against what HA says the entity takes. A yes from the host means HA took the
      call, not that the device did it, so the row waits for the device to report. */
   private async control(d: ControlDevice, action: Action, value?: number | string): Promise<void> {
-    const want = wantOf(action, value), c: Ctl = { status: "sending", want, since: Date.now() };
+    const want = wantOf(action, value), from = valueOf(this.states[d.entity], want);
+    const c: Ctl = { status: "sending", want, since: Date.now(), from };
     const drag = { ...this.ctlDrag };
     delete drag[`${d.id}:${action}`];
     [this.ctl, this.ctlDrag] = [{ ...this.ctl, [d.id]: c }, drag];
@@ -2095,13 +2106,42 @@ export class EcApp extends LitElement {
       this.ctl = { ...this.ctl, [d.id]: { status: "error", error: r.error ?? "Home Assistant didn't take it." } };
       return;
     }
-    if (wanted(this.states[d.entity], want)) {
-      this.ctl = { ...this.ctl, [d.id]: { status: "done", want, at: Date.now() } };
+    const reported = onReport(c, this.states[d.entity], undefined, Date.now());
+    if (reported && reported !== c) {
+      this.ctl = { ...this.ctl, [d.id]: reported };
       return;
     }
     setTimeout(() => {
-      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want } };
+      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want, from } };
     }, CTL_GIVE_UP_MS);
+  }
+
+  /* A dial being turned: the number chosen so far, which nothing is sent for until the finger lifts or the buttons and
+     keys are left alone. */
+  private dialTo(key: string, n: number): void {
+    if (this.ctlDrag[key] !== n) this.ctlDrag = { ...this.ctlDrag, [key]: n };
+  }
+
+  private dialDrop(key: string): void {
+    clearTimeout(this.dialTimers[key]);
+    const drag = { ...this.ctlDrag };
+    delete drag[key];
+    this.ctlDrag = drag;
+  }
+
+  private dialSend(d: ControlDevice, action: "brightness" | "humidity"): void {
+    const key = `${d.id}:${action}`, n = this.ctlDrag[key];
+    clearTimeout(this.dialTimers[key]);
+    if (n === undefined) return;
+    /* Turned back to where the device already is, there's nothing to ask for. */
+    if (wanted(this.states[d.entity], wantOf(action, n))) this.dialDrop(key);
+    else void this.control(d, action, n);
+  }
+
+  private dialSettle(d: ControlDevice, action: "brightness" | "humidity"): void {
+    const key = `${d.id}:${action}`;
+    clearTimeout(this.dialTimers[key]);
+    this.dialTimers[key] = window.setTimeout(() => this.dialSend(d, action), DIAL_SETTLE_MS);
   }
 
   /* A device whose role isn't said yet: Device identification, at that device. The list waits for HA's catalog. */
@@ -2125,19 +2165,47 @@ export class EcApp extends LitElement {
       v.offList && v.mode ? `${cap(v.mode)} isn't in its mode list.` : "",
       others.length ? `Shared with ${others.join(" and ")}.` : "",
     ].filter(Boolean).join(" ");
-    const range = (action: "brightness" | "humidity", label: string, min: number, max: number, at: number, words: (n: number) => string) => {
-      const key = `${d.id}:${action}`, dragged = this.ctlDrag[key];
-      return html`<label class="ctl-range">
-        <span>${words(dragged ?? at)}</span>
-        <input type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(dragged ?? at))} ?disabled=${busy}
-          @input=${(e: Event) => (this.ctlDrag = { ...this.ctlDrag, [key]: Number((e.target as HTMLInputElement).value) })}
-          @change=${(e: Event) => void this.control(d, action, Number((e.target as HTMLInputElement).value))} />
-      </label>`;
+    /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
+       it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
+    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null) => {
+      const key = `${d.id}:${action}`, shown = this.ctlDrag[key] ?? at, step = DIAL_STEP[action];
+      const t = shown === null ? null : dialT(shown, min, max), [tx, ty] = dialAt(t ?? 0);
+      const under = (e: PointerEvent) => {
+        const box = ((e.currentTarget as Element).closest("svg") as SVGSVGElement).getBoundingClientRect();
+        return dialValue(((e.clientX - box.left) / box.width) * 120, ((e.clientY - box.top) / box.height) * 120, min, max);
+      };
+      const held = (e: PointerEvent) => (e.currentTarget as Element).hasPointerCapture(e.pointerId);
+      const [dx, dy] = dot === null || dot < min || dot > max ? [null, null] : dialAt(dialT(dot, min, max));
+      return html`<div class="dial ${busy ? "busy" : ""}" style="--c:${lk.c}">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <path class="trk" d=${dialArc(0, 1)}></path>
+          ${t === null ? nothing : svg`<path class="fil" d=${dialArc(0, t)}></path>`}
+          ${dx === null ? nothing : svg`<circle class="unit-dot" cx=${dx} cy=${dy} r="2.6"></circle>`}
+          ${t === null ? nothing : svg`<circle class="thumb" cx=${tx} cy=${ty} r="6.5"></circle>`}
+          <path class="hit" d=${dialArc(0, 1)}
+            @pointerdown=${(e: PointerEvent) => {
+              if (busy) return;
+              e.preventDefault();
+              (e.currentTarget as Element).setPointerCapture(e.pointerId);
+              this.dialTo(key, under(e));
+            }}
+            @pointermove=${(e: PointerEvent) => held(e) && this.dialTo(key, under(e))}
+            @pointerup=${(e: PointerEvent) => held(e) && this.dialSend(d, action)}
+            @pointercancel=${() => this.dialDrop(key)}></path>
+        </svg>
+        <div class="dial-mid"><span class="dial-cap">${caption}</span><span class="dial-num">${shown === null ? "Off" : html`${shown}<small>%</small>`}</span></div>
+        <input class="sr" type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(shown ?? max))} ?disabled=${busy}
+          @input=${(e: Event) => this.dialTo(key, Number((e.target as HTMLInputElement).value))}
+          @change=${() => this.dialSettle(d, action)} />
+        <div class="dial-steps">
+          <button aria-label="Lower ${label}" ?disabled=${busy || shown === null || shown <= min} @click=${() => { this.dialTo(key, stepDown(shown ?? min, step, min)); this.dialSettle(d, action); }}>&minus;</button>
+          <button aria-label="Raise ${label}" ?disabled=${busy || (shown !== null && shown >= max)} @click=${() => { this.dialTo(key, stepUp(shown ?? 0, step, max)); this.dialSettle(d, action); }}>+</button>
+        </div>
+      </div>`;
     };
     let controls: unknown = nothing;
     if (!v.down && v.kind === "dimmer") {
-      const dragged = this.ctlDrag[`${d.id}:brightness`];
-      controls = range("brightness", `${d.name} brightness`, 1, 100, v.brightness ?? 100, (n) => (dragged === undefined && v.brightness === null ? "" : `${n}%`));
+      controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
     } else if (!v.down && v.kind === "humidifier") {
       const choices = humidityChoices(v);
       controls = html`${v.modes.length
@@ -2152,7 +2220,7 @@ export class EcApp extends LitElement {
               </div>
             </fieldset>`
           : nothing}
-        ${choices.length > 1 && v.setpoint !== null ? range("humidity", `${d.name} target humidity`, choices[0], choices[choices.length - 1], v.setpoint, (n) => `Target ${n}%`) : nothing}`;
+        ${choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh) : nothing}`;
     }
     return html`<div class="dev" data-device=${d.id}>
       <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
@@ -2199,10 +2267,13 @@ export class EcApp extends LitElement {
     const z = this.zoneById(this.zoneId);
     if (!z) return nothing;
     const left = stepsLeft(z), L = storedLayout(this.raw(z.id));
-    return html`<div>
-        <h1>${z.name}</h1>
-        ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
-        <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
+    return html`<div class="card-head">
+        <div>
+          <h1>${z.name}</h1>
+          ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
+          <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
+        </div>
+        <button class="btn" @click=${() => this.viewTargets(z.id)}>View targets</button>
       </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
@@ -2211,12 +2282,8 @@ export class EcApp extends LitElement {
         : nothing}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
-      <div class="split">${this.controlsCard(z)}${this.zoneMap(z)}</div>
       ${this.historyCard(z)}
-      <section class="card">
-        <div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" @click=${() => this.openSchedule(z.id)}>Set targets</button></div></div>
-        ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
-      </section>
+      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>
       <p class="small muted">Activity arrives in a release that follows.</p>`;
   }
 
@@ -2710,7 +2777,8 @@ export class EcApp extends LitElement {
     }
     if (d.step === 3) body = this.placement(d, z);
     const heightless = d.step === 3 ? noHeight(d) : [];
-    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0));
+    const unsaved = d.step === 3 ? unsavedNames(d) : [];
+    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0 || unsaved.length > 0));
     const title = { 1: "Zone layout", 3: "Device placement" }[d.flow[0] === 3 ? 3 : 1];
     return html`<div><h1>${title}: ${z.name}</h1></div>
       <section class="card">
@@ -2722,7 +2790,9 @@ export class EcApp extends LitElement {
             ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
             : heightless.length
               ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
-              : nothing}
+              : unsaved.length
+                ? html`<button class="fixlink" @click=${() => this.pickItem(unsaved[0].id)}>Save or put back ${unsaved[0].name}'s new name first &rsaquo;</button>`
+                : nothing}
         </div>
       </section>`;
   }
@@ -2801,21 +2871,26 @@ export class EcApp extends LitElement {
         : nothing}
       ${sel?.kind === "virtual"
         ? html`<div class="now vedit">
-            <label class="field" for="lay-vrename"
-              >Name<input
-                id="lay-vrename"
-                type="text"
-                maxlength="40"
-                enterkeyhint="done"
-                autocomplete="off"
-                .value=${live(sel.name)}
-                @change=${(e: Event) => {
-                  const input = e.target as HTMLInputElement;
-                  this.setLay((x) => renameVirtual(x, sel.id, input.value));
-                  input.value = itemOf(this.lay as LayoutDraft, sel.id)?.name ?? input.value;
-                }}
-                @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-            /></label>
+            <div class="vname">
+              <div class="field">
+                <label for="lay-vrename">Name</label>
+                <span class="resettable"
+                  ><input
+                    id="lay-vrename"
+                    type="text"
+                    maxlength="40"
+                    enterkeyhint="done"
+                    autocomplete="off"
+                    .value=${live(d.vtyped[sel.id] ?? sel.name)}
+                    @input=${(e: Event) => this.setLay((x) => typeVirtualName(x, sel.id, (e.target as HTMLInputElement).value))}
+                    @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.setLay((x) => saveVirtualName(x, sel.id))}
+                  />${sel.id in d.vtyped
+                    ? html`<button class="reset" aria-label="Put the name back to ${sel.name}" title="Put back ${sel.name}" @click=${() => this.setLay((x) => resetVirtualName(x, sel.id))}>${icon("reset")}</button>`
+                    : nothing}</span
+                >
+              </div>
+              ${sel.id in d.vtyped ? html`<button class="btn" aria-label="Save name" @click=${() => this.setLay((x) => saveVirtualName(x, sel.id))}>Save</button>` : nothing}
+            </div>
             ${this.chips(`Type of ${sel.name}`, `vtype-${sel.id}`, VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), sel.type ?? "Other", (v) => this.setLay((x) => retypeVirtual(x, sel.id, v as VirtualType)))}
             <button class="btn danger" @click=${() => this.setLay((x) => removeVirtual(x, sel.id))}>Remove ${sel.name}</button>
           </div>`
@@ -3374,10 +3449,16 @@ export class EcApp extends LitElement {
   }
 
   /* The zone's limits as it is judged by them, day and night. */
+  /* The zone's limits, a tap away from its page rather than a card on it: they're looked up now and then, where the
+     readings, history and controls are what the page is opened for. */
+  private viewTargets(zoneId: string): void {
+    this.modal = { kind: "targets", zoneId };
+  }
+
   private targetsTable(z: Zone) {
     const raw = this.raw(z.id), b = liveBands(raw, this.states), onHelpers = Object.values(storedLinks(raw)).some(Boolean);
     const row = (p: Period, name: string, k: BandKey) => html`<tr><td>${name}<span class="sub">${METRIC[k].unit}</span></td>${b[p][k].map((v) => html`<td>${v === null ? "-" : v}</td>`)}</tr>`;
-    const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : ""}</td>`)}</tr>`;
+    const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : "-"}</td>`)}</tr>`;
     const table = (p: Period, title: string) => html`<div class="tbl-wrap">
       <table class="limits">
         <thead><tr><th>${title}</th>${LIMIT_NAME.map((n) => html`<th>${n}</th>`)}</tr></thead>
@@ -3499,6 +3580,22 @@ export class EcApp extends LitElement {
           <div class="row">
             <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
             <button class="btn danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (m.kind === "targets") {
+      const z = this.zoneById(m.zoneId);
+      if (!z) return nothing;
+      return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && this.closeModal()}>
+        <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+          <h2 id="dlg-title" tabindex="-1">Targets: ${z.name}</h2>
+          <div class="review-scroll">
+            ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
+          </div>
+          <div class="row">
+            <button class="btn" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+            <button class="btn primary" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;
