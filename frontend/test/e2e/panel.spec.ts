@@ -210,6 +210,8 @@ test.describe("talking to HA", () => {
       fakeHA.disk = JSON.stringify(next);
       fakeHA.restart();
     })()`);
+    /* Looked for with the menu open: closed, no page is listed, so there'd be nothing to wait for. */
+    await openNav(frame);
     await expect(tab(frame, "Nursery")).toHaveCount(0);
     await expect(app(frame).locator(".zone-card")).toHaveCount(1);
   });
@@ -1013,6 +1015,7 @@ test.describe("zones", () => {
     await expect(remove).toBeDisabled();
     await alert(frame).getByLabel("Type Nursery to confirm").fill("Nursery");
     await remove.click();
+    await openNav(frame);
     await expect(tab(frame, "Nursery")).toHaveCount(0);
     const after = await stored(page);
     expect(after.zones.map((z) => z.id)).toEqual(["garden", "veg"]);
