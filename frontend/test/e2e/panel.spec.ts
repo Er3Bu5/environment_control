@@ -1319,10 +1319,29 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByRole("group", { name: "Its type" }).getByLabel("Tank").check();
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
     await spot(frame, "Outside the wall, by unit 1").click();
-    /* Picked, a virtual device can be renamed, retyped and removed right here. */
-    await app(frame).getByLabel("Name", { exact: true }).fill("Waste tank");
-    await app(frame).getByLabel("Name", { exact: true }).press("Enter");
+    /* Picked, a virtual device can be renamed, retyped and removed right here. A typed name stays in the box through
+       the redraw every new reading causes, and only becomes the name on Save. */
+    const name = app(frame).getByLabel("Name", { exact: true }), save = app(frame).getByRole("button", { name: "Save name" });
+    await expect(save).toHaveCount(0);
+    await name.fill("Waste");
+    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Drain tank" })).toHaveCount(1);
+    await expect(name).toHaveValue("Waste");
+    await expect(finish(frame)).toBeDisabled();
+    await expect(app(frame).getByRole("button", { name: /Save or put back Drain tank's new name first/ })).toBeVisible();
+    await app(frame).getByRole("button", { name: "Put the name back to Drain tank" }).click();
+    await expect(name).toHaveValue("Drain tank");
+    await expect(save).toHaveCount(0);
+    await expect(finish(frame)).toBeEnabled();
+    await name.fill("Waste tank");
+    await save.click();
     await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank" })).toContainText("Tank");
+    await expect(save).toHaveCount(0);
+    await name.fill("Waste tank 2");
+    await name.press("Enter");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank 2" })).toHaveCount(1);
+    await name.fill("Waste tank");
+    await name.press("Enter");
     await app(frame).getByLabel("Add a virtual device").fill("Spare bucket");
     await app(frame).getByRole("button", { name: "Add", exact: true }).click();
     await app(frame).getByRole("button", { name: "Remove Spare bucket" }).click();

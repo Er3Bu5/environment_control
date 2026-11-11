@@ -82,7 +82,10 @@ import {
   VIRTUAL_TYPES,
   type VirtualType,
   removeVirtual,
-  renameVirtual,
+  resetVirtualName,
+  saveVirtualName,
+  typeVirtualName,
+  unsavedNames,
   retypeVirtual,
   fits,
   flowOf,
@@ -1016,7 +1019,7 @@ export class EcApp extends LitElement {
       window.scrollTo(0, 0);
       return;
     }
-    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length))) return;
+    if (layoutIssues(d).length || (d.step === 3 && (stranded(d).length || noHeight(d).length || unsavedNames(d).length))) return;
     const step: SetupStep = d.flow[0] === 3 ? "place" : "layout";
     const changes = layoutChanges(d, this.config);
     if (!changes.length) {
@@ -2676,7 +2679,8 @@ export class EcApp extends LitElement {
     }
     if (d.step === 3) body = this.placement(d, z);
     const heightless = d.step === 3 ? noHeight(d) : [];
-    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0));
+    const unsaved = d.step === 3 ? unsavedNames(d) : [];
+    const blocked = (d.step === 1 && issues.some((i) => i.startsWith("Width"))) || (d.step === 2 && issues.length > 0) || (d.step === 3 && (lost.length > 0 || heightless.length > 0 || unsaved.length > 0));
     const title = { 1: "Zone layout", 3: "Device placement" }[d.flow[0] === 3 ? 3 : 1];
     return html`<div><h1>${title}: ${z.name}</h1></div>
       <section class="card">
@@ -2688,7 +2692,9 @@ export class EcApp extends LitElement {
             ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
             : heightless.length
               ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
-              : nothing}
+              : unsaved.length
+                ? html`<button class="fixlink" @click=${() => this.pickItem(unsaved[0].id)}>Save or put back ${unsaved[0].name}'s new name first &rsaquo;</button>`
+                : nothing}
         </div>
       </section>`;
   }
@@ -2767,21 +2773,26 @@ export class EcApp extends LitElement {
         : nothing}
       ${sel?.kind === "virtual"
         ? html`<div class="now vedit">
-            <label class="field" for="lay-vrename"
-              >Name<input
-                id="lay-vrename"
-                type="text"
-                maxlength="40"
-                enterkeyhint="done"
-                autocomplete="off"
-                .value=${live(sel.name)}
-                @change=${(e: Event) => {
-                  const input = e.target as HTMLInputElement;
-                  this.setLay((x) => renameVirtual(x, sel.id, input.value));
-                  input.value = itemOf(this.lay as LayoutDraft, sel.id)?.name ?? input.value;
-                }}
-                @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-            /></label>
+            <div class="vname">
+              <div class="field">
+                <label for="lay-vrename">Name</label>
+                <span class="resettable"
+                  ><input
+                    id="lay-vrename"
+                    type="text"
+                    maxlength="40"
+                    enterkeyhint="done"
+                    autocomplete="off"
+                    .value=${live(d.vtyped[sel.id] ?? sel.name)}
+                    @input=${(e: Event) => this.setLay((x) => typeVirtualName(x, sel.id, (e.target as HTMLInputElement).value))}
+                    @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.setLay((x) => saveVirtualName(x, sel.id))}
+                  />${sel.id in d.vtyped
+                    ? html`<button class="reset" aria-label="Put the name back to ${sel.name}" title="Put back ${sel.name}" @click=${() => this.setLay((x) => resetVirtualName(x, sel.id))}>${icon("reset")}</button>`
+                    : nothing}</span
+                >
+              </div>
+              ${sel.id in d.vtyped ? html`<button class="btn" aria-label="Save name" @click=${() => this.setLay((x) => saveVirtualName(x, sel.id))}>Save</button>` : nothing}
+            </div>
             ${this.chips(`Type of ${sel.name}`, `vtype-${sel.id}`, VIRTUAL_TYPES.map((t) => ({ value: t, label: t })), sel.type ?? "Other", (v) => this.setLay((x) => retypeVirtual(x, sel.id, v as VirtualType)))}
             <button class="btn danger" @click=${() => this.setLay((x) => removeVirtual(x, sel.id))}>Remove ${sel.name}</button>
           </div>`
