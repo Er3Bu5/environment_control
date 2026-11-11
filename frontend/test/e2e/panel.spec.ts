@@ -1860,12 +1860,15 @@ test.describe("manual controls", () => {
 
   test("dims a light controller, and sets a dehumidifier's mode and target, each shown once reported", async ({ page }) => {
     const frame = await openZone(page);
-    await controls(frame).getByLabel("Overhead light controller brightness").fill("40");
+    await controls(frame).getByRole("slider", { name: "Overhead light controller brightness", exact: true }).fill("40");
     await expect(row(frame, "Overhead light controller")).toContainText("On, 40%.");
     await row(frame, "Auxiliary dehumidifier").getByText("Eco", { exact: true }).click();
     await expect(row(frame, "Auxiliary dehumidifier")).toContainText("On, eco mode.");
-    await controls(frame).getByLabel("Auxiliary dehumidifier target humidity").fill("45");
-    await expect(row(frame, "Auxiliary dehumidifier")).toContainText("Target 45%");
+    await controls(frame).getByRole("slider", { name: "Auxiliary dehumidifier target humidity", exact: true }).fill("45");
+    /* The dial shows the number being chosen at once, so wait for the command and the device's report. */
+    await expect.poll(() => serviceCalls(page)).toBe(3);
+    await expect(row(frame, "Auxiliary dehumidifier").getByRole("slider")).toBeEnabled();
+    await expect(row(frame, "Auxiliary dehumidifier").locator(".dial")).toContainText("Target45%");
     expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data])).toEqual([
       ["light.turn_on", { entity_id: "light.garden_light_controller_overhead", brightness_pct: 40 }],
       ["humidifier.set_mode", { entity_id: "humidifier.auxiliary_dehumidifier", mode: "eco" }],
@@ -1876,7 +1879,7 @@ test.describe("manual controls", () => {
   test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate("fakeHA.knobs.steps['light.garden_light_controller_overhead'] = { step: 5, floor: 15 }");
-    const lamp = row(frame, "Overhead light controller"), slider = controls(frame).getByLabel("Overhead light controller brightness");
+    const lamp = row(frame, "Overhead light controller"), slider = controls(frame).getByRole("slider", { name: "Overhead light controller brightness", exact: true });
     await slider.fill("63");
     await expect(lamp.getByRole("status")).toHaveText("Went to 65%, not 63%. Overhead light controller keeps to its own steps and limits.", { timeout: 3000 });
     await expect(lamp).toContainText("On, 65%.");
@@ -1887,6 +1890,57 @@ test.describe("manual controls", () => {
     await expect(lamp.getByRole("status")).toHaveText("Not confirmed. Overhead light controller still reports 65%. It may not take 67%, so try another value.", { timeout: 15_000 });
     await slider.fill("40");
     await expect(lamp).toContainText("On, 40%.");
+    await expect(lamp.getByRole("status")).toHaveCount(0);
+  });
+
+  test("a dial's buttons step in the light's own steps and send one command once left alone, and its middle takes no tap", async ({ page }) => {
+    const frame = await openZone(page);
+    const lamp = row(frame, "Overhead light controller"), num = lamp.locator(".dial-num");
+    await lamp.scrollIntoViewIfNeeded();
+    const box = (await lamp.locator(".dial svg").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const raise = lamp.getByRole("button", { name: "Raise Overhead light controller brightness" });
+    await raise.click();
+    await raise.click();
+    /* The number moves ahead of the light only while it's being chosen, and nothing is sent yet. */
+    await expect(num).toHaveText("90%");
+    expect(await serviceCalls(page)).toBe(0);
+    await expect(lamp).toContainText("On, 90%.");
+    await expect(lamp.getByRole("status")).toHaveCount(0);
+    await lamp.getByRole("button", { name: "Lower Overhead light controller brightness" }).click();
+    await expect(lamp).toContainText("On, 85%.");
+    expect((await calls(page)).map((c) => c.data.brightness_pct)).toEqual([90, 85]);
+  });
+
+  test("dragging a dial's arc chooses the number under the pointer, sent when it lifts", async ({ page }) => {
+    const frame = await openZone(page);
+    const lamp = row(frame, "Overhead light controller"), num = lamp.locator(".dial-num");
+    await lamp.scrollIntoViewIfNeeded();
+    const box = (await lamp.locator(".dial svg").boundingBox())!;
+    /* Where a brightness sits on the arc: 270 degrees from bottom left, in the dial's 120 unit box. */
+    const at = (pct: number): [number, number] => {
+      const a = ((135 + (270 * (pct - 1)) / 99) * Math.PI) / 180;
+      return [box.x + ((60 + 48 * Math.cos(a)) / 120) * box.width, box.y + ((60 + 48 * Math.sin(a)) / 120) * box.height];
+    };
+    await page.mouse.move(...at(60));
+    await page.mouse.down();
+    await expect(num).toHaveText("60%");
+    await page.mouse.move(...at(45), { steps: 4 });
+    await page.mouse.move(...at(30), { steps: 4 });
+    await expect(num).toHaveText("30%");
+    await expect(lamp).toContainText("On, 80%.");
+    expect(await serviceCalls(page)).toBe(0);
+    await page.mouse.up();
+    await expect(lamp).toContainText("On, 30%.");
+    expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data])).toEqual([["light.turn_on", { entity_id: "light.garden_light_controller_overhead", brightness_pct: 30 }]]);
+    /* Turned and brought back to where the light already is, nothing is asked for. */
+    await page.mouse.move(...at(30));
+    await page.mouse.down();
+    await page.mouse.move(...at(50), { steps: 4 });
+    await page.mouse.move(...at(30), { steps: 4 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    expect(await serviceCalls(page)).toBe(1);
     await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 

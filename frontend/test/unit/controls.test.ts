@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CTL_FLIP_MS, type Ctl, ctlLine, deviceView, humidityChoices, onReport, wantOf, wanted, zoneControls } from "../../src/frame/controls";
+import { CTL_FLIP_MS, type Ctl, ctlLine, deviceView, dialArc, dialAt, dialT, dialValue, humidityChoices, onReport, stepDown, stepUp, wantOf, wanted, zoneControls } from "../../src/frame/controls";
 import type { HaState } from "../../src/frame/readings";
 
 const st = (state: string, attributes: Record<string, unknown> = {}): HaState => ({ state, attributes, at: null });
@@ -117,5 +117,32 @@ describe("a control moves only when the device reports it", () => {
     expect(ctlLine({ status: "done", want: { state: "on", brightness: 80 }, at: 0, asked: 78 }, lamp, at80)).toEqual({ text: "Went to 80%, not 78%. Overhead keeps to its own steps and limits.", tone: "" });
     expect(ctlLine({ status: "stuck", want: wantOf("brightness", 82), from: 80 }, lamp, at80)?.text).toBe("Not confirmed. Overhead still reports 80%. It may not take 82%, so try another value.");
     expect(ctlLine({ status: "stuck", want: wantOf("brightness", 82), from: null }, lamp, deviceView("light.lamp", st("off", { supported_color_modes: ["brightness"] })))?.text).toBe("Not confirmed. Overhead still reports off. Try again, or check the device.");
+  });
+});
+
+describe("the dial a number is set on", () => {
+  const near = ([x, y]: [number, number]) => [Math.round(x), Math.round(y)];
+
+  it("runs from bottom left, over the top, to bottom right", () => {
+    expect([near(dialAt(0)), near(dialAt(0.5)), near(dialAt(1))]).toEqual([[26, 94], [60, 12], [94, 94]]);
+    expect(dialArc(0, 1)).toBe("M26.06 93.94A48 48 0 1 1 93.94 93.94");
+    expect(dialArc(0, 0.5)).toBe("M26.06 93.94A48 48 0 0 1 60.00 12.00");
+  });
+
+  it("reads the number under a point, and gets back the point a number sits at", () => {
+    expect(dialValue(60, 12, 1, 100)).toBe(51);
+    expect(dialValue(12, 60, 35, 80)).toBe(43);
+    for (const n of [1, 15, 40, 80, 100]) expect(dialValue(...dialAt(dialT(n, 1, 100)), 1, 100)).toBe(n);
+  });
+
+  it("stops at the nearer end for a point in the gap at the bottom, and never jumps to the other", () => {
+    expect(dialValue(50, 110, 1, 100)).toBe(1);
+    expect(dialValue(70, 110, 1, 100)).toBe(100);
+  });
+
+  it("steps to the next whole step either way, inside the limits", () => {
+    expect([stepUp(78, 5, 100), stepDown(78, 5, 1), stepUp(80, 5, 100), stepDown(80, 5, 1)]).toEqual([80, 75, 85, 75]);
+    expect([stepUp(98, 5, 100), stepUp(100, 5, 100), stepDown(3, 5, 1), stepUp(0, 5, 100)]).toEqual([100, 100, 1, 5]);
+    expect([stepUp(50, 1, 54), stepUp(54, 1, 54), stepDown(50, 1, 50)]).toEqual([51, 54, 50]);
   });
 });
