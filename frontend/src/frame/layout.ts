@@ -134,6 +134,9 @@ export interface LayoutDraft extends Layout {
   vname: string;
   vtype: VirtualType;
   vissue: string;
+  /* A new name typed for a virtual device and not yet saved, by its id. Kept here so it survives every redraw: the
+     page redraws whenever a reading arrives, which used to put the old name back in the box mid-word. */
+  vtyped: Record<string, string>;
 }
 
 const spot = (v: unknown): Spot | null => (Array.isArray(v) && v.length === 2 && num(v[0]) && num(v[1]) ? [v[0], v[1]] : null);
@@ -184,7 +187,7 @@ export const flowOf = (d: LayoutDraft): (1 | 2 | 3)[] => (d.flow.includes(2) && 
 export function openLayout(c: RawConfig, zoneId: string, flow: (1 | 2 | 3)[]): LayoutDraft {
   const z = c.zones.find((x) => x.id === zoneId);
   const items = zoneItems(c, zoneId);
-  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null, vname: "", vtype: "Other", vissue: "" };
+  const draft: LayoutDraft = { zoneId, flow, step: flow[0], ...storedLayout(z), ...items, pick: null, vname: "", vtype: "Other", vissue: "", vtyped: {} };
   if (flow[0] === 3) draft.pick = firstToPlace(draft);
   return draft;
 }
@@ -234,6 +237,28 @@ export function renameVirtual(d: LayoutDraft, id: string, typed: string): void {
   if (!d.vissue) v.name = name;
 }
 
+/* Typing only changes the box. The name changes on Save, and Reset puts the box back to the name as last saved. */
+export function typeVirtualName(d: LayoutDraft, id: string, typed: string): void {
+  const v = d.virt.find((x) => x.id === id);
+  if (!v) return;
+  if (typed === v.name) delete d.vtyped[id];
+  else d.vtyped[id] = typed;
+}
+
+export function saveVirtualName(d: LayoutDraft, id: string): void {
+  if (!(id in d.vtyped)) return;
+  renameVirtual(d, id, d.vtyped[id]);
+  if (!d.vissue) delete d.vtyped[id];
+}
+
+export function resetVirtualName(d: LayoutDraft, id: string): void {
+  delete d.vtyped[id];
+  d.vissue = "";
+}
+
+/* Virtual devices whose box holds a name that was never saved, which the wizard won't apply past. */
+export const unsavedNames = (d: LayoutDraft): Item[] => d.virt.filter((v) => v.id in d.vtyped);
+
 export function retypeVirtual(d: LayoutDraft, id: string, type: VirtualType): void {
   const v = d.virt.find((x) => x.id === id);
   if (v) v.type = type;
@@ -241,6 +266,7 @@ export function retypeVirtual(d: LayoutDraft, id: string, type: VirtualType): vo
 
 export function removeVirtual(d: LayoutDraft, id: string): void {
   d.virt = d.virt.filter((v) => v.id !== id);
+  delete d.vtyped[id];
   if (d.pick === id) d.pick = null;
 }
 

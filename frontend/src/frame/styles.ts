@@ -344,6 +344,14 @@ export const styles = css`
   .picker > p { margin: 0; overflow-wrap: anywhere; }
 
   .now.vedit { flex-direction: column; align-items: stretch; }
+  .vname { display: flex; align-items: flex-end; gap: 8px; }
+  .vname .field { flex: 1; }
+  .vname > .btn { padding: 9px 14px; font-size: 15px; }
+  .resettable { position: relative; display: block; }
+  .resettable:has(.reset) input { padding-right: 40px; }
+  .resettable .reset { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+  .resettable .reset:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+  .resettable .reset svg { width: 18px; height: 18px; fill: currentColor; }
 
   summary { cursor: pointer; color: var(--muted); }
   li.entity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 4px 0; }

@@ -4,6 +4,10 @@ import {
   noHeight,
   removeVirtual,
   renameVirtual,
+  resetVirtualName,
+  saveVirtualName,
+  typeVirtualName,
+  unsavedNames,
   retypeVirtual,
   allowed,
   applyLayout,
@@ -158,6 +162,33 @@ describe("the draft", () => {
     d.vtype = "Tank";
     addVirtual(d);
     expect([d.virt.at(-1)?.type, d.vtype]).toEqual(["Tank", "Other"]);
+  });
+
+  it("keeps a typed name apart from the saved one until Save, and Reset puts the saved one back", () => {
+    const c = config(), d = openLayout(c, "z", [3]);
+    typeVirtualName(d, "v-tank", "Waste");
+    expect([d.virt[0].name, d.vtyped["v-tank"], unsavedNames(d).map((v) => v.id), layoutChanges(d, c).length]).toEqual(["Drain tank", "Waste", ["v-tank"], 0]);
+    resetVirtualName(d, "v-tank");
+    expect([d.virt[0].name, unsavedNames(d).length]).toEqual(["Drain tank", 0]);
+    /* Typed back to the saved name, there's nothing to save. */
+    typeVirtualName(d, "v-tank", "Waste");
+    typeVirtualName(d, "v-tank", "Drain tank");
+    expect(unsavedNames(d)).toEqual([]);
+    typeVirtualName(d, "v-tank", " Waste tank ");
+    saveVirtualName(d, "v-tank");
+    expect([d.virt[0].name, d.vissue, unsavedNames(d).length]).toEqual(["Waste tank", "", 0]);
+  });
+
+  it("keeps a name that can't be saved in the box, saying why, and forgets it with the device", () => {
+    const d = openLayout(config(), "z", [3]);
+    typeVirtualName(d, "v-tank", "  ");
+    saveVirtualName(d, "v-tank");
+    expect([d.vissue, d.virt[0].name, d.vtyped["v-tank"]]).toEqual(["A virtual device needs a name.", "Drain tank", "  "]);
+    resetVirtualName(d, "v-tank");
+    expect(d.vissue).toBe("");
+    typeVirtualName(d, "v-tank", "Gone");
+    removeVirtual(d, "v-tank");
+    expect(d.vtyped).toEqual({});
   });
 
   it("renames a virtual device keeping its id, refusing a blank or taken name, and retypes and removes it", () => {

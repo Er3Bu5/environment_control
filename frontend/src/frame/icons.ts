@@ -18,6 +18,8 @@ const PATHS = {
   probe: "M8 2h8v9h-1.5v6L13 21v1h-2v-1l-1.5-4v-6H8V2Zm2 2v5h4V4h-4Z",
   /* A tank: a drum with a level line, for drain tanks and reservoirs. */
   tank: "M12 2C7.6 2 4 3.3 4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5c0-1.7-3.6-3-8-3Zm0 2c3.6 0 6 .9 6 1s-2.4 1-6 1-6-.9-6-1 2.4-1 6-1Zm6 14.9c-.3.4-2.6 1.1-6 1.1s-5.7-.7-6-1.1V13c1.5.7 3.6 1 6 1s4.5-.3 6-1v5.9Z",
+  /* A turn-back arrow, for putting a box back to what was last saved. */
+  reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
 } as const;
 
 export type IconName = keyof typeof PATHS;
