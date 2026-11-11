@@ -60,8 +60,11 @@ function baseMap(L: Layout, g: ReturnType<typeof geom>) {
     aisles.push(svg`<line x1=${g.wx} x2=${g.W - g.wx} y1=${g.Y(r)} y2=${g.Y(r)} stroke="var(--line)" stroke-dasharray="4 5"></line>`);
   for (let r = 0; r < L.rows; r++)
     for (let c = 0; c < L.cols; c++)
-      if (planted(L, r, c))
-        units.push(svg`<circle cx=${g.X(c)} cy=${g.Y(r)} r=${g.R} fill="var(--tile)" stroke="var(--off)"></circle><text x=${g.X(c)} y=${g.Y(r) + 5} text-anchor="middle" fill="var(--muted)" font-size="15">${r * L.cols + c + 1}</text>`);
+      if (planted(L, r, c)) {
+        /* A unit with a label shows it in place of its number, smaller when long and cut short past what the circle holds. */
+        const n = r * L.cols + c + 1, label = L.labels?.[n], shown = label ? (label.length > 6 ? `${label.slice(0, 5)}…` : label) : String(n), size = shown.length <= 3 ? 15 : shown.length <= 4 ? 13 : 11.5;
+        units.push(svg`<circle cx=${g.X(c)} cy=${g.Y(r)} r=${g.R} fill="var(--tile)" stroke="var(--off)">${label ? svg`<title>Unit ${n}, ${label}</title>` : nothing}</circle><text x=${g.X(c)} y=${g.Y(r) + size / 3} text-anchor="middle" fill=${label ? "var(--fg)" : "var(--muted)"} font-size=${size}>${shown}</text>`);
+      }
   return svg`<rect x=${g.wx} y=${g.wy} width=${g.W - g.wx * 2} height=${g.H - g.wy * 2} rx="4" fill="none" stroke="var(--muted)" stroke-width="2"><title>Wall</title></rect>${aisles}${units}`;
 }
 

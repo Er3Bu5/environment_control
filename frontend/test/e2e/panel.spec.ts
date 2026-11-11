@@ -1395,6 +1395,32 @@ test.describe("zone layout and placement", () => {
     await expect(card).not.toContainText("Above canopy In canopy");
   });
 
+  test("a unit can be given a label, which the map shows in place of its number", async ({ page }) => {
+    const frame = await openFromMenu(page, "Garden", "Zone layout");
+    await finish(frame).click();
+    const labels = app(frame).locator("details.ulabels");
+    await labels.locator("summary").click();
+    await expect(labels.getByRole("textbox")).toHaveCount(12);
+    await labels.getByLabel("Label for unit 2", { exact: true }).fill("GG4");
+    /* Typed text stays through the redraw every new reading causes. */
+    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
+    await expect(labels.getByLabel("Label for unit 2", { exact: true })).toHaveValue("GG4");
+    await labels.getByLabel("Label for unit 7", { exact: true }).fill("Blue Dream");
+    const units = app(frame).locator(".map svg > text");
+    await expect(units.nth(1)).toHaveText("GG4");
+    await expect(units.nth(6)).toHaveText("Blue …");
+    await expect(units.nth(0)).toHaveText("1");
+    await finish(frame).click();
+    await expect(dialog(frame).locator(".review-row")).toHaveText(["Unit 2 labelNone → GG4", "Unit 7 labelNone → Blue Dream"]);
+    await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
+    const z = (await stored(page)).zones.find((x) => x.id === "garden") as unknown as { layout: { labels?: Record<string, string> } };
+    expect(z.layout.labels).toEqual({ 2: "GG4", 7: "Blue Dream" });
+    /* The zone's own map shows them too. */
+    await tab(frame, "Garden").click();
+    await expect(app(frame).locator(".map svg > text").nth(1)).toHaveText("GG4");
+  });
+
   test("a grid that strands a placed sensor carries on to the map, and can't save until it's placed again", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await finish(frame).click();
