@@ -1492,7 +1492,7 @@ test.describe("zone layout and placement", () => {
     const z = (await stored(page)).zones.find((x) => x.id === "garden") as unknown as { layout: { labels?: Record<string, string> } };
     expect(z.layout.labels).toEqual({ 2: "GG4", 7: "Blue Dream" });
     /* The zone's own map shows them too. */
-    await tab(frame, "Garden").click();
+    await goTo(frame, "Garden");
     await expect(app(frame).locator(".map svg > text").nth(1)).toHaveText("GG4");
   });
 
