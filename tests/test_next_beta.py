@@ -1,6 +1,7 @@
 """The Beta workflow's version numbering and its test of whether a merge changed anything that ships."""
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -46,3 +47,58 @@ def test_the_next_beta_follows_the_newest_release(tags, expected) -> None:
 )
 def test_only_a_change_to_what_ships_makes_a_beta(paths, expected) -> None:
     assert next_beta.ships(paths) is expected
+
+
+def _git(repo: Path, *args: str) -> str:
+    cmd = ["git", "-c", "user.name=t", "-c", "user.email=nobody", "-c", "commit.gpgsign=false", *args]
+    return subprocess.run(cmd, cwd=repo, capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
+
+
+def _merge(repo: Path, text: str) -> str:
+    path = repo / "custom_components" / "environment_control" / "x.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", text)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_a_merge_a_newer_release_already_holds_makes_no_beta(tmp_path, monkeypatch, capsys) -> None:
+    """Three merges queue up and the newest is released first: starting an older one again must not publish it."""
+    _git(tmp_path, "init", "-q")
+    first, second, third = (_merge(tmp_path, n) for n in ("one", "two", "three"))
+    _git(tmp_path, "tag", "v0.1.2b2", first)
+    monkeypatch.chdir(tmp_path)
+
+    def outputs(commit: str) -> dict[str, str]:
+        assert next_beta.main(["next_beta.py", commit]) == 0
+        return dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())
+
+    # In turn, each is ahead of the newest release and ships.
+    ahead = {"version": "0.1.2b3", "ship": "true", "since": "v0.1.2b2", "included": "false", "title": "two"}
+    assert outputs(second) == ahead
+    _git(tmp_path, "tag", "v0.1.2b3", third)
+    # The release built from the third merge holds the second, and the third itself.
+    held = {"version": "0.1.2b4", "ship": "false", "since": "v0.1.2b3", "included": "true"}
+    assert outputs(second) == {**held, "title": "two"}
+    assert outputs(third) == {**held, "title": "three"}
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        # A merge commit: the pull request's title is the first line of its body.
+        ("Merge pull request #33 from someone/feat/zones\n\nZone page: History first\n", "Zone page: History first"),
+        # A squashed merge: the title is the subject, with the pull request's number after it.
+        ("Controls: set brightness on a dial (#32)\n\nLonger text.\n", "Controls: set brightness on a dial"),
+        ("A plain commit\n\nBody.\n", "A plain commit"),
+        # A merge commit with no body falls back to its subject.
+        ("Merge pull request #7 from someone/fix", "Merge pull request #7 from someone/fix"),
+        # One line of plain text, so it can't add a second workflow output.
+        ("Merge pull request #9 from a/b\n\nNice\ttitle\x07 here\nship=true\n", "Nice title here"),
+        ("x" * 300, "x" * 100),
+        ("", ""),
+    ],
+)
+def test_a_release_is_named_after_the_merge_it_carries(message, expected) -> None:
+    assert next_beta.title_of(message) == expected

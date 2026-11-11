@@ -1,7 +1,9 @@
 """The next beta after the newest release tag, and whether anything that ships has changed since that release.
 
 Run by the Beta workflow once Validate has passed on a merge to main. Prints GitHub Actions outputs: version, ship
-(true or false) and since (the release it was compared with). Usage: python3 scripts/next_beta.py <commit>
+(true or false), since (the release it was compared with) and included (true when that release was already built from
+this commit or a later one) and title (what the merge was, to name the release). Usage: python3 scripts/next_beta.py
+<commit>
 """
 
 from __future__ import annotations
@@ -68,6 +70,36 @@ def _git(*args: str) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout  # noqa: S603
 
 
+def included(commit: str, release: str) -> bool:
+    """Whether the release was built from this commit or a later one, so it already holds everything here.
+
+    A run started again after a newer merge went out would otherwise publish this older code under a newer number,
+    and Home Assistant would offer it as an update.
+    """
+    cmd = ["git", "merge-base", "--is-ancestor", commit, release]
+    return subprocess.run(cmd, capture_output=True, check=False).returncode == 0  # noqa: S603
+
+
+MERGE = re.compile(r"^Merge pull request #\d+ from \S+$")
+SQUASH = re.compile(r"\s*\(#\d+\)$")
+MAX_TITLE = 100
+
+
+def title_of(message: str) -> str:
+    """What a merge was, in its pull request's own words, to name the release with.
+
+    Home Assistant shows a release as its tag, then its name, so a name that is only the version reads "v0.1.2b2 -
+    0.1.2b2". A merge commit carries the pull request's title as the first line of its body; a squashed one as its
+    subject, with the pull request's number after it. One line of plain text, since it becomes a workflow output.
+    """
+    lines = [" ".join(line.split()) for line in message.splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    title = lines[1] if MERGE.match(lines[0]) and len(lines) > 1 else SQUASH.sub("", lines[0])
+    return "".join(ch for ch in title if ch.isprintable())[:MAX_TITLE].strip()
+
+
 def main(argv: list[str]) -> int:
     commit = argv[1] if len(argv) > 1 else ""
     if not COMMIT.match(commit):
@@ -75,11 +107,14 @@ def main(argv: list[str]) -> int:
         return 2
     tags = _git("tag", "--list", "v*").split()
     latest = newest(tags)
-    changed = _git("diff", "--name-only", latest, commit).split() if latest else []
+    behind = latest is not None and included(commit, latest)
+    changed = _git("diff", "--name-only", latest, commit).split() if latest and not behind else []
     ship = latest is None or ships(changed)
     print(f"version={next_beta(tags)}")
     print(f"ship={'true' if ship else 'false'}")
     print(f"since={latest or ''}")
+    print(f"included={'true' if behind else 'false'}")
+    print(f"title={title_of(_git('log', '-1', '--format=%B', commit))}")
     return 0
 
 

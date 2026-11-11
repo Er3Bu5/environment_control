@@ -18,6 +18,10 @@ on:
         description: "Publish a GitHub release; false builds the zip and keeps it as a workflow artifact"
         type: boolean
         default: false
+      title:
+        description: "What the release is, in a few words. Home Assistant shows it after the tag"
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -90,6 +94,7 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       REF: ${{ inputs.ref }}
+      TITLE: ${{ inputs.title }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
@@ -107,5 +112,7 @@ jobs:
       - name: Publish the release
         run: |
           pre=""; [[ "$VERSION" == *b* ]] && pre="--prerelease"
+          # Home Assistant shows a release as its tag then its name, so the name says what the release is, never the
+          # version again ("v0.1.2b2 - 0.1.2b2").
           gh release create "v$VERSION" environment_control.zip environment_control.zip.sha256 \
-            --target "$REF" --title "$VERSION" --generate-notes $pre
+            --target "$REF" --title "${TITLE:-Environment Control}" --generate-notes $pre
