@@ -62,6 +62,8 @@ export type HostMessage =
   | { type: "states"; states: Record<string, unknown> }
   | { type: "theme"; theme: Theme }
   | { type: "narrow"; narrow: boolean }
+  /* The back gesture or button, which the host hears and the frame can't. */
+  | { type: "back" }
   | { type: "result"; req: number; ok: boolean; error?: string; catalog?: Catalog; stored?: Stored; history?: History };
 
 const COLOR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|[a-z]{3,20})$/i;
@@ -168,6 +170,8 @@ export function readHostMessage(data: unknown): HostMessage | null {
     }
     case "narrow":
       return typeof data.narrow === "boolean" ? { type: "narrow", narrow: data.narrow } : null;
+    case "back":
+      return { type: "back" };
     case "result": {
       if (!Number.isInteger(data.req) || typeof data.ok !== "boolean") return null;
       const catalog = "catalog" in data ? readCatalog(data.catalog) : undefined;

@@ -31,6 +31,7 @@ HOST_ACCEPTS = {
     "history",
     "setting",
     "device",
+    "nav",
 }
 FRAME_BANNED = {
     "callService": r"\bcallService\b",

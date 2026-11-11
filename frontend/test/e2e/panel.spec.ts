@@ -207,6 +207,51 @@ test.describe("talking to HA", () => {
     if (w!.width > 900) expect((await card("Controls").locator(".dev", { hasText: "Auxiliary dehumidifier" }).boundingBox())!.height).toBeLessThan(175);
   });
 
+  test("the back gesture goes back a step inside the panel, and leaves it only from where it started", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const h1 = (name: string) => app(frame).getByRole("heading", { level: 1, name, exact: true });
+    /* The page keeps one history entry of its own in front while the panel has somewhere to go back to. */
+    const held = () => page.evaluate(() => !!(history.state && (history.state as { ecBack?: boolean }).ecBack));
+    const back = () => page.evaluate(() => history.back());
+    await expect(h1("Overview")).toBeVisible();
+    expect(await held()).toBe(false);
+    await goTo(frame, "Garden");
+    await expect(h1("Garden")).toBeVisible();
+    await expect.poll(held).toBe(true);
+    await goTo(frame, "Setup");
+    await expect(h1("Setup")).toBeVisible();
+    const entries = await page.evaluate(() => history.length);
+    await back();
+    await expect(h1("Garden")).toBeVisible();
+    await expect.poll(held).toBe(true);
+    await back();
+    await expect(h1("Overview")).toBeVisible();
+    /* Back where it started, nothing is held, so the next back gesture is Home Assistant's. */
+    await expect.poll(held).toBe(false);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+
+    /* A menu closes, an editor steps back, and unsaved changes are asked about before anything is lost. */
+    await openNav(frame);
+    await expect(tab(frame, "Setup")).toBeVisible();
+    await back();
+    await expect(app(frame).getByRole("navigation").getByRole("menuitem")).toHaveCount(0);
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await back();
+    await expect(app(frame).getByRole("alertdialog")).toContainText("Discard unsaved changes?");
+    await back();
+    await expect(app(frame).getByRole("alertdialog")).toHaveCount(0);
+    await expect(app(frame).getByLabel("Zone name")).toHaveValue("Flower tent");
+    await back();
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Discard and continue" }).click();
+    await expect(h1("Setup")).toBeVisible();
+    await back();
+    await expect(h1("Overview")).toBeVisible();
+    await expect.poll(held).toBe(false);
+  });
+
   test("after HA restarts, the panel reads what's stored again", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
