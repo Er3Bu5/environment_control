@@ -1293,6 +1293,8 @@ test.describe("after an update", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    /* The frame tells the host a draft is open a moment after it's drawn. */
+    await expect.poll(() => page.evaluate<boolean>("panel.draftOpen")).toBe(true);
     await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
     await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
     await expect.poll(() => hostDialogOpen(page)).toBe(true);
