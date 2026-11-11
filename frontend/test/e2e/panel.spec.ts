@@ -162,7 +162,7 @@ test.describe("talking to HA", () => {
     const frame = await panelFrame(page);
     await frame.evaluate(() => {
       for (const m of [
-        { v: 1, type: "device", id: "heater", action: "turn_on", req: 1 },
+        { v: 1, type: "switch", entity_id: "switch.heater_mains", action: "turn_on", req: 1 },
         { v: 1, type: "calibrate", sensor: "s1", value: 0, req: 2 },
         { v: 1, type: "setting", zone: "nursery", name: "bands.day.temperature.min", value: 20, req: 3 },
         { v: 1, type: "save", base: 0, config: { zones: [], devices: [] }, req: 4 },
@@ -1755,4 +1755,127 @@ test.describe("leaving with a draft open", () => {
     await expect.poll(() => page.frames().length).toBe(2);
     expect(await leaveAsks(page)).toBe(false);
   });
+});
+
+test.describe("manual controls", () => {
+  const controls = (frame: Frame) => app(frame).locator("#controls");
+  const row = (frame: Frame, name: string) => controls(frame).locator(".dev", { has: frame.locator(".dev-name", { hasText: new RegExp(`^${name}$`) }) });
+  const sw = (frame: Frame, name: string) => controls(frame).getByRole("switch", { name, exact: true });
+  const calls = (page: Page) => page.evaluate<{ domain: string; service: string; data: Record<string, unknown> }[]>("fakeHA.calls");
+  async function openZone(page: Page, zone = "Garden"): Promise<Frame> {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await tab(frame, zone).click();
+    await expect(controls(frame)).toBeVisible();
+    return frame;
+  }
+  const device = (frame: Frame, body: Record<string, unknown>) =>
+    frame.evaluate(
+      (b) =>
+        new Promise<{ ok: boolean; error?: string }>((resolve) => {
+          const req = 9000 + Math.floor(Math.random() * 1000);
+          window.addEventListener("message", (e) => e.data?.type === "result" && e.data.req === req && resolve(e.data));
+          parent.postMessage({ v: 1, type: "device", req, ...b }, "*");
+        }),
+      body,
+    );
+
+  test("groups the zone's devices by what they move, names shared hardware, and holds back a device with no role", async ({ page }) => {
+    const frame = await openZone(page);
+    await expect(controls(frame).locator("h3")).toHaveText(["Humidity", "Temperature", "Airflow", "Lights"]);
+    await expect(row(frame, "Heater")).toContainText("Off. Shared with Veg and Nursery.");
+    await expect(row(frame, "Dehumidifier")).toContainText("Unit RH 56%. Normal isn't in its mode list.");
+    await expect(row(frame, "Air conditioner exhaust fan")).toContainText("Unavailable");
+    await expect(sw(frame, "Air conditioner exhaust fan")).toBeDisabled();
+    await expect(controls(frame)).not.toContainText("Spare plug");
+    await expect(row(frame, "Plug 7")).toHaveCount(0);
+    await controls(frame).getByRole("button", { name: /Plug 7 isn't shown until you say what it is/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: /Device identification/ })).toBeVisible();
+    await expect(app(frame).locator("#md-switch_plug_7")).toBeInViewport();
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("a tap is shown as sent, and the switch moves only once the device reports it", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate("fakeHA.knobs.reportMs = 1500");
+    await sw(frame, "Heater").click();
+    await expect(row(frame, "Heater").getByRole("status")).toHaveText("Sent. Waiting for Heater to report back.");
+    await expect(sw(frame, "Heater")).toHaveAttribute("aria-checked", "false");
+    await expect(sw(frame, "Heater")).toBeDisabled();
+    expect(await calls(page)).toEqual([expect.objectContaining({ domain: "switch", service: "turn_on", data: { entity_id: "switch.heater_mains" } })]);
+    await expect(sw(frame, "Heater")).toHaveAttribute("aria-checked", "true");
+    await expect(row(frame, "Heater").getByRole("status")).toHaveCount(0);
+    await expect(row(frame, "Heater")).toContainText("On. Shared with Veg and Nursery.");
+  });
+
+  test("a command the device drops is never shown as done, says what it still reports, and can be tried again", async ({ page }) => {
+    test.setTimeout(45_000);
+    const frame = await openZone(page);
+    await page.evaluate("fakeHA.knobs.dropNext = true");
+    await sw(frame, "Heater").click();
+    await expect(row(frame, "Heater").getByRole("status")).toHaveText("Not confirmed. Heater still reports off. A Tuya plug can drop a command without saying, so try again.", { timeout: 15_000 });
+    await expect(sw(frame, "Heater")).toHaveAttribute("aria-checked", "false");
+    await sw(frame, "Heater").click();
+    await expect(sw(frame, "Heater")).toHaveAttribute("aria-checked", "true");
+    await expect(row(frame, "Heater").getByRole("status")).toHaveCount(0);
+    expect((await calls(page)).map((c) => c.service)).toEqual(["turn_on", "turn_on"]);
+  });
+
+  test("a failsafe that puts a device straight back is said, rather than the control looking broken", async ({ page }) => {
+    const frame = await openZone(page, "Veg");
+    await sw(frame, "Oscillating fans").click();
+    await expect(row(frame, "Oscillating fans").getByRole("status")).toHaveText("Put back by Home Assistant straight after, most likely a failsafe or the light schedule.");
+    await expect(sw(frame, "Oscillating fans")).toHaveAttribute("aria-checked", "true");
+  });
+
+  test("dims a light controller, and sets a dehumidifier's mode and target, each shown once reported", async ({ page }) => {
+    const frame = await openZone(page);
+    await controls(frame).getByLabel("Overhead light controller brightness").fill("40");
+    await expect(row(frame, "Overhead light controller")).toContainText("On, 40%.");
+    await row(frame, "Auxiliary dehumidifier").getByText("Eco", { exact: true }).click();
+    await expect(row(frame, "Auxiliary dehumidifier")).toContainText("On, eco mode.");
+    await controls(frame).getByLabel("Auxiliary dehumidifier target humidity").fill("45");
+    await expect(row(frame, "Auxiliary dehumidifier")).toContainText("Target 45%");
+    expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data])).toEqual([
+      ["light.turn_on", { entity_id: "light.garden_light_controller_overhead", brightness_pct: 40 }],
+      ["humidifier.set_mode", { entity_id: "humidifier.auxiliary_dehumidifier", mode: "eco" }],
+      ["humidifier.set_humidity", { entity_id: "humidifier.auxiliary_dehumidifier", humidity: 45 }],
+    ]);
+  });
+
+  test("a device that goes offline disables its controls and keeps no dial for it", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate("fakeHA.offline('humidifier.garden_dehumidifier', true)");
+    await expect(row(frame, "Dehumidifier")).toContainText("Unavailable");
+    await expect(sw(frame, "Dehumidifier")).toBeDisabled();
+    await expect(controls(frame).getByLabel("Dehumidifier target humidity", { exact: true })).toHaveCount(0);
+  });
+
+  test("the host sends to the device the setup maps, whatever entity the frame names", async ({ page }) => {
+    const frame = await openZone(page);
+    expect((await device(frame, { id: "heater", action: "turn_on", entity_id: "switch.reservoir_pump" })).ok).toBe(true);
+    expect((await calls(page)).map((c) => c.data.entity_id)).toEqual(["switch.heater_mains"]);
+  });
+
+  const REFUSED: [string, Record<string, unknown>, string][] = [
+    ["a device in no zone", { id: "spare-plug", action: "turn_on" }, "isn't mapped to a zone"],
+    ["a device the setup doesn't have", { id: "nobody", action: "turn_on" }, "isn't mapped to a zone"],
+    ["a device whose role isn't said", { id: "plug", action: "turn_on" }, "Say what that device is"],
+    ["an action the panel doesn't know", { id: "heater", action: "toggle" }, "Not a device or action"],
+    ["brightness on a plug", { id: "heater", action: "brightness", value: 50 }, "isn't something this device takes"],
+    ["brightness past 100", { id: "lc-over", action: "brightness", value: 101 }, "isn't something this device takes"],
+    ["brightness that isn't a whole percent", { id: "lc-over", action: "brightness", value: 40.5 }, "isn't something this device takes"],
+    ["a mode not in the device's list", { id: "dehu", action: "mode", value: "normal" }, "isn't something this device takes"],
+    ["a target past the device's limits", { id: "dehu", action: "humidity", value: 90 }, "isn't something this device takes"],
+    ["an unavailable device", { id: "acfan", action: "turn_on" }, "unavailable"],
+  ];
+  for (const [what, body, why] of REFUSED) {
+    test(`the host refuses ${what}`, async ({ page }) => {
+      const frame = await openZone(page);
+      const r = await device(frame, body);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain(why);
+      expect(await serviceCalls(page)).toBe(0);
+    });
+  }
 });

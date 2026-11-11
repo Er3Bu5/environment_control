@@ -204,6 +204,30 @@ export const styles = css`
   td .sub { display: block; font-size: 12px; color: var(--muted); }
   @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
+  /* Controls sit beside the map on a wide screen and above it on a narrow one, as the mock has them. */
+  .split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); gap: 12px; align-items: start; }
+  @media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); } }
+  .cgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .ctl-reading { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+  .devs { display: flex; flex-direction: column; gap: 8px; }
+  .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
+  .dev-text { flex: 1 1 150px; min-width: 0; }
+  .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; margin-left: auto; max-width: 100%; }
+  .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
+  .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
+  .sw.on { justify-content: flex-end; border-color: var(--primary); }
+  .sw.on i { background: var(--primary); }
+  .sw:disabled, .ctl-range input:disabled, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+  .ctl-range { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .ctl-range input { width: 130px; accent-color: var(--primary); }
+  .ctl-modes .chiprow { justify-content: flex-end; }
+  .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+  .ctl-status.crit { color: var(--crit); }
+  .ctl-status.warn { color: var(--fg); }
+  .ctl-status.warn::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--warn); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
   ul { list-style: none; margin: 0; padding: 0; }
   li.device { padding: 10px 0; border-top: 1px solid var(--line); }
   .name { font-weight: 500; overflow-wrap: anywhere; }

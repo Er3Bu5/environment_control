@@ -9,6 +9,8 @@ export interface HaState {
   state: string;
   attributes: Record<string, unknown>;
   at: string | null;
+  /* Who made the last change, as the host reads HA's context: a person, an automation or the device itself. */
+  by?: "user" | "automation" | "device";
 }
 
 /* The boards report every 10 seconds; one silent for this long has stopped, whatever it last said. */
@@ -29,7 +31,8 @@ export function readState(raw: unknown): HaState | null {
   const r = raw as Record<string, unknown>;
   if (typeof r.state !== "string") return null;
   const attributes = typeof r.attributes === "object" && r.attributes !== null && !Array.isArray(r.attributes) ? (r.attributes as Record<string, unknown>) : {};
-  return { state: r.state, attributes, at: typeof r.at === "string" ? r.at : null };
+  const by = r.by === "user" || r.by === "automation" || r.by === "device" ? r.by : undefined;
+  return { state: r.state, attributes, at: typeof r.at === "string" ? r.at : null, ...(by ? { by } : {}) };
 }
 
 /* A number from a state, or null for anything that isn't one. */

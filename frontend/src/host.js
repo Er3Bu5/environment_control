@@ -6,9 +6,10 @@
    Anything the frame sends that isn't on the allowlist is dropped.
 
    It saves Setup to the integration's own storage through the backend, and asks you first, in a dialog it draws itself,
-   before a save makes any device controllable or links a helper. This release moves nothing: there is no service call
-   here. Device controls, calibration and setting writes arrive in the releases that use them, each checked here against
-   the setup this element fetched itself, never the frame's copy.
+   before a save makes any device controllable or links a helper. It is the only code that calls a service, and only
+   for its fixed write table: a mapped device on or off, its brightness, mode or target humidity; a sensor's leaf
+   temperature offset; a zone's linked helper. Each is checked here against the setup this element fetched itself and
+   HA's own state, never the frame's copy, and the frame never names an entity or a service.
    Kept small and dependency-free on purpose, because it runs with full trust, and shipped exactly as written. */
 import FRAME_HTML from "./frame.js";
 
@@ -22,6 +23,10 @@ const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
 const NUMBER = /^number\.[a-z0-9_]{1,200}$/;
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CELSIUS = ["°C", "℃"];
+/* What a device's control can ask for, and the roles a control is shown for. A device whose role isn't said, or is
+   Other, has no control in the panel, so nothing is sent to it either. */
+const ACTIONS = ["turn_on", "turn_off", "brightness", "mode", "humidity"];
+const CONTROL_ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light"];
 /* The ranges the panel draws: the light card's 4 hours and the History card's four. The backend holds the same list. */
 const HISTORY_HOURS = [4, 6, 24, 72, 168];
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
@@ -326,6 +331,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "calibrate") this.calibrate(m);
     else if (m.type === "history") this.history(m);
     else if (m.type === "setting") this.setting(m);
+    else if (m.type === "device") this.device(m);
     /* HA's own event for opening its sidebar, the one its panels fire from their menu button. It carries nothing. */
     else if (m.type === "sidebar") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
   }
@@ -373,6 +379,44 @@ class EnvironmentControlPanel extends HTMLElement {
       if (m.value < a.min || m.value > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) return refuse(`It has to be between ${a.min} and ${a.max}, in steps of ${a.step}.`);
       call = ["input_number", "set_value", { entity_id: entity, value: m.value }];
     }
+    try {
+      await this._hass.callService(...call);
+    } catch (err) {
+      return refuse(String((err && /** @type {any} */ (err).message) || err));
+    }
+    this.reply(m.req, true);
+  }
+  /* The device write: a device id and an action, never an entity or a service. The entity is the one the stored setup
+     maps to a zone, which a person said yes to when it was saved, and the action has to be one that entity takes by HA's
+     own account: brightness only on a light that dims, a mode from the humidifier's own list, a target inside its own
+     limits. A yes means HA took the call, not that the device did it: the frame waits for the device to report. */
+  /** @param {any} m */
+  async device(m) {
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    if (typeof m.id !== "string" || !ITEM_ID.test(m.id) || !ACTIONS.includes(m.action)) return refuse("Not a device or action this panel knows.");
+    /** @type {any[]} */
+    const devices = this.config.devices || [], zones = this.config.zones || [];
+    const d = devices.find((x) => x && x.id === m.id);
+    const mapped = d && typeof d.entity === "string" && ENTITY.test(d.entity) && Array.isArray(d.zones) && d.zones.some((/** @type {unknown} */ id) => zones.some((/** @type {any} */ z) => z && z.id === id));
+    if (!mapped) return refuse("That device isn't mapped to a zone.");
+    if (!CONTROL_ROLES.includes(d.type)) return refuse("Say what that device is in Device identification first.");
+    const entity = d.entity, domain = entity.split(".")[0], st = this._hass.states[entity];
+    if (!st) return refuse(`Home Assistant has no ${entity}.`);
+    if (st.state === "unavailable") return refuse("It's unavailable in Home Assistant.");
+    const a = st.attributes || {}, target = { entity_id: entity }, num = (/** @type {unknown} */ v) => typeof v === "number" && Number.isFinite(v);
+    /** @type {[string, string, Record<string, unknown>] | null} */
+    let call = null;
+    if (m.action === "turn_on" || m.action === "turn_off") call = [domain, m.action, target];
+    else if (m.action === "brightness") {
+      const dims = domain === "light" && Array.isArray(a.supported_color_modes) && a.supported_color_modes.some((/** @type {unknown} */ c) => c !== "onoff");
+      if (dims && Number.isInteger(m.value) && m.value >= 1 && m.value <= 100) call = ["light", "turn_on", { ...target, brightness_pct: m.value }];
+    } else if (m.action === "mode") {
+      if (domain === "humidifier" && typeof m.value === "string" && Array.isArray(a.available_modes) && a.available_modes.includes(m.value)) call = ["humidifier", "set_mode", { ...target, mode: m.value }];
+    } else if (domain === "humidifier" && Number.isInteger(m.value) && num(a.min_humidity) && num(a.max_humidity) && m.value >= a.min_humidity && m.value <= a.max_humidity) {
+      call = ["humidifier", "set_humidity", { ...target, humidity: m.value }];
+    }
+    if (!call) return refuse("That isn't something this device takes.");
     try {
       await this._hass.callService(...call);
     } catch (err) {
