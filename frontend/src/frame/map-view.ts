@@ -68,10 +68,11 @@ function baseMap(L: Layout, g: ReturnType<typeof geom>) {
   return svg`<rect x=${g.wx} y=${g.wy} width=${g.W - g.wx * 2} height=${g.H - g.wy * 2} rx="4" fill="none" stroke="var(--muted)" stroke-width="2"><title>Wall</title></rect>${aisles}${units}`;
 }
 
-function markView(s: Item, g: ReturnType<typeof geom>, offset: number, selected: boolean, onPick?: (id: string) => void, label?: string) {
+/* tip: what hovering a mark says. Its name and where it is, so a soil probe names the unit it's in and that unit's label. */
+function markView(s: Item, g: ReturnType<typeof geom>, offset: number, selected: boolean, onPick?: (id: string) => void, label?: string, tip?: string) {
   const [r, c] = s.pos as Spot, x = g.X(c), y = g.Y(r) + offset, k = look(s), h = MARK / 2;
   const ring = selected ? svg`<rect x=${x - h - 4} y=${y - h - 4} width=${MARK + 8} height=${MARK + 8} rx="10" fill="none" stroke="var(--fg)" stroke-width="2"></rect>` : nothing;
-  const body = svg`<title>${s.name}</title>${ring}<rect x=${x - h} y=${y - h} width=${MARK} height=${MARK} rx="7" fill=${k.fill ? k.c : "var(--card)"} stroke=${k.c} stroke-width="2" stroke-dasharray=${k.dash ? "4 3" : "none"}></rect><svg x=${x - 11} y=${y - 11} width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d=${iconPath(k.icon)} fill=${k.fill ? "#FFFFFF" : k.c}></path></svg>`;
+  const body = svg`<title>${tip ?? s.name}</title>${ring}<rect x=${x - h} y=${y - h} width=${MARK} height=${MARK} rx="7" fill=${k.fill ? k.c : "var(--card)"} stroke=${k.c} stroke-width="2" stroke-dasharray=${k.dash ? "4 3" : "none"}></rect><svg x=${x - 11} y=${y - 11} width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d=${iconPath(k.icon)} fill=${k.fill ? "#FFFFFF" : k.c}></path></svg>`;
   if (!onPick) return svg`<g aria-label=${label ?? s.name} role="img">${body}</g>`;
   return svg`<g class="hit" role="button" tabindex="0" aria-label=${label ?? `Select ${s.name}`} @click=${() => onPick(s.id)} @keydown=${activate(() => onPick(s.id))}>${body}</g>`;
 }
@@ -110,7 +111,7 @@ export function mapView(L: Layout, o: MapOptions) {
     const key = (s.pos as Spot).join(",");
     seen[key] = (seen[key] ?? 0) + 1;
     const where = posText(s.pos as Spot, L);
-    return markView(s, g, (seen[key] - 1) * 40, o.picked === s.id, o.onPick, o.onPick ? `Select ${s.name}, ${where}` : `${s.name}, ${where}`);
+    return markView(s, g, (seen[key] - 1) * 40, o.picked === s.id, o.onPick, o.onPick ? `Select ${s.name}, ${where}` : `${s.name}, ${where}`, `${s.name}, ${where.charAt(0).toLowerCase()}${where.slice(1)}`);
   });
   return html`<div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label=${o.label}>${baseMap(L, g)}${spots}${marks}</svg></div>`;
 }

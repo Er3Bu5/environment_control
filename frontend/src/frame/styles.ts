@@ -234,7 +234,7 @@ export const styles = css`
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
   .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
-  .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; margin-left: auto; max-width: 100%; }
+  .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 32px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
@@ -260,7 +260,11 @@ export const styles = css`
   .dial-steps button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--card); font-size: 18px; line-height: 1; }
   .dial-steps button:disabled { opacity: .45; cursor: not-allowed; }
   .dial.busy .dial-steps button:disabled { opacity: 1; }
-  .ctl-modes { margin-top: 8px; }
+  /* A row with modes: the name at the left, the modes centred in the space between, then the dial, and the switch set
+     apart from the dial so a thumb on one isn't on the other. */
+  .dev:has(.dev-modes) .dev-text { flex: 0 1 auto; }
+  .dev-modes { flex: 1 1 260px; display: flex; justify-content: center; min-width: 0; }
+  .dev-modes .chiprow { justify-content: center; }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
   .ctl-status.crit { color: var(--crit); }
   .ctl-status.warn { color: var(--fg); }
@@ -385,11 +389,10 @@ export const styles = css`
   .virt-head { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
   .pickwrap.virt { border-style: dashed; }
   .ents .field { max-width: 440px; }
-  .ulabels summary { font-size: 14px; color: var(--fg); }
-  .ulabels > p { margin: 6px 0 8px; }
+  .ulabels { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--tile); }
   .ugrid-wrap { overflow-x: auto; }
   .ugrid { display: grid; gap: 6px; min-width: min-content; }
-  .ugrid input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 14px; color: var(--fg); text-align: center; }
+  .ugrid input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 14px; color: var(--fg); text-align: center; }
   .resettable { position: relative; display: block; }
   .resettable:has(.reset) input { padding-right: 40px; }
   .resettable .reset { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; color: var(--muted); }

@@ -109,7 +109,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, humidityChoices, modeChoices, nudgeTargets, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, choiceDown, choiceUp, humidityChoices, modeChoices, nearestChoice, nudgeTargets, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -2176,6 +2176,8 @@ export class EcApp extends LitElement {
       return;
     }
     const note = `Moving the target one step and back, which puts ${d.name} in ${mode} mode.`;
+    /* Already asked for, the same steps aren't sent twice over each other. */
+    if (this.ctl[d.id]?.status === "sending") return;
     for (const target of steps) {
       await this.control(d, "humidity", target, note);
       if (!(await this.answered(d))) return;
@@ -2249,12 +2251,16 @@ export class EcApp extends LitElement {
     ].filter(Boolean).join(" ");
     /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
        it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
-    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null) => {
+    /* only: the numbers the device takes, where it takes only some, as a dehumidifier whose target moves in steps of
+       5 does. The dial, its buttons and its keys then land on those and nothing between. */
+    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null, only: number[] | null = null) => {
       const key = `${d.id}:${action}`, shown = this.ctlDrag[key] ?? at, step = DIAL_STEP[action];
       const t = shown === null ? null : dialT(shown, min, max), [tx, ty] = dialAt(t ?? 0);
+      const snap = (n: number) => (only ? nearestChoice(only, n) : n);
+      const up = (n: number) => (only ? choiceUp(only, n) : stepUp(n, step, max)), down = (n: number) => (only ? choiceDown(only, n) : stepDown(n, step, min));
       const under = (e: PointerEvent) => {
         const box = ((e.currentTarget as Element).closest("svg") as SVGSVGElement).getBoundingClientRect();
-        return dialValue(((e.clientX - box.left) / box.width) * 120, ((e.clientY - box.top) / box.height) * 120, min, max);
+        return snap(dialValue(((e.clientX - box.left) / box.width) * 120, ((e.clientY - box.top) / box.height) * 120, min, max));
       };
       const held = (e: PointerEvent) => (e.currentTarget as Element).hasPointerCapture(e.pointerId);
       const [dx, dy] = dot === null || dot < min || dot > max ? [null, null] : dialAt(dialT(dot, min, max));
@@ -2276,16 +2282,16 @@ export class EcApp extends LitElement {
             @pointercancel=${() => this.dialDrop(key)}></path>
         </svg>
         <div class="dial-mid"><span class="dial-cap">${caption}</span><span class="dial-num">${shown === null ? "Off" : html`${shown}<small>%</small>`}</span></div>
-        <input class="sr" type="range" aria-label=${label} min=${min} max=${max} step="1" .value=${live(String(shown ?? max))} ?disabled=${busy}
-          @input=${(e: Event) => this.dialTo(key, Number((e.target as HTMLInputElement).value))}
+        <input class="sr" type="range" aria-label=${label} min=${min} max=${max} step=${only && only.length > 1 ? only[1] - only[0] : 1} .value=${live(String(shown ?? max))} ?disabled=${busy}
+          @input=${(e: Event) => this.dialTo(key, snap(Number((e.target as HTMLInputElement).value)))}
           @change=${() => this.dialSettle(d, action)} />
         <div class="dial-steps">
-          <button aria-label="Lower ${label}" ?disabled=${busy || shown === null || shown <= min} @click=${() => { this.dialTo(key, stepDown(shown ?? min, step, min)); this.dialSettle(d, action); }}>&minus;</button>
-          <button aria-label="Raise ${label}" ?disabled=${busy || (shown !== null && shown >= max)} @click=${() => { this.dialTo(key, stepUp(shown ?? 0, step, max)); this.dialSettle(d, action); }}>+</button>
+          <button aria-label="Lower ${label}" ?disabled=${busy || shown === null || shown <= min} @click=${() => { this.dialTo(key, down(shown ?? min)); this.dialSettle(d, action); }}>&minus;</button>
+          <button aria-label="Raise ${label}" ?disabled=${busy || (shown !== null && shown >= max)} @click=${() => { this.dialTo(key, up(shown ?? 0)); this.dialSettle(d, action); }}>+</button>
         </div>
       </div>`;
     };
-    /* Modes sit under the device's name and its dial beside them, so a row is as tall as its dial and no taller. */
+    /* Modes sit in the middle of the row, between the device's name and its dial, so a row is as tall as its dial. */
     let controls: unknown = nothing, modes: unknown = nothing;
     if (!v.down && v.kind === "dimmer") {
       controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
@@ -2305,7 +2311,7 @@ export class EcApp extends LitElement {
               </div>
             </fieldset>`
           : nothing;
-      controls = choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh) : nothing;
+      controls = choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh, v.stepRh === null ? null : choices) : nothing;
     }
     return html`<div class="dev" data-device=${d.id}>
       <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
@@ -2316,8 +2322,8 @@ export class EcApp extends LitElement {
         ${v.offList && v.mode && v.mode !== d.extraMode
           ? html`<button class="fixlink" @click=${() => void this.addExtraMode(z.id, d.entity, v.mode as string)}>Add ${cap(v.mode)} as a mode &rsaquo;</button>`
           : nothing}
-        ${modes}
       </div>
+      ${modes === nothing ? nothing : html`<div class="dev-modes">${modes}</div>`}
       <div class="dev-ctl">
         ${controls}
         <button class="sw ${v.on ? "on" : ""}" role="switch" aria-checked=${v.on ? "true" : "false"} aria-label=${d.name} ?disabled=${busy}
@@ -2941,7 +2947,7 @@ export class EcApp extends LitElement {
     const z = this.zoneById(d.zoneId);
     if (!z) return nothing;
     const flow = flowOf(d), at = flow.indexOf(d.step), last = at === flow.length - 1;
-    const NAMES = { 1: "Size", 2: "Units", 3: "Sensors and devices" } as const;
+    const NAMES = { 1: "Size", 2: "Units and labels", 3: "Sensors and devices" } as const;
     const steps = flow.length > 1 ? this.stepsHead(flow.map((n) => NAMES[n]), at, (i) => this.layGo(flow[i])) : nothing;
     const issues = layoutIssues(d), lost = stranded(d), changes = last ? layoutChanges(d, this.config).length : 0;
     let body: unknown = nothing;
@@ -2972,9 +2978,9 @@ export class EcApp extends LitElement {
         ${Number.isFinite(d.w) && d.rows && d.cols ? html`<p class="small muted">Each circle is one unit. Units sit about ${(d.w / d.cols).toFixed(2)} x ${(d.d / d.rows).toFixed(2)} m apart.</p>` : nothing}
         ${d.units >= 1 && d.units <= 200 ? mapView(L, { items: [], label: `${plural(d.units, "unit")} in ${plural(d.rows, "row")}` }) : nothing}
         ${d.units >= 1 && d.units <= 200 && d.rows * d.cols >= d.units
-          ? html`<details class="ulabels" ?open=${Object.keys(L.labels ?? {}).length > 0}>
-              <summary>Unit labels, optional</summary>
-              <p class="small muted">A short name for a unit, such as the plant in it. The map shows it in place of the unit's number.</p>
+          ? html`<div class="ulabels">
+              <h2>Unit labels</h2>
+              <p class="small muted">Optional. Type a short name for a unit, such as the plant in it, into the box with its number. The map shows it in place of the number.</p>
               <div class="ugrid-wrap">
                 <div class="ugrid" style="grid-template-columns:repeat(${d.cols}, minmax(72px, 1fr))">
                   ${Array.from({ length: d.rows * d.cols }, (_, i) => i + 1).map((n) =>
@@ -2993,7 +2999,7 @@ export class EcApp extends LitElement {
                   )}
                 </div>
               </div>
-            </details>`
+            </div>`
           : nothing}
         ${issues.map((i) => html`<div class="notice"><span>${i}</span></div>`)}
         ${notice(lostSensors, "sensor", `You'll place ${lostSensors.length > 1 ? "them" : "it"} again in the next step.`)}

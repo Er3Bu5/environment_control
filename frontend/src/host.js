@@ -14,7 +14,7 @@
 import FRAME_HTML from "./frame.js";
 
 /* Only what the UI draws. Anything else an integration puts in its attributes stays here. */
-const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
+const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "target_humidity_step", "min", "max", "step", "unit_of_measurement"];
 const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
 const SENSOR = /^sensor\.[a-z0-9_]{1,200}$/;
 /* On and off entities a zone can follow for day and night or for red lights: read, never switched from here. */
@@ -26,6 +26,10 @@ const CELSIUS = ["°C", "℃"];
 /* What a device's control can ask for, and the roles a control is shown for. A device whose role isn't said, or is
    Other, has no control in the panel, so nothing is sent to it either. */
 const ACTIONS = ["turn_on", "turn_off", "brightness", "mode", "humidity"];
+/* A device that says its target moves in steps takes only a target on one of them: this room's dehumidifiers step by 5
+   and take anything between without a word, changing nothing. One that names no step takes any whole percent. */
+/** @param {number} value @param {number} min @param {unknown} step */
+const onStep = (value, min, step) => !(typeof step === "number" && Number.isFinite(step) && step > 0) || Math.abs((value - min) / step - Math.round((value - min) / step)) < 1e-9;
 const CONTROL_ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light"];
 /* The ranges the panel draws: the light card's 4 hours and the History card's four. The backend holds the same list. */
 const HISTORY_HOURS = [4, 6, 24, 72, 168];
@@ -431,7 +435,7 @@ class EnvironmentControlPanel extends HTMLElement {
       if (dims && Number.isInteger(m.value) && m.value >= 1 && m.value <= 100) call = ["light", "turn_on", { ...target, brightness_pct: m.value }];
     } else if (m.action === "mode") {
       if (domain === "humidifier" && typeof m.value === "string" && Array.isArray(a.available_modes) && a.available_modes.includes(m.value)) call = ["humidifier", "set_mode", { ...target, mode: m.value }];
-    } else if (domain === "humidifier" && Number.isInteger(m.value) && num(a.min_humidity) && num(a.max_humidity) && m.value >= a.min_humidity && m.value <= a.max_humidity) {
+    } else if (domain === "humidifier" && Number.isInteger(m.value) && num(a.min_humidity) && num(a.max_humidity) && m.value >= a.min_humidity && m.value <= a.max_humidity && onStep(m.value, a.min_humidity, a.target_humidity_step)) {
       call = ["humidifier", "set_humidity", { ...target, humidity: m.value }];
     }
     if (!call) return refuse("That isn't something this device takes.");

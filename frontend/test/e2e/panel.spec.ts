@@ -1467,18 +1467,18 @@ test.describe("zone layout and placement", () => {
     const step = (name: string) => app(frame).locator(".steps").getByRole("button", { name, exact: true });
     const current = app(frame).locator('.steps li[aria-current="step"]');
     await expect(current).toHaveText("1. Size");
-    await step("2. Units").click();
-    await expect(current).toHaveText("2. Units");
+    await step("2. Units and labels").click();
+    await expect(current).toHaveText("2. Units and labels");
     await step("1. Size").click();
     await expect(current).toHaveText("1. Size");
-    await step("2. Units").click();
+    await step("2. Units and labels").click();
     /* Fewer units strand a sensor, so placing joins the steps. A grid too small for the units, which Next wouldn't
        pass, holds a jump forward too. */
     await app(frame).getByLabel("Units", { exact: true }).fill("4");
     await app(frame).getByRole("button", { name: "Fewer columns" }).click();
     await expect(app(frame).getByText(/^This grid holds \d+ units, and you have 4\.$/)).toBeVisible();
     await step("3. Sensors and devices").click();
-    await expect(current).toHaveText("2. Units");
+    await expect(current).toHaveText("2. Units and labels");
     await app(frame).getByRole("button", { name: "Suggest a grid" }).click();
     await step("3. Sensors and devices").click();
     await expect(current).toHaveText("3. Sensors and devices");
@@ -1497,8 +1497,10 @@ test.describe("zone layout and placement", () => {
   test("a unit can be given a label, which the map shows in place of its number", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await finish(frame).click();
-    const labels = app(frame).locator("details.ulabels");
-    await labels.locator("summary").click();
+    /* In plain sight on the step, under its own heading, not folded away. */
+    await expect(app(frame).locator(".steps")).toContainText("2. Units and labels");
+    const labels = app(frame).locator(".ulabels");
+    await expect(labels.getByRole("heading", { name: "Unit labels" })).toBeVisible();
     await expect(labels.getByRole("textbox")).toHaveCount(12);
     await labels.getByLabel("Label for unit 2", { exact: true }).fill("GG4");
     /* Typed text stays through the redraw every new reading causes. */
@@ -1559,6 +1561,8 @@ test.describe("zone layout and placement", () => {
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Aisle/ })).toHaveCount(0);
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Unit \d$/ })).toHaveCount(4);
     await spot(frame, "Unit 1").click();
+    /* Hovering its mark says which unit it's in. */
+    await expect(app(frame).locator(".map svg title", { hasText: /^Soil 1/ })).toHaveText("Soil 1, unit 1");
     /* A soil probe is in the substrate, so it's asked no height. */
     await expect(app(frame).getByRole("group", { name: /^Height of Soil 1/ })).toHaveCount(0);
     /* A tap on the one that's picked lets go of it, in the list and on the map. */
@@ -2256,10 +2260,30 @@ test.describe("manual controls", () => {
     await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
+  test("a device whose target moves in steps is set only on those steps, by the dial's buttons and by the host", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on", { target_humidity_step: 5 })`);
+    const unit = row(frame, "Auxiliary dehumidifier"), num = unit.locator(".dial-num");
+    await expect(num).toHaveText("50%");
+    await unit.getByRole("button", { name: "Raise Auxiliary dehumidifier target humidity" }).click();
+    await expect(num).toHaveText("55%");
+    await expect.poll(() => serviceCalls(page)).toBe(1);
+    /* Its slider moves in the same steps, so the keys land on them too. */
+    await expect(unit.getByRole("slider")).toHaveAttribute("step", "5");
+    await unit.getByRole("slider").fill("65");
+    await expect(num).toHaveText("65%");
+    await expect.poll(() => serviceCalls(page)).toBe(2);
+    expect((await calls(page)).map((c) => c.data.humidity)).toEqual([55, 65]);
+    /* And the host won't send a target between steps whatever the frame asks for. */
+    expect(await device(frame, { id: "aux", action: "humidity", value: 63 })).toMatchObject({ ok: false, error: expect.stringContaining("isn't something this device takes") });
+    expect(await serviceCalls(page)).toBe(2);
+  });
+
   test("a mode Home Assistant doesn't list is added from the row that reports it, then reached by moving the target one step and back", async ({ page }) => {
     test.setTimeout(60_000);
     const frame = await openZone(page);
-    await page.evaluate(`fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"] = "normal"`);
+    /* As the real unit is: its target moves in steps of 5, and it takes a target between two steps without changing. */
+    await page.evaluate(`fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"] = "normal"; fakeHA.setState("humidifier.garden_dehumidifier", "on", { target_humidity_step: 5 })`);
     const dehu = row(frame, "Dehumidifier"), chip = (name: string) => dehu.getByRole("radio", { name, exact: true });
     await expect(dehu).toContainText("Normal isn't in its mode list.");
     await expect(chip("Normal")).toHaveCount(0);
@@ -2297,8 +2321,8 @@ test.describe("manual controls", () => {
     await expect(unit).toContainText("On, normal mode.");
     await expect(mode("Normal")).toBeChecked();
     await expect(unit.getByRole("status")).toHaveCount(0);
-    /* Each step waited for the one before: the mode, then the target up one and back to where it was. */
-    expect((await calls(page)).map((c) => [c.service, c.data.mode ?? c.data.humidity])).toEqual([["set_mode", "boost"], ["set_humidity", 56], ["set_humidity", 55]]);
+    /* Each step waited for the one before: the mode, then the target up one of the unit's own steps and back. */
+    expect((await calls(page)).map((c) => [c.service, c.data.mode ?? c.data.humidity])).toEqual([["set_mode", "boost"], ["set_humidity", 60], ["set_humidity", 55]]);
     await expect(unit.locator(".dial")).toContainText("Target55%");
 
     /* A unit that takes the target changes and stays as it was is never shown as having reached the mode. */
