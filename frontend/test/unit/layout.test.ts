@@ -3,6 +3,9 @@ import {
   noHeight,
   allowed,
   applyLayout,
+  labelUnit,
+  storedLayout,
+  unitLabels,
   carryPlacement,
   devsOff,
   flowOf,
@@ -168,6 +171,28 @@ describe("the draft", () => {
     expect(now.devs.map((x) => [x.id, x.pos])).toEqual([["d-fan", [-1, 2]]]);
     expect(now.virt.map((v) => [v.id, v.pos])).toEqual([["v-tank", [-1, 0]], ["v-lid", null]]);
     expect([now.step, now.pick]).toEqual([3, "probe"]);
+  });
+
+  it("labels a unit by its number, shows the label in a spot's words, and drops one whose unit is gone", () => {
+    const c = config(), d = openLayout(c, "z", [1, 2]);
+    labelUnit(d, 2, " GG4 ");
+    labelUnit(d, 5, "A long plant name");
+    labelUnit(d, 3, "x");
+    labelUnit(d, 3, "  ");
+    expect(unitLabels(d.labels, d.units)).toEqual({ 2: "GG4", 5: "A long plant" });
+    expect(layoutChanges(d, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual(["Unit 2 label: None > GG4", "Unit 5 label: None > A long plant"]);
+    applyLayout(c, d);
+    const z = c.zones[0] as Record<string, unknown>;
+    expect(z.layout).toEqual({ ...L, labels: { 2: "GG4", 5: "A long plant" } });
+    expect([posText([0, 1], storedLayout(z)), posText([0, 0], storedLayout(z))]).toEqual(["Unit 2, GG4", "Unit 1"]);
+    /* Fewer units, and the label of one that's gone goes with it. */
+    const fewer = openLayout(c, "z", [1, 2]);
+    fewer.units = 4;
+    expect(layoutChanges(fewer, c).map((x) => `${x.label}: ${x.before} > ${x.after}`)).toEqual(["Units: 5 > 4", "Unit 5 label: A long plant > Removed with the unit"]);
+    applyLayout(c, fewer);
+    expect((z.layout as Record<string, unknown>).labels).toEqual({ 2: "GG4" });
+    /* Anything that isn't a label on a unit is left out when read. */
+    expect(unitLabels({ 0: "a", 2: 7, "02": "b", 3: "ok", 9: "far" }, 5)).toEqual({ 3: "ok" });
   });
 
   it("asks a height of every environment sensor on the map, and of no soil probe", () => {

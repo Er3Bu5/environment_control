@@ -91,6 +91,9 @@ import {
   fits,
   flowOf,
   itemOf,
+  labelUnit,
+  layoutOf,
+  MAX_UNIT_LABEL,
   layoutChanges,
   layoutIssues,
   onMapOnly,
@@ -2874,7 +2877,7 @@ export class EcApp extends LitElement {
           ${this.number("lay-d", "Depth in metres", d.d, { min: 0.1, max: 100, step: 0.1 }, (v) => this.setLay((x) => typed(x, "d", v)))}
         </div>`;
     if (d.step === 2) {
-      const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
+      const L = layoutOf(d);
       const lostSensors = lost.filter((s) => s.pos && s.kind !== "virtual"), lostVirt = lost.filter((s) => s.pos && s.kind === "virtual");
       const movedOff = d.devs.filter((x) => x.pos && !fits(x, L));
       const notice = (list: Item[], what: string, then: string) =>
@@ -2893,6 +2896,30 @@ export class EcApp extends LitElement {
         </div>
         ${Number.isFinite(d.w) && d.rows && d.cols ? html`<p class="small muted">Each circle is one unit. Units sit about ${(d.w / d.cols).toFixed(2)} x ${(d.d / d.rows).toFixed(2)} m apart.</p>` : nothing}
         ${d.units >= 1 && d.units <= 200 ? mapView(L, { items: [], label: `${plural(d.units, "unit")} in ${plural(d.rows, "row")}` }) : nothing}
+        ${d.units >= 1 && d.units <= 200 && d.rows * d.cols >= d.units
+          ? html`<details class="ulabels" ?open=${Object.keys(L.labels ?? {}).length > 0}>
+              <summary>Unit labels, optional</summary>
+              <p class="small muted">A short name for a unit, such as the plant in it. The map shows it in place of the unit's number.</p>
+              <div class="ugrid-wrap">
+                <div class="ugrid" style="grid-template-columns:repeat(${d.cols}, minmax(72px, 1fr))">
+                  ${Array.from({ length: d.rows * d.cols }, (_, i) => i + 1).map((n) =>
+                    n > d.units
+                      ? html`<span></span>`
+                      : html`<input
+                          type="text"
+                          aria-label="Label for unit ${n}"
+                          placeholder=${n}
+                          maxlength=${MAX_UNIT_LABEL}
+                          autocomplete="off"
+                          enterkeyhint="next"
+                          .value=${live(d.labels?.[n] ?? "")}
+                          @input=${(e: Event) => this.setLay((x) => labelUnit(x, n, (e.target as HTMLInputElement).value))}
+                        />`,
+                  )}
+                </div>
+              </div>
+            </details>`
+          : nothing}
         ${issues.map((i) => html`<div class="notice"><span>${i}</span></div>`)}
         ${notice(lostSensors, "sensor", `You'll place ${lostSensors.length > 1 ? "them" : "it"} again in the next step.`)}
         ${notice(lostVirt, "virtual device", `You'll place ${lostVirt.length > 1 ? "them" : "it"} again in the next step.`)}
@@ -2918,7 +2945,7 @@ export class EcApp extends LitElement {
   }
 
   private placement(d: LayoutDraft, z: Zone) {
-    const L = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
+    const L = layoutOf(d);
     const sel = itemOf(d, d.pick) ?? null;
     const where = (s: Item, missing: unknown) =>
       !fits(s, L) ? missing : s.kind === "env" && !s.level ? html`<span class="pill high">Needs a height</span>` : html`<span class="small muted">${posText(s.pos as Spot, L)}</span>`;

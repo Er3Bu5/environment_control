@@ -31,6 +31,7 @@ MAX_NAME = 100
 LEAF_RANGE = (-10, 10)
 LEVELS = ("above", "in", "under")
 MAX_UNITS = 200
+MAX_UNIT_LABEL = 12
 MAX_GRID = 20
 MAX_SIZE_M = 100
 EMERSON_MODES = ("none", "helper", "fixed", "detected")
@@ -136,6 +137,13 @@ def _check_layout(zid: str, layout: Any) -> None:
         _fail(f"{zid} has a unit count outside 1 to {MAX_UNITS}")
     if not all(_is_int(v) and 1 <= v <= MAX_GRID for v in (rows, cols)) or rows * cols < units:
         _fail(f"{zid} has a grid that doesn't hold its units")
+    labels = layout.get("labels")
+    if labels is not None and not (
+        isinstance(labels, dict)
+        and all(isinstance(k, str) and k.isdecimal() and str(int(k)) == k and 1 <= int(k) <= units for k in labels)
+        and all(isinstance(v, str) and v.strip() and len(v) <= MAX_UNIT_LABEL for v in labels.values())
+    ):
+        _fail(f"{zid} has a unit label that isn't short text on one of its units")
 
 
 def _planted(layout: dict[str, Any], r: Any, c: Any) -> bool:
