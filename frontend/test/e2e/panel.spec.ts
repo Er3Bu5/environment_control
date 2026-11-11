@@ -190,13 +190,14 @@ test.describe("talking to HA", () => {
     const head = app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true });
     const [h, w] = [await head.boundingBox(), await app(frame).locator(".wrap").boundingBox()];
     expect(Math.abs(h!.x + h!.width / 2 - (w!.x + w!.width / 2))).toBeLessThan(2);
-    /* One row: View targets at the left edge, the heading in the middle, the menu button at the right edge. */
-    const [m, t] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox()];
-    const midY = (b: { y: number; height: number }) => b.y + b.height / 2;
-    expect(Math.abs(midY(m!) - midY(h!))).toBeLessThan(4);
-    expect(Math.abs(midY(t!) - midY(h!))).toBeLessThan(4);
-    expect(Math.abs(m!.x + m!.width - (w!.x + w!.width))).toBeLessThan(2);
-    expect(Math.abs(t!.x - w!.x)).toBeLessThan(2);
+    /* The menu button at the left edge and View targets at the right, both level with the foot of the heading block. */
+    const [m, t, block] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox(), await app(frame).locator(".pagehead").boundingBox()];
+    const foot = (b: { y: number; height: number }) => b.y + b.height;
+    expect(Math.abs(foot(m!) - foot(block!))).toBeLessThan(2);
+    expect(Math.abs(foot(t!) - foot(block!))).toBeLessThan(2);
+    expect(foot(m!)).toBeGreaterThan(foot(h!));
+    expect(Math.abs(m!.x - w!.x)).toBeLessThan(2);
+    expect(Math.abs(t!.x + t!.width - (w!.x + w!.width))).toBeLessThan(2);
     /* The zone's cards each take the page's full width, one under the other. */
     const card = (name: string) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name, exact: true }) });
     const [place, controls] = [await card("Device placement").boundingBox(), await card("Controls").boundingBox()];
@@ -717,6 +718,22 @@ test.describe("targets, day and night", () => {
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+  });
+
+  test("Back is at the top of Targets and of Sensor Calibration, above everything there is to edit", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    const above = async () => {
+      const back = await app(frame).getByRole("button", { name: "Back", exact: true }).boundingBox();
+      const card = await app(frame).locator("section.card").first().boundingBox();
+      expect(await app(frame).getByRole("button", { name: "Back", exact: true }).count()).toBe(1);
+      return back!.y + back!.height <= card!.y;
+    };
+    expect(await above()).toBe(true);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
+    expect(await above()).toBe(true);
   });
 
   test("an Athena stage fills the period on show, all stored here with nothing sent", async ({ page }) => {
@@ -1450,18 +1467,18 @@ test.describe("zone layout and placement", () => {
     const step = (name: string) => app(frame).locator(".steps").getByRole("button", { name, exact: true });
     const current = app(frame).locator('.steps li[aria-current="step"]');
     await expect(current).toHaveText("1. Size");
-    await step("2. Units").click();
-    await expect(current).toHaveText("2. Units");
+    await step("2. Units and labels").click();
+    await expect(current).toHaveText("2. Units and labels");
     await step("1. Size").click();
     await expect(current).toHaveText("1. Size");
-    await step("2. Units").click();
+    await step("2. Units and labels").click();
     /* Fewer units strand a sensor, so placing joins the steps. A grid too small for the units, which Next wouldn't
        pass, holds a jump forward too. */
     await app(frame).getByLabel("Units", { exact: true }).fill("4");
     await app(frame).getByRole("button", { name: "Fewer columns" }).click();
     await expect(app(frame).getByText(/^This grid holds \d+ units, and you have 4\.$/)).toBeVisible();
     await step("3. Sensors and devices").click();
-    await expect(current).toHaveText("2. Units");
+    await expect(current).toHaveText("2. Units and labels");
     await app(frame).getByRole("button", { name: "Suggest a grid" }).click();
     await step("3. Sensors and devices").click();
     await expect(current).toHaveText("3. Sensors and devices");
@@ -1480,8 +1497,10 @@ test.describe("zone layout and placement", () => {
   test("a unit can be given a label, which the map shows in place of its number", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await finish(frame).click();
-    const labels = app(frame).locator("details.ulabels");
-    await labels.locator("summary").click();
+    /* In plain sight on the step, under its own heading, not folded away. */
+    await expect(app(frame).locator(".steps")).toContainText("2. Units and labels");
+    const labels = app(frame).locator(".ulabels");
+    await expect(labels.getByRole("heading", { name: "Unit labels" })).toBeVisible();
     await expect(labels.getByRole("textbox")).toHaveCount(12);
     await labels.getByLabel("Label for unit 2", { exact: true }).fill("GG4");
     /* Typed text stays through the redraw every new reading causes. */
@@ -1542,6 +1561,8 @@ test.describe("zone layout and placement", () => {
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Aisle/ })).toHaveCount(0);
     await expect(app(frame).locator(".map").getByRole("button", { name: /^Unit \d$/ })).toHaveCount(4);
     await spot(frame, "Unit 1").click();
+    /* Hovering its mark says which unit it's in. */
+    await expect(app(frame).locator(".map svg title", { hasText: /^Soil 1/ })).toHaveText("Soil 1, unit 1");
     /* A soil probe is in the substrate, so it's asked no height. */
     await expect(app(frame).getByRole("group", { name: /^Height of Soil 1/ })).toHaveCount(0);
     /* A tap on the one that's picked lets go of it, in the list and on the map. */
@@ -1572,7 +1593,11 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByRole("button", { name: "Add or edit devices" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
     await expect(app(frame).locator('.steps li[aria-current="step"]')).toHaveText("2. Devices");
-    await app(frame).getByRole("button", { name: "Add a virtual device" }).click();
+    /* In the accent colour, above everything Home Assistant lists, so it's found without scrolling. */
+    const add = app(frame).getByRole("button", { name: "Add a virtual device" });
+    await expect(add).toHaveClass(/\bprimary\b/);
+    expect((await add.boundingBox())!.y).toBeLessThan((await app(frame).getByLabel("Search Home Assistant").boundingBox())!.y);
+    await add.click();
     const tank = app(frame).locator(".pickwrap.virt"), name = tank.getByLabel("Name", { exact: true });
     await expect(name).toBeFocused();
     await expect(finish(frame)).toBeDisabled();
@@ -1739,6 +1764,21 @@ test.describe("history", () => {
   const card = (frame: Frame) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "History", exact: true }) });
   const row = (frame: Frame, name: string) => card(frame).locator("tbody tr", { hasText: name });
   const calls = (page: Page) => page.evaluate<{ entities: string[]; hours: number; buckets: number }[]>("historyCalls");
+
+  test("the tiles' tracks line up across the row, however many lines of notes a tile has", async ({ page }) => {
+    const frame = await garden(page);
+    await goTo(frame, "Garden");
+    const tiles = app(frame).locator(".tiles .tile");
+    await expect(tiles).toHaveCount(3);
+    /* VPD has a line the others don't, its leaf temperature offset, which used to push its track down. */
+    await expect(tiles.nth(2)).toContainText("Leaf temperature offset");
+    const tops = await tiles.locator(".track").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    const perRow = (await tiles.evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size)) === 1 ? 3 : 2;
+    expect(tops[0]).toBe(tops[1]);
+    if (perRow === 3) expect(tops[2]).toBe(tops[0]);
+    const ranges = await tiles.locator(".range").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(ranges[0]).toBe(ranges[1]);
+  });
 
   test("every sensor gets a line and the combined line ends on the same value as the tile", async ({ page }) => {
     const frame = await garden(page);
@@ -2220,10 +2260,30 @@ test.describe("manual controls", () => {
     await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
+  test("a device whose target moves in steps is set only on those steps, by the dial's buttons and by the host", async ({ page }) => {
+    const frame = await openZone(page);
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on", { target_humidity_step: 5 })`);
+    const unit = row(frame, "Auxiliary dehumidifier"), num = unit.locator(".dial-num");
+    await expect(num).toHaveText("50%");
+    await unit.getByRole("button", { name: "Raise Auxiliary dehumidifier target humidity" }).click();
+    await expect(num).toHaveText("55%");
+    await expect.poll(() => serviceCalls(page)).toBe(1);
+    /* Its slider moves in the same steps, so the keys land on them too. */
+    await expect(unit.getByRole("slider")).toHaveAttribute("step", "5");
+    await unit.getByRole("slider").fill("65");
+    await expect(num).toHaveText("65%");
+    await expect.poll(() => serviceCalls(page)).toBe(2);
+    expect((await calls(page)).map((c) => c.data.humidity)).toEqual([55, 65]);
+    /* And the host won't send a target between steps whatever the frame asks for. */
+    expect(await device(frame, { id: "aux", action: "humidity", value: 63 })).toMatchObject({ ok: false, error: expect.stringContaining("isn't something this device takes") });
+    expect(await serviceCalls(page)).toBe(2);
+  });
+
   test("a mode Home Assistant doesn't list is added from the row that reports it, then reached by moving the target one step and back", async ({ page }) => {
     test.setTimeout(60_000);
     const frame = await openZone(page);
-    await page.evaluate(`fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"] = "normal"`);
+    /* As the real unit is: its target moves in steps of 5, and it takes a target between two steps without changing. */
+    await page.evaluate(`fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"] = "normal"; fakeHA.setState("humidifier.garden_dehumidifier", "on", { target_humidity_step: 5 })`);
     const dehu = row(frame, "Dehumidifier"), chip = (name: string) => dehu.getByRole("radio", { name, exact: true });
     await expect(dehu).toContainText("Normal isn't in its mode list.");
     await expect(chip("Normal")).toHaveCount(0);
@@ -2261,8 +2321,8 @@ test.describe("manual controls", () => {
     await expect(unit).toContainText("On, normal mode.");
     await expect(mode("Normal")).toBeChecked();
     await expect(unit.getByRole("status")).toHaveCount(0);
-    /* Each step waited for the one before: the mode, then the target up one and back to where it was. */
-    expect((await calls(page)).map((c) => [c.service, c.data.mode ?? c.data.humidity])).toEqual([["set_mode", "boost"], ["set_humidity", 56], ["set_humidity", 55]]);
+    /* Each step waited for the one before: the mode, then the target up one of the unit's own steps and back. */
+    expect((await calls(page)).map((c) => [c.service, c.data.mode ?? c.data.humidity])).toEqual([["set_mode", "boost"], ["set_humidity", 60], ["set_humidity", 55]]);
     await expect(unit.locator(".dial")).toContainText("Target55%");
 
     /* A unit that takes the target changes and stays as it was is never shown as having reached the mode. */

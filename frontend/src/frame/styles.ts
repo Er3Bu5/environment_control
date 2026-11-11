@@ -28,21 +28,23 @@ export const styles = css`
 
   /* The page menu's button sits at the top left of the page, and each page's heading is centred beside it. */
   .wrap { position: relative; }
-  /* Its own rule for a menu's wrapper says position: relative, which put this button in the page's flow, on a row of
-     its own above the heading. Both classes together outrank that. */
-  .zmenu.navmenu { position: absolute; right: 0; top: 0; z-index: 12; }
+  /* The page menu's button and the page's heading share the top row: the button at the left, at the foot of the
+     heading block, and the heading centred. They're two items in one grid cell, so the button follows the heading's
+     height whatever it holds. */
+  .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 12; }
+  .navmenu .menu { left: 0; right: auto; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
-  .navmenu + * { min-height: 36px; padding-inline: 48px; text-align: center; }
+  .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
-  /* A zone's heading row: View targets at the left, the name and its details in the middle, and the menu button, which
-     sits over the right-hand column, all on one line. */
+  /* A zone's heading row: the menu button over the left-hand column, the name and its details in the middle, and
+     View targets at the right, the two buttons level with the foot of the details. */
   .navmenu + .pagehead { padding-inline: 0; }
-  .pagehead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(44px, 1fr); align-items: start; gap: 8px; }
+  .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .btn { grid-column: 1; grid-row: 1; justify-self: start; }
+  .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
 
   main { padding: 18px 16px 48px; }
-  .wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
@@ -207,6 +209,11 @@ export const styles = css`
   .tile .name, .lcard .name { font-size: 13px; color: var(--muted); }
   .tile .val, .lcard .val { font-size: 22px; font-weight: 500; line-height: 1.1; }
   .tile .val small, .lcard .val small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  /* A row of tiles shares its five rows, as the mock has it: name and value, notes, track, limits, state. So the
+     tracks line up across the row however many lines of notes a tile has. */
+  .tile { display: grid; grid-row: span 5; grid-template-rows: subgrid; align-items: start; }
+  .lcard { grid-row: span 5; }
+  .tnotes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .tavg { font-size: 12px; color: var(--muted); }
   .range { display: flex; justify-content: space-between; gap: 2px; color: var(--muted); }
   .range span { display: flex; flex-direction: column; align-items: center; font-size: 10px; }
@@ -227,7 +234,7 @@ export const styles = css`
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
   .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
-  .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; margin-left: auto; max-width: 100%; }
+  .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 32px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
@@ -253,7 +260,11 @@ export const styles = css`
   .dial-steps button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--card); font-size: 18px; line-height: 1; }
   .dial-steps button:disabled { opacity: .45; cursor: not-allowed; }
   .dial.busy .dial-steps button:disabled { opacity: 1; }
-  .ctl-modes { margin-top: 8px; }
+  /* A row with modes: the name at the left, the modes centred in the space between, then the dial, and the switch set
+     apart from the dial so a thumb on one isn't on the other. */
+  .dev:has(.dev-modes) .dev-text { flex: 0 1 auto; }
+  .dev-modes { flex: 1 1 260px; display: flex; justify-content: center; min-width: 0; }
+  .dev-modes .chiprow { justify-content: center; }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
   .ctl-status.crit { color: var(--crit); }
   .ctl-status.warn { color: var(--fg); }
@@ -378,11 +389,10 @@ export const styles = css`
   .virt-head { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
   .pickwrap.virt { border-style: dashed; }
   .ents .field { max-width: 440px; }
-  .ulabels summary { font-size: 14px; color: var(--fg); }
-  .ulabels > p { margin: 6px 0 8px; }
+  .ulabels { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--tile); }
   .ugrid-wrap { overflow-x: auto; }
   .ugrid { display: grid; gap: 6px; min-width: min-content; }
-  .ugrid input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 14px; color: var(--fg); text-align: center; }
+  .ugrid input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 14px; color: var(--fg); text-align: center; }
   .resettable { position: relative; display: block; }
   .resettable:has(.reset) input { padding-right: 40px; }
   .resettable .reset { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; color: var(--muted); }

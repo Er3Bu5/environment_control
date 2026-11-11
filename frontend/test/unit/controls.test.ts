@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CTL_FLIP_MS, type Ctl, ctlLine, deviceView, dialArc, dialAt, dialT, dialValue, humidityChoices, modeChoices, nudgeTargets, onReport, stepDown, stepUp, wantOf, wanted, zoneControls } from "../../src/frame/controls";
+import { CTL_FLIP_MS, type Ctl, choiceDown, choiceUp, ctlLine, deviceView, dialArc, dialAt, dialT, dialValue, humidityChoices, modeChoices, nearestChoice, nudgeTargets, onReport, stepDown, stepUp, wantOf, wanted, zoneControls } from "../../src/frame/controls";
 import type { HaState } from "../../src/frame/readings";
 
 const st = (state: string, attributes: Record<string, unknown> = {}): HaState => ({ state, attributes, at: null });
@@ -147,6 +147,25 @@ describe("the dial a number is set on", () => {
   });
 });
 
+describe("a device that says its target moves in steps", () => {
+  const v = deviceView("humidifier.dehu", st("on", { humidity: 65, min_humidity: 35, max_humidity: 80, target_humidity_step: 5 }));
+
+  it("is offered its own steps and nothing between, and a number between goes to the nearest", () => {
+    expect([v.stepRh, humidityChoices(v)]).toEqual([5, [35, 40, 45, 50, 55, 60, 65, 70, 75, 80]]);
+    expect([nearestChoice(humidityChoices(v), 63), nearestChoice(humidityChoices(v), 62), nearestChoice([], 7)]).toEqual([65, 60, 7]);
+  });
+
+  it("goes up and down a step at a time, and stops at either end", () => {
+    const c = humidityChoices(v);
+    expect([choiceUp(c, 65), choiceDown(c, 65), choiceUp(c, 80), choiceDown(c, 35), choiceUp(c, 62)]).toEqual([70, 60, 80, 35, 65]);
+  });
+
+  it("is taken at whole percents when it names no step", () => {
+    const plain = deviceView("humidifier.dehu", st("on", { humidity: 52, min_humidity: 50, max_humidity: 54, target_humidity_step: 0 }));
+    expect([plain.stepRh, humidityChoices(plain)]).toEqual([null, [50, 51, 52, 53, 54]]);
+  });
+});
+
 describe("a mode Home Assistant doesn't list", () => {
   const dehu = (attrs: Record<string, unknown>) => deviceView("humidifier.dehu", st("on", { available_modes: ["eco", "boost"], mode: "boost", ...attrs }));
 
@@ -161,7 +180,10 @@ describe("a mode Home Assistant doesn't list", () => {
     expect(nudgeTargets(dehu({ humidity: 55, min_humidity: 35, max_humidity: 80 }))).toEqual([56, 55]);
     /* At the top there's no room above, so it steps down and back. */
     expect(nudgeTargets(dehu({ humidity: 80, min_humidity: 35, max_humidity: 80 }))).toEqual([79, 80]);
-    expect(nudgeTargets(dehu({ humidity: 52.5, min_humidity: 35, max_humidity: 80 }))).toEqual([54, 53]);
+    expect(nudgeTargets(dehu({ humidity: 52.5, min_humidity: 35, max_humidity: 80 }))).toEqual([53, 52]);
+    /* A unit that says its target moves in steps of 5 ignores a 1% move, so the step is one of its own. */
+    expect(nudgeTargets(dehu({ humidity: 65, min_humidity: 35, max_humidity: 80, target_humidity_step: 5 }))).toEqual([70, 65]);
+    expect(nudgeTargets(dehu({ humidity: 80, min_humidity: 35, max_humidity: 80, target_humidity_step: 5 }))).toEqual([75, 80]);
     expect(nudgeTargets(dehu({ humidity: 50, min_humidity: 50, max_humidity: 50 }))).toBeNull();
     expect(nudgeTargets(dehu({ humidity: 50 }))).toBeNull();
     expect(nudgeTargets(dehu({ min_humidity: 35, max_humidity: 80 }))).toBeNull();

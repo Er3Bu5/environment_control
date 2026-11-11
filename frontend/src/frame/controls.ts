@@ -61,6 +61,9 @@ export interface DeviceView {
   unitRh: number | null;
   minRh: number | null;
   maxRh: number | null;
+  /* The step the device says its target moves in, where it says. This room's dehumidifiers step by 5, and take a
+     target between two steps without a word and without changing anything. */
+  stepRh: number | null;
   /* What the device reports, as a short phrase: Off, On, On, 80%, On, eco mode. */
   text: string;
   /* A mode the device reports that isn't in its own list, as D1's normal isn't. */
@@ -81,21 +84,24 @@ export function deviceView(entity: string, st: HaState | undefined): DeviceView 
   const v: DeviceView = {
     down, on, kind, brightness: on && kind === "dimmer" ? pctOf(a.brightness) : null, mode: kind === "humidifier" ? mode : null, modes,
     setpoint: num(a.humidity) ? a.humidity : null, unitRh: num(a.current_humidity) ? a.current_humidity : null,
-    minRh: num(a.min_humidity) ? a.min_humidity : null, maxRh: num(a.max_humidity) ? a.max_humidity : null,
+    minRh: num(a.min_humidity) ? a.min_humidity : null, maxRh: num(a.max_humidity) ? a.max_humidity : null, stepRh: num(a.target_humidity_step) && a.target_humidity_step > 0 ? a.target_humidity_step : null,
     text: "", offList: kind === "humidifier" && mode !== null && !modes.includes(mode),
   };
   v.text = down ? "Unavailable" : !on ? (st.state === "off" ? "Off" : cap(st.state)) : v.brightness !== null ? `On, ${v.brightness}%` : v.mode ? `On, ${v.mode} mode` : "On";
   return v;
 }
 
-/* Target humidity choices: whole percents inside the device's own limits, and whatever it's set to now. */
+/* Target humidity choices: the device's own steps from its lowest, or whole percents where it names no step, inside its
+   limits, and whatever it's set to now. */
 export function humidityChoices(v: DeviceView): number[] {
   if (v.minRh === null || v.maxRh === null) return v.setpoint === null ? [] : [v.setpoint];
-  const out: number[] = [];
-  for (let x = Math.ceil(v.minRh); x <= Math.floor(v.maxRh); x++) out.push(x);
+  const out: number[] = [], step = v.stepRh ?? 1;
+  for (let x = v.stepRh === null ? Math.ceil(v.minRh) : v.minRh; x <= v.maxRh + 1e-9; x += step) if (Number.isInteger(x)) out.push(x);
   if (v.setpoint !== null && !out.includes(v.setpoint)) out.push(v.setpoint);
   return out.sort((a, b) => a - b);
 }
+/* The choice nearest a number, for a dial turned to somewhere between two of the device's steps. */
+export const nearestChoice = (choices: number[], n: number): number => choices.reduce((best, c) => (Math.abs(c - n) < Math.abs(best - n) ? c : best), choices[0] ?? n);
 
 export interface Want {
   state?: "on" | "off";
@@ -208,6 +214,9 @@ export const stepDown = (n: number, step: number, min: number) => Math.max(min, 
 /* A light controller is set in 5% steps, as the boards here round to; a target humidity in whole percents. A drag or
    the arrow keys still reach any whole percent. */
 export const DIAL_STEP = { brightness: 5, humidity: 1 } as const;
+/* The next choice up or down from a number, for a dial whose device takes only some numbers. */
+export const choiceUp = (choices: number[], n: number) => choices.find((c) => c > n) ?? n;
+export const choiceDown = (choices: number[], n: number) => [...choices].reverse().find((c) => c < n) ?? n;
 /* The buttons and keys send once they've been left alone this long, so five presses are one command, not five. */
 export const DIAL_SETTLE_MS = 700;
 
@@ -215,11 +224,12 @@ export const DIAL_SETTLE_MS = 700;
 export const modeChoices = (v: DeviceView, extra: string): string[] => (extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes);
 
 /* Some dehumidifiers have a mode their integration can't ask for, which the device drops into when its target is
-   changed: here, by moving the target one whole percent and back. The two targets to ask for, in order, or null when
-   the device has no target to move or no room to move it. */
+   changed: here, by moving the target one of the device's own steps and back. The two targets to ask for, in order,
+   or null when the device has no target to move or no room to move it. */
 export function nudgeTargets(v: DeviceView): [number, number] | null {
   if (v.setpoint === null || v.minRh === null || v.maxRh === null) return null;
-  const lo = Math.ceil(v.minRh), hi = Math.floor(v.maxRh), back = Math.min(hi, Math.max(lo, Math.round(v.setpoint)));
-  const other = back + 1 <= hi ? back + 1 : back - 1 >= lo ? back - 1 : null;
-  return other === null ? null : [other, back];
+  const steps = humidityChoices({ ...v, setpoint: null });
+  if (!steps.length) return null;
+  const back = nearestChoice(steps, v.setpoint), at = steps.indexOf(back), other = steps[at + 1] ?? steps[at - 1];
+  return other === undefined ? null : [other, back];
 }
