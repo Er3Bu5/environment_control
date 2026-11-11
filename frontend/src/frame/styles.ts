@@ -26,13 +26,13 @@ export const styles = css`
   .small { font-size: 13px; }
   svg { flex: none; }
 
-  .topbar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); padding: 0 16px; }
-  .bar { display: flex; align-items: center; gap: 12px; padding-block: 10px 4px; font-size: 19px; }
-  .bar svg { width: 22px; height: 22px; fill: var(--muted); }
-  .tabs { display: flex; gap: 20px; overflow-x: auto; scrollbar-width: none; }
-  .tabs button { flex: none; border: 0; border-bottom: 2px solid transparent; background: none; padding: 8px 0; font-size: 14px; color: var(--muted); }
-  .tabs button:hover { color: var(--fg); }
-  .tabs button[aria-current="page"] { color: var(--primary); border-bottom-color: var(--primary); }
+  /* The page menu's button sits at the top left of the page, and each page's heading is centred beside it. */
+  .wrap { position: relative; }
+  .navmenu { position: absolute; left: 0; top: 0; z-index: 12; }
+  .navmenu .menu { left: 0; right: auto; }
+  .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
+  .navmenu + * { min-height: 36px; padding-inline: 48px; text-align: center; }
+  .pagehead { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -209,13 +209,12 @@ export const styles = css`
   @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   /* Controls sit beside the map on a wide screen and above it on a narrow one, as the mock has them. */
-  .split { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 5fr); gap: 12px; align-items: start; }
-  @media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); } }
+  .split { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .cgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .ctl-reading { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
   .devs { display: flex; flex-direction: column; gap: 8px; }
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
-  .dev-text { flex: 1 1 150px; min-width: 0; }
+  .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
   .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
@@ -243,7 +242,7 @@ export const styles = css`
   .dial-steps button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--card); font-size: 18px; line-height: 1; }
   .dial-steps button:disabled { opacity: .45; cursor: not-allowed; }
   .dial.busy .dial-steps button:disabled { opacity: 1; }
-  .ctl-modes .chiprow { justify-content: flex-end; }
+  .ctl-modes { margin-top: 8px; }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
   .ctl-status.crit { color: var(--crit); }
   .ctl-status.warn { color: var(--fg); }

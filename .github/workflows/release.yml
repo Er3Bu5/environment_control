@@ -14,6 +14,10 @@ on:
         description: "Dry run: build only, publish nothing"
         type: boolean
         default: true
+      title:
+        description: "What this release is, in a few words. Home Assistant shows it after the tag"
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -58,5 +62,6 @@ jobs:
       attestations: write
     with:
       version: ${{ inputs.version }}
+      title: ${{ inputs.title }}
       ref: ${{ github.sha }}
       publish: ${{ !inputs.dry_run }}
