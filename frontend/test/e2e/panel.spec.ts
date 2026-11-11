@@ -2163,6 +2163,61 @@ test.describe("manual controls", () => {
     await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
+  test("a mode Home Assistant doesn't list is added from the row that reports it, then reached by moving the target one step and back", async ({ page }) => {
+    test.setTimeout(60_000);
+    const frame = await openZone(page);
+    await page.evaluate(`fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"] = "normal"`);
+    const dehu = row(frame, "Dehumidifier"), chip = (name: string) => dehu.getByRole("radio", { name, exact: true });
+    await expect(dehu).toContainText("Normal isn't in its mode list.");
+    await expect(chip("Normal")).toHaveCount(0);
+    /* The link opens Device identification at the device, with the mode filled in, to review like any other change. */
+    await dehu.getByRole("button", { name: "Add Normal as a mode ›" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: /Device identification/ })).toBeVisible();
+    const box = app(frame).locator("#md-humidifier_garden_dehumidifier").getByLabel(/^Extra mode, optional/);
+    await expect(box).toHaveValue("normal");
+    /* Plug 7 still has no role, which would hold the review, so it's left out of the zone here. */
+    await app(frame).locator("#md-switch_plug_7").getByRole("button").first().click();
+    /* This page's Garden has sensors Home Assistant no longer lists, which would hold the review too: they're swapped
+       for one it does, on the step before. */
+    await app(frame).locator(".steps").getByRole("button", { name: "1. Sensors", exact: true }).click();
+    for (const id of ["g-left", "g-right", "g-under"]) await app(frame).locator(`#ms-${id}`).getByRole("button").first().click();
+    await app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: "Environment board" }) }).getByRole("button").first().click();
+    const next = app(frame).getByRole("button", { name: /^(Next|Review and apply)$/ });
+    await next.click();
+    await expect(box).toHaveValue("normal");
+    await next.click();
+    await next.click();
+    await expect(app(frame).getByRole("dialog")).toContainText("extra modeNone → normal");
+    await app(frame).getByRole("dialog").getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(controls(frame)).toBeVisible();
+    /* Applied, the device goes by the name Home Assistant has for it. */
+    const unit = row(frame, "Garden Dehumidifier"), mode = (name: string) => unit.getByRole("radio", { name, exact: true });
+    await expect(unit).not.toContainText("isn't in its mode list");
+    await expect(unit.getByRole("radio")).toHaveCount(5);
+    await expect(mode("Normal")).toBeChecked();
+    expect(await serviceCalls(page)).toBe(0);
+
+    await unit.getByText("Boost", { exact: true }).click();
+    await expect(unit).toContainText("On, boost mode.");
+    await unit.getByText("Normal", { exact: true }).click();
+    await expect(unit.getByRole("status")).toHaveText("Moving the target one step and back, which puts Garden Dehumidifier in normal mode.");
+    await expect(unit).toContainText("On, normal mode.");
+    await expect(mode("Normal")).toBeChecked();
+    await expect(unit.getByRole("status")).toHaveCount(0);
+    /* Each step waited for the one before: the mode, then the target up one and back to where it was. */
+    expect((await calls(page)).map((c) => [c.service, c.data.mode ?? c.data.humidity])).toEqual([["set_mode", "boost"], ["set_humidity", 56], ["set_humidity", 55]]);
+    await expect(unit.locator(".dial")).toContainText("Target55%");
+
+    /* A unit that takes the target changes and stays as it was is never shown as having reached the mode. */
+    await page.evaluate(`delete fakeHA.knobs.targetModes["humidifier.garden_dehumidifier"]`);
+    await unit.getByText("Boost", { exact: true }).click();
+    await expect(unit).toContainText("On, boost mode.");
+    await unit.getByText("Normal", { exact: true }).click();
+    await expect(unit.getByRole("status")).toHaveText("Not confirmed. Garden Dehumidifier still reports on, boost mode. Moving its target didn't put it in normal mode.", { timeout: 20_000 });
+    await expect(mode("Boost")).toBeChecked();
+    await expect(mode("Normal")).not.toBeChecked();
+  });
+
   test("a device that goes offline disables its controls and keeps no dial for it", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate("fakeHA.offline('humidifier.garden_dehumidifier', true)");

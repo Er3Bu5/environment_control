@@ -197,6 +197,30 @@ def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
     validate_config(c)
 
 
+def test_a_dehumidifier_can_have_an_extra_mode(sample_config) -> None:
+    sample_config["devices"].append(
+        {"id": "d-x", "entity": "humidifier.x", "zones": [sample_config["zones"][0]["id"]], "nudgeMode": "normal"}
+    )
+    validate_config(sample_config)
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        {"entity": "switch.x", "nudgeMode": "normal"},
+        {"entity": "humidifier.x", "nudgeMode": "  "},
+        {"entity": "humidifier.x", "nudgeMode": "x" * 41},
+        {"entity": "humidifier.x", "nudgeMode": "nor\nmal"},
+        {"entity": "humidifier.x", "nudgeMode": 5},
+        {"nudgeMode": "normal"},
+    ],
+)
+def test_an_extra_mode_is_a_short_name_on_a_humidifier_only(sample_config, device) -> None:
+    sample_config["devices"].append({"id": "d-x", "zones": [sample_config["zones"][0]["id"]], **device})
+    with pytest.raises(InvalidConfig, match="extra mode"):
+        validate_config(sample_config)
+
+
 def test_a_virtual_device_waits_for_its_spot(sample_config) -> None:
     """Added in Device identification, it has no spot until Device placement gives it one."""
     sample_config["zones"][0].update(

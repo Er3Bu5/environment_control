@@ -278,6 +278,27 @@ describe("the draft", () => {
     expect(c.zones[0].virtual).toBeUndefined();
   });
 
+  it("keeps a dehumidifier's extra mode with the device, and never on anything else", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", entities: { temperature: "sensor.left_temp" } }] }], []);
+    const d = openMap(c, "garden");
+    d.controls["humidifier.dehu"] = "Dehumidifier";
+    d.controls["switch.heater_plug"] = "Heater";
+    d.extra["humidifier.dehu"] = " normal ";
+    d.extra["switch.heater_plug"] = "normal";
+    expect(mapChanges(d, c, sensors, controls).filter((x) => x.label.endsWith("extra mode")).map((x) => `${x.before} > ${x.after}`)).toContain("None > normal");
+    applyMap(c, d, sensors, controls);
+    expect(c.devices.map((x) => [x.entity, x.nudgeMode])).toEqual([["humidifier.dehu", "normal"], ["switch.heater_plug", undefined]]);
+    const again = openMap(c, "garden");
+    expect(again.extra).toEqual({ "humidifier.dehu": "normal" });
+    /* Moved to a fan, the mode isn't the fan's to have. */
+    swapControl(again, "humidifier.dehu", "fan.dehu_fan");
+    expect(again.extra).toEqual({});
+    const cleared = openMap(c, "garden");
+    delete cleared.extra["humidifier.dehu"];
+    applyMap(c, cleared, sensors, controls);
+    expect(c.devices[0].nudgeMode).toBeUndefined();
+  });
+
   it("leaves a sensor's leaf temperature offset alone, which is Sensor Calibration's", () => {
     const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", name: "Left board", leafEntity: "number.left_offset", leafUnused: false, leaf: 0.5, entities: { temperature: "sensor.left_temp", humidity: "sensor.left_rh" } }] }], []);
     const d = openMap(c, "garden");

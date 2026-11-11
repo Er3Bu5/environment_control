@@ -31,6 +31,8 @@ export interface ControlDevice {
   zones: string[];
   family: string;
   link: string;
+  /* A mode the device has that Home Assistant doesn't list, reached by moving its target one step and back. */
+  extraMode: string;
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -43,7 +45,7 @@ const ROLE_GROUP: Record<string, GroupKey> = Object.fromEntries(CONTROL_GROUPS.f
 export function zoneControls(c: RawConfig, zoneId: string): { groups: { key: GroupKey; title: string; metric: string | null; devices: ControlDevice[] }[]; unknown: ControlDevice[] } {
   const mine: ControlDevice[] = c.devices
     .filter((d) => isObj(d) && str(d.id) && str(d.entity) && Array.isArray(d.zones) && d.zones.includes(zoneId))
-    .map((d) => ({ id: str(d.id), entity: str(d.entity), name: str(d.name) || str(d.entity), role: str(d.type), zones: (d.zones as unknown[]).filter((z): z is string => typeof z === "string"), family: str(d.family), link: str(d.link) }));
+    .map((d) => ({ id: str(d.id), entity: str(d.entity), name: str(d.name) || str(d.entity), role: str(d.type), zones: (d.zones as unknown[]).filter((z): z is string => typeof z === "string"), family: str(d.family), link: str(d.link), extraMode: str(d.nudgeMode).trim() }));
   const groups = CONTROL_GROUPS.map((g) => ({ key: g.key, title: g.title, metric: g.metric, devices: mine.filter((d) => ROLE_GROUP[d.role] === g.key) })).filter((g) => g.devices.length);
   return { groups, unknown: mine.filter((d) => !ROLE_GROUP[d.role] && d.role !== "Other") };
 }
@@ -132,7 +134,7 @@ export function valueOf(st: HaState | undefined, want: Want): number | null {
 /* from is what the device reported for that number when the command went, so a move can be told from no answer.
    asked is set on a done command the device answered with a different number. */
 export type Ctl =
-  | { status: "sending"; want: Want; since: number; from?: number | null }
+  | { status: "sending"; want: Want; since: number; from?: number | null; note?: string }
   | { status: "stuck"; want: Want; from?: number | null }
   | { status: "done"; want: Want; at: number; asked?: number }
   | { status: "error"; error: string }
@@ -166,12 +168,15 @@ export function ctlLine(c: Ctl | undefined, d: ControlDevice, v: DeviceView): { 
     const got = asked(c.want);
     return c.asked === undefined || got === undefined ? null : { text: `Went to ${got}%, not ${c.asked}%. ${d.name} keeps to its own steps and limits.`, tone: "" };
   }
-  if (c.status === "sending") return { text: `Sent. Waiting for ${d.name} to report back.`, tone: "" };
+  if (c.status === "sending") return { text: c.note ?? `Sent. Waiting for ${d.name} to report back.`, tone: "" };
   if (c.status === "error") return { text: `Not sent. ${c.error}`, tone: "crit" };
   if (c.status === "stuck") {
     const want = asked(c.want), got = c.want.brightness !== undefined ? v.brightness : v.setpoint;
     /* A number the device won't take leaves it where it was, with no report, which looks the same as a dropped command. */
     if (want !== undefined && got !== null && (!c.want.state || v.on)) return { text: `Not confirmed. ${d.name} still reports ${got}%. It may not take ${want}%, so try another value.`, tone: "crit" };
+    /* The extra mode has no command of its own, so nothing was dropped: the device took its target and stayed put. */
+    if (c.want.mode !== undefined && c.want.mode === d.extraMode && !v.modes.includes(d.extraMode))
+      return { text: `Not confirmed. ${d.name} still reports ${v.text.toLowerCase()}. Moving its target didn't put it in ${d.extraMode} mode.`, tone: "crit" };
     const why = /tuya/i.test(d.family) ? "A Tuya plug can drop a command without saying, so try again." : "Try again, or check the device.";
     return { text: `Not confirmed. ${d.name} still reports ${v.text.toLowerCase()}. ${why}`, tone: "crit" };
   }
@@ -205,3 +210,16 @@ export const stepDown = (n: number, step: number, min: number) => Math.max(min, 
 export const DIAL_STEP = { brightness: 5, humidity: 1 } as const;
 /* The buttons and keys send once they've been left alone this long, so five presses are one command, not five. */
 export const DIAL_SETTLE_MS = 700;
+
+/* The modes a device is offered: Home Assistant's own list, then the extra one set for it, if HA doesn't list that. */
+export const modeChoices = (v: DeviceView, extra: string): string[] => (extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes);
+
+/* Some dehumidifiers have a mode their integration can't ask for, which the device drops into when its target is
+   changed: here, by moving the target one whole percent and back. The two targets to ask for, in order, or null when
+   the device has no target to move or no room to move it. */
+export function nudgeTargets(v: DeviceView): [number, number] | null {
+  if (v.setpoint === null || v.minRh === null || v.maxRh === null) return null;
+  const lo = Math.ceil(v.minRh), hi = Math.floor(v.maxRh), back = Math.min(hi, Math.max(lo, Math.round(v.setpoint)));
+  const other = back + 1 <= hi ? back + 1 : back - 1 >= lo ? back - 1 : null;
+  return other === null ? null : [other, back];
+}

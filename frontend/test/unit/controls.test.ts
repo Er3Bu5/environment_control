@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CTL_FLIP_MS, type Ctl, ctlLine, deviceView, dialArc, dialAt, dialT, dialValue, humidityChoices, onReport, stepDown, stepUp, wantOf, wanted, zoneControls } from "../../src/frame/controls";
+import { CTL_FLIP_MS, type Ctl, ctlLine, deviceView, dialArc, dialAt, dialT, dialValue, humidityChoices, modeChoices, nudgeTargets, onReport, stepDown, stepUp, wantOf, wanted, zoneControls } from "../../src/frame/controls";
 import type { HaState } from "../../src/frame/readings";
 
 const st = (state: string, attributes: Record<string, unknown> = {}): HaState => ({ state, attributes, at: null });
@@ -105,7 +105,7 @@ describe("a control moves only when the device reports it", () => {
   });
 
   it("words each outcome, naming what the device still reports", () => {
-    const d = { id: "fan", entity: "switch.fan", name: "Intake fan", role: "Fan", zones: ["garden"], family: "Tuya", link: "wifi" };
+    const d = { id: "fan", entity: "switch.fan", name: "Intake fan", role: "Fan", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "" };
     const v = deviceView("switch.fan", st("off"));
     expect(ctlLine({ status: "sending", want: wantOf("turn_on"), since: 0 }, d, v)?.text).toBe("Sent. Waiting for Intake fan to report back.");
     expect(ctlLine({ status: "stuck", want: wantOf("turn_on") }, d, v)).toEqual({ text: "Not confirmed. Intake fan still reports off. A Tuya plug can drop a command without saying, so try again.", tone: "crit" });
@@ -144,5 +144,34 @@ describe("the dial a number is set on", () => {
     expect([stepUp(78, 5, 100), stepDown(78, 5, 1), stepUp(80, 5, 100), stepDown(80, 5, 1)]).toEqual([80, 75, 85, 75]);
     expect([stepUp(98, 5, 100), stepUp(100, 5, 100), stepDown(3, 5, 1), stepUp(0, 5, 100)]).toEqual([100, 100, 1, 5]);
     expect([stepUp(50, 1, 54), stepUp(54, 1, 54), stepDown(50, 1, 50)]).toEqual([51, 54, 50]);
+  });
+});
+
+describe("a mode Home Assistant doesn't list", () => {
+  const dehu = (attrs: Record<string, unknown>) => deviceView("humidifier.dehu", st("on", { available_modes: ["eco", "boost"], mode: "boost", ...attrs }));
+
+  it("is offered after the device's own modes, once, and only when one is set", () => {
+    const v = dehu({});
+    expect([modeChoices(v, "normal"), modeChoices(v, "eco"), modeChoices(v, "")]).toEqual([["eco", "boost", "normal"], ["eco", "boost"], ["eco", "boost"]]);
+    const stored = { zones: [{ id: "garden" }], devices: [{ id: "dehu", entity: "humidifier.dehu", name: "Dehu", type: "Dehumidifier", zones: ["garden"], nudgeMode: " normal " }] };
+    expect(zoneControls(stored, "garden").groups[0].devices[0].extraMode).toBe("normal");
+  });
+
+  it("is reached by moving the target one whole percent and back, inside the device's limits", () => {
+    expect(nudgeTargets(dehu({ humidity: 55, min_humidity: 35, max_humidity: 80 }))).toEqual([56, 55]);
+    /* At the top there's no room above, so it steps down and back. */
+    expect(nudgeTargets(dehu({ humidity: 80, min_humidity: 35, max_humidity: 80 }))).toEqual([79, 80]);
+    expect(nudgeTargets(dehu({ humidity: 52.5, min_humidity: 35, max_humidity: 80 }))).toEqual([54, 53]);
+    expect(nudgeTargets(dehu({ humidity: 50, min_humidity: 50, max_humidity: 50 }))).toBeNull();
+    expect(nudgeTargets(dehu({ humidity: 50 }))).toBeNull();
+    expect(nudgeTargets(dehu({ min_humidity: 35, max_humidity: 80 }))).toBeNull();
+  });
+
+  it("says what it's doing while the steps are sent", () => {
+    const d = { id: "dehu", entity: "humidifier.dehu", name: "Dehu", role: "Dehumidifier", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "normal" };
+    expect(ctlLine({ status: "sending", want: wantOf("humidity", 56), since: 0, note: "Moving the target one step and back." }, d, dehu({}))?.text).toBe("Moving the target one step and back.");
+    expect(ctlLine({ status: "stuck", want: { mode: "normal" } }, d, dehu({}))?.text).toBe("Not confirmed. Dehu still reports on, boost mode. Moving its target didn't put it in normal mode.");
+    /* A mode Home Assistant does list was asked for by name, so a missing report is the usual story. */
+    expect(ctlLine({ status: "stuck", want: { mode: "eco" } }, d, dehu({}))?.text).toContain("A Tuya plug can drop a command");
   });
 });
