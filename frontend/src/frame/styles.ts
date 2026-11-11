@@ -126,7 +126,11 @@ export const styles = css`
   fieldset.chips legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
   .chiprow { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); font-size: 13px; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
-  .chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+  /* The choice itself is invisible and covers its whole chip, so a tap or a click anywhere on the chip lands on it.
+     At 1px it sat at a fraction of a pixel on some page widths, where a click aimed at it hit the chip's text instead. */
+  .chip { position: relative; }
+  .chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .chip input:disabled { cursor: not-allowed; }
   .chip:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
   .chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   .chip.wait { border-style: dashed; color: var(--muted); }
