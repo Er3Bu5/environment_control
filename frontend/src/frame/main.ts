@@ -2026,15 +2026,18 @@ export class EcApp extends LitElement {
     const r = this.zoneNow(z.id, k), band = this.bandNow(z, k), words = this.combinedWords(z.id, k);
     return html`<div class="tile">
       <div class="tile-top">${this.ic(...EcApp.LOOKS[k])}<div><div class="name">${METRIC[k].label}</div><div class="val">${fmt(k, r.value)} <small>${METRIC[k].unit}</small></div></div></div>
-      ${words ? html`<div class="tavg">${words}</div>` : nothing}
-      ${k === "vpd" && this.readingsOf(z.id).length
-        ? html`<div class="tavg">${this.leafLine(z)} <button class="fixlink small" @click=${() => this.openCalibration(z.id)}>Change &rsaquo;</button></div>`
-        : nothing}
+      <div class="tnotes">
+        ${words ? html`<div class="tavg">${words}</div>` : nothing}
+        ${k === "vpd" && this.readingsOf(z.id).length
+          ? html`<div class="tavg">${this.leafLine(z)} <button class="fixlink small" @click=${() => this.openCalibration(z.id)}>Change &rsaquo;</button></div>`
+          : nothing}
+      </div>
       ${this.track(z, k)}
       ${this.judged(z) && band
         ? html`<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => html`<span><b>${band[i] === null ? "-" : band[i]}</b>${l}</span>`)}</div>
             <div>${this.pill(this.stateOf(z, k))}</div>`
-        : html`<button class="fixlink small" @click=${() => this.openSchedule(z.id)}>Targets not set up yet &rsaquo;</button>`}
+        : html`<div><button class="fixlink small" @click=${() => this.openSchedule(z.id)}>Targets not set up yet &rsaquo;</button></div>
+            <div></div>`}
     </div>`;
   }
 
@@ -3112,6 +3115,7 @@ export class EcApp extends LitElement {
     const chartAt = chartLeaf(d, sensors), at = Math.abs(chartAt) < 1e-9 ? "the leaf the same as air" : phrase(chartAt);
     const same = new Set(counted.map((s) => (d.rows[s.id] ? leafValue(d.rows[s.id]) : 0))).size === 1;
     return html`${head}
+      <div class="row">${back}</div>
       ${open
         ? html`<div class="notice">
             Not confirmed yet. ${onBoard ? "Check each sensor's offset, then Confirm. A board keeps the offset it already holds, and one kept here starts at 0." : "Each offset starts at 0. Check them, then Confirm."}
@@ -3138,9 +3142,7 @@ export class EcApp extends LitElement {
           : nothing}
         ${onBoard ? html`<p class="small muted">Offsets on a board are changed on the board itself. Its VPD, and anything reading it such as your alerts, follow straight away.</p>` : nothing}
       </section>
-      <div class="row">
-        ${back}${open && !changes ? html`<button class="btn primary" ?disabled=${issues.length > 0} @click=${this.leafConfirm}>Confirm</button>` : nothing}
-      </div>`;
+      ${open && !changes ? html`<div class="row"><button class="btn primary" ?disabled=${issues.length > 0} @click=${this.leafConfirm}>Confirm</button></div>` : nothing}`;
   }
 
   private leafRow(d: LeafDraft, s: ReturnType<typeof envSensors>[number], homes: Home[], issues: { id: string; target: string }[], height: string) {
@@ -3449,6 +3451,7 @@ export class EcApp extends LitElement {
     const open = z.setup.targets === "todo" || z.setup.targets === "later", t = this.tgt;
     const all = this.pageIssues(d), changes = this.schedChangeList(d).length;
     return html`${head}
+      <div class="row">${back}</div>
       ${open ? html`<div class="notice">Not confirmed yet. A new zone's times and limits all start at 0, so set them, then Confirm. Applying a change confirms it too.</div>` : nothing}
       <section class="card" id="s-times">
         <div><h2>Day and night</h2><p class="muted small">How ${z.name} knows when it's day, and when its lights come on and go off.</p></div>
@@ -3474,9 +3477,7 @@ export class EcApp extends LitElement {
         ${issues.map((i) => html`<button class="notice fix" @click=${() => this.fixIssue(i)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
       </div>
       ${t ? this.targetsCard(d, t, z) : nothing} ${d.sending ? html`<div class="lstatus" role="status">Sending to Home Assistant...</div>` : nothing}
-      <div class="row">
-        ${back}${open && !changes ? html`<button class="btn primary" ?disabled=${all.length > 0 || d.sending} @click=${this.schedConfirm}>Confirm</button>` : nothing}
-      </div>`;
+      ${open && !changes ? html`<div class="row"><button class="btn primary" ?disabled=${all.length > 0 || d.sending} @click=${this.schedConfirm}>Confirm</button></div>` : nothing}`;
   }
 
   /* Targets: where the zone's limits come from, and the limits themselves, on the VPD chart or typed. */

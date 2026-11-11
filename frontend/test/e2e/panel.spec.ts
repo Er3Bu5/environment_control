@@ -190,13 +190,14 @@ test.describe("talking to HA", () => {
     const head = app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true });
     const [h, w] = [await head.boundingBox(), await app(frame).locator(".wrap").boundingBox()];
     expect(Math.abs(h!.x + h!.width / 2 - (w!.x + w!.width / 2))).toBeLessThan(2);
-    /* One row: View targets at the left edge, the heading in the middle, the menu button at the right edge. */
-    const [m, t] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox()];
-    const midY = (b: { y: number; height: number }) => b.y + b.height / 2;
-    expect(Math.abs(midY(m!) - midY(h!))).toBeLessThan(4);
-    expect(Math.abs(midY(t!) - midY(h!))).toBeLessThan(4);
-    expect(Math.abs(m!.x + m!.width - (w!.x + w!.width))).toBeLessThan(2);
-    expect(Math.abs(t!.x - w!.x)).toBeLessThan(2);
+    /* The menu button at the left edge and View targets at the right, both level with the foot of the heading block. */
+    const [m, t, block] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox(), await app(frame).locator(".pagehead").boundingBox()];
+    const foot = (b: { y: number; height: number }) => b.y + b.height;
+    expect(Math.abs(foot(m!) - foot(block!))).toBeLessThan(2);
+    expect(Math.abs(foot(t!) - foot(block!))).toBeLessThan(2);
+    expect(foot(m!)).toBeGreaterThan(foot(h!));
+    expect(Math.abs(m!.x - w!.x)).toBeLessThan(2);
+    expect(Math.abs(t!.x + t!.width - (w!.x + w!.width))).toBeLessThan(2);
     /* The zone's cards each take the page's full width, one under the other. */
     const card = (name: string) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name, exact: true }) });
     const [place, controls] = [await card("Device placement").boundingBox(), await card("Controls").boundingBox()];
@@ -717,6 +718,22 @@ test.describe("targets, day and night", () => {
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+  });
+
+  test("Back is at the top of Targets and of Sensor Calibration, above everything there is to edit", async ({ page }) => {
+    const frame = await open(page, "Garden");
+    const above = async () => {
+      const back = await app(frame).getByRole("button", { name: "Back", exact: true }).boundingBox();
+      const card = await app(frame).locator("section.card").first().boundingBox();
+      expect(await app(frame).getByRole("button", { name: "Back", exact: true }).count()).toBe(1);
+      return back!.y + back!.height <= card!.y;
+    };
+    expect(await above()).toBe(true);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
+    expect(await above()).toBe(true);
   });
 
   test("an Athena stage fills the period on show, all stored here with nothing sent", async ({ page }) => {
@@ -1743,6 +1760,21 @@ test.describe("history", () => {
   const card = (frame: Frame) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "History", exact: true }) });
   const row = (frame: Frame, name: string) => card(frame).locator("tbody tr", { hasText: name });
   const calls = (page: Page) => page.evaluate<{ entities: string[]; hours: number; buckets: number }[]>("historyCalls");
+
+  test("the tiles' tracks line up across the row, however many lines of notes a tile has", async ({ page }) => {
+    const frame = await garden(page);
+    await goTo(frame, "Garden");
+    const tiles = app(frame).locator(".tiles .tile");
+    await expect(tiles).toHaveCount(3);
+    /* VPD has a line the others don't, its leaf temperature offset, which used to push its track down. */
+    await expect(tiles.nth(2)).toContainText("Leaf temperature offset");
+    const tops = await tiles.locator(".track").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    const perRow = (await tiles.evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size)) === 1 ? 3 : 2;
+    expect(tops[0]).toBe(tops[1]);
+    if (perRow === 3) expect(tops[2]).toBe(tops[0]);
+    const ranges = await tiles.locator(".range").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(ranges[0]).toBe(ranges[1]);
+  });
 
   test("every sensor gets a line and the combined line ends on the same value as the tile", async ({ page }) => {
     const frame = await garden(page);
