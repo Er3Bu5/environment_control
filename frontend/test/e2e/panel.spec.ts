@@ -1186,6 +1186,72 @@ test.describe("map devices", () => {
     await expect(current).toHaveText("2. Devices");
   });
 
+  test("a name given here is kept in place of Home Assistant's, and a device moved to another entity keeps its name and type", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    const allow = async () => {
+      await expect.poll(() => hostDialogOpen(page)).toBe(true);
+      await page.waitForTimeout(1100);
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Enter");
+      await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    };
+    await row(frame, "Environment board").getByRole("button").first().click();
+    const board = app(frame).locator("#ms-d-board"), name = board.getByLabel("Name", { exact: true });
+    await expect(name).toHaveValue("Environment board");
+    await name.fill("Canopy left");
+    /* A redraw, as every new reading causes, leaves what's typed alone. */
+    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
+    await expect(name).toHaveValue("Canopy left");
+    await expect(board.locator("strong").first()).toHaveText("Canopy left");
+    await expect(board).toContainText("Home Assistant calls it Environment board. Its name there isn't changed.");
+    await name.fill("");
+    await expect(next(frame)).toBeDisabled();
+    await board.getByRole("button", { name: "Put back Home Assistant's name, Environment board" }).click();
+    await expect(name).toHaveValue("Environment board");
+    await expect(board).not.toContainText("Home Assistant calls it");
+    await name.fill("Canopy left");
+    await next(frame).click();
+
+    await row(frame, "Spare Plug").getByRole("button").first().click();
+    const plug = app(frame).locator("#md-switch_spare_plug");
+    await plug.getByLabel("Heater", { exact: true }).check();
+    await plug.getByLabel("Name", { exact: true }).fill("Tent heater");
+    await next(frame).click();
+    await expect(app(frame).locator(".review")).toContainText("Canopy left (environment)");
+    await expect(app(frame).locator(".review")).toContainText("Tent heater (Heater)");
+    await next(frame).click();
+    await expect(dialog(frame)).toContainText("Environment board name");
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await allow();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    let saved = await stored(page);
+    expect(saved.zones.find((x) => x.id === "flower_tent")?.sensors.map((x) => [x.id, x.name, x.nameSource])).toEqual([["d-board", "Canopy left", "confirmed"]]);
+    expect(saved.devices.filter((d) => (d.zones as string[]).includes("flower_tent")).map((d) => [d.entity, d.name, d.nameSource, d.type])).toEqual([["switch.spare_plug", "Tent heater", "confirmed", "Heater"]]);
+
+    /* Moved to another of Home Assistant's entities, it's one change, and Home Assistant asks before the new one can be switched. */
+    await page.evaluate(`fakeHA.setState("light.tent_light", "on", { friendly_name: "Tent light" })`);
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
+    await app(frame).locator(".steps").getByRole("button", { name: "2. Devices", exact: true }).click();
+    const swap = app(frame).locator("#swap-md-switch_spare_plug");
+    await expect(swap).toContainText("On: Spare Plug, switch.spare_plug");
+    await swap.getByRole("combobox").fill("tent");
+    await swap.getByRole("option", { name: /^Tent light/ }).click();
+    const moved = app(frame).locator("#md-light_tent_light");
+    await expect(moved.locator("strong").first()).toHaveText("Tent heater");
+    await expect(moved.getByLabel("Heater", { exact: true })).toBeChecked();
+    await expect(app(frame).locator("#md-switch_spare_plug .pickrow")).toHaveAttribute("aria-pressed", "false");
+    await next(frame).click();
+    await next(frame).click();
+    await expect(dialog(frame).locator(".review-row")).toHaveText(["Tent heater entityswitch.spare_plug → light.tent_light"]);
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await allow();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    saved = await stored(page);
+    expect(saved.devices.filter((d) => (d.zones as string[]).includes("flower_tent")).map((d) => [d.entity, d.name, d.type])).toEqual([["light.tent_light", "Tent heater", "Heater"]]);
+    expect(saved.devices.some((d) => d.entity === "switch.spare_plug" && (d.zones as string[]).includes("flower_tent"))).toBe(false);
+  });
+
   test("leaving Map devices with picks made asks first", async ({ page }) => {
     const frame = await newZoneMap(page);
     await row(frame, "Environment board").getByRole("button").first().click();
@@ -1392,37 +1458,39 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByLabel("In canopy").check();
     await expect(finish(frame)).toBeEnabled();
 
-    await app(frame).getByLabel("Add a virtual device").fill("Drain tank");
-    await app(frame).getByRole("group", { name: "Its type" }).getByLabel("Tank").check();
-    await app(frame).getByRole("button", { name: "Add", exact: true }).click();
-    await spot(frame, "Outside the wall, by unit 1").click();
-    /* Picked, a virtual device can be renamed, retyped and removed right here. A typed name stays in the box through
-       the redraw every new reading causes, and only becomes the name on Save. */
-    const name = app(frame).getByLabel("Name", { exact: true }), save = app(frame).getByRole("button", { name: "Save name" });
-    await expect(save).toHaveCount(0);
-    await name.fill("Waste");
-    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
-    await expect(app(frame).locator(".sensor-opt", { hasText: "Drain tank" })).toHaveCount(1);
-    await expect(name).toHaveValue("Waste");
+    /* Placement only places. Adding, naming and removing a device is Device identification's, a button away, and what's
+       been placed so far is still here on the way back. */
+    await expect(app(frame).getByLabel("Add a virtual device")).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "Add or edit devices" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
+    await expect(app(frame).locator('.steps li[aria-current="step"]')).toHaveText("2. Devices");
+    await app(frame).getByRole("button", { name: "Add a virtual device" }).click();
+    const tank = app(frame).locator(".pickwrap.virt"), name = tank.getByLabel("Name", { exact: true });
+    await expect(name).toBeFocused();
     await expect(finish(frame)).toBeDisabled();
-    await expect(app(frame).getByRole("button", { name: /Save or put back Drain tank's new name first/ })).toBeVisible();
-    await app(frame).getByRole("button", { name: "Put the name back to Drain tank" }).click();
-    await expect(name).toHaveValue("Drain tank");
-    await expect(save).toHaveCount(0);
-    await expect(finish(frame)).toBeEnabled();
-    await name.fill("Waste tank");
-    await save.click();
-    await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank" })).toContainText("Tank");
-    await expect(save).toHaveCount(0);
-    await name.fill("Waste tank 2");
-    await name.press("Enter");
-    await expect(app(frame).locator(".sensor-opt", { hasText: "Waste tank 2" })).toHaveCount(1);
-    await name.fill("Waste tank");
-    await name.press("Enter");
-    await app(frame).getByLabel("Add a virtual device").fill("Spare bucket");
-    await app(frame).getByRole("button", { name: "Add", exact: true }).click();
-    await app(frame).getByRole("button", { name: "Remove Spare bucket" }).click();
-    await expect(app(frame).locator(".sensor-opt", { hasText: "Spare bucket" })).toHaveCount(0);
+    await expect(app(frame).getByRole("button", { name: "A virtual device needs a name. ›" })).toBeVisible();
+    /* A typed name stays in the box through the redraw every new reading causes. */
+    await name.fill("Drain");
+    await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
+    await expect(name).toHaveValue("Drain");
+    await name.fill("Drain tank");
+    await tank.getByLabel("Tank", { exact: true }).check();
+    await app(frame).getByRole("button", { name: "Add a virtual device" }).click();
+    await expect(app(frame).locator(".pickwrap.virt")).toHaveCount(2);
+    await app(frame).locator(".pickwrap.virt").last().getByRole("button", { name: "Remove this virtual device" }).click();
+    await expect(app(frame).locator(".pickwrap.virt")).toHaveCount(1);
+    await finish(frame).click();
+    await expect(app(frame).locator(".review")).toContainText("1 virtual device");
+    await finish(frame).click();
+    await expect(dialog(frame)).toContainText("Drain tank, virtual");
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device placement: Flower tent", exact: true })).toBeVisible();
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Soil 1" })).toContainText("Unit 1");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Environment board" })).toContainText("Aisle between rows 1 and 2");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Drain tank" })).toContainText("Needs placing");
+    await expect(app(frame).locator(".sensor-opt", { hasText: "Drain tank" })).toHaveAttribute("aria-pressed", "true");
+    await expect(finish(frame)).toBeDisabled();
+    await spot(frame, "Outside the wall, by unit 1").click();
 
     await finish(frame).click();
     await expect(dialog(frame)).toContainText("Soil 1 position");
@@ -1434,7 +1502,7 @@ test.describe("zone layout and placement", () => {
       ["d-board", "env", [0.5, 0], "in"],
       ["d-soil", "soil", [0, 0], null],
     ]);
-    expect(z?.virtual).toEqual([{ id: "v-drain_tank", name: "Waste tank", pos: [-1, -1], type: "Tank" }]);
+    expect(z?.virtual).toEqual([{ id: "v-drain_tank", name: "Drain tank", pos: [-1, -1], type: "Tank" }]);
   });
 
   test("a zone's page shows its map, and names devices that aren't on it", async ({ page }) => {

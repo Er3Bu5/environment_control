@@ -365,10 +365,9 @@ export const styles = css`
   .picklist-menu li[aria-selected="true"] { font-weight: 500; }
   .picker > p { margin: 0; overflow-wrap: anywhere; }
 
-  .now.vedit { flex-direction: column; align-items: stretch; }
-  .vname { display: flex; align-items: flex-end; gap: 8px; }
-  .vname .field { flex: 1; }
-  .vname > .btn { padding: 9px 14px; font-size: 15px; }
+  .virt-head { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+  .pickwrap.virt { border-style: dashed; }
+  .ents .field { max-width: 440px; }
   .resettable { position: relative; display: block; }
   .resettable:has(.reset) input { padding-right: 40px; }
   .resettable .reset { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; color: var(--muted); }

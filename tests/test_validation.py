@@ -197,6 +197,14 @@ def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
     validate_config(c)
 
 
+def test_a_virtual_device_waits_for_its_spot(sample_config) -> None:
+    """Added in Device identification, it has no spot until Device placement gives it one."""
+    sample_config["zones"][0].update(
+        virtual=[{"id": "v-tank", "name": "Drain tank", "type": "Tank"}, {"id": "v-lid", "name": "Lid", "pos": None}]
+    )
+    validate_config(sample_config)
+
+
 def test_a_virtual_device_can_say_what_it_is(sample_config) -> None:
     c = _bad(
         sample_config,
