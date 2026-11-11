@@ -28,16 +28,17 @@ const leaveAsks = (page: Page) =>
     window.dispatchEvent(e);
     return e.defaultPrevented;
   });
-/* The host's reload bar, also in its closed shadow root: its button's centre on the page, or null when there's no bar. */
-async function updatedBarButton(page: Page): Promise<{ x: number; y: number } | null> {
+/* A button in the host's open dialog, by its data-host name: its centre on the page, or null when there's none. The
+   dialog is in the host's closed shadow root, so only DevTools can find it. */
+async function hostButton(page: Page, name: string): Promise<{ x: number; y: number } | null> {
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
   let button: number | null = null;
-  const walk = (n: { nodeId: number; nodeName: string; attributes?: string[]; children?: unknown[]; shadowRoots?: unknown[] }, inBar: boolean) => {
-    const attrs = n.attributes || [], bar = inBar || (n.nodeName === "DIV" && attrs[attrs.indexOf("class") + 1] === "updated" && attrs.includes("class"));
-    if (bar && n.nodeName === "BUTTON") button = n.nodeId;
+  const walk = (n: { nodeId: number; nodeName: string; attributes?: string[]; children?: unknown[]; shadowRoots?: unknown[] }, inDialog: boolean) => {
+    const attrs = n.attributes || [], open = inDialog || (n.nodeName === "DIALOG" && attrs.includes("open"));
+    if (open && n.nodeName === "BUTTON" && attrs[attrs.indexOf("data-host") + 1] === name && attrs.includes("data-host")) button = n.nodeId;
     if (n.nodeName === "IFRAME") return;
-    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c as typeof n, bar);
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c as typeof n, open);
   };
   walk(root as Parameters<typeof walk>[0], false);
   if (button === null) { await cdp.detach(); return null; }
@@ -1330,34 +1331,57 @@ test.describe("map devices", () => {
 });
 
 test.describe("after an update", () => {
-  test("a page that stayed open asks for a reload, keeps working underneath, and Reload reloads", async ({ page }) => {
+  test("a page that stayed open asks for a reload in a dialog, and Later keeps it working and quiet for a while", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
-    expect(await updatedBarButton(page)).toBeNull();
+    expect(await hostDialogOpen(page)).toBe(false);
     await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
     await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
-    await expect.poll(() => updatedBarButton(page)).not.toBeNull();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    expect(await hostDialogText(page)).toBe("Environment Control was updated Reload to use the new version. Later Reload");
+    const later = await hostButton(page, "later");
+    await page.mouse.click(later!.x, later!.y);
+    await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    /* The old panel carries on underneath, and isn't asked about again straight away. */
     await goTo(frame, "Setup");
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
-    const button = await updatedBarButton(page);
-    await Promise.all([page.waitForEvent("load"), page.mouse.click(button!.x, button!.y)]);
+    await page.evaluate("fakeHA.publish()");
+    await page.waitForTimeout(300);
+    expect(await hostDialogOpen(page)).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBe(1);
+  });
+
+  test("Reload in that dialog reloads the page, and with a draft open it says the draft would be lost", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    /* The frame tells the host a draft is open a moment after it's drawn. */
+    await expect.poll(() => page.evaluate<boolean>("panel.draftOpen")).toBe(true);
+    await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
+    await page.evaluate(`panelModuleUrl = "/environment_control_static/0.1.0b6/host.js"; fakeHA.publish()`);
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    expect(await hostDialogText(page)).toContain("You have changes that aren't applied yet, and reloading discards them: choose Later to apply them first.");
+    const reload = await hostButton(page, "reload");
+    await Promise.all([page.waitForEvent("load"), page.mouse.click(reload!.x, reload!.y)]);
     expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBeUndefined();
     await panelFrame(page);
   });
 
-  test("with the release HA registers, or no panel list at all, there is no bar", async ({ page }) => {
+  test("with the release HA registers, or no panel list at all, nothing asks for a reload", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await openNav(frame);
     await expect(tab(frame, "Overview")).toBeVisible();
     await page.evaluate(`panelModuleUrl = location.origin + "/custom_components/environment_control/frontend/host.js"; fakeHA.publish()`);
     await page.waitForTimeout(200);
-    expect(await updatedBarButton(page)).toBeNull();
+    expect(await hostDialogOpen(page)).toBe(false);
     await page.evaluate(`panelModuleUrl = undefined; fakeHA.publish()`);
     await page.waitForTimeout(200);
-    expect(await updatedBarButton(page)).toBeNull();
+    expect(await hostDialogOpen(page)).toBe(false);
   });
 });
 

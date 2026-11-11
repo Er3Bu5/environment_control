@@ -71,8 +71,8 @@ const onColor = (c) => {
     : ((/^rgba?\(([^)]*)\)/i.exec(c) || [])[1] || "").split(",").slice(0, 3).map(parseFloat);
   return rgb.length === 3 && rgb.every(Number.isFinite) && (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255 > 0.6 ? "#111111" : "#FFFFFF";
 };
-/* The bar asking for a reload after an update, in HA's own colours where its theme sets them. */
-const UPDATED_CSS = ".updated{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;font:14px/1.4 Roboto,system-ui,sans-serif;background:var(--secondary-background-color,#E5E5E5);color:var(--primary-text-color,#212121)}.updated button{font:inherit;min-height:36px;padding:0 16px;border-radius:18px;border:0;background:var(--primary-color,#03A9F4);color:var(--text-primary-color,#FFFFFF);cursor:pointer}";
+/* A reload turned down with Later isn't asked for again for this long. */
+const RELOAD_QUIET_MS = 10 * 60_000;
 /* The browser's Navigation API, where it has one. */
 /** @returns {any} */
 const navigation = () => /** @type {any} */ (window).navigation;
@@ -112,8 +112,8 @@ class EnvironmentControlPanel extends HTMLElement {
     /** @type {(() => void) | null} */
     this.onReady = null;
     this._narrow = false;
-    /** @type {HTMLElement | null} */
-    this.updatedBar = null;
+    /* Until when a reload turned down with Later stays quiet. */
+    this.reloadQuietUntil = 0;
     this.onMessage = this.onMessage.bind(this);
     /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
        raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
@@ -163,7 +163,7 @@ class EnvironmentControlPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = h;
     if (first) this.start(); else this.forward();
-    if (this.frame && !this.updatedBar && this.stale()) this.showUpdated();
+    if (this.frame && this.stale()) this.askReload();
   }
   /* After an update HA serves the new release from a new path and registers the panel there, but a page that stayed
      open, a browser tab or the Companion app, keeps this element: a custom element can't be defined twice, so HA goes on
@@ -175,14 +175,32 @@ class EnvironmentControlPanel extends HTMLElement {
     if (typeof url !== "string") return false;
     try { return new URL(url, location.origin).pathname !== new URL(import.meta.url).pathname; } catch { return false; }
   }
-  /* The old panel stays usable underneath, so a draft can still be applied before reloading. */
-  showUpdated() {
-    const bar = make("div", undefined, "updated"), go = make("button", "Reload");
-    bar.setAttribute("role", "status");
-    bar.append(make("span", "Environment Control was updated. Reload to use the new version."), go);
-    go.addEventListener("click", () => location.reload());
-    this.updatedBar = bar;
-    this.shadow.prepend(bar);
+  /* Asks in a dialog of its own, over the page, since a bar across the top was easy to miss. Later keeps the old panel
+     in use, so a draft can still be applied before reloading, and it's asked again after a while. */
+  askReload() {
+    if (this.asking || Date.now() < this.reloadQuietUntil) return;
+    this.asking = true;
+    const t = this.theme(), dlg = /** @type {HTMLDialogElement} */ (make("dialog", undefined, t.mode));
+    if (t.colors.primary) { dlg.style.setProperty("--p", t.colors.primary); dlg.style.setProperty("--on-p", onColor(t.colors.primary)); }
+    dlg.setAttribute("aria-labelledby", "ec-reload-title");
+    const title = make("h2", "Environment Control was updated");
+    title.id = "ec-reload-title"; title.tabIndex = -1;
+    const text = this.draftOpen
+      ? "Reload to use the new version. You have changes that aren't applied yet, and reloading discards them: choose Later to apply them first."
+      : "Reload to use the new version.";
+    const later = make("button", "Later"), reload = make("button", "Reload", "allow");
+    later.dataset.host = "later"; reload.dataset.host = "reload";
+    const row = make("div", undefined, "row"); row.append(later, reload);
+    dlg.append(make("style", DIALOG_CSS), title, make("p", text), row);
+    const close = () => { dlg.close(); dlg.remove(); this.asking = false; };
+    const wait = () => { this.reloadQuietUntil = Date.now() + RELOAD_QUIET_MS; close(); };
+    later.addEventListener("click", wait);
+    dlg.addEventListener("cancel", (e) => { e.preventDefault(); wait(); });
+    /* Said yes to losing the draft above, so the browser's own leave prompt would only ask again. */
+    reload.addEventListener("click", () => { this.draftOpen = false; close(); location.reload(); });
+    this.shadow.append(dlg);
+    dlg.showModal();
+    title.focus();
   }
   get hass() { return this._hass; }
   /* HA hides its sidebar in a narrow window, the Fold folded for one, and a panel then has to offer a way to open it. */
@@ -216,7 +234,7 @@ class EnvironmentControlPanel extends HTMLElement {
     const style = document.createElement("style");
     /* HA mounts a panel in a container with no height of its own, padded for the safe areas, so the panel sizes itself
        to the window less that padding. A height of 100% would resolve to nothing and leave the frame at 150px. */
-    style.textContent = ":host{display:flex;flex-direction:column;height:calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))}iframe{display:block;width:100%;flex:1;min-height:0;border:0}" + UPDATED_CSS;
+    style.textContent = ":host{display:flex;flex-direction:column;height:calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))}iframe{display:block;width:100%;flex:1;min-height:0;border:0}";
     this.frame = document.createElement("iframe");
     /* allow-scripts alone: adding allow-same-origin would let the frame reach this page and undo the sandbox. */
     this.frame.setAttribute("sandbox", "allow-scripts");
