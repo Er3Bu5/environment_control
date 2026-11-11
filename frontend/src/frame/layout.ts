@@ -14,6 +14,19 @@ export interface Layout {
   units: number;
   rows: number;
   cols: number;
+  /* A short name for a unit, such as the plant in it, by the unit's number. Shown on the map in place of the number. */
+  labels?: Record<string, string>;
+}
+export const MAX_UNIT_LABEL = 12;
+/* The labels that belong to a unit this layout has, trimmed, and nothing else. */
+export function unitLabels(labels: unknown, units: number): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof labels !== "object" || labels === null || Array.isArray(labels)) return out;
+  for (const [k, v] of Object.entries(labels)) {
+    const n = Number(k), text = typeof v === "string" ? v.trim().slice(0, MAX_UNIT_LABEL) : "";
+    if (Number.isInteger(n) && n >= 1 && n <= units && String(n) === k && text) out[k] = text;
+  }
+  return out;
 }
 export type Level = "above" | "in" | "under";
 export const LEVELS: Record<Level, string> = { above: "Above canopy", in: "In canopy", under: "Under canopy" };
@@ -119,7 +132,8 @@ export function posText(p: Spot, L: Layout): string {
     const a = unitName(L, r, c - 0.5), b = unitName(L, r, c + 0.5);
     return a && b ? `Between ${a} and ${b}` : a || b ? `Beside ${a || b}` : "Between units";
   }
-  return planted(L, r, c) ? `Unit ${r * L.cols + c + 1}` : `Where unit ${r * L.cols + c + 1} would be`;
+  const n = r * L.cols + c + 1, label = L.labels?.[n];
+  return planted(L, r, c) ? (label ? `Unit ${n}, ${label}` : `Unit ${n}`) : `Where unit ${n} would be`;
 }
 
 /* The draft: a zone's layout and every mark. flow is the steps this opening covers: 1 size, 2 units and grid, 3 the map. */
@@ -139,7 +153,20 @@ const DEFAULT_LAYOUT: Layout = { w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2 };
 
 export function storedLayout(z: Record<string, unknown> | undefined): Layout {
   const l = z && isObj(z.layout) ? z.layout : {};
-  return [l.w, l.d, l.units, l.rows, l.cols].every(num) ? { w: l.w as number, d: l.d as number, units: l.units as number, rows: l.rows as number, cols: l.cols as number } : { ...DEFAULT_LAYOUT };
+  if (![l.w, l.d, l.units, l.rows, l.cols].every(num)) return { ...DEFAULT_LAYOUT };
+  const labels = unitLabels(l.labels, l.units as number);
+  return { w: l.w as number, d: l.d as number, units: l.units as number, rows: l.rows as number, cols: l.cols as number, ...(Object.keys(labels).length ? { labels } : {}) };
+}
+/* The layout a draft describes, as the map draws it and as it's stored. */
+export const layoutOf = (d: Layout): Layout => {
+  const labels = unitLabels(d.labels, d.units);
+  return { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols, ...(Object.keys(labels).length ? { labels } : {}) };
+};
+export function labelUnit(d: Layout, n: number, typed: string): void {
+  const labels = { ...(d.labels ?? {}) };
+  if (typed.trim()) labels[n] = typed.slice(0, MAX_UNIT_LABEL);
+  else delete labels[n];
+  d.labels = labels;
 }
 
 /* What a zone's map shows: its sensors, its devices that are placed or can be, and its virtual devices. Only climate
@@ -237,6 +264,9 @@ export function layoutChanges(d: LayoutDraft, c: RawConfig): Change[] {
   add("Size", `${was.w} x ${was.d} m`, `${d.w} x ${d.d} m`);
   add("Units", String(was.units), String(d.units));
   add("Grid", `${was.rows} rows, ${was.cols} columns`, `${d.rows} rows, ${d.cols} columns`);
+  const had = was.labels ?? {}, has = unitLabels(d.labels, d.units);
+  for (const k of [...new Set([...Object.keys(had), ...Object.keys(has)])].sort((a, b) => Number(a) - Number(b)))
+    add(`Unit ${k} label`, had[k] ?? "None", has[k] ?? (Number(k) > d.units ? "Removed with the unit" : "None"));
   for (const s of d.sensors) {
     const old = items.sensors.find((x) => x.id === s.id);
     add(`${s.name} position`, where(old?.pos ?? null, was), fits(s, d) ? where(s.pos, d) : "Not placed");
@@ -257,7 +287,7 @@ export function layoutChanges(d: LayoutDraft, c: RawConfig): Change[] {
 export function applyLayout(c: RawConfig, d: LayoutDraft): void {
   const z = c.zones.find((x) => x.id === d.zoneId);
   if (!z) return;
-  const L: Layout = { w: d.w, d: d.d, units: d.units, rows: d.rows, cols: d.cols };
+  const L = layoutOf(d);
   z.layout = L;
   for (const s of Array.isArray(z.sensors) ? z.sensors.filter(isObj) : []) {
     const drafted = d.sensors.find((x) => x.id === s.id);

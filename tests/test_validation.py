@@ -57,6 +57,14 @@ CASES = {
     "layout too big": (lambda c: c["zones"][0]["layout"].update(w=500), "size outside"),
     "grid too small for its units": (lambda c: c["zones"][0]["layout"].update(units=99), "doesn't hold its units"),
     "unit count that isn't whole": (lambda c: c["zones"][0]["layout"].update(units=2.5), "unit count outside"),
+    "label on a unit the zone doesn't have": (
+        lambda c: c["zones"][0]["layout"].update(labels={"999": "GG4"}),
+        "unit label",
+    ),
+    "label on a unit numbered oddly": (lambda c: c["zones"][0]["layout"].update(labels={"01": "GG4"}), "unit label"),
+    "unit label that's too long": (lambda c: c["zones"][0]["layout"].update(labels={"1": "x" * 13}), "unit label"),
+    "unit label that's blank": (lambda c: c["zones"][0]["layout"].update(labels={"1": "  "}), "unit label"),
+    "unit labels that aren't by unit": (lambda c: c["zones"][0]["layout"].update(labels=["GG4"]), "unit label"),
     "sensor outside the wall": (lambda c: c["zones"][0]["sensors"][0].update(pos=[-1, 0]), "can't go"),
     "sensor off the half-steps": (lambda c: c["zones"][0]["sensors"][0].update(pos=[0.25, 0]), "can't go"),
     "soil probe in an aisle": (
@@ -219,6 +227,11 @@ def test_an_extra_mode_is_a_short_name_on_a_humidifier_only(sample_config, devic
     sample_config["devices"].append({"id": "d-x", "zones": [sample_config["zones"][0]["id"]], **device})
     with pytest.raises(InvalidConfig, match="extra mode"):
         validate_config(sample_config)
+
+
+def test_a_unit_can_have_a_label(sample_config) -> None:
+    sample_config["zones"][0]["layout"].update(labels={"1": "GG4", "2": "Plant twelve"})
+    validate_config(sample_config)
 
 
 def test_a_virtual_device_waits_for_its_spot(sample_config) -> None:
