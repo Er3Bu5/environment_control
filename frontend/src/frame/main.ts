@@ -329,7 +329,6 @@ export class EcApp extends LitElement {
     chartW: { state: true },
     states: { state: true },
     now: { state: true },
-    level: { state: true },
     picked: { state: true },
     linkFilter: { state: true },
     moreOpen: { state: true },
@@ -373,7 +372,6 @@ export class EcApp extends LitElement {
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
-  declare private level: "all" | Level;
   declare private picked: string | null;
   declare private linkFilter: string;
   private clock: ReturnType<typeof setInterval> | undefined;
@@ -419,7 +417,6 @@ export class EcApp extends LitElement {
     this.chartW = 0;
     this.states = {};
     this.now = Date.now();
-    this.level = "all";
     this.picked = null;
     this.linkFilter = "all";
     this.moreOpen = new Set();
@@ -886,6 +883,46 @@ export class EcApp extends LitElement {
     (el?.matches("input, button") ? el : (el?.querySelector("button, input") as HTMLElement | null))?.focus({ preventScroll: true });
   }
 
+  /* A wizard's steps, each a button that goes to it. Going back is always open. Going forward passes through the same
+     checks as pressing Next, so it stops at the first step with something left to answer. */
+  private stepsHead(names: string[], at: number, go: (i: number) => void) {
+    return html`<ol class="steps">
+      ${names.map((n, i) => html`<li aria-current=${i === at ? "step" : nothing}>${i === at ? html`${i + 1}. ${n}` : html`<button @click=${() => go(i)}>${i + 1}. ${n}</button>`}</li>`)}
+    </ol>`;
+  }
+
+  private mapGo(step: 1 | 2 | 3): void {
+    const m = this.mapw;
+    if (!m || !this.catalog || step === m.step) return;
+    if (step > m.step) {
+      const issues = mapIssues(m, this.sensorsFound, this.controlsFound);
+      const stop = issues.find((i) => i.step >= m.step && i.step < step);
+      if (stop) return void this.jumpTo(stop);
+    }
+    this.setMap((d) => (d.step = step));
+    window.scrollTo(0, 0);
+  }
+
+  private layGo(step: 1 | 2 | 3): void {
+    const d = this.lay;
+    if (!d || step === d.step) return;
+    const flow = flowOf(d), from = flow.indexOf(d.step), to = flow.indexOf(step);
+    if (to < 0) return;
+    let land = step;
+    if (to > from) {
+      const issues = layoutIssues(d);
+      /* The first step on the way whose Next would be off is as far as it goes. */
+      const held = flow.slice(from, to).find((n) => (n === 1 && issues.some((i) => i.startsWith("Width"))) || (n === 2 && issues.length > 0));
+      if (held === d.step) return;
+      if (held) land = held;
+    }
+    this.setLay((x) => {
+      x.step = land;
+      if (land === 3 && d.step !== 3) x.pick = firstToPlace(x);
+    });
+    window.scrollTo(0, 0);
+  }
+
   private mapBack = (): void => {
     const m = this.mapw;
     if (!m) return;
@@ -984,6 +1021,13 @@ export class EcApp extends LitElement {
   private pickItem(id: string): void {
     this.setLay((d) => (d.pick = id));
     void this.updateComplete.then(() => this.shadowRoot?.querySelector(".map")?.scrollIntoView({ block: "nearest" }));
+  }
+
+  /* A tap on a sensor or device, in the list or on the map: it picks it, and a tap on the one already picked lets go
+     of it, so nothing is left armed for the next tap on the map. */
+  private tapItem(id: string): void {
+    if (this.lay?.pick === id) this.setLay((d) => (d.pick = null));
+    else this.pickItem(id);
   }
 
   private placeAt(p: Spot): void {
@@ -2012,16 +2056,10 @@ export class EcApp extends LitElement {
   /* The zone's map as it's placed, with a height filter. Devices have no height, so they show only under All. */
   private zoneMap(z: Zone) {
     const c = this.config, L = storedLayout(this.raw(z.id)), items = zoneItems(c, z.id);
-    const shown = [
-      ...items.sensors.filter((s) => this.level === "all" || (s.kind === "env" && s.level === this.level)),
-      ...(this.level === "all" ? [...items.devs.filter((x) => x.pos), ...items.virt] : []),
-    ];
+    const shown = [...items.sensors, ...items.devs.filter((x) => x.pos), ...items.virt];
     const left = items.devs.filter((x) => !x.pos);
     return html`<section class="card">
-      <div class="card-head">
-        <h2>Device placement</h2>
-        ${this.chips("Height", `level-filter-${z.id}`, [{ value: "all", label: "All" }, ...(Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: LEVELS[k] }))], this.level, (v) => (this.level = v as "all" | Level))}
-      </div>
+      <div class="card-head"><h2>Device placement</h2></div>
       ${mapView(L, { items: shown, picked: this.picked, onPick: (id) => (this.picked = this.picked === id ? null : id), label: `Units, sensors and devices in ${z.name}` })}
       ${keyView}
       ${left.length
@@ -2571,9 +2609,7 @@ export class EcApp extends LitElement {
   private mapWizard(m: MapDraft) {
     const z = this.zoneById(m.zoneId);
     if (!z) return nothing;
-    const steps = html`<ol class="steps">
-      ${["Sensors", "Devices", "Check"].map((n, i) => html`<li aria-current=${m.step === i + 1 ? "step" : nothing}>${i + 1}. ${n}</li>`)}
-    </ol>`;
+    const steps = this.stepsHead(["Sensors", "Devices", "Check"], m.step - 1, (i) => this.mapGo((i + 1) as 1 | 2 | 3));
     const head = html`<div><h1>Device identification: ${z.name}</h1></div>`;
     if (!this.catalog)
       return html`${head}<section class="card">
@@ -2705,7 +2741,7 @@ export class EcApp extends LitElement {
     if (!z) return nothing;
     const flow = flowOf(d), at = flow.indexOf(d.step), last = at === flow.length - 1;
     const NAMES = { 1: "Size", 2: "Units", 3: "Sensors and devices" } as const;
-    const steps = flow.length > 1 ? html`<ol class="steps">${flow.map((n, i) => html`<li aria-current=${i === at ? "step" : nothing}>${i + 1}. ${NAMES[n]}</li>`)}</ol>` : nothing;
+    const steps = flow.length > 1 ? this.stepsHead(flow.map((n) => NAMES[n]), at, (i) => this.layGo(flow[i])) : nothing;
     const issues = layoutIssues(d), lost = stranded(d), changes = last ? layoutChanges(d, this.config).length : 0;
     let body: unknown = nothing;
     if (d.step === 1)
@@ -2766,7 +2802,7 @@ export class EcApp extends LitElement {
     const sel = itemOf(d, d.pick) ?? null;
     const where = (s: Item, missing: unknown) =>
       !fits(s, L) ? missing : s.kind === "env" && !s.level ? html`<span class="pill high">Needs a height</span>` : html`<span class="small muted">${posText(s.pos as Spot, L)}</span>`;
-    const opt = (s: Item, missing: unknown) => html`<button class="sensor-opt" aria-pressed=${d.pick === s.id ? "true" : "false"} @click=${() => this.pickItem(s.id)}>
+    const opt = (s: Item, missing: unknown) => html`<button class="sensor-opt" aria-pressed=${d.pick === s.id ? "true" : "false"} @click=${() => this.tapItem(s.id)}>
       <span class="opt-name">${mk(look(s))}${s.name}${s.kind === "virtual" ? html` <span class="small muted">${s.type ?? "Other"}</span>` : nothing}</span>${where(s, missing)}
     </button>`;
     const needs = html`<span class="pill high">Needs placing</span>`;
@@ -2812,7 +2848,7 @@ export class EcApp extends LitElement {
         picked: d.pick,
         placing: sel,
         onSpot: (p) => this.placeAt(p),
-        onPick: (id) => this.pickItem(id),
+        onPick: (id) => this.tapItem(id),
         outer: true,
         label: sel ? `Places for ${sel.name}` : "Places for a sensor or device",
       })}
