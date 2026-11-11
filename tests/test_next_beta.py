@@ -50,7 +50,7 @@ def test_only_a_change_to_what_ships_makes_a_beta(paths, expected) -> None:
 
 
 def _git(repo: Path, *args: str) -> str:
-    cmd = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", *args]
+    cmd = ["git", "-c", "user.name=t", "-c", "user.email=nobody", "-c", "commit.gpgsign=false", *args]
     return subprocess.run(cmd, cwd=repo, capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
 
 
