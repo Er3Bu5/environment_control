@@ -1111,6 +1111,18 @@ test.describe("map devices", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    const before = (await stored(page)).revision;
+    await pickAll(frame);
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog(frame)).toContainText("Not allowed, so nothing was saved.");
+    expect((await stored(page)).revision).toBe(before);
+  });
+
   test("Device identification's step headers move between its steps", async ({ page }) => {
     const frame = await newZoneMap(page);
     const step = (name: string) => app(frame).locator(".steps").getByRole("button", { name, exact: true });
@@ -1129,18 +1141,6 @@ test.describe("map devices", () => {
     await expect(current).toHaveText("3. Check");
     await step("2. Devices").click();
     await expect(current).toHaveText("2. Devices");
-  });
-
-  test("cancelling the host's dialog stores nothing, and the review says so", async ({ page }) => {
-    const frame = await newZoneMap(page);
-    const before = (await stored(page)).revision;
-    await pickAll(frame);
-    await next(frame).click();
-    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
-    await expect.poll(() => hostDialogOpen(page)).toBe(true);
-    await page.keyboard.press("Escape");
-    await expect(dialog(frame)).toContainText("Not allowed, so nothing was saved.");
-    expect((await stored(page)).revision).toBe(before);
   });
 
   test("leaving Map devices with picks made asks first", async ({ page }) => {
