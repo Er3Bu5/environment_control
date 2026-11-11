@@ -2,7 +2,8 @@
 
 Run by the Beta workflow once Validate has passed on a merge to main. Prints GitHub Actions outputs: version, ship
 (true or false), since (the release it was compared with) and included (true when that release was already built from
-this commit or a later one). Usage: python3 scripts/next_beta.py <commit>
+this commit or a later one) and title (what the merge was, to name the release). Usage: python3 scripts/next_beta.py
+<commit>
 """
 
 from __future__ import annotations
@@ -79,6 +80,26 @@ def included(commit: str, release: str) -> bool:
     return subprocess.run(cmd, capture_output=True, check=False).returncode == 0  # noqa: S603
 
 
+MERGE = re.compile(r"^Merge pull request #\d+ from \S+$")
+SQUASH = re.compile(r"\s*\(#\d+\)$")
+MAX_TITLE = 100
+
+
+def title_of(message: str) -> str:
+    """What a merge was, in its pull request's own words, to name the release with.
+
+    Home Assistant shows a release as its tag, then its name, so a name that is only the version reads "v0.1.2b2 -
+    0.1.2b2". A merge commit carries the pull request's title as the first line of its body; a squashed one as its
+    subject, with the pull request's number after it. One line of plain text, since it becomes a workflow output.
+    """
+    lines = [" ".join(line.split()) for line in message.splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    title = lines[1] if MERGE.match(lines[0]) and len(lines) > 1 else SQUASH.sub("", lines[0])
+    return "".join(ch for ch in title if ch.isprintable())[:MAX_TITLE].strip()
+
+
 def main(argv: list[str]) -> int:
     commit = argv[1] if len(argv) > 1 else ""
     if not COMMIT.match(commit):
@@ -93,6 +114,7 @@ def main(argv: list[str]) -> int:
     print(f"ship={'true' if ship else 'false'}")
     print(f"since={latest or ''}")
     print(f"included={'true' if behind else 'false'}")
+    print(f"title={title_of(_git('log', '-1', '--format=%B', commit))}")
     return 0
 
 

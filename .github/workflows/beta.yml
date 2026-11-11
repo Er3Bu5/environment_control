@@ -33,6 +33,7 @@ jobs:
       actions: read
     outputs:
       version: ${{ steps.next.outputs.version }}
+      title: ${{ steps.next.outputs.title }}
       ship: ${{ steps.next.outputs.ship }}
       tested: ${{ steps.tested.outputs.tested }}
     steps:
@@ -101,5 +102,6 @@ jobs:
       attestations: write
     with:
       version: ${{ needs.plan.outputs.version }}
+      title: ${{ needs.plan.outputs.title }}
       ref: ${{ github.sha }}
       publish: true

@@ -75,8 +75,30 @@ def test_a_merge_a_newer_release_already_holds_makes_no_beta(tmp_path, monkeypat
         return dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())
 
     # In turn, each is ahead of the newest release and ships.
-    assert outputs(second) == {"version": "0.1.2b3", "ship": "true", "since": "v0.1.2b2", "included": "false"}
+    ahead = {"version": "0.1.2b3", "ship": "true", "since": "v0.1.2b2", "included": "false", "title": "two"}
+    assert outputs(second) == ahead
     _git(tmp_path, "tag", "v0.1.2b3", third)
     # The release built from the third merge holds the second, and the third itself.
-    assert outputs(second) == {"version": "0.1.2b4", "ship": "false", "since": "v0.1.2b3", "included": "true"}
-    assert outputs(third) == {"version": "0.1.2b4", "ship": "false", "since": "v0.1.2b3", "included": "true"}
+    held = {"version": "0.1.2b4", "ship": "false", "since": "v0.1.2b3", "included": "true"}
+    assert outputs(second) == {**held, "title": "two"}
+    assert outputs(third) == {**held, "title": "three"}
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        # A merge commit: the pull request's title is the first line of its body.
+        ("Merge pull request #33 from someone/feat/zones\n\nZone page: History first\n", "Zone page: History first"),
+        # A squashed merge: the title is the subject, with the pull request's number after it.
+        ("Controls: set brightness on a dial (#32)\n\nLonger text.\n", "Controls: set brightness on a dial"),
+        ("A plain commit\n\nBody.\n", "A plain commit"),
+        # A merge commit with no body falls back to its subject.
+        ("Merge pull request #7 from someone/fix", "Merge pull request #7 from someone/fix"),
+        # One line of plain text, so it can't add a second workflow output.
+        ("Merge pull request #9 from a/b\n\nNice\ttitle\x07 here\nship=true\n", "Nice title here"),
+        ("x" * 300, "x" * 100),
+        ("", ""),
+    ],
+)
+def test_a_release_is_named_after_the_merge_it_carries(message, expected) -> None:
+    assert next_beta.title_of(message) == expected
