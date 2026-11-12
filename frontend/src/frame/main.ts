@@ -2673,7 +2673,12 @@ export class EcApp extends LitElement {
             </div>`;
           })}
         </div>
-        ${this.wizBar({ label: "Page buttons", back: stepsLeft(z).length ? "Finish for now" : "Done", onBack: () => this.leaveTo("zone", z.id) })}
+        ${this.wizBar({
+          label: "Page buttons",
+          back: stepsLeft(z).length ? "Finish for now" : "Done",
+          onBack: () => this.leaveTo("zone", z.id),
+          ...(next ? { next: "Continue", onNext: () => this.openStep(z.id, next) } : {}),
+        })}
       </section>`;
   }
 
@@ -3915,6 +3920,8 @@ export class EcApp extends LitElement {
       </section>`;
   }
 
+  /* A dialog's buttons ride in the same bar at the foot of the window as a page's, so leaving and going on are always
+     found in one place. The bar stays inside the dialog, which is what keeps it usable while the page behind is inert. */
   private modalView() {
     const m = this.modal;
     if (!m) return nothing;
@@ -3943,9 +3950,9 @@ export class EcApp extends LitElement {
                   @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.guardGo()}
               /></label>`
             : nothing}
-          <div class="row">
-            <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="btn danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+          <div class="draftbar wizbar dlgbar" data-bare>
+            <button class="draft-discard" @click=${() => this.closeModal()}>${m.keep}</button>
+            <button class="draft-review danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
           </div>
         </div>
       </div>`;
@@ -3959,9 +3966,9 @@ export class EcApp extends LitElement {
           <div class="review-scroll">
             ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
           </div>
-          <div class="row">
-            <button class="btn" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
-            <button class="btn primary" @click=${() => this.closeModal()}>Close</button>
+          <div class="draftbar wizbar dlgbar" data-bare>
+            <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
+            <button class="draft-review" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
           </div>
         </div>
       </div>`;
@@ -3985,9 +3992,9 @@ export class EcApp extends LitElement {
               </div>`
             : nothing}
         </div>
-        <div class="row">
-          <button class="btn" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
-          <button class="btn primary" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
+        <div class="draftbar wizbar dlgbar" data-bare>
+          <button class="draft-discard" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
+          <button class="draft-review" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
         </div>
       </div>
     </div>`;

@@ -1,5 +1,5 @@
 /* The real built host and frame, mounted on a page that plays Home Assistant with the mock's fake HA. */
-import { type Frame, type Page, expect, test } from "@playwright/test";
+import { type Frame, type Locator, type Page, expect, test } from "@playwright/test";
 
 const PAGE = "/frontend/test/e2e/page.html";
 
@@ -1115,6 +1115,64 @@ test.describe("zones", () => {
     await expect(app(frame).locator(".zone-card")).toHaveCount(3);
     await expect.poll(() => leaveAsks(page)).toBe(false);
     expect((await stored(page)).zones.map((z) => z.id)).not.toContain("seedlings");
+  });
+
+  test("a dialog's buttons ride in the bar at the foot of the window, in place of the page's own", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    /* Leaving on the left and going on on the right, at the foot, clear of the dialog, and the only bar showing. */
+    const atFoot = async (box: Locator, names: string[]) => {
+      const bar = box.locator(".draftbar");
+      await expect(bar.getByRole("button")).toHaveText(names);
+      const gap = await bar.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(40);
+      expect(await box.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(await bar.evaluate((el) => el.getBoundingClientRect().top));
+      await expect(app(frame).locator(".draftbar:visible")).toHaveCount(1);
+    };
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Set up Veg" }).click();
+    await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
+    await app(frame).getByLabel("Zone name").fill("Veg tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await atFoot(dialog(frame), ["Back to editing", "Apply 1 change"]);
+    await dialog(frame).getByRole("button", { name: "Back to editing" }).click();
+    /* With the dialog gone the page's own bar is back. */
+    await expect(app(frame).getByRole("button", { name: "Review and apply" })).toBeVisible();
+    await goTo(frame, "Overview");
+    await atFoot(alert(frame), ["Keep editing", "Discard and continue"]);
+    await alert(frame).getByRole("button", { name: "Discard and continue" }).click();
+    await goTo(frame, "Garden");
+    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await atFoot(dialog(frame), ["Close", "Set targets"]);
+    await dialog(frame).getByRole("button", { name: "Close" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
+    /* A box being typed in inside a dialog doesn't take its buttons away: the dialog stops short of the bar. */
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
+    await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
+    await alert(frame).getByLabel("Type Nursery to confirm").fill("Nursery");
+    await expect(alert(frame).getByLabel("Type Nursery to confirm")).toBeFocused();
+    await atFoot(alert(frame), ["Keep zone", "Remove zone"]);
+    await alert(frame).getByRole("button", { name: "Keep zone" }).click();
+    expect((await stored(page)).zones.map((z) => z.id)).toEqual(["garden", "veg", "nursery"]);
+  });
+
+  test("the setup guide's bar goes on to the next step still to do", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Add zone" }).click();
+    await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
+    await app(frame).getByRole("button", { name: "Review and apply" }).click();
+    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    const bar = app(frame).getByRole("region", { name: "Page buttons", exact: true });
+    await expect(bar.getByRole("button")).toHaveText(["Finish for now", "Continue"]);
+    await bar.getByRole("button", { name: "Continue" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
   });
 
   test("Zone details renames from the menu, and Finish with nothing changed saves nothing", async ({ page }) => {
