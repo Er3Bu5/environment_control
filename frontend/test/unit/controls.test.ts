@@ -186,19 +186,21 @@ describe("a device that says its target moves in steps", () => {
 describe("a mode Home Assistant doesn't list", () => {
   const dehu = (attrs: Record<string, unknown>) => deviceView("humidifier.dehu", st("on", { available_modes: ["eco", "boost"], mode: "boost", ...attrs }));
 
-  it("is offered after the device's own modes, once, and only when one is set", () => {
+  it("is offered among the device's own modes, all by name, once, and only when one is set", () => {
     const v = dehu({});
-    expect([modeChoices(v, "normal"), modeChoices(v, "eco"), modeChoices(v, "")]).toEqual([["eco", "boost", "normal"], ["eco", "boost"], ["eco", "boost"]]);
+    expect([modeChoices(v, "normal"), modeChoices(v, "eco"), modeChoices(v, "")]).toEqual([["boost", "eco", "normal"], ["boost", "eco"], ["boost", "eco"]]);
     const stored = { zones: [{ id: "garden" }], devices: [{ id: "dehu", entity: "humidifier.dehu", name: "Dehu", type: "Dehumidifier", zones: ["garden"], nudgeMode: " normal " }] };
     expect(zoneControls(stored, "garden").groups[0].devices[0].extraMode).toBe("normal");
   });
 
   it("leaves out the modes hidden in Device identification, but never the one the device is in", () => {
     const v = dehu({ available_modes: ["sleep", "comfort", "eco", "boost"] });
-    expect(modeChoices(v, "normal", ["sleep", "comfort"])).toEqual(["eco", "boost", "normal"]);
+    expect(modeChoices(v, "normal", ["sleep", "comfort"])).toEqual(["boost", "eco", "normal"]);
     /* It's in boost, so boost stays on the row though it's hidden; the extra mode can be hidden like any other. */
-    expect(modeChoices(v, "normal", ["boost", "normal"])).toEqual(["sleep", "comfort", "eco", "boost"]);
+    expect(modeChoices(v, "normal", ["boost", "normal"])).toEqual(["boost", "comfort", "eco", "sleep"]);
     expect(modeChoices(dehu({ mode: "normal" }), "normal", ["normal", "eco", "boost"])).toEqual(["normal"]);
+    /* By name whatever order the device gives them in, and whatever their capitals. */
+    expect(modeChoices(dehu({ available_modes: ["Sleep", "normal", "Boost", "eco"] }), "")).toEqual(["Boost", "eco", "normal", "Sleep"]);
     const stored = { zones: [{ id: "garden" }], devices: [{ id: "dehu", entity: "humidifier.dehu", name: "Dehu", type: "Dehumidifier", zones: ["garden"], hiddenModes: ["sleep", 5, "comfort"] }] };
     expect(zoneControls(stored, "garden").groups[0].devices[0].hiddenModes).toEqual(["sleep", "comfort"]);
   });

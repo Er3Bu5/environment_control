@@ -2670,7 +2670,8 @@ test.describe("manual controls", () => {
     await expect(app(frame).getByRole("heading", { level: 1, name: /Device identification/ })).toBeVisible();
     /* Every mode Home Assistant lists and the extra one, each ticked until it's left out. */
     const offered = app(frame).locator("#modes-md-humidifier_garden_dehumidifier"), tick = (mode: string) => offered.getByRole("checkbox", { name: mode, exact: true });
-    await expect(offered.locator(".chip")).toHaveText(["Sleep", "Comfort", "Eco", "Boost", "Normal"]);
+    /* By name, both here and on the row, whatever order the device lists them in. */
+    await expect(offered.locator(".chip")).toHaveText(["Boost", "Comfort", "Eco", "Normal", "Sleep"]);
     for (const box of await offered.getByRole("checkbox").all()) await expect(box).toBeChecked();
     await tick("Sleep").uncheck();
     await tick("Comfort").uncheck();
@@ -2691,17 +2692,17 @@ test.describe("manual controls", () => {
     await app(frame).getByRole("dialog").getByRole("button", { name: /^Apply \d+ changes$/ }).click();
     await expect(controls(frame)).toBeVisible();
     const unit = row(frame, "Garden Dehumidifier");
-    await expect(unit.locator(".chip")).toHaveText(["Eco", "Boost", "Normal"]);
+    await expect(unit.locator(".chip")).toHaveText(["Boost", "Eco", "Normal"]);
     await expect(unit.getByRole("radio", { name: "Normal", exact: true })).toBeChecked();
     /* Leaving a mode out sends nothing to the device, and the device keeps it: put in sleep mode from elsewhere, the row
        shows sleep, and drops it again once the device moves on. */
     expect(await serviceCalls(page)).toBe(0);
     await page.evaluate(`fakeHA.setState("humidifier.garden_dehumidifier", "on", { mode: "sleep" })`);
-    await expect(unit.locator(".chip")).toHaveText(["Sleep", "Eco", "Boost", "Normal"]);
+    await expect(unit.locator(".chip")).toHaveText(["Boost", "Eco", "Normal", "Sleep"]);
     await expect(unit.getByRole("radio", { name: "Sleep", exact: true })).toBeChecked();
     await unit.getByText("Eco", { exact: true }).click();
     await expect(unit).toContainText("On, eco mode.");
-    await expect(unit.locator(".chip")).toHaveText(["Eco", "Boost", "Normal"]);
+    await expect(unit.locator(".chip")).toHaveText(["Boost", "Eco", "Normal"]);
     /* Only the names are stored, with the device. */
     const kept = await page.evaluate<{ entity: string; hiddenModes?: string[] }[]>("JSON.parse(JSON.stringify(fakeHA.config.devices))");
     expect(kept.filter((d) => d.hiddenModes).map((d) => [d.entity, d.hiddenModes])).toEqual([["humidifier.garden_dehumidifier", ["comfort", "sleep"]]]);

@@ -112,7 +112,7 @@ import {
   MAX_GRID,
 } from "./layout";
 import { CLASS_LOOK, keyView, look, mapView, mk } from "./map-view";
-import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, choiceDown, choiceUp, humidityChoices, modeChoices, nearestChoice, nudgeTargets, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
+import { type Action, type ControlDevice, type Ctl, CTL_GIVE_UP_MS, ctlLine, deviceView, DIAL_SETTLE_MS, DIAL_STEP, dialArc, dialAt, dialT, dialValue, choiceDown, choiceUp, humidityChoices, inNameOrder, modeChoices, nearestChoice, nudgeTargets, onReport, stepDown, stepUp, valueOf, wanted, wantOf, zoneControls } from "./controls";
 import {
   BAND_KEYS,
   type BandKey,
@@ -2862,7 +2862,7 @@ export class EcApp extends LitElement {
   private modesOffered(m: MapDraft, entity: string) {
     if (!takesExtraMode(entity)) return nothing;
     const extra = m.extra[entity]?.trim() ?? "", hidden = m.hide[entity] ?? [];
-    const all = [...new Set([...deviceView(entity, this.states[entity]).modes, ...(extra ? [extra] : []), ...hidden])];
+    const all = inNameOrder([...new Set([...deviceView(entity, this.states[entity]).modes, ...(extra ? [extra] : []), ...hidden])]);
     if (!all.length) return nothing;
     return html`<fieldset class="chips" id="modes-${controlTarget(entity)}">
       <legend>Modes offered in Controls</legend>
