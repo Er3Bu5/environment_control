@@ -11,7 +11,9 @@
   /* HA sets these from the device's safe areas; non-zero here so a panel that ignores them shows. */
   --safe-area-inset-top: 10px; --safe-area-inset-bottom: 20px; }
 html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
-header { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #F44336; color: #fff; }
+/* One line that stays inside its bar. Wrapped at a phone's width its text spilt down over the top left of the panel,
+   which is where the panel's menu button stays once a page is scrolled, and took the taps meant for it. */
+header { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #F44336; color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; }
 /* As HA's ha-panel-custom styles itself for a panel it loads as a module: a block with safe-area padding and no height. */
 ha-panel-custom { display: block; box-sizing: border-box; margin-top: 36px; padding-top: var(--safe-area-inset-top); padding-bottom: var(--safe-area-inset-bottom); }
 #ha-overview { position: fixed; top: 36px; left: 0; right: 0; padding: 24px 16px; }
