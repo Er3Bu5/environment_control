@@ -164,6 +164,8 @@ test.describe("layout", () => {
     await expect.poll(async () => (await rect()).top).toBe(8);
     expect((await rect()).left).toBe(rest.left);
     await expect(button).toBeInViewport();
+    /* Wherever this test page itself is scrolled to, nothing of the page lies over the frame and takes the tap. */
+    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
     await button.click();
     await expect(tab(frame, "Overview")).toBeInViewport();
     await expect(tab(frame, "Setup")).toBeInViewport();

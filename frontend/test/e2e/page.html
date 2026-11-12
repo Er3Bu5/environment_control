@@ -11,11 +11,13 @@
   /* HA sets these from the device's safe areas; non-zero here so a panel that ignores them shows. */
   --safe-area-inset-top: 10px; --safe-area-inset-bottom: 20px; }
 html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
-/* One line that stays inside its bar. Wrapped at a phone's width its text spilt down over the top left of the panel,
-   which is where the panel's menu button stays once a page is scrolled, and took the taps meant for it. */
-header { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #F44336; color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; }
+/* One line, in the page's flow above the panel, never laid over it. As a fixed bar it covered the top of the panel's
+   frame whenever this page was scrolled (the page is the bar's height taller than the window, because the frame fills
+   the window by itself), and took the taps meant for the panel's menu button, which stays at the top of the frame once
+   a page is scrolled. Home Assistant draws nothing over a custom panel. */
+header { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #F44336; color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; }
 /* As HA's ha-panel-custom styles itself for a panel it loads as a module: a block with safe-area padding and no height. */
-ha-panel-custom { display: block; box-sizing: border-box; margin-top: 36px; padding-top: var(--safe-area-inset-top); padding-bottom: var(--safe-area-inset-bottom); }
+ha-panel-custom { display: block; box-sizing: border-box; padding-top: var(--safe-area-inset-top); padding-bottom: var(--safe-area-inset-bottom); }
 #ha-overview { position: fixed; top: 36px; left: 0; right: 0; padding: 24px 16px; }
 </style>
 </head>
