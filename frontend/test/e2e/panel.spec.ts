@@ -2382,6 +2382,35 @@ test.describe("manual controls", () => {
     await expect(lamp.getByRole("status")).toHaveCount(0);
   });
 
+  test("a dehumidifier that's off has a grey dial that says Off, with its target kept in the caption and still settable", async ({ page }) => {
+    const frame = await openZone(page);
+    const unit = row(frame, "Auxiliary dehumidifier"), num = unit.locator(".dial-num"), cap = unit.locator(".dial-cap"), fill = unit.locator(".dial .fil");
+    const stroke = () => fill.evaluate((el) => getComputedStyle(el).stroke);
+    await expect(num).toHaveText("50%");
+    await expect(cap).toHaveText("Target");
+    const lit = await stroke();
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "off")`);
+    await expect(unit).toContainText("Off.");
+    await expect(num).toHaveText("Off");
+    await expect(cap).toHaveText("Target 50%");
+    const grey = await stroke();
+    expect(grey).not.toBe(lit);
+    /* The same grey as an off device's icon and switch. */
+    expect(grey).toBe(await unit.locator(".sw i").evaluate((el) => getComputedStyle(el).backgroundColor));
+    /* The target can be set ahead of switching it on, and nothing here switches it on. */
+    await unit.getByRole("button", { name: "Raise Auxiliary dehumidifier target humidity" }).click();
+    await expect(cap).toHaveText("Target 51%");
+    await expect(num).toHaveText("Off");
+    await expect.poll(() => serviceCalls(page)).toBe(1);
+    expect((await calls(page)).map((c) => [`${c.domain}.${c.service}`, c.data.humidity])).toEqual([["humidifier.set_humidity", 51]]);
+    await expect.poll(() => page.evaluate(`fakeHA.states["humidifier.auxiliary_dehumidifier"].attributes.humidity`)).toBe(51);
+    await expect(unit.getByRole("status")).toHaveCount(0);
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on")`);
+    await expect(num).toHaveText("51%");
+    await expect(cap).toHaveText("Target");
+    expect(await stroke()).toBe(lit);
+  });
+
   test("a device whose target moves in steps is set only on those steps, by the dial's buttons and by the host", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on", { target_humidity_step: 5 })`);

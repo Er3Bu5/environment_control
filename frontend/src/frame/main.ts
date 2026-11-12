@@ -2295,7 +2295,9 @@ export class EcApp extends LitElement {
        it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
     /* only: the numbers the device takes, where it takes only some, as a dehumidifier whose target moves in steps of
        5 does. The dial, its buttons and its keys then land on those and nothing between. */
-    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null, only: number[] | null = null) => {
+    /* off: a device that's off but still holds its number, as a dehumidifier does its target. The arc goes grey and the
+       middle says Off, as a light's does, with the number kept in the caption so it can still be set before switching on. */
+    const dial = (action: "brightness" | "humidity", label: string, caption: string, min: number, max: number, at: number | null, dot: number | null, only: number[] | null = null, off = false) => {
       const key = `${d.id}:${action}`, shown = this.ctlDrag[key] ?? at, step = DIAL_STEP[action];
       const t = shown === null ? null : dialT(shown, min, max), [tx, ty] = dialAt(t ?? 0);
       const snap = (n: number) => (only ? nearestChoice(only, n) : n);
@@ -2306,7 +2308,7 @@ export class EcApp extends LitElement {
       };
       const held = (e: PointerEvent) => (e.currentTarget as Element).hasPointerCapture(e.pointerId);
       const [dx, dy] = dot === null || dot < min || dot > max ? [null, null] : dialAt(dialT(dot, min, max));
-      return html`<div class="dial ${busy ? "busy" : ""}" style="--c:${lk.c}">
+      return html`<div class="dial ${busy ? "busy" : ""}" style="--c:${off ? "var(--off)" : lk.c}">
         <svg viewBox="0 0 120 120" aria-hidden="true">
           <path class="trk" d=${dialArc(0, 1)}></path>
           ${t === null ? nothing : svg`<path class="fil" d=${dialArc(0, t)}></path>`}
@@ -2323,7 +2325,7 @@ export class EcApp extends LitElement {
             @pointerup=${(e: PointerEvent) => held(e) && this.dialSend(d, action)}
             @pointercancel=${() => this.dialDrop(key)}></path>
         </svg>
-        <div class="dial-mid"><span class="dial-cap">${caption}</span><span class="dial-num">${shown === null ? "Off" : html`${shown}<small>%</small>`}</span></div>
+        <div class="dial-mid"><span class="dial-cap">${off && shown !== null ? `${caption} ${shown}%` : caption}</span><span class="dial-num">${off || shown === null ? "Off" : html`${shown}<small>%</small>`}</span></div>
         <input class="sr" type="range" aria-label=${label} min=${min} max=${max} step=${only && only.length > 1 ? only[1] - only[0] : 1} .value=${live(String(shown ?? max))} ?disabled=${busy}
           @input=${(e: Event) => this.dialTo(key, snap(Number((e.target as HTMLInputElement).value)))}
           @change=${() => this.dialSettle(d, action)} />
@@ -2353,7 +2355,7 @@ export class EcApp extends LitElement {
               </div>
             </fieldset>`
           : nothing;
-      controls = choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh, v.stepRh === null ? null : choices) : nothing;
+      controls = choices.length > 1 && v.setpoint !== null ? dial("humidity", `${d.name} target humidity`, "Target", choices[0], choices[choices.length - 1], v.setpoint, v.unitRh, v.stepRh === null ? null : choices, !v.on) : nothing;
     }
     return html`<div class="dev" data-device=${d.id}>
       <span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
