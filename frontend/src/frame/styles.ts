@@ -110,13 +110,15 @@ export const styles = css`
   .field input[aria-invalid="true"] { border-color: var(--crit); }
   .task[aria-current="step"] strong { color: var(--primary); }
 
-  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
-  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  /* A dialog leaves the foot of the window to its buttons, which ride in the bar there. */
+  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px)); background: #00000080; }
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
-  .dialog .row { justify-content: flex-end; }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
-  .review-list { flex: none; border: 1px solid var(--line); border-radius: 8px; }
+  /* What a dialog lists keeps its own height and the list scrolls, rather than each part being squeezed and cut short. */
+  .review-scroll > * { flex: none; }
+  .review-list { border: 1px solid var(--line); border-radius: 8px; }
   .review-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 10px; font-size: 14px; }
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
@@ -347,6 +349,12 @@ export const styles = css`
   .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
   .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
+  .draft-review.danger { background: var(--crit); color: #FFFFFF; }
+  .draft-discard:disabled { opacity: .5; cursor: not-allowed; }
+  /* A dialog's buttons in the bar. The dialog stops short of the bar, so it never lies over a box being typed in. */
+  :host(.typing) .dlgbar { display: flex; }
+  /* The page's own bar steps aside while a dialog is open, so the dialog's buttons are the only ones at the foot. */
+  .draftbar[inert] { visibility: hidden; }
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
   .wizbar .fixlink { color: inherit; text-decoration: underline; }
   .wizbar[data-bare] .draft-text { opacity: .8; }
