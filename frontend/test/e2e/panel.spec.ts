@@ -144,6 +144,35 @@ test.describe("layout", () => {
     /* The page sets the top and bottom safe areas to 10px and 20px. */
     expect(await frame.evaluate(() => window.innerHeight)).toBe(windowHeight - 30);
   });
+
+  test("the menu button rests at the foot of the heading, and stays at the top of the window once that has scrolled away", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    const button = app(frame).getByRole("navigation").getByRole("button", { name: "Menu", exact: true });
+    const rect = () => button.evaluate((el) => (({ top, left, bottom }) => ({ top, left, bottom }))(el.getBoundingClientRect()));
+    const headFoot = () => app(frame).locator(".navmenu + *").evaluate((el) => el.getBoundingClientRect().bottom);
+    const rest = await rect();
+    expect(Math.abs(rest.bottom - (await headFoot()))).toBeLessThan(1);
+    expect(rest.top).toBeGreaterThan(8);
+    /* Part of the way, while the heading is still in view, it moves with the page. */
+    await frame.evaluate(() => scrollTo(0, 6));
+    await expect.poll(async () => (await rect()).top).toBe(rest.top - 6);
+    /* Far down the page it's still there, in line with the page's left edge, and the menu opens from it. */
+    await frame.evaluate(() => scrollTo(0, 900));
+    expect(await frame.evaluate(() => scrollY)).toBe(900);
+    await expect.poll(async () => (await rect()).top).toBe(8);
+    expect((await rect()).left).toBe(rest.left);
+    await expect(button).toBeInViewport();
+    await button.click();
+    await expect(tab(frame, "Overview")).toBeInViewport();
+    await expect(tab(frame, "Setup")).toBeInViewport();
+    await button.click();
+    /* Back at the top it's back at the foot of the heading. */
+    await frame.evaluate(() => scrollTo(0, 0));
+    await expect.poll(async () => (await rect()).top).toBe(rest.top);
+    expect(Math.abs((await rect()).bottom - (await headFoot()))).toBeLessThan(1);
+  });
 });
 
 test.describe("talking to HA", () => {
