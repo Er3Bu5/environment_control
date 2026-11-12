@@ -444,8 +444,9 @@ export class EcApp extends LitElement {
     window.addEventListener("message", this.onMessage);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
-    this.addEventListener("focusin", this.onFocus);
-    this.addEventListener("focusout", this.onFocus);
+    /* On the shadow root, not the element: focus moving between two things inside the panel never reaches the element. */
+    this.renderRoot.addEventListener("focusin", this.onFocus as EventListener);
+    this.renderRoot.addEventListener("focusout", this.onFocus as EventListener);
     /* Staleness and "reported ago" move with time even when nothing new arrives. */
     this.clock = setInterval(() => (this.now = Date.now()), 15_000);
     parent.postMessage({ v: 1, type: "ready" }, "*");
@@ -455,8 +456,8 @@ export class EcApp extends LitElement {
     window.removeEventListener("message", this.onMessage);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
-    this.removeEventListener("focusin", this.onFocus);
-    this.removeEventListener("focusout", this.onFocus);
+    this.renderRoot.removeEventListener("focusin", this.onFocus as EventListener);
+    this.renderRoot.removeEventListener("focusout", this.onFocus as EventListener);
     clearInterval(this.clock);
     this.chartRO?.disconnect();
     super.disconnectedCallback();

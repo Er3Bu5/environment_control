@@ -397,6 +397,21 @@ test.describe("sensor calibration", () => {
     await expect(bar(frame)).toHaveCount(0);
   });
 
+  test("on a touch screen the draft bar is out of the way only while a box is typed in, whatever is tapped next", async ({ page }) => {
+    const frame = await openGarden(page);
+    test.skip(!(await frame.evaluate(() => matchMedia("(pointer: coarse)").matches)), "a mouse and keyboard keep the bar");
+    await type(frame, "Environment left", "1.5");
+    await expect(bar(frame)).toBeVisible();
+    /* From a button in the panel straight to a box, and from the box straight to a button: focus never leaves the panel. */
+    const above = row(frame, "Environment left").getByRole("button", { name: "Above air" });
+    await above.click();
+    await expect(bar(frame)).toBeVisible();
+    await box(frame, "Environment left").click();
+    await expect(app(frame).locator(".draftbar")).toBeHidden();
+    await above.click();
+    await expect(bar(frame)).toBeVisible();
+  });
+
   test("a zone made before setup steps were recorded stays judged after one of its steps is confirmed", async ({ page }) => {
     const frame = await openGarden(page);
     await type(frame, "Environment under", "1");
