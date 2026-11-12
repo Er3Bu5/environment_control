@@ -32,9 +32,6 @@ export const styles = css`
      heading block, and the heading centred. They're two items in one grid cell, so the button follows the heading's
      height whatever it holds. */
   .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 12; }
-  /* Scrolled past its heading, the button stays at the top of the window. Its left edge is set to the page's own. */
-  .zmenu.navmenu.pinned { position: fixed; top: 8px; z-index: 18; }
-  .navmenu.pinned .burger { box-shadow: 0 2px 10px #0000003d; }
   .navmenu .menu { left: 0; right: auto; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }

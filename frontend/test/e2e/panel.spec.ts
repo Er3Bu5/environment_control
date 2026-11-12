@@ -145,7 +145,7 @@ test.describe("layout", () => {
     expect(await frame.evaluate(() => window.innerHeight)).toBe(windowHeight - 30);
   });
 
-  test("the menu button rests at the foot of the heading, and stays at the top of the window once that has scrolled away", async ({ page }) => {
+  test("the menu button rests at the foot of the heading and scrolls away with it, never riding over the page", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Garden");
@@ -154,26 +154,18 @@ test.describe("layout", () => {
     const headFoot = () => app(frame).locator(".navmenu + *").evaluate((el) => el.getBoundingClientRect().bottom);
     const rest = await rect();
     expect(Math.abs(rest.bottom - (await headFoot()))).toBeLessThan(1);
-    expect(rest.top).toBeGreaterThan(8);
-    /* Part of the way, while the heading is still in view, it moves with the page. */
-    await frame.evaluate(() => scrollTo(0, 6));
-    await expect.poll(async () => (await rect()).top).toBe(rest.top - 6);
-    /* Far down the page it's still there, in line with the page's left edge, and the menu opens from it. */
+    /* Far down the page it has gone up with its heading: still at the heading's foot, and out of the window. */
     await frame.evaluate(() => scrollTo(0, 900));
     expect(await frame.evaluate(() => scrollY)).toBe(900);
-    await expect.poll(async () => (await rect()).top).toBe(8);
-    expect((await rect()).left).toBe(rest.left);
-    await expect(button).toBeInViewport();
-    /* Wherever this test page itself is scrolled to, nothing of the page lies over the frame and takes the tap. */
-    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    expect((await rect()).top).toBe(rest.top - 900);
+    expect(Math.abs((await rect()).bottom - (await headFoot()))).toBeLessThan(1);
+    await expect(button).not.toBeInViewport();
+    /* Back at the top it's where it was, and the menu opens from it. */
+    await frame.evaluate(() => scrollTo(0, 0));
+    expect((await rect()).top).toBe(rest.top);
     await button.click();
     await expect(tab(frame, "Overview")).toBeInViewport();
     await expect(tab(frame, "Setup")).toBeInViewport();
-    await button.click();
-    /* Back at the top it's back at the foot of the heading. */
-    await frame.evaluate(() => scrollTo(0, 0));
-    await expect.poll(async () => (await rect()).top).toBe(rest.top);
-    expect(Math.abs((await rect()).bottom - (await headFoot()))).toBeLessThan(1);
   });
 });
 
