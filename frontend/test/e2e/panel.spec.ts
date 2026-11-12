@@ -2247,6 +2247,8 @@ test.describe("manual controls", () => {
     /* Under the name, starting under its icon, and clear of the dial at their right. */
     const icon = await box(".ic");
     expect(modes.y).toBeGreaterThanOrEqual(foot(text));
+    /* With room between them, so the modes read as a line of their own and not as part of the name. */
+    expect(modes.y - foot(text)).toBeGreaterThanOrEqual(12);
     expect(Math.abs(modes.x - icon.x)).toBeLessThan(2);
     expect(right(modes)).toBeLessThanOrEqual(dial.x);
     expect(Math.abs((await box(".chip >> nth=0")).x - icon.x)).toBeLessThan(2);
@@ -2273,7 +2275,7 @@ test.describe("manual controls", () => {
     const [mark, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
     expect(name.x).toBeGreaterThanOrEqual(right(mark));
     expect(name.y).toBeLessThan(foot(mark));
-    expect(chips.y).toBeGreaterThanOrEqual(foot(name));
+    expect(chips.y - Math.max(foot(name), foot(mark))).toBeGreaterThanOrEqual(12);
     expect(Math.abs(chips.x - mark.x)).toBeLessThan(2);
   });
 

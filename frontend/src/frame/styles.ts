@@ -275,14 +275,14 @@ export const styles = css`
      own. */
   @media (max-width: 999px), (min-width: 1100px) {
     .dev:has(.dev-modes) .dev-text { flex: 1 1 0; }
-    .dev-modes { flex-basis: 100%; justify-content: flex-start; }
+    .dev-modes { flex-basis: 100%; justify-content: flex-start; margin-top: 6px; }
     .dev-modes .chiprow { justify-content: flex-start; }
   }
   @media (min-width: 620px) and (max-width: 999px), (min-width: 1100px) {
     .dev:has(.dev-modes) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto 1fr; gap: 0 10px; }
     .dev:has(.dev-modes) > .ic { grid-area: 2 / 1; }
     .dev:has(.dev-modes) > .dev-text { grid-area: 2 / 2; }
-    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; margin-top: 8px; }
+    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; margin-top: 14px; }
     .dev:has(.dev-modes) > .dev-ctl { grid-area: 1 / 3 / 5 / 4; flex-wrap: nowrap; margin-left: 22px; }
     .dev:has(.dev-modes) > .ctl-status { grid-area: 5 / 1 / 6 / -1; margin-top: 8px; }
   }
