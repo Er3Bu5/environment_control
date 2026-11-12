@@ -31,6 +31,8 @@ hardware or reach the network.
   merges. Dependabot's pull requests are reviewed and merged the same way, never re-applied by hand.
 - **Releases are the owner's.** An agent may run the Release workflow as a dry run only. Publishing waits for the
   owner's approval on the `release` environment, which accepts runs from `main` only. After each merge to `main`,
-  the Beta workflow builds the next beta from that commit, and it waits for the same approval. Validate runs on pull
-  requests, not on merges: its last job records the git tree it passed on, and Beta and Release build only a commit
-  whose tree passed (Beta runs Validate itself when `main` moved after the pull request's last run).
+  the Beta workflow builds the next beta from that commit, and it waits for the same approval. Merges made one after
+  another make one beta: a merge waits until `main` has been quiet for five minutes, and makes none if a newer merge
+  lands in that time. Validate runs on pull requests, not on merges: its last job records the git tree it passed on,
+  and Beta and Release build only a commit whose tree passed (Beta runs Validate itself when `main` moved after the
+  pull request's last run).

@@ -4,6 +4,12 @@ name: Beta
 # the release environment, as every release is. The number follows the newest release tag (b8, then b9), and a merge
 # that changes nothing that ships makes no beta.
 #
+# Several merges one after another make one beta, not one each. A merge waits until main has been quiet for five
+# minutes, and if a newer merge lands in that time it makes no beta, because the newer merge's beta includes it. So a
+# single merge's beta asks for approval about five minutes after the merge, and a burst's about five minutes after its
+# last. A beta already waiting for approval when the next merge lands isn't withdrawn: turn it down and the newer one
+# follows.
+#
 # The suites aren't run again. The merge's pull request ran Validate on GitHub's test merge with main, and its last
 # job recorded that content by its git tree hash. When the merge's tree matches one recorded by a passing run from
 # this repository, that content has been tested byte for byte. When it doesn't (main moved after the pull request's
@@ -18,7 +24,8 @@ permissions: {}
 # One beta at a time, each numbered once the one before it is published or turned down, so two never take one number.
 # Merges made while one is under way wait their turn, oldest first: queue: max keeps every waiting run, where the
 # default keeps only the newest and cancels the ones between. A run whose merge a newer release already holds (one
-# started again by hand, say) makes no beta, so older code never goes out under a newer number.
+# started again by hand, say) makes no beta, so older code never goes out under a newer number. A run waiting out its
+# five minutes holds the queue, and gives way within seconds of a newer merge.
 concurrency:
   group: beta
   cancel-in-progress: false
@@ -28,6 +35,7 @@ jobs:
   plan:
     name: Next beta
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
       actions: read
@@ -41,8 +49,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Wait for merges to stop arriving
+        id: quiet
+        run: |
+          python3 scripts/quiet_main.py "$GITHUB_SHA" > "$RUNNER_TEMP/quiet"
+          cat "$RUNNER_TEMP/quiet" >> "$GITHUB_OUTPUT"
+          if grep -qx "newest=false" "$RUNNER_TEMP/quiet"; then
+            echo "A newer merge is on main, and its beta includes this one, so no beta." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Work out the version
         id: next
+        if: ${{ steps.quiet.outputs.newest == 'true' }}
         run: |
           python3 scripts/next_beta.py "$GITHUB_SHA" > "$RUNNER_TEMP/next"
           cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
