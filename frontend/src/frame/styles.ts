@@ -142,6 +142,9 @@ export const styles = css`
   .chip input:disabled { cursor: not-allowed; }
   .chip:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
   .chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+  /* A chip that is one of several ticked says so with a tick, so it doesn't read as the one choice of a set. The tick
+     has empty alternative text: the box already says it's ticked, and the tick mustn't become part of its name. */
+  .chip:has(input[type="checkbox"]:checked)::before { content: "✓" / ""; margin-right: 5px; font-size: 12px; }
   .chip.wait { border-style: dashed; color: var(--muted); }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }

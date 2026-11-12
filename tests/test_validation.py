@@ -205,6 +205,39 @@ def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
     validate_config(c)
 
 
+def test_a_dehumidifier_can_leave_modes_out_of_controls(sample_config) -> None:
+    sample_config["devices"].append(
+        {
+            "id": "d-x",
+            "entity": "humidifier.x",
+            "zones": [sample_config["zones"][0]["id"]],
+            "hiddenModes": ["comfort", "sleep"],
+        }
+    )
+    validate_config(sample_config)
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        {"entity": "switch.x", "hiddenModes": ["sleep"]},
+        {"entity": "humidifier.x", "hiddenModes": []},
+        {"entity": "humidifier.x", "hiddenModes": "sleep"},
+        {"entity": "humidifier.x", "hiddenModes": ["sleep", "sleep"]},
+        {"entity": "humidifier.x", "hiddenModes": ["  "]},
+        {"entity": "humidifier.x", "hiddenModes": ["x" * 41]},
+        {"entity": "humidifier.x", "hiddenModes": ["sl\neep"]},
+        {"entity": "humidifier.x", "hiddenModes": [5]},
+        {"entity": "humidifier.x", "hiddenModes": [f"m{n}" for n in range(21)]},
+        {"hiddenModes": ["sleep"]},
+    ],
+)
+def test_hidden_modes_are_a_short_list_of_names_on_a_humidifier_only(sample_config, device) -> None:
+    sample_config["devices"].append({"id": "d-x", "zones": [sample_config["zones"][0]["id"]], **device})
+    with pytest.raises(InvalidConfig, match="hidden modes"):
+        validate_config(sample_config)
+
+
 def test_a_dehumidifier_can_have_an_extra_mode(sample_config) -> None:
     sample_config["devices"].append(
         {"id": "d-x", "entity": "humidifier.x", "zones": [sample_config["zones"][0]["id"]], "nudgeMode": "normal"}

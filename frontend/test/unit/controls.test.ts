@@ -105,7 +105,7 @@ describe("a control moves only when the device reports it", () => {
   });
 
   it("words each outcome, naming what the device still reports", () => {
-    const d = { id: "fan", entity: "switch.fan", name: "Intake fan", role: "Fan", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "" };
+    const d = { id: "fan", entity: "switch.fan", name: "Intake fan", role: "Fan", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "", hiddenModes: [] };
     const v = deviceView("switch.fan", st("off"));
     expect(ctlLine({ status: "sending", want: wantOf("turn_on"), since: 0 }, d, v)?.text).toBe("Sent. Waiting for Intake fan to report back.");
     expect(ctlLine({ status: "stuck", want: wantOf("turn_on") }, d, v)).toEqual({ text: "Not confirmed. Intake fan still reports off. A Tuya plug can drop a command without saying, so try again.", tone: "crit" });
@@ -176,6 +176,16 @@ describe("a mode Home Assistant doesn't list", () => {
     expect(zoneControls(stored, "garden").groups[0].devices[0].extraMode).toBe("normal");
   });
 
+  it("leaves out the modes hidden in Device identification, but never the one the device is in", () => {
+    const v = dehu({ available_modes: ["sleep", "comfort", "eco", "boost"] });
+    expect(modeChoices(v, "normal", ["sleep", "comfort"])).toEqual(["eco", "boost", "normal"]);
+    /* It's in boost, so boost stays on the row though it's hidden; the extra mode can be hidden like any other. */
+    expect(modeChoices(v, "normal", ["boost", "normal"])).toEqual(["sleep", "comfort", "eco", "boost"]);
+    expect(modeChoices(dehu({ mode: "normal" }), "normal", ["normal", "eco", "boost"])).toEqual(["normal"]);
+    const stored = { zones: [{ id: "garden" }], devices: [{ id: "dehu", entity: "humidifier.dehu", name: "Dehu", type: "Dehumidifier", zones: ["garden"], hiddenModes: ["sleep", 5, "comfort"] }] };
+    expect(zoneControls(stored, "garden").groups[0].devices[0].hiddenModes).toEqual(["sleep", "comfort"]);
+  });
+
   it("is reached by moving the target one whole percent and back, inside the device's limits", () => {
     expect(nudgeTargets(dehu({ humidity: 55, min_humidity: 35, max_humidity: 80 }))).toEqual([56, 55]);
     /* At the top there's no room above, so it steps down and back. */
@@ -190,7 +200,7 @@ describe("a mode Home Assistant doesn't list", () => {
   });
 
   it("says what it's doing while the steps are sent", () => {
-    const d = { id: "dehu", entity: "humidifier.dehu", name: "Dehu", role: "Dehumidifier", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "normal" };
+    const d = { id: "dehu", entity: "humidifier.dehu", name: "Dehu", role: "Dehumidifier", zones: ["garden"], family: "Tuya", link: "wifi", extraMode: "normal", hiddenModes: [] };
     expect(ctlLine({ status: "sending", want: wantOf("humidity", 56), since: 0, note: "Moving the target one step and back." }, d, dehu({}))?.text).toBe("Moving the target one step and back.");
     expect(ctlLine({ status: "stuck", want: { mode: "normal" } }, d, dehu({}))?.text).toBe("Not confirmed. Dehu still reports on, boost mode. Moving its target didn't put it in normal mode.");
     /* A mode Home Assistant does list was asked for by name, so a missing report is the usual story. */

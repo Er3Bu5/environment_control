@@ -13,7 +13,7 @@ import {
   seedSlots,
   sensorCandidates,
   shownName,
-  swapControl,
+  swapControl, toggleMode,
 } from "../../src/frame/mapping";
 import { copyConfig } from "../../src/frame/model";
 
@@ -276,6 +276,35 @@ describe("the draft", () => {
     removeVirtual(next, "v-res_lid");
     applyMap(c, next, sensors, controls);
     expect(c.zones[0].virtual).toBeUndefined();
+  });
+
+  it("keeps the modes left out of Controls with the dehumidifier, and never on anything else", () => {
+    const c = copyConfig([{ id: "garden", name: "Garden", sensors: [{ id: "board1", entities: { temperature: "sensor.left_temp" } }] }], []);
+    const d = openMap(c, "garden");
+    d.controls["humidifier.dehu"] = "Dehumidifier";
+    d.controls["switch.heater_plug"] = "Heater";
+    toggleMode(d, "humidifier.dehu", "sleep");
+    toggleMode(d, "humidifier.dehu", "comfort");
+    toggleMode(d, "humidifier.dehu", "eco");
+    toggleMode(d, "humidifier.dehu", "eco");
+    toggleMode(d, "switch.heater_plug", "sleep");
+    expect(d.hide["humidifier.dehu"]).toEqual(["comfort", "sleep"]);
+    expect(mapChanges(d, c, sensors, controls).filter((x) => x.label.endsWith("modes left out of Controls")).map((x) => `${x.before} > ${x.after}`)).toContain("None > comfort, sleep");
+    applyMap(c, d, sensors, controls);
+    expect(c.devices.map((x) => [x.entity, x.hiddenModes])).toEqual([["humidifier.dehu", ["comfort", "sleep"]], ["switch.heater_plug", undefined]]);
+    const again = openMap(c, "garden");
+    expect(again.hide).toEqual({ "humidifier.dehu": ["comfort", "sleep"] });
+    expect(mapChanges(again, c, sensors, controls)).toEqual([]);
+    /* Moved to a fan, the modes aren't the fan's to have. */
+    swapControl(again, "humidifier.dehu", "fan.dehu_fan");
+    expect(again.hide).toEqual({});
+    /* Ticking the last one back leaves nothing stored. */
+    const cleared = openMap(c, "garden");
+    toggleMode(cleared, "humidifier.dehu", "sleep");
+    toggleMode(cleared, "humidifier.dehu", "comfort");
+    expect(cleared.hide).toEqual({});
+    applyMap(c, cleared, sensors, controls);
+    expect(c.devices[0].hiddenModes).toBeUndefined();
   });
 
   it("keeps a dehumidifier's extra mode with the device, and never on anything else", () => {
