@@ -500,6 +500,11 @@ export class EcApp extends LitElement {
     if (m.type === "states") this.controlsReported(Object.keys(m.states));
     if (m.type === "init" || m.type === "theme") this.applyTheme(m.theme);
     if (m.type === "init" || m.type === "narrow") this.narrow = m.narrow;
+    /* The host used up its history entry to tell us, so it's told afresh whether there's still somewhere to go back to. */
+    if (m.type === "back") {
+      this.back();
+      void this.updateComplete.then(() => this.sayBack());
+    }
     if (m.type === "init" && !this.catalog) void this.askCatalog();
     if (m.type === "result") {
       const resolve = this.waiting.get(m.req);
@@ -654,6 +659,7 @@ export class EcApp extends LitElement {
       this.draftHeld = held;
       parent.postMessage({ v: 1, type: "draft", open: held }, "*");
     }
+    if (this.canGoBack !== this.backSaid) this.sayBack();
     if (changed.has("modal")) {
       const before = changed.get("modal");
       if (this.modal && !before) {
@@ -680,12 +686,43 @@ export class EcApp extends LitElement {
     };
   }
 
+  /* Pages come from here, in order, so Back has somewhere to go. Going to the page before this one steps back along it
+     and going anywhere else adds to it, so opening an editor and closing it leaves no trace. */
+  private trail: { screen: Screen; zoneId: string | null }[] = [];
+  private backSaid: boolean | null = null;
+
   private go(screen: Screen, zoneId: string | null = null): void {
+    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && (a.screen !== "zone" || a.zoneId === b.zoneId);
+    const here = { screen: this.screen, zoneId: this.zoneId }, to = { screen, zoneId }, before = this.trail[this.trail.length - 1];
+    if (!same(here, to)) {
+      if (before && same(before, to)) this.trail.pop();
+      else this.trail = [...this.trail, here].slice(-30);
+    }
     this.screen = screen;
     this.zoneId = zoneId;
     this.menu = null;
     this.chartAt = null;
     window.scrollTo(0, 0);
+  }
+
+  /* Whether Back has anything to do here. The host is told, because the back gesture reaches it and not the frame. */
+  private get canGoBack(): boolean {
+    return !!(this.modal || this.menu || this.wiz || this.mapw || this.lay || this.leafw || this.sched || this.guide || this.trail.length);
+  }
+
+  /* One step back, whatever is in front: a dialog or a menu closes, an editor does what its own Back or Cancel does,
+     its guard for unsaved changes included, and otherwise the page before this one comes back. */
+  private back(): void {
+    if (this.modal) return void this.closeModal();
+    if (this.menu) return void (this.menu = null);
+    if (this.wiz) return void this.cancelWizard();
+    if (this.mapw) return void this.mapBack();
+    if (this.lay) return void this.layBack();
+    if (this.leafw) return void this.leafExit();
+    if (this.sched) return void this.schedExit();
+    const before = this.trail[this.trail.length - 1];
+    if (this.guide) return void this.leaveTo(before?.screen ?? "setup", before?.zoneId ?? null);
+    if (before) this.go(before.screen, before.zoneId);
   }
 
   private leaveTo(screen: Screen, zoneId: string | null = null): void {
@@ -1187,6 +1224,11 @@ export class EcApp extends LitElement {
     }
     if (d.fromGuide) this.guide = d.zoneId;
     else this.go(this.leafBack.screen, this.leafBack.zoneId);
+  }
+
+  private sayBack(): void {
+    this.backSaid = this.canGoBack;
+    parent.postMessage({ v: 1, type: "nav", back: this.backSaid }, "*");
   }
 
   private leafExit = (): void => {

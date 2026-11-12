@@ -118,6 +118,18 @@ class EnvironmentControlPanel extends HTMLElement {
     this._narrow = false;
     /* Until when a reload turned down with Later stays quiet. */
     this.reloadQuietUntil = 0;
+    /* Back inside the panel. The frame's pages aren't in the browser's history, so a back gesture left the panel, and
+       on Android the app. While the frame has somewhere to go back to, one history entry of this page's own is kept in
+       front. Going back from it is heard here and passed to the frame, which steps back and says whether to keep one. */
+    this.backArmed = false;
+    this.backSkips = 0;
+    /** @param {PopStateEvent} e */
+    this.onPop = (e) => {
+      if (this.backSkips > 0) { this.backSkips--; return; }
+      if (!this.backArmed || (e.state && e.state.ecBack)) return;
+      this.backArmed = false;
+      if (this.ready) this.post({ type: "back" });
+    };
     this.onMessage = this.onMessage.bind(this);
     /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
        raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
@@ -179,6 +191,19 @@ class EnvironmentControlPanel extends HTMLElement {
     if (typeof url !== "string") return false;
     try { return new URL(url, location.origin).pathname !== new URL(import.meta.url).pathname; } catch { return false; }
   }
+  /* Only a yes or a no is taken from the frame. The worst a compromised frame can do with it is hold one back gesture,
+     which the next one gets past, since an entry is only ever added once per answer. */
+  /** @param {boolean} on */
+  armBack(on) {
+    if (on && !this.backArmed) {
+      this.backArmed = true;
+      history.pushState({ ecBack: true }, "", location.href);
+    } else if (!on && this.backArmed) {
+      this.backArmed = false;
+      if (history.state && history.state.ecBack) { this.backSkips++; history.back(); }
+    }
+  }
+
   /* Asks in a dialog of its own, over the page, since a bar across the top was easy to miss. Later keeps the old panel
      in use, so a draft can still be applied before reloading, and it's asked again after a while. */
   askReload() {
@@ -218,6 +243,7 @@ class EnvironmentControlPanel extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("message", this.onMessage);
     window.removeEventListener("beforeunload", this.onUnload);
+    window.removeEventListener("popstate", this.onPop);
     window.removeEventListener("click", this.onClick, true);
     if (navigation()) navigation().removeEventListener("navigate", this.onNavigate);
     this.draftOpen = false;
@@ -246,6 +272,7 @@ class EnvironmentControlPanel extends HTMLElement {
     this.frame.srcdoc = FRAME_HTML;
     window.addEventListener("message", this.onMessage);
     window.addEventListener("beforeunload", this.onUnload);
+    window.addEventListener("popstate", this.onPop);
     window.addEventListener("click", this.onClick, true);
     if (navigation()) navigation().addEventListener("navigate", this.onNavigate);
     this.shadow.append(style, this.frame);
@@ -347,6 +374,7 @@ class EnvironmentControlPanel extends HTMLElement {
     /* A frame that has just loaded holds no draft. */
     if (m.type === "ready") { this.draftOpen = false; this.init(); }
     else if (m.type === "draft") { if (typeof m.open === "boolean") this.draftOpen = m.open; }
+    else if (m.type === "nav") { if (typeof m.back === "boolean") this.armBack(m.back); }
     else if (m.type === "appearance") this.setAppearance(m);
     else if (m.type === "catalog") this.catalog(m);
     else if (m.type === "save") this.save(m);
