@@ -2271,6 +2271,43 @@ test.describe("manual controls", () => {
     expect(Math.abs(chips.x - icon.x)).toBeLessThan(2);
   });
 
+  test("on a wide screen a group's devices stand two abreast, each laid out as a mid-width row", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const frame = await openZone(page);
+    const foot = (b: { y: number; height: number }) => b.y + b.height, right = (b: { x: number; width: number }) => b.x + b.width;
+    const group = controls(frame).locator(".cgroup", { has: frame.getByRole("heading", { name: "Humidity", exact: true }) });
+    const [whole, first, second] = [(await group.boundingBox())!, (await group.locator(".dev").nth(0).boundingBox())!, (await group.locator(".dev").nth(1).boundingBox())!];
+    /* Side by side, as tall as each other, and filling the group's width between them. */
+    expect(second.y).toBe(first.y);
+    expect(second.height).toBe(first.height);
+    expect(second.x).toBeGreaterThan(right(first));
+    expect(Math.abs(first.x - whole.x)).toBeLessThan(2);
+    expect(Math.abs(right(second) - right(whole))).toBeLessThan(2);
+    expect(Math.abs(first.width - second.width)).toBeLessThan(2);
+    /* In half the width, the modes sit under the name, starting under its icon and all on one line, with the dial
+       beside both, and nothing runs out of its row. */
+    const r = row(frame, "Auxiliary dehumidifier");
+    const box = async (sel: string) => (await r.locator(sel).boundingBox())!;
+    const [mine, text, modes, dial, onOff] = [(await r.boundingBox())!, await box(".dev-text"), await box(".dev-modes"), await box(".dial"), await box(".sw")];
+    expect(modes.y).toBeGreaterThanOrEqual(foot(text));
+    expect(Math.abs(modes.x - (await box(".ic")).x)).toBeLessThan(2);
+    expect((await box(".chip >> nth=3")).y).toBe((await box(".chip >> nth=0")).y);
+    expect(dial.y).toBeLessThan(foot(text));
+    expect(right(modes)).toBeLessThanOrEqual(dial.x);
+    expect(right(dial)).toBeLessThan(onOff.x);
+    expect(right(onOff)).toBeLessThanOrEqual(right(mine));
+    expect(mine.height).toBeLessThan(175);
+    /* Every group is in the same two columns, and a row with a dial keeps it on the row's own line. */
+    for (const g of await controls(frame).locator(".cgroup").all()) {
+      const rows = await Promise.all((await g.locator(".dev").all()).map(async (d) => (await d.boundingBox())!));
+      for (const [i, b] of rows.entries()) expect(Math.abs(b.x - (i % 2 ? second.x : first.x))).toBeLessThan(2);
+    }
+    const light = row(frame, "Overhead light controller");
+    const [name, lightDial] = [(await light.locator(".dev-text").boundingBox())!, (await light.locator(".dial").boundingBox())!];
+    expect(lightDial.y).toBeLessThan(foot(name));
+    expect(lightDial.x).toBeGreaterThanOrEqual(right(name));
+  });
+
   test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate("fakeHA.knobs.steps['light.garden_light_controller_overhead'] = { step: 5, floor: 15 }");
