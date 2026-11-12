@@ -341,10 +341,14 @@ export const styles = css`
   .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
   .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
+  /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
+  .wizbar .fixlink { color: inherit; text-decoration: underline; }
+  .wizbar[data-bare] .draft-text { opacity: .8; }
   @media (max-width: 640px) {
     .draftbar { flex-wrap: wrap; gap: 8px 10px; padding: 10px; }
     .draft-text { flex: 1 1 calc(100% - 36px); }
     .draftbar:not([data-blocked]) .draft-why { display: none; }
+    .wizbar[data-bare] .draft-text { display: none; }
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     :host(.drafting) main { padding-bottom: 136px; }

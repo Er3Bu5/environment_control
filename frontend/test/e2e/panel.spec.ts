@@ -397,6 +397,21 @@ test.describe("sensor calibration", () => {
     await expect(bar(frame)).toHaveCount(0);
   });
 
+  test("on a touch screen the draft bar is out of the way only while a box is typed in, whatever is tapped next", async ({ page }) => {
+    const frame = await openGarden(page);
+    test.skip(!(await frame.evaluate(() => matchMedia("(pointer: coarse)").matches)), "a mouse and keyboard keep the bar");
+    await type(frame, "Environment left", "1.5");
+    await expect(bar(frame)).toBeVisible();
+    /* From a button in the panel straight to a box, and from the box straight to a button: focus never leaves the panel. */
+    const above = row(frame, "Environment left").getByRole("button", { name: "Above air" });
+    await above.click();
+    await expect(bar(frame)).toBeVisible();
+    await box(frame, "Environment left").click();
+    await expect(app(frame).locator(".draftbar")).toBeHidden();
+    await above.click();
+    await expect(bar(frame)).toBeVisible();
+  });
+
   test("a zone made before setup steps were recorded stays judged after one of its steps is confirmed", async ({ page }) => {
     const frame = await openGarden(page);
     await type(frame, "Environment under", "1");
@@ -1305,6 +1320,56 @@ test.describe("map devices", () => {
     await expect(current).toHaveText("2. Devices");
   });
 
+  test("a wizard's Back and Next ride in a bar pinned to the foot of the window, which counts what's unsaved and covers nothing", async ({ page }) => {
+    await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 });
+    const frame = await newZoneMap(page);
+    const bar = app(frame).getByRole("region", { name: "Steps", exact: true });
+    const pinned = async () => {
+      const gap = await bar.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(40);
+    };
+    /* The step runs well past the foot of the window, and its buttons are in view without scrolling. */
+    expect(await frame.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeGreaterThan(100);
+    expect(await frame.evaluate(() => scrollY)).toBe(0);
+    await expect(bar.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
+    await expect(next(frame)).toBeInViewport();
+    await pinned();
+    await expect(bar.locator(".draft-count")).toHaveCount(0);
+    /* Something picked is counted there. */
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await expect(bar.locator(".draft-count")).toHaveText(/^[1-9]\d*$/);
+    await expect(bar).toContainText("nothing changes until you apply");
+    /* On a touch screen it's out of the way while a box is typed in, as the draft bar is, and back once the box is left. */
+    const name = app(frame).locator("#ms-d-board").getByLabel("Name", { exact: true });
+    const touch = await frame.evaluate(() => matchMedia("(pointer: coarse)").matches);
+    await name.click();
+    if (touch) await expect(bar).toBeHidden();
+    else await expect(bar).toBeVisible();
+    await name.press("Enter");
+    await expect(bar).toBeVisible();
+    /* And back when the keyboard is put away with the box still focused, which a touch screen shows as the window growing. */
+    if (touch) {
+      await name.click();
+      await expect(bar).toBeHidden();
+      await page.setViewportSize({ width: page.viewportSize()!.width, height: 820 });
+      await expect(bar).toBeVisible();
+      await expect(name).toBeFocused();
+      await name.press("Enter");
+      await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 });
+    }
+    /* Scrolled to its end, the step's last line clears the bar. */
+    await frame.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    const [last, top] = await bar.evaluate((el) => [el.previousElementSibling!.getBoundingClientRect().bottom, el.getBoundingClientRect().top]);
+    expect(last).toBeLessThanOrEqual(top);
+    await pinned();
+    await next(frame).click();
+    await expect(app(frame).locator(".steps [aria-current]")).toHaveText("2. Devices");
+    expect(await frame.evaluate(() => scrollY)).toBe(0);
+    await expect(bar.getByRole("button", { name: "Back", exact: true })).toBeInViewport();
+    await pinned();
+  });
+
   test("a name given here is kept in place of Home Assistant's, and a device moved to another entity keeps its name and type", async ({ page }) => {
     const frame = await newZoneMap(page);
     const allow = async () => {
@@ -1325,17 +1390,21 @@ test.describe("map devices", () => {
     await expect(board.locator("strong").first()).toHaveText("Canopy left");
     await expect(board).toContainText("Home Assistant calls it Environment board. Its name there isn't changed.");
     await name.fill("");
+    await name.press("Enter");
     await expect(next(frame)).toBeDisabled();
     await board.getByRole("button", { name: "Put back Home Assistant's name, Environment board" }).click();
     await expect(name).toHaveValue("Environment board");
     await expect(board).not.toContainText("Home Assistant calls it");
     await name.fill("Canopy left");
+    /* On a touch screen the bar with Next is out of the way while a box is typed in, and Enter leaves the box. */
+    await name.press("Enter");
     await next(frame).click();
 
     await row(frame, "Spare Plug").getByRole("button").first().click();
     const plug = app(frame).locator("#md-switch_spare_plug");
     await plug.getByLabel("Heater", { exact: true }).check();
     await plug.getByLabel("Name", { exact: true }).fill("Tent heater");
+    await plug.getByLabel("Name", { exact: true }).press("Enter");
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Canopy left (environment)");
     await expect(app(frame).locator(".review")).toContainText("Tent heater (Heater)");
@@ -1490,6 +1559,22 @@ test.describe("zone layout and placement", () => {
     await expect.poll(async () => (await stored(page)).zones.find((z) => z.id === "veg")?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
   });
 
+  test("Device placement's buttons are pinned to the foot of the window too, with the map still above them", async ({ page }) => {
+    await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 });
+    const frame = await openFromMenu(page, "Garden", "Device placement");
+    const bar = app(frame).getByRole("region", { name: "Steps", exact: true });
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device placement: Garden", exact: true })).toBeVisible();
+    expect(await frame.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeGreaterThan(100);
+    await expect(bar.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
+    await expect(finish(frame)).toBeInViewport();
+    const gap = await bar.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+    expect(gap).toBeGreaterThanOrEqual(8);
+    expect(gap).toBeLessThanOrEqual(40);
+    await frame.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    const [last, top] = await bar.evaluate((el) => [el.previousElementSibling!.getBoundingClientRect().bottom, el.getBoundingClientRect().top]);
+    expect(last).toBeLessThanOrEqual(top);
+  });
+
   test("finishing or cancelling a setup editor goes back where it was opened: Setup from its menu, the zone's page from a link", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await app(frame).getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1556,6 +1641,12 @@ test.describe("zone layout and placement", () => {
     await expect(units.nth(1)).toHaveText("GG4");
     await expect(units.nth(6)).toHaveText("Blue …");
     await expect(units.nth(0)).toHaveText("1");
+    /* The keyboard's Next goes on to the next unit, and from the last one it leaves the box, which is what puts a
+       phone's keyboard away and brings the bar with Review and apply back. */
+    await labels.getByLabel("Label for unit 7", { exact: true }).press("Enter");
+    await expect(labels.getByLabel("Label for unit 8", { exact: true })).toBeFocused();
+    await labels.getByLabel("Label for unit 12", { exact: true }).press("Enter");
+    expect(await frame.evaluate(() => document.querySelector("ec-app")!.shadowRoot!.activeElement)).toBeNull();
     await finish(frame).click();
     await expect(dialog(frame).locator(".review-row")).toHaveText(["Unit 2 labelNone → GG4", "Unit 7 labelNone → Blue Dream"]);
     await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
@@ -1645,6 +1736,8 @@ test.describe("zone layout and placement", () => {
     await add.click();
     const tank = app(frame).locator(".pickwrap.virt"), name = tank.getByLabel("Name", { exact: true });
     await expect(name).toBeFocused();
+    /* What's in the way of Next is said in the bar, which a touch screen shows once the box is left. */
+    await name.press("Enter");
     await expect(finish(frame)).toBeDisabled();
     await expect(app(frame).getByRole("button", { name: "A virtual device needs a name. ›" })).toBeVisible();
     /* A typed name stays in the box through the redraw every new reading causes. */

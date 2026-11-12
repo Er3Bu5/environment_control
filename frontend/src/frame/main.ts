@@ -444,8 +444,10 @@ export class EcApp extends LitElement {
     window.addEventListener("message", this.onMessage);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
-    this.addEventListener("focusin", this.onFocus);
-    this.addEventListener("focusout", this.onFocus);
+    /* On the shadow root, not the element: focus moving between two things inside the panel never reaches the element. */
+    this.renderRoot.addEventListener("focusin", this.onFocus as EventListener);
+    this.renderRoot.addEventListener("focusout", this.onFocus as EventListener);
+    window.addEventListener("resize", this.onResize);
     /* Staleness and "reported ago" move with time even when nothing new arrives. */
     this.clock = setInterval(() => (this.now = Date.now()), 15_000);
     parent.postMessage({ v: 1, type: "ready" }, "*");
@@ -455,8 +457,9 @@ export class EcApp extends LitElement {
     window.removeEventListener("message", this.onMessage);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
-    this.removeEventListener("focusin", this.onFocus);
-    this.removeEventListener("focusout", this.onFocus);
+    this.renderRoot.removeEventListener("focusin", this.onFocus as EventListener);
+    this.renderRoot.removeEventListener("focusout", this.onFocus as EventListener);
+    window.removeEventListener("resize", this.onResize);
     clearInterval(this.clock);
     this.chartRO?.disconnect();
     super.disconnectedCallback();
@@ -545,6 +548,7 @@ export class EcApp extends LitElement {
     const el = e.composedPath()[0];
     const field = el instanceof HTMLInputElement && el.type === "text";
     this.typing = e.type === "focusin" && field && matchMedia("(pointer: coarse)").matches;
+    this.viewH = window.innerHeight;
     /* A typed number box also moves up to sit just above the keyboard, as the mock has it, so the chart or row it
        belongs to stays in view. The page gets room below to scroll into while it does. */
     const box = this.typing && el instanceof HTMLInputElement && !!el.dataset.lin;
@@ -558,6 +562,15 @@ export class EcApp extends LitElement {
         if (this.shadowRoot?.activeElement !== input) return;
         window.scrollBy(0, (input.closest(".field") ?? input).getBoundingClientRect().top - 8);
       }, 300);
+  };
+
+  /* The keyboard put away with the box still focused, as Android's back gesture does, brings the bar back: the window
+     grows again. Where the app lays the keyboard over the page nothing changes size, and a tap outside the box does it. */
+  private viewH = 0;
+  private onResize = (): void => {
+    const grew = window.innerHeight - this.viewH;
+    this.viewH = window.innerHeight;
+    if (this.typing && grew > 120) this.typing = false;
   };
 
   /* Tallest height seen at this width, so a window shrunk by the keyboard can be told from a rotation. */
@@ -653,7 +666,7 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", held && !!(this.leafw || this.sched) && this.screen === "setup");
+    this.classList.toggle("drafting", ((held && !!(this.leafw || this.sched)) || !!(this.mapw || this.lay)) && this.screen === "setup");
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
@@ -2962,14 +2975,19 @@ export class EcApp extends LitElement {
         ${issues.map((i) => html`<button class="notice fix" @click=${() => this.jumpTo(i)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
         <p class="small muted">Applying only changes Environment Control. Home Assistant asks you before any device becomes controllable.</p>`;
     }
-    const last = m.step === 3, changes = last ? this.mapChangeList(m).length : 0;
+    const last = m.step === 3, changes = this.mapChangeList(m).length;
     return html`${head}<section class="card">
         ${steps}${body}
-        <div class="row">
-          <button class="btn" @click=${this.mapBack}>${m.step === 1 ? "Cancel" : "Back"}</button>
-          <button class="btn primary" ?disabled=${blocked} @click=${this.mapNext}>${last ? (changes ? "Review and apply" : "Finish") : "Next"}</button>
-          ${here.length ? html`<button class="fixlink" @click=${() => this.jumpTo(here[0])}>${here[0].text} &rsaquo;</button>` : nothing}
-        </div>
+        ${this.wizBar({
+          where: `Step ${m.step} of 3`,
+          back: m.step === 1 ? "Cancel" : "Back",
+          onBack: this.mapBack,
+          next: last ? (changes ? "Review and apply" : "Finish") : "Next",
+          onNext: this.mapNext,
+          blocked,
+          changes,
+          fix: here.length ? html`<button class="fixlink" @click=${() => this.jumpTo(here[0])}>${here[0].text} &rsaquo;</button>` : nothing,
+        })}
       </section>`;
   }
 
@@ -3014,7 +3032,7 @@ export class EcApp extends LitElement {
     const flow = flowOf(d), at = flow.indexOf(d.step), last = at === flow.length - 1;
     const NAMES = { 1: "Size", 2: "Units and labels", 3: "Sensors and devices" } as const;
     const steps = flow.length > 1 ? this.stepsHead(flow.map((n) => NAMES[n]), at, (i) => this.layGo(flow[i])) : nothing;
-    const issues = layoutIssues(d), lost = stranded(d), changes = last ? layoutChanges(d, this.config).length : 0;
+    const issues = layoutIssues(d), lost = stranded(d), changes = layoutChanges(d, this.config).length;
     let body: unknown = nothing;
     if (d.step === 1)
       body = html`<p class="muted">Measure the inside of the zone.</p>
@@ -3060,6 +3078,13 @@ export class EcApp extends LitElement {
                           enterkeyhint="next"
                           .value=${live(d.labels?.[n] ?? "")}
                           @input=${(e: Event) => this.setLay((x) => labelUnit(x, n, (e.target as HTMLInputElement).value))}
+                          @keydown=${(e: KeyboardEvent) => {
+                            /* The keyboard's Next goes to the next unit, and leaves the last one, which puts the keyboard away. */
+                            if (e.key !== "Enter") return;
+                            const box = e.target as HTMLInputElement, after = box.nextElementSibling;
+                            if (after instanceof HTMLInputElement) after.focus();
+                            else box.blur();
+                          }}
                         />`,
                   )}
                 </div>
@@ -3078,15 +3103,21 @@ export class EcApp extends LitElement {
     return html`<div><h1>${title}: ${z.name}</h1></div>
       <section class="card">
         ${steps}${body}
-        <div class="row">
-          <button class="btn" @click=${this.layBack}>${at === 0 ? "Cancel" : "Back"}</button>
-          <button class="btn primary" ?disabled=${blocked} @click=${this.layNext}>${last ? (changes ? "Review and apply" : "Finish") : "Next"}</button>
-          ${d.step === 3 && lost.length
-            ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
-            : heightless.length
-              ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
-              : nothing}
-        </div>
+        ${this.wizBar({
+          where: flow.length > 1 ? `Step ${at + 1} of ${flow.length}` : "",
+          back: at === 0 ? "Cancel" : "Back",
+          onBack: this.layBack,
+          next: last ? (changes ? "Review and apply" : "Finish") : "Next",
+          onNext: this.layNext,
+          blocked,
+          changes,
+          fix:
+            d.step === 3 && lost.length
+              ? html`<button class="fixlink" @click=${() => this.pickItem(lost[0].id)}>Place ${lost[0].name} to save &rsaquo;</button>`
+              : heightless.length
+                ? html`<button class="fixlink" @click=${() => this.pickItem(heightless[0].id)}>Set ${heightless[0].name}'s height to save &rsaquo;</button>`
+                : nothing,
+        })}
       </section>`;
   }
 
@@ -3274,6 +3305,23 @@ export class EcApp extends LitElement {
   }
 
   /* Pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
+  /* A wizard's Back and Next ride in the same bar as a freely edited page's Review and apply, pinned to the foot of the
+     window, so a long step is never scrolled to its end to move on. It says how much is unsaved, or what to put right. */
+  private wizBar(o: { where: string; back: string; onBack: () => void; next: string; onNext: () => void; blocked: boolean; changes: number; fix: unknown }) {
+    const fix = o.fix !== nothing;
+    const text = fix
+      ? o.fix
+      : o.changes
+        ? html`<strong>${plural(o.changes, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>`
+        : o.where;
+    return html`<div class="draftbar wizbar" role="region" aria-label="Steps" ?inert=${!!this.modal} ?data-blocked=${fix} ?data-bare=${!fix && !o.changes}>
+      ${o.changes && !fix ? html`<span class="draft-count">${o.changes}</span>` : nothing}
+      <span class="draft-text">${text}</span>
+      <button class="draft-discard" @click=${o.onBack}>${o.back}</button>
+      <button class="draft-review" ?disabled=${o.blocked} @click=${o.onNext}>${o.next}</button>
+    </div>`;
+  }
+
   private draftBar() {
     if (this.screen !== "setup") return nothing;
     let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; discard: () => void; review: () => void } | null = null;
