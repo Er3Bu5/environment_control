@@ -269,8 +269,10 @@ export const styles = css`
   .dev-modes { flex: 1 1 260px; display: flex; justify-content: center; min-width: 0; }
   .dev-modes .chiprow { justify-content: center; }
   /* Too narrow for all of that on one line: the modes go under the device's name, and the dial stands beside the two
-     of them, so the row is still only as tall as its dial. The empty first and last rows share the height left over,
-     which centres the name and its modes against the dial. Narrower still, the modes take a line of their own. */
+     of them, so the row is still only as tall as its dial. The modes start under the icon, not under the name: those
+     50px are what keep five of them on one line on a folding phone. The empty first and last rows share the height
+     left over, which centres the name and its modes against the dial. Narrower still, the modes take a line of their
+     own. */
   @media (max-width: 999px), (min-width: 1100px) {
     .dev:has(.dev-modes) .dev-text { flex: 1 1 0; }
     .dev-modes { flex-basis: 100%; justify-content: flex-start; }
@@ -280,18 +282,16 @@ export const styles = css`
     .dev:has(.dev-modes) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto 1fr; gap: 0 10px; }
     .dev:has(.dev-modes) > .ic { grid-area: 2 / 1; }
     .dev:has(.dev-modes) > .dev-text { grid-area: 2 / 2; }
-    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 2; margin-top: 8px; }
+    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; margin-top: 8px; }
     .dev:has(.dev-modes) > .dev-ctl { grid-area: 1 / 3 / 5 / 4; flex-wrap: nowrap; margin-left: 22px; }
     .dev:has(.dev-modes) > .ctl-status { grid-area: 5 / 1 / 6 / -1; margin-top: 8px; }
   }
   /* On a wide screen a group's devices stand two abreast, so a row isn't stretched across the page with nothing in its
-     middle. Each row is then about as wide as a whole row on a mid-width screen, and is laid out the same way, except
-     that the modes start under the icon: half a page is tight, and those 50px keep four modes on one line. Two in a
-     line are as tall as each other. */
+     middle. Each row is then about as wide as a whole row on a mid-width screen, and is laid out the same way. Half a
+     page holds four modes on one line. Two in a line are as tall as each other. */
   @media (min-width: 1100px) {
     .devs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .dev-text { flex-basis: 160px; }
-    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; }
     .dev:has(.dev-modes) > .dev-ctl { margin-left: 6px; }
   }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }

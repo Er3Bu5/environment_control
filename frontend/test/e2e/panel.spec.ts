@@ -2244,11 +2244,12 @@ test.describe("manual controls", () => {
     const box = async (sel: string) => (await r.locator(sel).boundingBox())!;
     const [whole, text, modes, dial, onOff] = [(await r.boundingBox())!, await box(".dev-text"), await box(".dev-modes"), await box(".dial"), await box(".sw")];
     const foot = (b: { y: number; height: number }) => b.y + b.height, right = (b: { x: number; width: number }) => b.x + b.width;
-    /* Under the name, starting where the name starts, and clear of the dial at their right. */
+    /* Under the name, starting under its icon, and clear of the dial at their right. */
+    const icon = await box(".ic");
     expect(modes.y).toBeGreaterThanOrEqual(foot(text));
-    expect(Math.abs(modes.x - text.x)).toBeLessThan(2);
+    expect(Math.abs(modes.x - icon.x)).toBeLessThan(2);
     expect(right(modes)).toBeLessThanOrEqual(dial.x);
-    expect(Math.abs((await box(".chip >> nth=0")).x - text.x)).toBeLessThan(2);
+    expect(Math.abs((await box(".chip >> nth=0")).x - icon.x)).toBeLessThan(2);
     /* The dial is beside the name and the modes, not on a line under them, so the row is as tall as its dial. */
     expect(dial.y).toBeLessThan(foot(text));
     expect(foot(dial)).toBeGreaterThan(modes.y);
@@ -2262,13 +2263,18 @@ test.describe("manual controls", () => {
     const status = (await r.locator(".ctl-status").boundingBox())!;
     expect(status.y).toBeGreaterThanOrEqual(foot((await r.locator(".dial").boundingBox())!) - 1);
     expect(Math.abs(status.x - (await r.locator(".ic").boundingBox())!.x)).toBeLessThan(2);
+    /* A unit with five modes still has them on one line. */
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on", { available_modes: ["sleep", "comfort", "eco", "boost", "normal"], mode: "boost" })`);
+    await expect(r.locator(".chip")).toHaveCount(5);
+    expect((await box(".chip >> nth=4")).y).toBe((await box(".chip >> nth=0")).y);
+    expect(right(await box(".chip >> nth=4"))).toBeLessThanOrEqual((await box(".dial")).x);
     /* Narrower still, the name stays beside its icon and the modes take the line under both. */
     await page.setViewportSize({ width: 412, height: 900 });
-    const [icon, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
-    expect(name.x).toBeGreaterThanOrEqual(right(icon));
-    expect(name.y).toBeLessThan(foot(icon));
+    const [mark, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
+    expect(name.x).toBeGreaterThanOrEqual(right(mark));
+    expect(name.y).toBeLessThan(foot(mark));
     expect(chips.y).toBeGreaterThanOrEqual(foot(name));
-    expect(Math.abs(chips.x - icon.x)).toBeLessThan(2);
+    expect(Math.abs(chips.x - mark.x)).toBeLessThan(2);
   });
 
   test("on a wide screen a group's devices stand two abreast, each laid out as a mid-width row", async ({ page }) => {
