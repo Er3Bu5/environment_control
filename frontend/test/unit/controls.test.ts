@@ -30,6 +30,23 @@ describe("what a zone's page offers", () => {
     expect(unknown.map((d) => d.id)).toEqual(["plug"]);
     expect(zoneControls(config, "veg").groups.flatMap((g) => g.devices.map((d) => d.id))).toEqual(["heater", "vegfan"]);
   });
+
+  it("lists what can have a dial first in its group, and otherwise keeps the order devices were added in", () => {
+    const mixed = {
+      zones: [{ id: "garden" }],
+      devices: [
+        dev("plug1", "switch.lights_1", "Light", ["garden"]),
+        dev("over", "light.controller_overhead", "Light", ["garden"]),
+        dev("plug2", "switch.lights_2", "Light", ["garden"]),
+        dev("under", "light.controller_under", "Light", ["garden"]),
+        dev("mains", "switch.dehumidifier_mains", "Dehumidifier", ["garden"]),
+        dev("dehu", "humidifier.dehu", "Dehumidifier", ["garden"]),
+        dev("fan2", "switch.fan_2", "Fan", ["garden"]),
+        dev("fan1", "switch.fan_1", "Fan", ["garden"]),
+      ],
+    };
+    expect(zoneControls(mixed, "garden").groups.map((g) => g.devices.map((d) => d.id))).toEqual([["dehu", "mains"], ["fan2", "fan1"], ["over", "under", "plug1", "plug2"]]);
+  });
 });
 
 describe("what a device reports", () => {

@@ -2314,6 +2314,11 @@ test.describe("manual controls", () => {
     const [name, lightDial] = [(await light.locator(".dev-text").boundingBox())!, (await light.locator(".dial").boundingBox())!];
     expect(lightDial.y).toBeLessThan(foot(name));
     expect(lightDial.x).toBeGreaterThanOrEqual(right(name));
+    /* What has a dial is listed first, so the two controllers share a line and no plug is stretched beside a dial. */
+    const lights = controls(frame).locator(".cgroup", { has: frame.getByRole("heading", { name: "Lights", exact: true }) }).locator(".dev");
+    await expect(lights.locator(".dev-name")).toHaveText(["Overhead light controller", "Under canopy light controller", "Overhead lights 1", "Overhead lights 2", "Red lights"]);
+    expect((await lights.nth(1).boundingBox())!.y).toBe((await lights.nth(0).boundingBox())!.y);
+    expect((await lights.nth(2).boundingBox())!.height).toBeLessThan(100);
   });
 
   test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
