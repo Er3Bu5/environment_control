@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setDetails, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
+import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setDetails, setHistory, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
 
 const base = () =>
   copyConfig(
@@ -48,6 +48,18 @@ describe("editing", () => {
     setDetails(c, "veg", "Veg tent", "   ");
     const z = c.zones[0];
     expect([z.name, z.description, z.extra]).toEqual(["Veg tent", undefined, { kept: true }]);
+  });
+
+  it("keeps what a zone's History opens on, reads only a graph and range the card has, and stores nothing for what every zone starts with", () => {
+    const c = base();
+    setHistory(c, "veg", { metric: "humidity", hours: 72 });
+    expect(c.zones[0].history).toEqual({ metric: "humidity", hours: 72 });
+    expect(readZones(c.zones).map((z) => z.history)).toEqual([{ metric: "humidity", hours: 72 }, null]);
+    setHistory(c, "veg", HISTORY_DEFAULT);
+    expect("history" in c.zones[0]).toBe(false);
+    expect(c.zones[0].extra).toEqual({ kept: true });
+    for (const bad of [{ metric: "pressure", hours: 24 }, { metric: "vpd", hours: 48 }, { metric: "vpd" }, "vpd", null])
+      expect(readZones([{ id: "x", name: "X", history: bad }])[0].history).toBeNull();
   });
 
   it("marks one step without touching the others", () => {

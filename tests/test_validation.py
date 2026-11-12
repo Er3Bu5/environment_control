@@ -117,6 +117,23 @@ CASES = {
     ),
     "follows a non on/off entity": (lambda c: c["zones"][0].update(lights=["sensor.x"]), "on or off"),
     "description too long": (lambda c: c["zones"][0].update(description="x" * 201), "short text"),
+    "History opening on a graph it doesn't have": (
+        lambda c: c["zones"][0].update(history={"metric": "pressure", "hours": 24}),
+        "History",
+    ),
+    "History opening on a range it doesn't have": (
+        lambda c: c["zones"][0].update(history={"metric": "vpd", "hours": 48}),
+        "History",
+    ),
+    "History opening on a range that isn't a number": (
+        lambda c: c["zones"][0].update(history={"metric": "vpd", "hours": True}),
+        "History",
+    ),
+    "History opening on something with more to it": (
+        lambda c: c["zones"][0].update(history={"metric": "vpd", "hours": 24, "entity": "sensor.x"}),
+        "History",
+    ),
+    "History opening on something that isn't a choice": (lambda c: c["zones"][0].update(history="vpd"), "History"),
     "leaf offset not a number entity": (
         lambda c: c["zones"][0].update(sensors=[{"id": "s", "leafEntity": "sensor.x"}]),
         "number entity",
@@ -203,6 +220,11 @@ def test_a_zone_that_aims_for_no_target_stores_none(sample_config) -> None:
         sample_config, lambda c: [v.__setitem__(2, None) for p in c["zones"][0]["bands"].values() for v in p.values()]
     )
     validate_config(c)
+
+
+def test_a_zone_can_say_what_its_history_opens_on(sample_config) -> None:
+    sample_config["zones"][0]["history"] = {"metric": "humidity", "hours": 72}
+    validate_config(sample_config)
 
 
 def test_a_dehumidifier_can_leave_modes_out_of_controls(sample_config) -> None:

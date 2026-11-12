@@ -1897,6 +1897,50 @@ test.describe("history", () => {
     await expect(card(frame).locator(".chart-note")).toContainText("Home Assistant has kept 12 hours of these readings");
   });
 
+  test("what's showing can be made what a zone's History opens on, through a review, and each zone keeps its own", async ({ page }) => {
+    const frame = await garden(page);
+    await tab(frame, "Garden").click();
+    const button = (name: string) => card(frame).getByRole("button", { name, exact: true });
+    const always = card(frame).getByRole("button", { name: /^Always open on / });
+    const opensOn = () => page.evaluate<unknown>("JSON.parse(fakeHA.disk).zones[0].history ?? null");
+    await expect(button("Temp")).toHaveAttribute("aria-pressed", "true");
+    await expect(button("24h")).toHaveAttribute("aria-pressed", "true");
+    /* Nothing to offer while it shows what it opens on. */
+    await expect(always).toHaveCount(0);
+    await button("RH").click();
+    await button("72h").click();
+    await expect(always).toHaveText("Always open on Humidity, 72h ›");
+    /* Offered at the foot of the card, under the chart and its table, so it never moves them. */
+    expect((await always.boundingBox())!.y).toBeGreaterThan((await card(frame).locator("table").boundingBox())!.y);
+    await always.click();
+    const dialog = app(frame).getByRole("dialog");
+    await expect(dialog.locator(".review-row")).toHaveText(["Garden's History opens onTemperature, 24h → Humidity, 72h"]);
+    expect(await opensOn()).toBeNull();
+    await dialog.getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).locator(".toast")).toHaveText("Garden's History now opens on Humidity, 72h.");
+    await expect(always).toHaveCount(0);
+    expect(await opensOn()).toEqual({ metric: "humidity", hours: 72 });
+    expect(await serviceCalls(page)).toBe(0);
+    /* Another zone still opens on what every zone starts with, and coming back to Garden opens on its own. */
+    await goTo(frame, "Veg");
+    await expect(button("Temp")).toHaveAttribute("aria-pressed", "true");
+    await expect(button("24h")).toHaveAttribute("aria-pressed", "true");
+    await goTo(frame, "Garden");
+    await expect(button("RH")).toHaveAttribute("aria-pressed", "true");
+    await expect(button("72h")).toHaveAttribute("aria-pressed", "true");
+    /* Looking at something else for now changes nothing stored, and offers itself in turn. */
+    await button("VPD").click();
+    await expect(always).toHaveText("Always open on VPD, 72h ›");
+    expect(await opensOn()).toEqual({ metric: "humidity", hours: 72 });
+    /* Choosing what every zone starts with again stores nothing. */
+    await button("Temp").click();
+    await button("24h").click();
+    await always.click();
+    await expect(dialog.locator(".review-row")).toHaveText(["Garden's History opens onHumidity, 72h → Temperature, 24h"]);
+    await dialog.getByRole("button", { name: "Apply 1 change" }).click();
+    await expect.poll(opensOn).toBeNull();
+  });
+
   test("switching metric or range keeps the card's place on the page while the new readings load", async ({ page }) => {
     const frame = await garden(page);
     await goTo(frame, "Garden");
