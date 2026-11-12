@@ -2,8 +2,8 @@
 
 Run by the Beta workflow once Validate has passed on a merge to main. Prints GitHub Actions outputs: version, ship
 (true or false), since (the release it was compared with) and included (true when that release was already built from
-this commit or a later one) and title (what the merge was, to name the release). Usage: python3 scripts/next_beta.py
-<commit>
+this commit or a later one) and title (what the merge was, and how many earlier merges come with it, to name the
+release). Usage: python3 scripts/next_beta.py <commit>
 """
 
 from __future__ import annotations
@@ -100,6 +100,18 @@ def title_of(message: str) -> str:
     return "".join(ch for ch in title if ch.isprintable())[:MAX_TITLE].strip()
 
 
+def with_more(title: str, more: int) -> str:
+    """The title of a beta that carries earlier merges too, as one made after a burst of merges does.
+
+    It is named after the newest merge, and says how many others came with it, so the name doesn't pass the rest off
+    as that one change. The count is kept whole when a long title has to be cut.
+    """
+    if more < 1 or not title:
+        return title
+    tail = f" and {more} more"
+    return title[: MAX_TITLE - len(tail)].strip() + tail
+
+
 def main(argv: list[str]) -> int:
     commit = argv[1] if len(argv) > 1 else ""
     if not COMMIT.match(commit):
@@ -114,7 +126,9 @@ def main(argv: list[str]) -> int:
     print(f"ship={'true' if ship else 'false'}")
     print(f"since={latest or ''}")
     print(f"included={'true' if behind else 'false'}")
-    print(f"title={title_of(_git('log', '-1', '--format=%B', commit))}")
+    # Merges on main since that release, this one included: each is one commit on main's own line.
+    merges = int(_git("rev-list", "--first-parent", "--count", f"{latest}..{commit}")) if latest and not behind else 1
+    print(f"title={with_more(title_of(_git('log', '-1', '--format=%B', commit)), merges - 1)}")
     return 0
 
 

@@ -102,3 +102,35 @@ def test_a_merge_a_newer_release_already_holds_makes_no_beta(tmp_path, monkeypat
 )
 def test_a_release_is_named_after_the_merge_it_carries(message, expected) -> None:
     assert next_beta.title_of(message) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "more", "expected"),
+    [
+        ("Zone page: History first", 0, "Zone page: History first"),
+        ("Zone page: History first", 2, "Zone page: History first and 2 more"),
+        # A long title is cut to make room, never the count.
+        ("x" * 100, 12, "x" * 88 + " and 12 more"),
+        ("", 3, ""),
+    ],
+)
+def test_a_beta_carrying_earlier_merges_says_how_many(title, more, expected) -> None:
+    assert next_beta.with_more(title, more) == expected
+    assert len(next_beta.with_more(title, more)) <= next_beta.MAX_TITLE
+
+
+def test_a_beta_made_after_a_burst_of_merges_counts_the_ones_before_it(tmp_path, monkeypatch, capsys) -> None:
+    _git(tmp_path, "init", "-q")
+    first, second, third, fourth = (_merge(tmp_path, n) for n in ("one", "two", "three", "four"))
+    _git(tmp_path, "tag", "v0.1.2b2", first)
+    monkeypatch.chdir(tmp_path)
+
+    def title(commit: str) -> str:
+        assert next_beta.main(["next_beta.py", commit]) == 0
+        return dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())["title"]
+
+    assert title(second) == "two"
+    assert title(fourth) == "four and 2 more"
+    # Once a release holds them, the next beta counts only what came after it.
+    _git(tmp_path, "tag", "v0.1.2b3", third)
+    assert title(fourth) == "four"
