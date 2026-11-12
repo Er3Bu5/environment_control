@@ -304,7 +304,6 @@ const LINK_LABEL: Record<LinkKind, string> = {
 };
 const PATH_LABEL: Record<PathKind, string> = { local: "Local", cloud: "Cloud", derived: "", unknown: "Local or cloud not known" };
 
-const historyWords = (v: HistoryView) => `${METRIC[v.metric].label}, ${RANGES.find((r) => r.hours === v.hours)?.label ?? `${v.hours}h`}`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /* A chart's readings as last fetched. They're fetched again after a while; the last point is live either way. */
@@ -316,6 +315,8 @@ interface HistEntry {
 }
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const METRIC_KEYS: Metric[] = ["temperature", "humidity", "vpd", "light"];
+/* A graph and a range in words, as the History card's offer and its review say them: Humidity, 72h. */
+const historyWords = (v: HistoryView) => `${METRIC[v.metric].label}, ${RANGES.find((r) => r.hours === v.hours)?.label ?? `${v.hours}h`}`;
 
 /* Plain properties rather than decorators, so the same source builds under any compiler setting. */
 export class EcApp extends LitElement {
