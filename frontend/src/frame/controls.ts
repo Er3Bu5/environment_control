@@ -227,11 +227,15 @@ export const choiceDown = (choices: number[], n: number) => [...choices].reverse
 /* The buttons and keys send once they've been left alone this long, so five presses are one command, not five. */
 export const DIAL_SETTLE_MS = 700;
 
-/* The modes a device is offered: Home Assistant's own list, then the extra one set for it, if HA doesn't list that. */
-/* The modes a row offers: Home Assistant's list and the extra one, less any left out in Device identification. The
-   mode the device is in is always there, left out or not, so the row never shows a device in no mode at all. */
+/* The modes a row offers, by name: Home Assistant's list and the extra one set for the device, if HA doesn't list
+   that, less any left out in Device identification. The mode the device is in is always there, left out or not, so
+   the row never shows a device in no mode at all. */
 export const modeChoices = (v: DeviceView, extra: string, hidden: string[] = []): string[] =>
-  (extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes).filter((m) => m === v.mode || !hidden.includes(m));
+  inNameOrder((extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes).filter((m) => m === v.mode || !hidden.includes(m)));
+
+/* Modes are listed by name, not in the order the device happens to give them, so two units with the same modes show
+   them in the same places and a mode is found without reading the row. */
+export const inNameOrder = (modes: string[]): string[] => [...modes].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
 /* Some dehumidifiers have a mode their integration can't ask for, which the device drops into when its target is
    changed: here, by moving the target one of the device's own steps and back. The two targets to ask for, in order,
