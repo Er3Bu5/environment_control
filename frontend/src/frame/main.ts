@@ -3896,6 +3896,25 @@ export class EcApp extends LitElement {
           )}
         </div>
         <p class="small muted">Only on this device. Nothing changes in Home Assistant or in Environment Control's settings.</p>
+        ${this.zones.length
+          ? html`<div class="opens">
+              <div><h3>History opens on</h3><p class="small muted">The graph and range each zone's History starts on. Kept with the zone, so it's the same on every device.</p></div>
+              ${this.zones.map((z) => {
+                const at = z.history ?? HISTORY_DEFAULT;
+                const seg = (label: string, items: [string, string][], cur: string, view: (v: string) => HistoryView) =>
+                  html`<div class="seg" role="group" aria-label="${z.name}: ${label}">
+                    ${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => cur !== v && this.historyDefault(z, view(v))}>${l}</button>`)}
+                  </div>`;
+                return html`<div class="opens-row">
+                  <strong>${z.name}</strong>
+                  <div class="row">
+                    ${seg("graph", METRIC_KEYS.map((m) => [m, METRIC[m].short]), at.metric, (v) => ({ metric: v as Metric, hours: at.hours }))}
+                    ${seg("range", RANGES.map((r) => [String(r.hours), r.label]), String(at.hours), (v) => ({ metric: at.metric, hours: Number(v) }))}
+                  </div>
+                </div>`;
+              })}
+            </div>`
+          : nothing}
       </section>`;
   }
 

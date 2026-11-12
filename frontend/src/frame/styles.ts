@@ -83,6 +83,9 @@ export const styles = css`
   .menu .remove { color: var(--crit); }
 
   .looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  /* What each zone's History opens on: a line per zone, its name then the two choices, which wrap under it on a phone. */
+  .opens { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .opens-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
   .look { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: 14px; text-align: center; }
   .look svg { width: 24px; height: 24px; fill: var(--muted); }
   .look[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
