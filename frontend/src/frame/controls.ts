@@ -40,6 +40,7 @@ export interface ControlDevice {
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const DIAL_DOMAINS = /^(light|humidifier)\./;
 const ROLE_GROUP: Record<string, GroupKey> = Object.fromEntries(CONTROL_GROUPS.flatMap((g) => g.types.map((t) => [t, g.key])));
 
 /* The zone's devices by group. One whose role isn't said yet is held back, because a plain plug could be anything; one
@@ -48,7 +49,11 @@ export function zoneControls(c: RawConfig, zoneId: string): { groups: { key: Gro
   const mine: ControlDevice[] = c.devices
     .filter((d) => isObj(d) && str(d.id) && str(d.entity) && Array.isArray(d.zones) && d.zones.includes(zoneId))
     .map((d) => ({ id: str(d.id), entity: str(d.entity), name: str(d.name) || str(d.entity), role: str(d.type), zones: (d.zones as unknown[]).filter((z): z is string => typeof z === "string"), family: str(d.family), link: str(d.link), extraMode: str(d.nudgeMode).trim(), hiddenModes: Array.isArray(d.hiddenModes) ? d.hiddenModes.filter((m): m is string => typeof m === "string") : [] }));
-  const groups = CONTROL_GROUPS.map((g) => ({ key: g.key, title: g.title, metric: g.metric, devices: mine.filter((d) => ROLE_GROUP[d.role] === g.key) })).filter((g) => g.devices.length);
+  /* In a group, what can have a dial comes first: a light controller, a dehumidifier. Its row is tall and a plug's is
+     short, so on a screen wide enough for two columns the tall rows pair up and a plug isn't stretched beside a dial.
+     Told by the kind of entity, which doesn't change, never by what it reports, so a row never moves. */
+  const dialFirst = (list: ControlDevice[]) => [...list.filter((d) => DIAL_DOMAINS.test(d.entity)), ...list.filter((d) => !DIAL_DOMAINS.test(d.entity))];
+  const groups = CONTROL_GROUPS.map((g) => ({ key: g.key, title: g.title, metric: g.metric, devices: dialFirst(mine.filter((d) => ROLE_GROUP[d.role] === g.key)) })).filter((g) => g.devices.length);
   return { groups, unknown: mine.filter((d) => !ROLE_GROUP[d.role] && d.role !== "Other") };
 }
 

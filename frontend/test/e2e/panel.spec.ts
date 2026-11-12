@@ -144,6 +144,37 @@ test.describe("layout", () => {
     /* The page sets the top and bottom safe areas to 10px and 20px. */
     expect(await frame.evaluate(() => window.innerHeight)).toBe(windowHeight - 30);
   });
+
+  test("the menu button rests at the foot of the heading, and stays at the top of the window once that has scrolled away", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    const button = app(frame).getByRole("navigation").getByRole("button", { name: "Menu", exact: true });
+    const rect = () => button.evaluate((el) => (({ top, left, bottom }) => ({ top, left, bottom }))(el.getBoundingClientRect()));
+    const headFoot = () => app(frame).locator(".navmenu + *").evaluate((el) => el.getBoundingClientRect().bottom);
+    const rest = await rect();
+    expect(Math.abs(rest.bottom - (await headFoot()))).toBeLessThan(1);
+    expect(rest.top).toBeGreaterThan(8);
+    /* Part of the way, while the heading is still in view, it moves with the page. */
+    await frame.evaluate(() => scrollTo(0, 6));
+    await expect.poll(async () => (await rect()).top).toBe(rest.top - 6);
+    /* Far down the page it's still there, in line with the page's left edge, and the menu opens from it. */
+    await frame.evaluate(() => scrollTo(0, 900));
+    expect(await frame.evaluate(() => scrollY)).toBe(900);
+    await expect.poll(async () => (await rect()).top).toBe(8);
+    expect((await rect()).left).toBe(rest.left);
+    await expect(button).toBeInViewport();
+    /* Wherever this test page itself is scrolled to, nothing of the page lies over the frame and takes the tap. */
+    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    await button.click();
+    await expect(tab(frame, "Overview")).toBeInViewport();
+    await expect(tab(frame, "Setup")).toBeInViewport();
+    await button.click();
+    /* Back at the top it's back at the foot of the heading. */
+    await frame.evaluate(() => scrollTo(0, 0));
+    await expect.poll(async () => (await rect()).top).toBe(rest.top);
+    expect(Math.abs((await rect()).bottom - (await headFoot()))).toBeLessThan(1);
+  });
 });
 
 test.describe("talking to HA", () => {
@@ -2384,6 +2415,8 @@ test.describe("manual controls", () => {
     /* Under the name, starting under its icon, and clear of the dial at their right. */
     const icon = await box(".ic");
     expect(modes.y).toBeGreaterThanOrEqual(foot(text));
+    /* With room between them, so the modes read as a line of their own and not as part of the name. */
+    expect(modes.y - foot(text)).toBeGreaterThanOrEqual(12);
     expect(Math.abs(modes.x - icon.x)).toBeLessThan(2);
     expect(right(modes)).toBeLessThanOrEqual(dial.x);
     expect(Math.abs((await box(".chip >> nth=0")).x - icon.x)).toBeLessThan(2);
@@ -2410,7 +2443,7 @@ test.describe("manual controls", () => {
     const [mark, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
     expect(name.x).toBeGreaterThanOrEqual(right(mark));
     expect(name.y).toBeLessThan(foot(mark));
-    expect(chips.y).toBeGreaterThanOrEqual(foot(name));
+    expect(chips.y - Math.max(foot(name), foot(mark))).toBeGreaterThanOrEqual(12);
     expect(Math.abs(chips.x - mark.x)).toBeLessThan(2);
   });
 
@@ -2449,6 +2482,11 @@ test.describe("manual controls", () => {
     const [name, lightDial] = [(await light.locator(".dev-text").boundingBox())!, (await light.locator(".dial").boundingBox())!];
     expect(lightDial.y).toBeLessThan(foot(name));
     expect(lightDial.x).toBeGreaterThanOrEqual(right(name));
+    /* What has a dial is listed first, so the two controllers share a line and no plug is stretched beside a dial. */
+    const lights = controls(frame).locator(".cgroup", { has: frame.getByRole("heading", { name: "Lights", exact: true }) }).locator(".dev");
+    await expect(lights.locator(".dev-name")).toHaveText(["Overhead light controller", "Under canopy light controller", "Overhead lights 1", "Overhead lights 2", "Red lights"]);
+    expect((await lights.nth(1).boundingBox())!.y).toBe((await lights.nth(0).boundingBox())!.y);
+    expect((await lights.nth(2).boundingBox())!.height).toBeLessThan(100);
   });
 
   test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {

@@ -32,6 +32,9 @@ export const styles = css`
      heading block, and the heading centred. They're two items in one grid cell, so the button follows the heading's
      height whatever it holds. */
   .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 12; }
+  /* Scrolled past its heading, the button stays at the top of the window. Its left edge is set to the page's own. */
+  .zmenu.navmenu.pinned { position: fixed; top: 8px; z-index: 18; }
+  .navmenu.pinned .burger { box-shadow: 0 2px 10px #0000003d; }
   .navmenu .menu { left: 0; right: auto; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
@@ -275,14 +278,14 @@ export const styles = css`
      own. */
   @media (max-width: 999px), (min-width: 1100px) {
     .dev:has(.dev-modes) .dev-text { flex: 1 1 0; }
-    .dev-modes { flex-basis: 100%; justify-content: flex-start; }
+    .dev-modes { flex-basis: 100%; justify-content: flex-start; margin-top: 6px; }
     .dev-modes .chiprow { justify-content: flex-start; }
   }
   @media (min-width: 620px) and (max-width: 999px), (min-width: 1100px) {
     .dev:has(.dev-modes) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto 1fr; gap: 0 10px; }
     .dev:has(.dev-modes) > .ic { grid-area: 2 / 1; }
     .dev:has(.dev-modes) > .dev-text { grid-area: 2 / 2; }
-    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; margin-top: 8px; }
+    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 1 / 4 / 3; margin-top: 14px; }
     .dev:has(.dev-modes) > .dev-ctl { grid-area: 1 / 3 / 5 / 4; flex-wrap: nowrap; margin-left: 22px; }
     .dev:has(.dev-modes) > .ctl-status { grid-area: 5 / 1 / 6 / -1; margin-top: 8px; }
   }

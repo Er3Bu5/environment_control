@@ -304,6 +304,8 @@ const LINK_LABEL: Record<LinkKind, string> = {
 };
 const PATH_LABEL: Record<PathKind, string> = { local: "Local", cloud: "Cloud", derived: "", unknown: "Local or cloud not known" };
 
+/* The page menu's button: its height, and how far from the top of the window it stays once the heading has scrolled away. */
+const NAV_BUTTON_H = 34, NAV_PIN_TOP = 8;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /* A chart's readings as last fetched. They're fetched again after a while; the last point is live either way. */
@@ -447,6 +449,8 @@ export class EcApp extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("message", this.onMessage);
+    window.addEventListener("scroll", this.pinNav, { passive: true });
+    window.addEventListener("resize", this.pinNav);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
     /* On the shadow root, not the element: focus moving between two things inside the panel never reaches the element. */
@@ -460,6 +464,8 @@ export class EcApp extends LitElement {
 
   disconnectedCallback(): void {
     window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("scroll", this.pinNav);
+    window.removeEventListener("resize", this.pinNav);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
     this.renderRoot.removeEventListener("focusin", this.onFocus as EventListener);
@@ -658,6 +664,7 @@ export class EcApp extends LitElement {
      lose anything, and only when that changes. */
   protected updated(changed: PropertyValues): void {
     this.fetchWanted();
+    this.pinNav();
     const chart = this.shadowRoot?.querySelector(".chart") ?? null;
     if (chart !== this.chartEl) {
       this.chartRO?.disconnect();
@@ -1668,6 +1675,17 @@ export class EcApp extends LitElement {
   };
 
   /* Drawing. */
+  /* The menu button rests at the foot of the page's heading. Once that would scroll off the top it stays at the top of
+     the window instead, so the menu is one tap away however far down the page is. Where it rests is read from the
+     heading, which doesn't move when the button is lifted out, so nothing jumps as it changes over. */
+  private pinNav = (): void => {
+    const nav = this.shadowRoot?.querySelector<HTMLElement>(".navmenu"), head = nav?.nextElementSibling, wrap = nav?.parentElement;
+    if (!nav || !head || !wrap) return;
+    const pinned = head.getBoundingClientRect().bottom - NAV_BUTTON_H < NAV_PIN_TOP;
+    nav.classList.toggle("pinned", pinned);
+    nav.style.left = pinned ? `${wrap.getBoundingClientRect().left}px` : "";
+  };
+
   /* Where to go: one button that opens the list of pages, in place of a title bar and a row of tabs. Every zone is in
      it, so a new zone appears there as soon as it's added. With Home Assistant's own sidebar hidden, as on a phone, the
      way to open that is here too. */
