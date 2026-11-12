@@ -347,11 +347,15 @@ export const styles = css`
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
   .wizbar .fixlink { color: inherit; text-decoration: underline; }
   .wizbar[data-bare] .draft-text { opacity: .8; }
+  /* With only its buttons to hold, the bar is as wide as they are, not a long empty strip with a button at its end. */
+  .wizbar[data-bare] { width: auto; max-width: calc(100vw - 32px); padding-left: 12px; }
+  .wizbar[data-bare] .draft-text:empty { display: none; }
   @media (max-width: 640px) {
     .draftbar { flex-wrap: wrap; gap: 8px 10px; padding: 10px; }
     .draft-text { flex: 1 1 calc(100% - 36px); }
     .draftbar:not([data-blocked]) .draft-why { display: none; }
     .wizbar[data-bare] .draft-text { display: none; }
+    .wizbar[data-bare] { width: min(820px, calc(100vw - 32px)); padding-left: 10px; }
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     :host(.drafting) main { padding-bottom: 136px; }

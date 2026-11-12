@@ -270,6 +270,7 @@ test.describe("talking to HA", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await back();
     await expect(app(frame).getByRole("alertdialog")).toContainText("Discard unsaved changes?");
     await back();
@@ -536,6 +537,7 @@ test.describe("sensor calibration", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).locator("#g-calibrate")).toContainText("Needs sensors from Device identification");
@@ -811,20 +813,40 @@ test.describe("targets, day and night", () => {
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
   });
 
-  test("Back is at the top of Targets and of Sensor Calibration, above everything there is to edit", async ({ page }) => {
+  test("Back on Targets and on Sensor Calibration is in the bar at the foot of the window, and what's unsaved joins it there", async ({ page }) => {
     const frame = await open(page, "Garden");
-    const above = async () => {
-      const back = await app(frame).getByRole("button", { name: "Back", exact: true }).boundingBox();
-      const card = await app(frame).locator("section.card").first().boundingBox();
-      expect(await app(frame).getByRole("button", { name: "Back", exact: true }).count()).toBe(1);
-      return back!.y + back!.height <= card!.y;
+    const bar = app(frame).getByRole("region", { name: "Page buttons", exact: true });
+    const back = app(frame).getByRole("button", { name: "Back", exact: true });
+    const atFoot = async (region = bar) => {
+      await expect(back).toHaveCount(1);
+      await expect(region.getByRole("button", { name: "Back", exact: true })).toBeInViewport();
+      const gap = await region.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(40);
     };
-    expect(await above()).toBe(true);
-    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+    /* No row of buttons is left on the page itself, at its top or its foot. */
+    await expect(app(frame).locator("main").getByRole("button", { name: /^(Back|Confirm|Cancel|Next|Finish)$/ })).toHaveCount(0);
+    await atFoot();
+    await frame.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    await atFoot();
+    await back.click();
     await app(frame).getByRole("button", { name: "Set up Garden" }).click();
     await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
-    expect(await above()).toBe(true);
+    await expect(app(frame).locator("main").getByRole("button", { name: /^(Back|Confirm|Cancel|Next|Finish)$/ })).toHaveCount(0);
+    await atFoot();
+    /* With something changed, the same bar counts it, and holds Discard and Review and apply beside Back. */
+    const offset = app(frame).getByLabel("Environment left degrees from air");
+    await offset.fill("1.5");
+    await offset.press("Enter");
+    const unsaved = app(frame).getByRole("region", { name: "Unsaved changes", exact: true });
+    await expect(bar).toHaveCount(0);
+    await atFoot(unsaved);
+    await expect(unsaved.getByRole("button")).toHaveText(["Back", "Discard", "Review and apply"]);
+    for (const b of await unsaved.getByRole("button").all()) await expect(b).toBeInViewport();
+    /* All three on one line, on a phone too. */
+    const tops = await Promise.all((await unsaved.getByRole("button").all()).map(async (b) => (await b.boundingBox())!.y));
+    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(2);
   });
 
   test("an Athena stage fills the period on show, all stored here with nothing sent", async ({ page }) => {
@@ -1021,6 +1043,7 @@ test.describe("targets, day and night", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await app(frame).locator("#g-targets").getByRole("button", { name: "Targets, day and night" }).click();
@@ -1061,9 +1084,13 @@ test.describe("zones", () => {
     const name = app(frame).getByLabel("Zone name"), review = app(frame).getByRole("button", { name: "Review and apply" });
     await expect(review).toBeDisabled();
     await name.fill("veg");
-    await expect(app(frame).getByRole("button", { name: "There's already a zone called veg ›" })).toBeVisible();
+    /* Said under the box as it's typed, and in the bar, where it's a link back to the box, once the box is left. */
+    await expect(app(frame).getByRole("status").filter({ hasText: /^There's already a zone called veg$/ })).toBeVisible();
+    await name.press("Enter");
     await expect(review).toBeDisabled();
+    await expect(app(frame).getByRole("button", { name: "There's already a zone called veg ›" })).toBeVisible();
     await name.fill("Flower tent");
+    await expect(app(frame).getByRole("status").filter({ hasText: "already a zone" })).toHaveCount(0);
     await app(frame).getByLabel("Description, optional").fill("By the window");
     await review.click();
     await expect(dialog(frame)).toContainText("Zone name");
@@ -1085,6 +1112,7 @@ test.describe("zones", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Seedlings");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await expect.poll(() => leaveAsks(page)).toBe(true);
     await goTo(frame, "Overview");
     await expect(alert(frame)).toContainText("Discard unsaved changes?");
@@ -1104,6 +1132,7 @@ test.describe("zones", () => {
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByLabel("Zone name").fill("Veg tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await openNav(frame);
@@ -1145,6 +1174,7 @@ test.describe("zones", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill('<img src=x onerror="window.pwned=1">');
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await openNav(frame);
@@ -1194,6 +1224,7 @@ test.describe("map devices", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
@@ -1528,6 +1559,7 @@ test.describe("after an update", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     /* The frame tells the host a draft is open a moment after it's drawn. */
     await expect.poll(() => page.evaluate<boolean>("panel.draftOpen")).toBe(true);
     await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
@@ -1709,6 +1741,7 @@ test.describe("zone layout and placement", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).getByRole("button", { name: "Device placement", exact: true })).toBeDisabled();
@@ -1843,6 +1876,7 @@ test.describe("live readings", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
+    await app(frame).getByLabel("Zone name").press("Enter");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();

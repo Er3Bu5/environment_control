@@ -678,7 +678,7 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", ((held && !!(this.leafw || this.sched)) || !!(this.mapw || this.lay)) && this.screen === "setup");
+    this.classList.toggle("drafting", this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide));
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
@@ -2595,6 +2595,8 @@ export class EcApp extends LitElement {
   private wizard(w: Wizard) {
     const issue = zoneNameIssue(w.name, this.zones, w.id), typed = !!w.name.trim();
     const changes = this.wizChanges(w).length;
+    /* A name that can't be used is said under its box as well as in the bar: on a touch screen the bar is out of the
+       way while the box is typed in, which is exactly when the name goes wrong. */
     return html`<div><h1>${w.id ? "Zone details" : "Add zone"}</h1></div>
       <section class="card">
         <label class="field" for="wiz-name"
@@ -2606,9 +2608,11 @@ export class EcApp extends LitElement {
             autocomplete="off"
             .value=${w.name}
             aria-invalid=${issue && typed ? "true" : "false"}
+            aria-describedby="wiz-name-why"
             @input=${(e: Event) => (this.wiz = { ...w, name: (e.target as HTMLInputElement).value })}
             @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (this.shadowRoot?.querySelector("#wiz-desc") as HTMLElement | null)?.focus()}
         /></label>
+        <div class="lstatus" id="wiz-name-why" role="status">${issue && typed ? issue : nothing}</div>
         <label class="field" for="wiz-desc"
           >Description, optional<textarea
             id="wiz-desc"
@@ -2620,11 +2624,16 @@ export class EcApp extends LitElement {
             @input=${(e: Event) => (this.wiz = { ...w, desc: (e.target as HTMLTextAreaElement).value })}
           ></textarea></label>
         ${w.id ? nothing : html`<p class="small muted">Size and units come later, after its devices are mapped.</p>`}
-        <div class="row">
-          <button class="btn" @click=${this.cancelWizard}>Cancel</button>
-          <button class="btn primary" ?disabled=${!!issue} @click=${this.finishWizard}>${changes ? "Review and apply" : "Finish"}</button>
-          <button class="fixlink" ?hidden=${!issue} @click=${() => (this.shadowRoot?.querySelector("#wiz-name") as HTMLElement | null)?.focus()}>${issue} &rsaquo;</button>
-        </div>
+        ${this.wizBar({
+          label: "Page buttons",
+          back: "Cancel",
+          onBack: this.cancelWizard,
+          next: changes ? "Review and apply" : "Finish",
+          onNext: this.finishWizard,
+          blocked: !!issue,
+          changes,
+          fix: issue ? html`<button class="fixlink" @click=${() => (this.shadowRoot?.querySelector("#wiz-name") as HTMLElement | null)?.focus()}>${issue} &rsaquo;</button>` : nothing,
+        })}
       </section>`;
   }
 
@@ -2682,7 +2691,7 @@ export class EcApp extends LitElement {
             </div>`;
           })}
         </div>
-        <div class="row"><button class="btn" @click=${() => this.leaveTo("zone", z.id)}>${stepsLeft(z).length ? "Finish for now" : "Done"}</button></div>
+        ${this.wizBar({ label: "Page buttons", back: stepsLeft(z).length ? "Finish for now" : "Done", onBack: () => this.leaveTo("zone", z.id) })}
       </section>`;
   }
 
@@ -2934,7 +2943,7 @@ export class EcApp extends LitElement {
             ? html`<p>${this.catalogError}</p>
                 <div class="row"><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
             : html`<p class="muted">Asking Home Assistant what it has.</p>`}
-          <div class="row"><button class="btn" @click=${this.mapBack}>Cancel</button></div>
+          ${this.wizBar({ back: "Cancel", onBack: this.mapBack })}
         </section>`;
     const sensors = this.sensorsFound, controls = this.controlsFound, issues = mapIssues(m, sensors, controls);
     const here = issues.filter((i) => i.step === m.step), blocked = m.step === 3 ? issues.length > 0 : here.length > 0;
@@ -3239,18 +3248,16 @@ export class EcApp extends LitElement {
     if (!z) return nothing;
     const { raw, sensors, homesBy } = this.leafCtx(d.zoneId);
     const head = html`<div><h1>Sensor Calibration: ${z.name}</h1></div>`;
-    const back = html`<button class="btn" ?disabled=${d.sending} @click=${this.leafExit}>Back</button>`;
     if (!sensors.length)
       return html`${head}<section class="card">
           <p class="muted">${z.name} has no environment sensors yet, and only those have a leaf temperature offset.</p>
-          <div class="row">${back}<button class="btn" @click=${() => this.openMapDevices(z.id)}>Device identification</button></div>
+          <div class="row"><button class="btn" @click=${() => this.openMapDevices(z.id)}>Device identification</button></div>
         </section>`;
     if (!d.seeded)
       return html`${head}<section class="card">
           ${this.catalogError
             ? html`<div class="notice"><span>${this.catalogError}</span><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
             : html`<p class="muted">Looking up ${z.name}'s boards in Home Assistant.</p>`}
-          <div class="row">${back}</div>
         </section>`;
     const issues = leafIssues(d, sensors, homesBy), changes = this.leafChangeList(d).length;
     const open = z.setup.calibrate === "todo" || z.setup.calibrate === "later";
@@ -3264,7 +3271,6 @@ export class EcApp extends LitElement {
     const chartAt = chartLeaf(d, sensors), at = Math.abs(chartAt) < 1e-9 ? "the leaf the same as air" : phrase(chartAt);
     const same = new Set(counted.map((s) => (d.rows[s.id] ? leafValue(d.rows[s.id]) : 0))).size === 1;
     return html`${head}
-      <div class="row">${back}</div>
       ${open
         ? html`<div class="notice">
             Not confirmed yet. ${onBoard ? "Check each sensor's offset, then Confirm. A board keeps the offset it already holds, and one kept here starts at 0." : "Each offset starts at 0. Check them, then Confirm."}
@@ -3290,8 +3296,7 @@ export class EcApp extends LitElement {
             </div>`
           : nothing}
         ${onBoard ? html`<p class="small muted">Offsets on a board are changed on the board itself. Its VPD, and anything reading it such as your alerts, follow straight away.</p>` : nothing}
-      </section>
-      ${open && !changes ? html`<div class="row"><button class="btn primary" ?disabled=${issues.length > 0} @click=${this.leafConfirm}>Confirm</button></div>` : nothing}`;
+      </section>`;
   }
 
   private leafRow(d: LeafDraft, s: ReturnType<typeof envSensors>[number], homes: Home[], issues: { id: string; target: string }[], height: string) {
@@ -3352,39 +3357,53 @@ export class EcApp extends LitElement {
   }
 
   /* Pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
-  /* A wizard's Back and Next ride in the same bar as a freely edited page's Review and apply, pinned to the foot of the
-     window, so a long step is never scrolled to its end to move on. It says how much is unsaved, or what to put right. */
-  private wizBar(o: { where: string; back: string; onBack: () => void; next: string; onNext: () => void; blocked: boolean; changes: number; fix: unknown }) {
-    const fix = o.fix !== nothing;
+  /* Every setup page's own buttons ride in one bar pinned to the foot of the window: a wizard's Back and Next, a page's
+     Back and Confirm, and Review and apply. So no page is scrolled to its end to move on, and they are always found in
+     the same place. The bar says how much is unsaved, or what has to be put right first. */
+  private wizBar(o: { where?: string; back: string; onBack: () => void; next?: string; onNext?: () => void; blocked?: boolean; changes?: number; fix?: unknown; label?: string }) {
+    const fix = o.fix !== undefined && o.fix !== nothing, changes = o.changes ?? 0;
     const text = fix
       ? o.fix
-      : o.changes
-        ? html`<strong>${plural(o.changes, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>`
-        : o.where;
-    return html`<div class="draftbar wizbar" role="region" aria-label="Steps" ?inert=${!!this.modal} ?data-blocked=${fix} ?data-bare=${!fix && !o.changes}>
-      ${o.changes && !fix ? html`<span class="draft-count">${o.changes}</span>` : nothing}
+      : changes
+        ? html`<strong>${plural(changes, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>`
+        : (o.where ?? "");
+    return html`<div class="draftbar wizbar" role="region" aria-label=${o.label ?? "Steps"} ?inert=${!!this.modal} ?data-blocked=${fix} ?data-bare=${!fix && !changes}>
+      ${changes && !fix ? html`<span class="draft-count">${changes}</span>` : nothing}
       <span class="draft-text">${text}</span>
       <button class="draft-discard" @click=${o.onBack}>${o.back}</button>
-      <button class="draft-review" ?disabled=${o.blocked} @click=${o.onNext}>${o.next}</button>
+      ${o.next ? html`<button class="draft-review" ?disabled=${!!o.blocked} @click=${o.onNext}>${o.next}</button>` : nothing}
     </div>`;
   }
 
+  /* Sensor Calibration and Targets are edited freely, so their bar is always there: Back, and Confirm while the step
+     hasn't been confirmed, until something differs from what's saved, and then the count, Discard and Review and apply
+     beside Back. */
   private draftBar() {
     if (this.screen !== "setup") return nothing;
-    let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; discard: () => void; review: () => void } | null = null;
+    let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
     if (this.leafw) {
-      const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId);
-      bar = { zoneId: d.zoneId, changes: this.leafChangeList(d), issue: leafIssues(d, sensors, homesBy)[0]?.text, sending: d.sending, discard: this.leafDiscard, review: this.leafReview };
+      const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId), z = this.zoneById(d.zoneId);
+      const open = !!z && d.seeded && sensors.length > 0 && (z.setup.calibrate === "todo" || z.setup.calibrate === "later");
+      bar = { zoneId: d.zoneId, changes: this.leafChangeList(d), issue: leafIssues(d, sensors, homesBy)[0]?.text, sending: d.sending, back: this.leafExit, discard: this.leafDiscard, review: this.leafReview, confirm: open ? this.leafConfirm : null };
     } else if (this.sched) {
-      const d = this.sched;
-      bar = { zoneId: d.zoneId, changes: this.schedChangeList(d), issue: this.pageIssues(d)[0]?.text, sending: d.sending, discard: this.schedDiscard, review: this.schedReview };
+      const d = this.sched, z = this.zoneById(d.zoneId);
+      const open = !!z && d.seeded && (z.setup.targets === "todo" || z.setup.targets === "later");
+      bar = { zoneId: d.zoneId, changes: this.schedChangeList(d), issue: this.pageIssues(d)[0]?.text, sending: d.sending, back: this.schedExit, discard: this.schedDiscard, review: this.schedReview, confirm: open ? this.schedConfirm : null };
     }
-    const n = bar?.changes.length ?? 0;
-    if (!bar || !n) return nothing;
+    if (!bar) return nothing;
+    const n = bar.changes.length;
     const z = this.zoneById(bar.zoneId), blocked = bar.issue ? `Fix first: ${bar.issue}` : "";
+    const back = html`<button class="draft-discard" ?disabled=${bar.sending} @click=${bar.back}>Back</button>`;
+    if (!n)
+      return html`<div class="draftbar wizbar" role="region" aria-label="Page buttons" ?inert=${!!this.modal} ?data-blocked=${!!(bar.confirm && blocked)} ?data-bare=${!(bar.confirm && blocked)}>
+        <span class="draft-text">${bar.confirm && blocked ? html`<strong>${blocked}</strong>` : nothing}</span>
+        ${back}
+        ${bar.confirm ? html`<button class="draft-review" ?disabled=${!!blocked || bar.sending} @click=${bar.confirm}>Confirm</button>` : nothing}
+      </div>`;
     return html`<div class="draftbar" role="region" aria-label="Unsaved changes" ?inert=${!!this.modal} ?data-blocked=${!!blocked}>
       <span class="draft-count">${n}</span>
       <span class="draft-text"><strong>${n === 1 ? `${z?.name ?? ""} · ${bar.changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
+      ${back}
       <button class="draft-discard" ?disabled=${bar.sending} @click=${bar.discard}>Discard</button>
       <button class="draft-review" ?disabled=${!!blocked || bar.sending} @click=${bar.review}>Review and apply</button>
     </div>`;
@@ -3527,13 +3546,11 @@ export class EcApp extends LitElement {
       <h1>Targets, day and night: ${z.name}</h1>
       <p class="muted small">Where ${z.name}'s times come from, and what they are. Nothing changes until you review and apply.</p>
     </div>`;
-    const back = html`<button class="btn" ?disabled=${d.sending} @click=${this.schedExit}>Back</button>`;
     if (!d.seeded)
       return html`${head}<section class="card">
           ${this.catalogError
             ? html`<div class="notice"><span>${this.catalogError}</span><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
             : html`<p class="muted">Looking up Home Assistant's helpers.</p>`}
-          <div class="row">${back}</div>
         </section>`;
     const issues = schedIssues(d, this.states, this.catalog), bad = (t: string) => issues.some((i) => i.target === t), lock = d.sending;
     const raw = this.raw(d.zoneId), others = sharing(this.config.zones, d.zoneId).map((o) => String(o.name ?? o.id));
@@ -3617,7 +3634,6 @@ export class EcApp extends LitElement {
     const open = z.setup.targets === "todo" || z.setup.targets === "later", t = this.tgt;
     const all = this.pageIssues(d), changes = this.schedChangeList(d).length;
     return html`${head}
-      <div class="row">${back}</div>
       ${open ? html`<div class="notice">Not confirmed yet. A new zone's times and limits all start at 0, so set them, then Confirm. Applying a change confirms it too.</div>` : nothing}
       <section class="card" id="s-times">
         <div><h2>Day and night</h2><p class="muted small">How ${z.name} knows when it's day, and when its lights come on and go off.</p></div>
@@ -3642,8 +3658,7 @@ export class EcApp extends LitElement {
       <div class="issues">
         ${issues.map((i) => html`<button class="notice fix" @click=${() => this.fixIssue(i)}><span>${i.text}</span><span class="fixgo">Fix &rsaquo;</span></button>`)}
       </div>
-      ${t ? this.targetsCard(d, t, z) : nothing} ${d.sending ? html`<div class="lstatus" role="status">Sending to Home Assistant...</div>` : nothing}
-      ${open && !changes ? html`<div class="row"><button class="btn primary" ?disabled=${all.length > 0 || d.sending} @click=${this.schedConfirm}>Confirm</button></div>` : nothing}`;
+      ${t ? this.targetsCard(d, t, z) : nothing} ${d.sending ? html`<div class="lstatus" role="status">Sending to Home Assistant...</div>` : nothing}`;
   }
 
   /* Targets: where the zone's limits come from, and the limits themselves, on the VPD chart or typed. */
