@@ -265,6 +265,22 @@ export const styles = css`
   .dev:has(.dev-modes) .dev-text { flex: 0 1 auto; }
   .dev-modes { flex: 1 1 260px; display: flex; justify-content: center; min-width: 0; }
   .dev-modes .chiprow { justify-content: center; }
+  /* Too narrow for all of that on one line: the modes go under the device's name, and the dial stands beside the two
+     of them, so the row is still only as tall as its dial. The empty first and last rows share the height left over,
+     which centres the name and its modes against the dial. Narrower still, the modes take a line of their own. */
+  @media (max-width: 999px) {
+    .dev:has(.dev-modes) .dev-text { flex: 1 1 0; }
+    .dev-modes { flex-basis: 100%; justify-content: flex-start; }
+    .dev-modes .chiprow { justify-content: flex-start; }
+  }
+  @media (min-width: 620px) and (max-width: 999px) {
+    .dev:has(.dev-modes) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto 1fr; gap: 0 10px; }
+    .dev:has(.dev-modes) > .ic { grid-area: 2 / 1; }
+    .dev:has(.dev-modes) > .dev-text { grid-area: 2 / 2; }
+    .dev:has(.dev-modes) > .dev-modes { grid-area: 3 / 2; margin-top: 8px; }
+    .dev:has(.dev-modes) > .dev-ctl { grid-area: 1 / 3 / 5 / 4; flex-wrap: nowrap; margin-left: 22px; }
+    .dev:has(.dev-modes) > .ctl-status { grid-area: 5 / 1 / 6 / -1; margin-top: 8px; }
+  }
   .ctl-status { flex-basis: 100%; font-size: 12px; color: var(--muted); }
   .ctl-status.crit { color: var(--crit); }
   .ctl-status.warn { color: var(--fg); }
