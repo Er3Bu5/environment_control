@@ -12,10 +12,22 @@ export interface Layout {
   rows: number;
   cols: number;
 }
+/* What a zone's History card opens on: one of its graphs, over one of the ranges it offers. */
+export const HISTORY_METRICS = ["temperature", "humidity", "vpd", "light"] as const;
+export const HISTORY_HOURS = [6, 24, 72, 168] as const;
+export interface HistoryView {
+  metric: (typeof HISTORY_METRICS)[number];
+  hours: number;
+}
+/* Until a zone says otherwise. */
+export const HISTORY_DEFAULT: HistoryView = { metric: "temperature", hours: 24 };
+
 export interface Zone {
   id: string;
   name: string;
   description: string | null;
+  /* null while the zone hasn't chosen, which is HISTORY_DEFAULT. */
+  history: HistoryView | null;
   layout: Layout | null;
   sensors: { id: string; placed: boolean }[];
   setup: Partial<Record<SetupStep, StepState>>;
@@ -34,6 +46,11 @@ function readLayout(v: unknown): Layout | null {
   return { w: v.w as number, d: v.d as number, units: v.units as number, rows: v.rows as number, cols: v.cols as number };
 }
 
+function readHistory(v: unknown): HistoryView | null {
+  if (!isObj(v) || !HISTORY_METRICS.includes(v.metric as HistoryView["metric"]) || !HISTORY_HOURS.includes(v.hours as (typeof HISTORY_HOURS)[number])) return null;
+  return { metric: v.metric as HistoryView["metric"], hours: v.hours as number };
+}
+
 export function readZones(list: unknown[]): Zone[] {
   const out: Zone[] = [];
   for (const z of list) {
@@ -43,7 +60,7 @@ export function readZones(list: unknown[]): Zone[] {
     const sensors = Array.isArray(z.sensors)
       ? z.sensors.filter(isObj).filter((s) => typeof s.id === "string").map((s) => ({ id: s.id as string, placed: Array.isArray(s.pos) }))
       : [];
-    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, layout: readLayout(z.layout), sensors, setup });
+    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, history: readHistory(z.history), layout: readLayout(z.layout), sensors, setup });
   }
   return out;
 }
@@ -127,6 +144,14 @@ export function setDetails(c: RawConfig, id: string, name: string, description: 
   z.name = name.trim();
   if (description.trim()) z.description = description.trim();
   else delete z.description;
+}
+
+/* What the zone's History card opens on. Choosing what every zone starts with stores nothing. */
+export function setHistory(c: RawConfig, id: string, view: HistoryView): void {
+  const z = c.zones.find((x) => x.id === id);
+  if (!z) return;
+  if (view.metric === HISTORY_DEFAULT.metric && view.hours === HISTORY_DEFAULT.hours) delete z.history;
+  else z.history = { metric: view.metric, hours: view.hours };
 }
 
 export function markStep(c: RawConfig, id: string, step: SetupStep, state: StepState): void {

@@ -19,6 +19,8 @@ import {
   readHostMessage,
 } from "./messages";
 import {
+  HISTORY_DEFAULT,
+  type HistoryView,
   MAX_DESCRIPTION,
   MAX_ZONE_NAME,
   type RawConfig,
@@ -36,6 +38,7 @@ import {
   removeZone,
   confirmLink,
   setDetails,
+  setHistory,
   stepsLeft,
   unknownLinks,
   zoneNameIssue,
@@ -312,6 +315,8 @@ interface HistEntry {
 }
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const METRIC_KEYS: Metric[] = ["temperature", "humidity", "vpd", "light"];
+/* A graph and a range in words, as the History card's offer and its review say them: Humidity, 72h. */
+const historyWords = (v: HistoryView) => `${METRIC[v.metric].label}, ${RANGES.find((r) => r.hours === v.hours)?.label ?? `${v.hours}h`}`;
 
 /* Plain properties rather than decorators, so the same source builds under any compiler setting. */
 export class EcApp extends LitElement {
@@ -710,6 +715,8 @@ export class EcApp extends LitElement {
     if (!same(here, to)) {
       if (before && same(before, to)) this.trail.pop();
       else this.trail = [...this.trail, here].slice(-30);
+      /* A zone's page opens with its History on the graph and range chosen for that zone. */
+      if (screen === "zone") ({ metric: this.metric, hours: this.range } = this.zoneById(zoneId)?.history ?? HISTORY_DEFAULT);
     }
     this.screen = screen;
     this.zoneId = zoneId;
@@ -1765,6 +1772,13 @@ export class EcApp extends LitElement {
         ${seg("Range", RANGES.map((r) => [String(r.hours), r.label]), String(R.hours), (v) => ([this.range, this.chartAt] = [Number(v), null]))}
       </div>
     </div>`;
+    /* What's showing can be made what this zone's History opens on. It's offered at the foot of the card, where its
+       coming and going doesn't move the chart. */
+    const opens = z.history ?? HISTORY_DEFAULT, showing: HistoryView = { metric: k, hours: R.hours };
+    const setDefault =
+      opens.metric === k && opens.hours === R.hours
+        ? nothing
+        : html`<div class="row"><button class="fixlink" @click=${() => this.historyDefault(z, showing)}>Always open on ${historyWords(showing)} &rsaquo;</button></div>`;
     const want = this.chartWant(z.id), e = want ? this.hist[want.key] : undefined;
     if (!this.envOf(z.id).length) return html`<section class="card">${head}<p class="small muted">No environment sensors in ${z.name} yet.</p></section>`;
     if (!want) return html`<section class="card">${head}<p class="small muted">No sensor in ${z.name} reads ${METRIC[k].label.toLowerCase()}.</p></section>`;
@@ -1795,6 +1809,7 @@ export class EcApp extends LitElement {
           </table>
         </div>
         <div class="key"><span>&nbsp;</span></div>
+        ${setDefault}
       </section>`;
     }
     const h = e.h, rows = this.chartRows(z, k, h), n = rows[0].line.length - 1;
@@ -1893,7 +1908,21 @@ export class EcApp extends LitElement {
         ${bands ? html`<span><i style="background:var(--ideal)"></i>Ideal zone</span><span><i style="background:var(--band);outline:1px solid var(--line)"></i>Min to max</span>` : nothing}
         ${runs.some((r) => !r.day) ? html`<span><i style="background:var(--shade);outline:1px solid var(--line)"></i>Lights off</span>` : nothing}
       </div>
+      ${setDefault}
     </section>`;
+  }
+
+  /* Stored with the zone, so it's the same on every screen the panel is opened on, and reviewed like any other change. */
+  private historyDefault(z: Zone, view: HistoryView): void {
+    this.modal = {
+      kind: "review",
+      changes: [{ label: `${z.name}'s History opens on`, before: historyWords(z.history ?? HISTORY_DEFAULT), after: historyWords(view) }],
+      note: "This only changes Environment Control. Nothing in Home Assistant changes.",
+      busy: false,
+      error: "",
+      apply: () => this.save((c) => setHistory(c, z.id, view)),
+      after: () => this.toast(`${z.name}'s History now opens on ${historyWords(view)}.`),
+    };
   }
 
   /* The zone's combined light over the last 4 hours, as the HA dashboard draws it: black to yellow between 1210 and

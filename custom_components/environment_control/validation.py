@@ -40,6 +40,9 @@ EMERSON_MODES = ("none", "helper", "fixed", "detected")
 # What a virtual device is: the roles real devices have, a tank, or something else. It only decides how it's drawn.
 VIRTUAL_TYPES = ("Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Tank", "Other")
 PERIOD_MODES = ("helper", "fixed", "detected")
+# What a zone's History card can open on: one of its graphs, over one of the ranges it offers.
+HISTORY_METRICS = ("temperature", "humidity", "vpd", "light")
+HISTORY_HOURS = (6, 24, 72, 168)
 # Limits as stored: wider than the panel lets you type, since a value read off a helper is kept here as last known.
 BAND_RANGE = {"temperature": (-50, 100), "humidity": (0, 100), "vpd": (0, 10)}
 MAX_LUX = 1_000_000
@@ -256,6 +259,15 @@ def validate_config(c: Any) -> None:
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
         _check_limits(zid, z)
+        opens = z.get("history")
+        if opens is not None and not (
+            isinstance(opens, dict)
+            and set(opens) == {"metric", "hours"}
+            and opens["metric"] in HISTORY_METRICS
+            and _is_int(opens["hours"])
+            and opens["hours"] in HISTORY_HOURS
+        ):
+            _fail(f"{zid} opens its History on a graph or range this panel doesn't have")
         basis = z.get("leafBasis")
         if basis is not None and not (isinstance(basis, str) and ITEM_ID.match(basis)):
             _fail(f"{zid} draws its VPD chart at an offset this panel doesn't know")
