@@ -2244,11 +2244,12 @@ test.describe("manual controls", () => {
     const box = async (sel: string) => (await r.locator(sel).boundingBox())!;
     const [whole, text, modes, dial, onOff] = [(await r.boundingBox())!, await box(".dev-text"), await box(".dev-modes"), await box(".dial"), await box(".sw")];
     const foot = (b: { y: number; height: number }) => b.y + b.height, right = (b: { x: number; width: number }) => b.x + b.width;
-    /* Under the name, starting where the name starts, and clear of the dial at their right. */
+    /* Under the name, starting under its icon, and clear of the dial at their right. */
+    const icon = await box(".ic");
     expect(modes.y).toBeGreaterThanOrEqual(foot(text));
-    expect(Math.abs(modes.x - text.x)).toBeLessThan(2);
+    expect(Math.abs(modes.x - icon.x)).toBeLessThan(2);
     expect(right(modes)).toBeLessThanOrEqual(dial.x);
-    expect(Math.abs((await box(".chip >> nth=0")).x - text.x)).toBeLessThan(2);
+    expect(Math.abs((await box(".chip >> nth=0")).x - icon.x)).toBeLessThan(2);
     /* The dial is beside the name and the modes, not on a line under them, so the row is as tall as its dial. */
     expect(dial.y).toBeLessThan(foot(text));
     expect(foot(dial)).toBeGreaterThan(modes.y);
@@ -2262,13 +2263,18 @@ test.describe("manual controls", () => {
     const status = (await r.locator(".ctl-status").boundingBox())!;
     expect(status.y).toBeGreaterThanOrEqual(foot((await r.locator(".dial").boundingBox())!) - 1);
     expect(Math.abs(status.x - (await r.locator(".ic").boundingBox())!.x)).toBeLessThan(2);
+    /* A unit with five modes still has them on one line. */
+    await page.evaluate(`fakeHA.setState("humidifier.auxiliary_dehumidifier", "on", { available_modes: ["sleep", "comfort", "eco", "boost", "normal"], mode: "boost" })`);
+    await expect(r.locator(".chip")).toHaveCount(5);
+    expect((await box(".chip >> nth=4")).y).toBe((await box(".chip >> nth=0")).y);
+    expect(right(await box(".chip >> nth=4"))).toBeLessThanOrEqual((await box(".dial")).x);
     /* Narrower still, the name stays beside its icon and the modes take the line under both. */
     await page.setViewportSize({ width: 412, height: 900 });
-    const [icon, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
-    expect(name.x).toBeGreaterThanOrEqual(right(icon));
-    expect(name.y).toBeLessThan(foot(icon));
+    const [mark, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
+    expect(name.x).toBeGreaterThanOrEqual(right(mark));
+    expect(name.y).toBeLessThan(foot(mark));
     expect(chips.y).toBeGreaterThanOrEqual(foot(name));
-    expect(Math.abs(chips.x - icon.x)).toBeLessThan(2);
+    expect(Math.abs(chips.x - mark.x)).toBeLessThan(2);
   });
 
   test("on a wide screen a group's devices stand two abreast, each laid out as a mid-width row", async ({ page }) => {
@@ -2449,6 +2455,52 @@ test.describe("manual controls", () => {
     await expect(unit.getByRole("status")).toHaveText("Not confirmed. Garden Dehumidifier still reports on, boost mode. Moving its target didn't put it in normal mode.", { timeout: 20_000 });
     await expect(mode("Boost")).toBeChecked();
     await expect(mode("Normal")).not.toBeChecked();
+  });
+
+  test("modes unticked in Device identification are left off the device's row, except the one it's in", async ({ page }) => {
+    test.setTimeout(60_000);
+    const frame = await openZone(page);
+    const dehu = row(frame, "Dehumidifier");
+    await expect(dehu.getByRole("radio")).toHaveCount(4);
+    await dehu.getByRole("button", { name: "Add Normal as a mode ›" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: /Device identification/ })).toBeVisible();
+    /* Every mode Home Assistant lists and the extra one, each ticked until it's left out. */
+    const offered = app(frame).locator("#modes-md-humidifier_garden_dehumidifier"), tick = (mode: string) => offered.getByRole("checkbox", { name: mode, exact: true });
+    await expect(offered.locator(".chip")).toHaveText(["Sleep", "Comfort", "Eco", "Boost", "Normal"]);
+    for (const box of await offered.getByRole("checkbox").all()) await expect(box).toBeChecked();
+    await tick("Sleep").uncheck();
+    await tick("Comfort").uncheck();
+    await tick("Eco").uncheck();
+    await tick("Eco").check();
+    /* Plug 7 and the sensors Home Assistant no longer lists would hold the review, as in the test above. */
+    await app(frame).locator("#md-switch_plug_7").getByRole("button").first().click();
+    await app(frame).locator(".steps").getByRole("button", { name: "1. Sensors", exact: true }).click();
+    for (const id of ["g-left", "g-right", "g-under"]) await app(frame).locator(`#ms-${id}`).getByRole("button").first().click();
+    await app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: "Environment board" }) }).getByRole("button").first().click();
+    const next = app(frame).getByRole("button", { name: /^(Next|Review and apply)$/ });
+    await next.click();
+    await expect(tick("Sleep")).not.toBeChecked();
+    await expect(tick("Eco")).toBeChecked();
+    await next.click();
+    await next.click();
+    await expect(app(frame).getByRole("dialog")).toContainText("modes left out of ControlsNone → comfort, sleep");
+    await app(frame).getByRole("dialog").getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(controls(frame)).toBeVisible();
+    const unit = row(frame, "Garden Dehumidifier");
+    await expect(unit.locator(".chip")).toHaveText(["Eco", "Boost", "Normal"]);
+    await expect(unit.getByRole("radio", { name: "Normal", exact: true })).toBeChecked();
+    /* Leaving a mode out sends nothing to the device, and the device keeps it: put in sleep mode from elsewhere, the row
+       shows sleep, and drops it again once the device moves on. */
+    expect(await serviceCalls(page)).toBe(0);
+    await page.evaluate(`fakeHA.setState("humidifier.garden_dehumidifier", "on", { mode: "sleep" })`);
+    await expect(unit.locator(".chip")).toHaveText(["Sleep", "Eco", "Boost", "Normal"]);
+    await expect(unit.getByRole("radio", { name: "Sleep", exact: true })).toBeChecked();
+    await unit.getByText("Eco", { exact: true }).click();
+    await expect(unit).toContainText("On, eco mode.");
+    await expect(unit.locator(".chip")).toHaveText(["Eco", "Boost", "Normal"]);
+    /* Only the names are stored, with the device. */
+    const kept = await page.evaluate<{ entity: string; hiddenModes?: string[] }[]>("JSON.parse(JSON.stringify(fakeHA.config.devices))");
+    expect(kept.filter((d) => d.hiddenModes).map((d) => [d.entity, d.hiddenModes])).toEqual([["humidifier.garden_dehumidifier", ["comfort", "sleep"]]]);
   });
 
   test("a device that goes offline disables its controls and keeps no dial for it", async ({ page }) => {

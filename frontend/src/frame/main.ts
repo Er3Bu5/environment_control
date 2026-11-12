@@ -71,7 +71,7 @@ import {
   sensorTarget,
   shownName,
   swapControl,
-  takesExtraMode,
+  takesExtraMode, toggleMode,
   MAX_MODE_NAME,
   addVirtual,
   virtualTarget,
@@ -2339,7 +2339,7 @@ export class EcApp extends LitElement {
       controls = dial("brightness", `${d.name} brightness`, "Brightness", 1, 100, v.brightness, null);
     } else if (!v.down && v.kind === "humidifier") {
       const choices = humidityChoices(v);
-      const offered = modeChoices(v, d.extraMode);
+      const offered = modeChoices(v, d.extraMode, d.hiddenModes);
       modes = offered.length
           ? html`<fieldset class="chips ctl-modes">
               <legend class="sr">${d.name} mode</legend>
@@ -2788,10 +2788,31 @@ export class EcApp extends LitElement {
                   ></label
                 >`
               : nothing}
+            ${this.modesOffered(m, c.entity)}
             <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${otherNames.join(" and ")} too` : ""}.</p>
           </div>`
         : nothing}
     </div>`;
+  }
+
+  /* Which of a humidifier's or dehumidifier's modes its Controls row offers: every one it has, ticked until it's left
+     out. Only the row gets shorter. The device keeps the mode, and one it's in is shown whatever is chosen here. */
+  private modesOffered(m: MapDraft, entity: string) {
+    if (!takesExtraMode(entity)) return nothing;
+    const extra = m.extra[entity]?.trim() ?? "", hidden = m.hide[entity] ?? [];
+    const all = [...new Set([...deviceView(entity, this.states[entity]).modes, ...(extra ? [extra] : []), ...hidden])];
+    if (!all.length) return nothing;
+    return html`<fieldset class="chips" id="modes-${controlTarget(entity)}">
+      <legend>Modes offered in Controls</legend>
+      <div class="chiprow">
+        ${all.map(
+          (mode) => html`<label class="chip"
+            ><input type="checkbox" .checked=${live(!hidden.includes(mode))} @change=${() => this.setMap((d) => toggleMode(d, entity, mode))} />${cap(mode)}</label
+          >`,
+        )}
+      </div>
+      <span class="small muted">Untick a mode you don't use to keep the row short. The device still has it, and the mode it's in always shows.</span>
+    </fieldset>`;
   }
 
   /* A virtual device, something worth seeing on the map that Home Assistant doesn't have: its name, its type and

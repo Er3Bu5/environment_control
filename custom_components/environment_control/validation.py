@@ -28,6 +28,7 @@ SENSOR_CLASSES = ("env", "soil")
 MAX_SENSORS_PER_ZONE = 50
 MAX_NAME = 100
 MAX_MODE_NAME = 40
+MAX_HIDDEN_MODES = 20
 # Leaf temperature offsets kept here, as wide as any board allows and then some.
 LEAF_RANGE = (-10, 10)
 LEVELS = ("above", "in", "under")
@@ -318,6 +319,17 @@ def validate_config(c: Any) -> None:
             and entity.startswith("humidifier.")
         ):
             _fail(f"{did} has an extra mode that isn't a short name on a humidifier or dehumidifier")
+        # Modes its row in Controls leaves out. Only their names: the device keeps every mode it has.
+        hidden = d.get("hiddenModes")
+        if hidden is not None and not (
+            isinstance(hidden, list)
+            and 0 < len(hidden) <= MAX_HIDDEN_MODES
+            and all(isinstance(m, str) and m.strip() and len(m) <= MAX_MODE_NAME and m.isprintable() for m in hidden)
+            and len(set(hidden)) == len(hidden)
+            and isinstance(entity, str)
+            and entity.startswith("humidifier.")
+        ):
+            _fail(f"{did} has hidden modes that aren't a short list of names on a humidifier or dehumidifier")
         place = d.get("place")
         if place is None:
             continue

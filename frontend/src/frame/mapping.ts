@@ -151,8 +151,21 @@ export interface MapDraft {
   swap: Record<string, string>;
   /* A mode a humidifier or dehumidifier has that Home Assistant doesn't list, by its entity. */
   extra: Record<string, string>;
+  /* Modes a humidifier or dehumidifier has that Controls leaves out, by its entity. Nothing about the device changes:
+     it only keeps the row short. */
+  hide: Record<string, string[]>;
 }
 export const MAX_MODE_NAME = 40;
+export const MAX_HIDDEN_MODES = 20;
+/* The modes left out, tidied: short names, each once, in a steady order. */
+export const hiddenModes = (list: unknown): string[] =>
+  [...new Set((Array.isArray(list) ? list : []).filter((m): m is string => typeof m === "string" && !!m.trim() && m.length <= MAX_MODE_NAME))].sort().slice(0, MAX_HIDDEN_MODES);
+/* Leaves a mode out of Controls, or puts it back. */
+export function toggleMode(d: MapDraft, entity: string, mode: string): void {
+  const now = d.hide[entity] ?? [], next = now.includes(mode) ? now.filter((m) => m !== mode) : [...now, mode];
+  if (next.length) d.hide[entity] = hiddenModes(next);
+  else delete d.hide[entity];
+}
 
 export const MAX_NAME = 100;
 export const MAX_VIRTUAL_NAME = 40;
@@ -175,7 +188,7 @@ export const classSlots = (d: MapDraft, id: string): readonly Slot[] => CLASS_SL
 
 export function openMap(c: RawConfig, zoneId: string): MapDraft {
   const z = c.zones.find((x) => x.id === zoneId);
-  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, cls: {}, avg: {}, combine: { env: "mean", soil: "mean" }, controls: {}, names: {}, virt: [], swap: {}, extra: {} };
+  const draft: MapDraft = { zoneId, step: 1, q: "", sensors: {}, cls: {}, avg: {}, combine: { env: "mean", soil: "mean" }, controls: {}, names: {}, virt: [], swap: {}, extra: {}, hide: {} };
   if (!z) return draft;
   const named = (x: Record<string, unknown>, key: string) => {
     if (x.nameSource === "confirmed" && str(x.name)) draft.names[key] = str(x.name);
@@ -197,6 +210,7 @@ export function openMap(c: RawConfig, zoneId: string): MapDraft {
       draft.controls[str(d.entity)] = (ROLES as readonly string[]).includes(str(d.type)) ? (d.type as Role) : "";
       named(d, str(d.entity));
       if (str(d.nudgeMode).trim()) draft.extra[str(d.entity)] = str(d.nudgeMode).trim();
+      if (hiddenModes(d.hiddenModes).length) draft.hide[str(d.entity)] = hiddenModes(d.hiddenModes);
     }
   return draft;
 }
@@ -238,6 +252,8 @@ export function swapControl(d: MapDraft, from: string, to: string): void {
   /* The extra mode is the hardware's, so it goes along only to another humidifier or dehumidifier. */
   if (from in d.extra && takesExtraMode(to)) d.extra[to] = d.extra[from];
   delete d.extra[from];
+  if (from in d.hide && takesExtraMode(to)) d.hide[to] = d.hide[from];
+  delete d.hide[from];
 }
 export const takesExtraMode = (entity: string) => entity.startsWith("humidifier.");
 
@@ -282,6 +298,8 @@ export interface Change {
   after: string;
 }
 
+const leftOut = (list: string[] | undefined) => hiddenModes(list).join(", ") || "None";
+
 export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[], controls: ControlCandidate[]): Change[] {
   const was = openMap(c, d.zoneId), out: Change[] = [];
   const add = (label: string, before: string, after: string) => before !== after && out.push({ label, before, after });
@@ -306,6 +324,7 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
     add(`${name} entity`, from, to);
     add(`${name} is a`, was.controls[from] || "Not set", d.controls[to] || "Not set");
     add(`${name} extra mode`, was.extra[from] ?? "None", d.extra[to]?.trim() || "None");
+    add(`${name} modes left out of Controls`, leftOut(was.hide[from]), leftOut(d.hide[to]));
     add(`${name} name`, was.names[from] ?? controlName(from), d.names[to]?.trim() ?? controlName(to));
   }
   for (const e of new Set([...Object.keys(was.controls), ...Object.keys(d.controls)])) {
@@ -315,6 +334,7 @@ export function mapChanges(d: MapDraft, c: RawConfig, sensors: SensorCandidate[]
     if (has) add(`${controlName(e)} is a`, had ? was.controls[e] || "Not set" : "Not set", d.controls[e] || "Not set");
     if (has) add(`${controlName(e)} name`, was.names[e] ?? controlName(e), d.names[e]?.trim() ?? controlName(e));
     if (has) add(`${controlName(e)} extra mode`, was.extra[e] ?? "None", d.extra[e]?.trim() || "None");
+    if (has) add(`${controlName(e)} modes left out of Controls`, leftOut(was.hide[e]), leftOut(d.hide[e]));
   }
   for (const v of d.virt) {
     const old = was.virt.find((x) => x.id === v.id), name = v.name.trim() || "Virtual device";
@@ -419,6 +439,9 @@ export function applyMap(c: RawConfig, d: MapDraft, sensors: SensorCandidate[], 
     const extra = takesExtraMode(entity) ? (d.extra[entity]?.trim().slice(0, MAX_MODE_NAME) ?? "") : "";
     if (extra) dev.nudgeMode = extra;
     else delete dev.nudgeMode;
+    const hidden = takesExtraMode(entity) ? hiddenModes(d.hide[entity]) : [];
+    if (hidden.length) dev.hiddenModes = hidden;
+    else delete dev.hiddenModes;
   }
   /* A device in no zone isn't mapped, so its entry goes. */
   c.devices = c.devices.filter((x) => !Array.isArray(x.zones) || x.zones.length);

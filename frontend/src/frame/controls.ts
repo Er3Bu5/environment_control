@@ -33,6 +33,8 @@ export interface ControlDevice {
   link: string;
   /* A mode the device has that Home Assistant doesn't list, reached by moving its target one step and back. */
   extraMode: string;
+  /* Modes the device has that its row leaves out. */
+  hiddenModes: string[];
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -45,7 +47,7 @@ const ROLE_GROUP: Record<string, GroupKey> = Object.fromEntries(CONTROL_GROUPS.f
 export function zoneControls(c: RawConfig, zoneId: string): { groups: { key: GroupKey; title: string; metric: string | null; devices: ControlDevice[] }[]; unknown: ControlDevice[] } {
   const mine: ControlDevice[] = c.devices
     .filter((d) => isObj(d) && str(d.id) && str(d.entity) && Array.isArray(d.zones) && d.zones.includes(zoneId))
-    .map((d) => ({ id: str(d.id), entity: str(d.entity), name: str(d.name) || str(d.entity), role: str(d.type), zones: (d.zones as unknown[]).filter((z): z is string => typeof z === "string"), family: str(d.family), link: str(d.link), extraMode: str(d.nudgeMode).trim() }));
+    .map((d) => ({ id: str(d.id), entity: str(d.entity), name: str(d.name) || str(d.entity), role: str(d.type), zones: (d.zones as unknown[]).filter((z): z is string => typeof z === "string"), family: str(d.family), link: str(d.link), extraMode: str(d.nudgeMode).trim(), hiddenModes: Array.isArray(d.hiddenModes) ? d.hiddenModes.filter((m): m is string => typeof m === "string") : [] }));
   const groups = CONTROL_GROUPS.map((g) => ({ key: g.key, title: g.title, metric: g.metric, devices: mine.filter((d) => ROLE_GROUP[d.role] === g.key) })).filter((g) => g.devices.length);
   return { groups, unknown: mine.filter((d) => !ROLE_GROUP[d.role] && d.role !== "Other") };
 }
@@ -221,7 +223,10 @@ export const choiceDown = (choices: number[], n: number) => [...choices].reverse
 export const DIAL_SETTLE_MS = 700;
 
 /* The modes a device is offered: Home Assistant's own list, then the extra one set for it, if HA doesn't list that. */
-export const modeChoices = (v: DeviceView, extra: string): string[] => (extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes);
+/* The modes a row offers: Home Assistant's list and the extra one, less any left out in Device identification. The
+   mode the device is in is always there, left out or not, so the row never shows a device in no mode at all. */
+export const modeChoices = (v: DeviceView, extra: string, hidden: string[] = []): string[] =>
+  (extra && !v.modes.includes(extra) ? [...v.modes, extra] : v.modes).filter((m) => m === v.mode || !hidden.includes(m));
 
 /* Some dehumidifiers have a mode their integration can't ask for, which the device drops into when its target is
    changed: here, by moving the target one of the device's own steps and back. The two targets to ask for, in order,
