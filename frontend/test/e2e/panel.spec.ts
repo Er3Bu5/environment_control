@@ -2192,6 +2192,40 @@ test.describe("manual controls", () => {
     ]);
   });
 
+  test("on a screen too narrow for one line, a dehumidifier's modes sit under its name with the dial beside both", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 900 });
+    const frame = await openZone(page);
+    const r = row(frame, "Auxiliary dehumidifier");
+    const box = async (sel: string) => (await r.locator(sel).boundingBox())!;
+    const [whole, text, modes, dial, onOff] = [(await r.boundingBox())!, await box(".dev-text"), await box(".dev-modes"), await box(".dial"), await box(".sw")];
+    const foot = (b: { y: number; height: number }) => b.y + b.height, right = (b: { x: number; width: number }) => b.x + b.width;
+    /* Under the name, starting where the name starts, and clear of the dial at their right. */
+    expect(modes.y).toBeGreaterThanOrEqual(foot(text));
+    expect(Math.abs(modes.x - text.x)).toBeLessThan(2);
+    expect(right(modes)).toBeLessThanOrEqual(dial.x);
+    expect(Math.abs((await box(".chip >> nth=0")).x - text.x)).toBeLessThan(2);
+    /* The dial is beside the name and the modes, not on a line under them, so the row is as tall as its dial. */
+    expect(dial.y).toBeLessThan(foot(text));
+    expect(foot(dial)).toBeGreaterThan(modes.y);
+    expect(right(dial)).toBeLessThan(onOff.x);
+    expect(whole.height).toBeLessThan(175);
+    /* The name and its modes are centred against the dial as one block. */
+    expect(Math.abs((text.y + foot(modes)) / 2 - (whole.y + whole.height / 2))).toBeLessThan(3);
+    /* What a device says back still gets a line of its own, the full width of the row. */
+    await page.evaluate("fakeHA.knobs.dropNext = true");
+    await r.getByText("Eco", { exact: true }).click();
+    const status = (await r.locator(".ctl-status").boundingBox())!;
+    expect(status.y).toBeGreaterThanOrEqual(foot((await r.locator(".dial").boundingBox())!) - 1);
+    expect(Math.abs(status.x - (await r.locator(".ic").boundingBox())!.x)).toBeLessThan(2);
+    /* Narrower still, the name stays beside its icon and the modes take the line under both. */
+    await page.setViewportSize({ width: 412, height: 900 });
+    const [icon, name, chips] = [await box(".ic"), await box(".dev-text"), await box(".dev-modes")];
+    expect(name.x).toBeGreaterThanOrEqual(right(icon));
+    expect(name.y).toBeLessThan(foot(icon));
+    expect(chips.y).toBeGreaterThanOrEqual(foot(name));
+    expect(Math.abs(chips.x - icon.x)).toBeLessThan(2);
+  });
+
   test("a light controller that rounds to its own steps answers with its own number, and the row says so at once", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate("fakeHA.knobs.steps['light.garden_light_controller_overhead'] = { step: 5, floor: 15 }");
