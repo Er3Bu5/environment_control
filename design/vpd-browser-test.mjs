@@ -1469,7 +1469,7 @@ await haSet([["input_datetime.garden_night_time", "19:00:00"]]); await ev(`rende
 await schedOpen("veg");
 check("Sched: across midnight the length is right", (await ev(`document.querySelector("#s-len").textContent`)) === "18h 00m of light, 6h 00m of dark", await ev(`document.querySelector("#s-len").textContent`));
 check("Sched: shared helpers are named", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
-check("Sched: the helpers it reads are picked right there, by entity", same(await ev(`[document.querySelector("#map-onHelper").value,document.querySelector("#map-offHelper").value]`), ["input_datetime.veg_day_time", "input_datetime.veg_night_time"]), await ev(`[document.querySelector("#map-onHelper").value,document.querySelector("#map-offHelper").value]`));
+check("Sched: the helpers it reads are picked right there, by entity", same(await ev(`[document.querySelector("#map-onHelper").dataset.value,document.querySelector("#map-offHelper").dataset.value]`), ["input_datetime.veg_day_time", "input_datetime.veg_night_time"]), await ev(`[document.querySelector("#map-onHelper").dataset.value,document.querySelector("#map-offHelper").dataset.value]`));
 check("Emerson: a zone without it says it's not used, with nothing to set", (await ev(`document.querySelector("#s-emerson").textContent`)).includes("Not used in Veg.") && (await ev(`!document.querySelector("#sin-morning")`)) === true);
 await setBox("day", "15:00"); await clickIt("[data-dreview]");
 check("Review: names the zone that moves with it", (await schedModal()).includes("Veg and Nursery") && (await schedModal()).includes("Nursery uses the same helpers"), await schedModal());
@@ -1628,8 +1628,9 @@ check("Helpers: and nothing else, not even a date-and-time helper", listed.every
 const HOST_ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
 check("Helpers: only allowlisted attributes cross", helperList.every((h) => Object.keys(h.attributes).every((k) => HOST_ATTRS.includes(k))), helperList.find((h) => Object.keys(h.attributes).some((k) => !HOST_ATTRS.includes(k))));
 check("Helpers: listing them maps nothing, so no unlinked helper's state reaches the frame", (await ev(`"input_number.nursery_day_temperature_min_threshold" in haStates`)) === false);
-const pick = async (sel, value) => { await ev(`(()=>{const s=document.querySelector("#${sel}");s.value=${JSON.stringify(value)};s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
-const opts = (sel) => ev(`[...document.querySelectorAll("#${sel} option")].map(o=>o.value)`);
+/* Helper pickers are search boxes since #25: picking one is choosing it from the box's list. */
+const pick = async (sel, value) => { await ev(`pickHelper(document.querySelector("#${sel}").dataset.hq, ${JSON.stringify(value)})`); await sleep(40); };
+const opts = (sel) => ev(`helperOptions(document.querySelector("#${sel}").dataset.hq)`);
 const fixText = () => ev(`document.querySelector("#td-issues")?.textContent || ""`);
 const mapNextOff = () => ev(`!!topDraft().blocked`);
 await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
@@ -1638,15 +1639,17 @@ check("Picker: lights on lists every time helper HA has, not names built from th
 check("Picker: limit pickers only show once the zone uses its helpers", (await ev(`!!document.querySelector("[data-mlink^='bands']")`)) === false);
 await clickIt('[data-mband="helpers"]');
 const tmin = "map-l-bands-day-temperature-min", nT = "input_number.nursery_day_temperature_min_threshold";
-const groups = await ev(`[...document.querySelectorAll("#${tmin} optgroup")].map(g=>[g.label,[...g.querySelectorAll("option")].map(o=>o.value)])`);
-check("Picker: helpers in the setting's unit come first, °C and ℃ alike", groups[0][0] === "In °C" && groups[0][1].includes(nT) && groups[0][1].includes("input_number.garden_day_temperature_min_threshold") && !groups[0][1].includes("input_number.nursery_day_humidity_min_threshold") && groups[1][0] === "Other helpers" && groups[1][1].includes("input_number.nursery_day_humidity_min_threshold"), groups);
+await ev(`(()=>{const i=document.querySelector("#${tmin}");i.focus();i.value="temperature min threshold";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(40);
+const pickListed = await ev(`[...document.querySelectorAll("#${tmin}-list [data-hval]")].map(li=>li.dataset.hval)`);
+check("Picker: typing narrows to helpers matching every word, in the setting's unit first", pickListed.includes(nT) && pickListed.includes("input_number.garden_day_temperature_min_threshold") && !pickListed.includes("input_number.nursery_day_humidity_min_threshold") && pickListed.length <= 8, pickListed);
 const nTval = await onHA(`fakeHA.states["${nT}"].state`);
-check("Picker: each option names the helper and what it holds", (await ev(`[...document.querySelectorAll("#${tmin} option")].find(o=>o.value==="${nT}").textContent`)) === `${nT} (${nTval} °C)`);
+check("Picker: each choice names the helper and what it holds", (await ev(`document.querySelector('#${tmin}-list [data-hval="${nT}"] .eid').textContent`)) === `${nT}, ${nTval} °C`, await ev(`document.querySelector('#${tmin}-list [data-hval="${nT}"] .eid').textContent`));
+await ev(`document.activeElement.blur()`); await sleep(220);
 check("Picker: My helpers with nothing linked says so and holds Next", (await mapNextOff()) === true && (await fixText()).includes("Link at least one limit"), await fixText());
 await pick(tmin, "input_number.nursery_day_humidity_min_threshold");
 check("Picker: a helper in another unit is flagged and holds Next", (await mapNextOff()) === true && (await fixText()).includes("Day temperature Min: input_number.nursery_day_humidity_min_threshold is in %, not °C"), await fixText());
 await pick(tmin, nT);
-check("Picker: the box keeps focus through the redraw", (await active()) === tmin);
+check("Picker: picking leaves the box, so a phone's keyboard closes, and says what's linked under it", (await active()) !== tmin && (await ev(`document.querySelector("#${tmin}-box p").textContent`)).startsWith("Linked: "), await active());
 await pick("map-l-bands-day-temperature-max", nT);
 check("Picker: one helper behind two limits is flagged", (await fixText()).includes(`${nT} is linked to both Day temperature Min and Day temperature Max`), await fixText());
 await pick("map-l-bands-day-temperature-max", "input_number.nursery_day_temperature_max_threshold");
@@ -1687,7 +1690,7 @@ await ev(`openReview()`); await sleep(40); await clickIt("[data-rapply]"); await
 check("Picker: a helper another zone already links isn't asked about again", (await hostDialog()).open === false);
 check("Picker: linking all three Emerson helpers gives Veg the Emerson effect, read from them", JSON.stringify(await ev(`zoneById("veg").emerson`)) === JSON.stringify(await ev(`zoneById("garden").emerson`)), await ev(`zoneById("veg").emerson`));
 await ev(`openTd("veg");render()`); await sleep(40);
-check("Picker: and the page shows it, with its values", (await ev(`!!document.querySelector("#sin-morning") && document.querySelector('[data-mem="helper"]').getAttribute("aria-pressed")==="true"`)) === true);
+check("Picker: and the page shows it, with its values", (await ev(`!!document.querySelector("#sin-morning") && document.querySelector('[data-mem="helper"]').checked`)) === true);
 const wrongKind = await evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.humidity.min="input_datetime.veg_day_time"}).then(r=>[r.ok,r.error])`);
 check("Picker: the backend refuses a limit linked to a time helper", wrongKind[0] === false && wrongKind[1].includes("isn't a number helper"), wrongKind);
 
@@ -1732,7 +1735,7 @@ const lateSet = await evp(`ask("setting",{zone:"veg",name:"bands.day.temperature
 check("No target: and the host refuses to write one", lateSet === false && (await helperCalls()).length === callsBefore);
 await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
 await clickIt('[data-vtarget="on"]');
-check("No target: turning it on offers Set here or a helper", (await ev(`document.querySelector("#map-l-bands-day-temperature-target").selectedOptions[0].textContent`)) === "Set here");
+check("No target: turning it on offers Set here or a helper", (await ev(`document.querySelector("#map-l-bands-day-temperature-target-box p").textContent`)) === "Set here");
 await pick("map-l-bands-day-temperature-target", "input_number.veg_day_temperature_target");
 await ev(`openReview()`); await sleep(40); await clickIt("[data-rapply]"); await sleep(300);
 await sleep(1100); await hostClick("allow"); await sleep(400);
@@ -1743,7 +1746,7 @@ await reset();
 // ---------- Red lights: from a helper, set here, detected, or not used
 await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 const emModes = () => ev(`[...document.querySelectorAll("[data-mem]")].map(b=>b.dataset.mem)`);
-check("Red lights: four sources, like day and night", JSON.stringify(await emModes()) === JSON.stringify(["none", "helper", "fixed", "detected"]) && (await ev(`document.querySelector('[data-mem="none"]').getAttribute("aria-pressed")`)) === "true", await emModes());
+check("Red lights: four sources, like day and night", JSON.stringify(await emModes()) === JSON.stringify(["none", "helper", "fixed", "detected"]) && (await ev(`document.querySelector('[data-mem="none"]').checked`)) === true, await emModes());
 await clickIt('[data-mem="fixed"]');
 check("Red lights: Set here shows the three extensions, starting at none", same(await ev(`["morning","daylight","evening"].map(k=>document.querySelector("#sin-"+k)?.value)`), ["0", "0", "0"]), await ev(`["morning","daylight","evening"].map(k=>document.querySelector("#sin-"+k)?.value)`));
 await setBox("morning", "10"); await setBox("daylight", "20"); await setBox("evening", "70");
@@ -1776,7 +1779,7 @@ await reset(); await ev(`openTd("nursery");render()`); await sleep(40);
 const detCard = await ev(`document.querySelector("#s-emerson").textContent`);
 check("Red lights: the page shows what it follows, with nothing to set", detCard.includes("Detected") && detCard.includes("switch.lights_red") && (await ev(`!!document.querySelector("#sin-morning")`)) === false, detCard);
 await reset(); await ev(`ui.screen="setup";openTd("garden");ui.vpdw.period="day";render()`); await sleep(150);
-check("Red lights: Garden is still on its helpers", (await ev(`document.querySelector('[data-mem="helper"]').getAttribute("aria-pressed")`)) === "true" && (await ev(`document.querySelector("#map-l-morning").value`)) === "input_number.emerson_effect_morning_extension");
+check("Red lights: Garden is still on its helpers", (await ev(`document.querySelector('[data-mem="helper"]').checked`)) === true && (await ev(`document.querySelector("#map-l-morning").dataset.value`)) === "input_number.emerson_effect_morning_extension");
 const emBad = await evp(`saveConfig(()=>{const z=zoneById("nursery");z.emersonMode="fixed";z.emerson={morning:90,daylight:10,evening:5}}).then(r=>[r.ok,r.error])`);
 const redBad = await evp(`saveConfig(()=>{zoneById("nursery").redLights=["lock.front_door"]}).then(r=>[r.ok,r.error])`);
 check("Red lights: the backend refuses an extension past 59 minutes and a switch that isn't on or off", emBad[0] === false && emBad[1].includes("outside 0 to 59") && redBad[0] === false && redBad[1].includes("isn't an on or off entity"), [emBad, redBad]);
