@@ -450,6 +450,7 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .state { text-align: right; white-space: nowrap; }
 
 /* The mock's own rules for what the frontend doesn't have yet, or styles another way. */
+.lrow .small { overflow-wrap: anywhere; }
 .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
 .bar { display: flex; align-items: center; gap: 12px; padding-block: 10px 4px; font-size: 19px; }
@@ -531,7 +532,7 @@ body.drafting .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 </style>
 
 <main id="main"></main>
-<div class="draftbar" id="draftbar" role="region" aria-label="Unsaved changes" hidden><span class="draft-count" id="draft-count"></span><span class="draft-text"><strong id="draft-what"></strong><span id="draft-why"></span></span><button class="draft-discard" data-ddiscard>Discard</button><button class="draft-review" data-dreview>Review and apply</button></div>
+<div class="draftbar" id="draftbar" role="region" aria-label="Unsaved changes" hidden><span class="draft-count" id="draft-count"></span><span class="draft-text"><strong id="draft-what"></strong><span id="draft-why"></span></span><button class="draft-discard" data-dback hidden>Back</button><button class="draft-discard" data-ddiscard>Discard</button><button class="draft-review" data-dreview>Review and apply</button></div>
 <div class="modal" id="modal" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -560,6 +561,7 @@ const ICON = {
   home: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
+  reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
   cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
 };
 const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
@@ -1379,19 +1381,13 @@ function deviceEntities(s) {
 }
 /* A sensor's class decides which readings it is asked for, and each slot takes one kind of entity from the device. Soil comes back as a second class with irrigation (tag soil-probes-mock), which is when the class box appears. */
 const SENSOR_CLASS = { env: "Environment" };
-const CLASS_SLOTS = { env: ["temperature", "humidity", "vpd", "light", "leaf"] };
+/* No leaf offset here: where a sensor's offset lives is chosen on Sensor Calibration, as the panel has it since #17. */
+const CLASS_SLOTS = { env: ["temperature", "humidity", "vpd", "light"] };
 const SLOT_TAKES = { temperature: "temperature", humidity: "humidity", vpd: "vpd", light: "illuminance", leaf: "leaf" };
 const SLOT_REQUIRED = { env: ["temperature", "humidity"] };
 const SLOT_NONE = { leaf: "None, kept in Environment Control" };
 const slotsOf = (s, cls) => Object.fromEntries(CLASS_SLOTS[cls].map((k) => [k, deviceEntities(s).filter((e) => e[2] === SLOT_TAKES[k]).map(([e, v]) => [e, v])]));
 const classOf = (m, s) => m.cls[s.id] || s.kind;
-/* One candidate is taken, none means not used, and several wait for an answer. */
-function seedChoices(m, s) {
-  m.choice[s.id] = {};
-  for (const [k, o] of Object.entries(slotsOf(s, classOf(m, s)))) if (o.length < 2) m.choice[s.id][k] = o.length ? o[0][0] : "none";
-}
-const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"];
-const MAP_STEPS = ["Sensors", "Devices", "Check"];
 const LIGHTS = {
   garden: [["switch.lights_1", "Lights 1"], ["switch.lights_2", "Lights 2"], ["switch.lights_3", "Lights 3"], ["switch.lights_4", "Lights 4"]],
   veg: [["switch.tent_lights", "Tent lights"]], nursery: [["switch.tent_lights", "Tent lights"]],
@@ -1402,48 +1398,100 @@ function periodSummary(mode, z, on, off, lights, rule) {
   return `${mode === "fixed" ? "Set here" : "From a helper"}, ${on} - ${off}`;
 }
 const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
+/* Device identification, as the panel has it since #36 (frontend mapWizard, sensorRow, controlRow, virtualRow). Sensors
+   and devices are picked and named here, a device's type is said here, a device can move to another entity, and virtual
+   devices are added, named, typed and removed here. Calibration values are Sensor Calibration's, not this page's. */
+const ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Other"];
+const VIRTUAL_TYPES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light", "Tank", "Other"];
+const MAX_VIRTUAL = 30;
+const MAP_STEPS = ["Sensors", "Devices", "Check"];
+/* Every reading on the device a sensor can be put to, the leaf offset aside: that's a number, set on Sensor Calibration. */
+const allReadings = (s) => deviceEntities(s).filter((e) => e[2] !== "leaf").map(([e, v]) => [e, v]);
+/* One candidate is taken, none means not used, and several wait for an answer. */
+function seedChoices(m, s) {
+  m.choice[s.id] = {};
+  for (const [k, o] of Object.entries(slotsOf(s, classOf(m, s)))) m.choice[s.id][k] = o.length === 1 ? o[0][0] : o.length ? "" : "none";
+}
 function openMap(id) {
-  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, avg: {}, combine: { env: methodOf(z) } };
+  const z = zoneById(id), m = { id, step: 1, q: "", pickS: {}, pickD: {}, choice: {}, roles: {}, cls: {}, avg: {}, combine: { env: methodOf(z) }, names: {}, more: {}, extra: {}, hide: {}, swap: {}, swapQ: {}, virt: virtualOf(z).map((v) => ({ ...v, type: v.type || "Other" })) };
   for (const s of z.sensors) {
     m.pickS[s.id] = true; m.cls[s.id] = s.kind; m.choice[s.id] = {}; if (s.avg === false) m.avg[s.id] = false;
     for (const [k, opts] of Object.entries(slotsOf(s, s.kind))) m.choice[s.id][k] = opts.length ? opts[opts.length - 1][0] : "none";
-    if (s.leafUnused) m.choice[s.id].leaf = "none";
+    if (s.haName && s.name !== s.haName) m.names[s.id] = s.name;
   }
-  for (const d of devices) if (d.ctl) { m.roles[d.id] = d.type || ""; if (d.zones.includes(id)) m.pickD[d.id] = true; }
+  for (const d of devices) if (d.ctl) {
+    m.roles[d.id] = d.type || "";
+    if (d.zones.includes(id)) m.pickD[d.id] = true;
+    if (d.nudgeMode) m.extra[d.id] = d.nudgeMode;
+    if (Array.isArray(d.hiddenModes) && d.hiddenModes.length) m.hide[d.id] = [...d.hiddenModes];
+    if (d.haName && d.name !== d.haName) m.names[d.id] = d.name;
+  }
   ui.mapw = m; ui.wiz = null; ui.vpdw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.screen = "setup";
 }
-function needsChoice(m, s) { return Object.entries(slotsOf(s, classOf(m, s))).filter(([k, o]) => o.length > 1 && !(m.choice[s.id] || {})[k]).map(([k]) => METRIC_NAME[k]); }
-const missingRequired = (m, s) => SLOT_REQUIRED[classOf(m, s)].filter((k) => (m.choice[s.id] || {})[k] === "none");
+const haNameOf = (x) => x.haName || x.name;
+const shownName = (m, key, haName) => (key in m.names ? m.names[key] : haName);
 function toggleSensor(m, s) {
   if (m.pickS[s.id]) { delete m.pickS[s.id]; return; }
   m.pickS[s.id] = true; m.cls[s.id] = classOf(m, s);
   if (!m.choice[s.id]) seedChoices(m, s);
 }
 const metricsLine = (s) => `${SENSOR_CLASS[s.kind]}: ${Object.entries(slotsOf(s, s.kind)).filter(([, o]) => o.length).map(([k]) => METRIC_NAME[k]).join(", ")}`;
-function sensorRow(m, z, s) {
-  const on = !!m.pickS[s.id], ask = on ? needsChoice(m, s) : [];
-  const where = zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
-  const pill = ask.length ? '<span class="pill high">Pick one</span>' : s.area === z.name ? '<span class="pill plain">Suggested</span>' : where.length ? `<span class="pill plain">In ${esc(where[0])}</span>` : "";
-  const cls = classOf(m, s), ch = m.choice[s.id] || {};
-  const classBox = `<label class="ent"><span>Class</span><select data-mclass="${s.id}" aria-label="${esc(s.name)} class">${Object.entries(SENSOR_CLASS).map(([k, l]) => `<option value="${k}"${cls === k ? " selected" : ""}>${l}${k === s.kind ? " (detected)" : ""}</option>`).join("")}</select></label>`;
-  const slotBox = ([k, opts]) => `<label class="ent"><span>${METRIC_NAME[k]}</span><select data-mmetric="${s.id}:${k}" aria-label="${esc(s.name)} ${METRIC_NAME[k]}">${opts.length > 1 ? `<option value=""${ch[k] ? "" : " selected"}>Pick one</option>` : ""}${opts.map(([e, v]) => `<option value="${e}"${ch[k] === e ? " selected" : ""}>${esc(e)} (${esc(v)})</option>`).join("")}<option value="none"${ch[k] === "none" ? " selected" : ""}>${opts.length ? "Not used" : SLOT_NONE[k] || "None found"}</option></select></label>`;
-  const detail = !on ? "" : `<div class="ents">${Object.keys(SENSOR_CLASS).length > 1 ? classBox : ""}${Object.entries(slotsOf(s, cls)).map(slotBox).join("")}<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? " checked" : ""}> Exclude from average</label></div>`;
-  return `<div class="pickwrap" id="ms-${s.id}"><button class="pickrow" data-msensor="${s.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(s.name)}</strong><span class="dev-sub">${esc(s.family)}, ${esc(s.link)}. ${esc(metricsLine(s))}</span></span>${pill}</button>${detail}</div>`;
+/* A sensor's or device's name in this panel. It starts as Home Assistant's; typed over, it's kept here and HA's is left alone. */
+function nameField(m, key, haName, idBase) {
+  const own = key in m.names;
+  return `<div class="field"><label for="name-${idBase}">Name</label><span class="resettable"><input id="name-${idBase}" data-mname="${esc(key)}" data-haname="${esc(haName)}" type="text" maxlength="100" autocomplete="off" enterkeyhint="done" aria-invalid="${own && !m.names[key].trim()}" value="${esc(shownName(m, key, haName))}">${own ? `<button class="reset" data-mnamereset="${esc(key)}" aria-label="Put back Home Assistant's name, ${esc(haName)}" title="Put back ${esc(haName)}">${icon("reset")}</button>` : ""}</span>${own ? `<span class="small muted">Home Assistant calls it ${esc(haName)}. Its name there isn't changed.</span>` : ""}</div>`;
 }
+/* A reading offers what HA's device classes suggest and Not used, and on request every other sensor on the device. */
+function slotChoice(m, s, k) {
+  const cur = (m.choice[s.id] || {})[k] ?? "", key = `${s.id}:${k}`, open = !!m.more[key];
+  const shown = [...slotsOf(s, classOf(m, s))[k]], all = allReadings(s);
+  const picked = all.find(([e]) => e === cur);
+  if (picked && !shown.some(([e]) => e === cur)) shown.push(picked);
+  const more = all.filter(([e]) => !shown.some(([x]) => x === e));
+  const options = [...shown.map(([e, v]) => [e, `${e}, ${v}`]), ["none", "Not used"], ...(open ? more.map(([e, v]) => [e, `${e}, ${v}`]) : [])];
+  return chips(`${METRIC_NAME[k]}${cur === "" ? ", pick one" : ""}`, `${s.id}-${k}`, options, cur, `data-mmetric="${key}" data-x`).replace(/data-x="[^"]*"/g, "") +
+    (more.length ? `<button class="fixlink small" data-mmore="${key}" aria-expanded="${open}">${open ? "Fewer" : `From this device: ${plural(more.length, "more sensor")}`} &rsaquo;</button>` : "");
+}
+function sensorRow(m, z, s) {
+  const on = !!m.pickS[s.id], cls = classOf(m, s), waiting = on && Object.keys(slotsOf(s, cls)).some((k) => (m.choice[s.id] || {})[k] === "");
+  const where = zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name);
+  const pill = waiting ? '<span class="pill high">Pick one</span>' : s.area === z.name ? '<span class="pill plain">Suggested</span>' : where.length ? `<span class="pill plain">In ${esc(where[0])}</span>` : "";
+  const classes = Object.keys(SENSOR_CLASS).length > 1 ? chips("Class", `class-${s.id}`, Object.entries(SENSOR_CLASS).map(([k, l]) => [k, k === s.kind ? `${l}, detected` : l]), cls, `data-mclass="${s.id}"`) : "";
+  const detail = !on ? "" : `<div class="ents">${nameField(m, s.id, haNameOf(s), `ms-${s.id}`)}${classes}${Object.keys(slotsOf(s, cls)).map((k) => slotChoice(m, s, k)).join("")}<label class="inavg"><input type="checkbox" data-mavg="${s.id}"${m.avg[s.id] === false ? " checked" : ""}> Exclude from average</label></div>`;
+  return `<div class="pickwrap" id="ms-${s.id}"><button class="pickrow" data-msensor="${s.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(on ? shownName(m, s.id, haNameOf(s)).trim() || s.name : s.name)}</strong><span class="dev-sub">${esc(s.family || "ESPHome")}, ${esc(s.link)}. ${esc(metricsLine(s))}</span></span>${pill}</button>${detail}</div>`;
+}
+/* Where a device can move: an entity no zone uses yet, or the one it's on. */
+const swapCandidates = (m, d) => devices.filter((o) => o.ctl && o.id !== d.id && !o.zones.length && !m.pickD[o.id] && !Object.values(m.swap).includes(o.entity));
 function deviceMapRow(m, z, d) {
-  const on = !!m.pickD[d.id], other = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
-  const pill = on && !m.roles[d.id] ? '<span class="pill high">What is it?</span>' : d.zones.includes(z.id) ? '<span class="pill plain">Suggested</span>' : "";
-  const role = !on ? "" : `<div class="ents"><label class="ent"><span>This is a</span><select data-mrole="${d.id}" aria-label="What ${esc(d.name)} is"><option value=""${m.roles[d.id] ? "" : " selected"}>Pick one</option>${ROLES.map((r) => `<option${m.roles[d.id] === r ? " selected" : ""}>${r}</option>`).join("")}</select></label>${other.length ? `<p class="dev-sub">Shared. Also in ${esc(other.join(", "))}.</p>` : ""}</div>`;
-  return `<div class="pickwrap" id="md-${d.id}"><button class="pickrow" data-mdevice="${d.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(d.name)}</strong><span class="dev-sub">${esc(d.family)}, ${esc(LINK[d.link])}. ${esc(d.integration)}</span></span>${pill}</button>${role}</div>`;
+  const on = !!m.pickD[d.id], role = m.roles[d.id] || "", other = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
+  const pill = on && !role ? '<span class="pill high">What is it?</span>' : d.zones.includes(z.id) ? '<span class="pill plain">Suggested</span>' : "";
+  const entity = m.swap[d.id] || d.entity, q = (m.swapQ[d.id] || "").trim().toLowerCase();
+  const found = q ? swapCandidates(m, d).filter((o) => `${o.entity} ${o.name}`.toLowerCase().includes(q)).slice(0, 8) : [];
+  const swap = `<div class="field"><label for="swap-${d.id}">Home Assistant entity</label><input id="swap-${d.id}" data-mswapq="${d.id}" type="search" placeholder="Search to move it to another entity" autocomplete="off" value="${esc(m.swapQ[d.id] || "")}">
+    ${found.length ? `<div class="picklist">${found.map((o) => `<button class="pickrow" data-mswap="${d.id}" data-entity="${esc(o.entity)}"><span class="pick-text"><strong>${esc(o.name)}</strong><span class="dev-sub">${esc(o.entity)}</span></span></button>`).join("")}</div>` : q ? '<span class="small muted">Nothing matches.</span>' : ""}
+    <span class="small muted">On ${esc(entity)}.</span></div>`;
+  const takes = d.ctl === "humidifier", v = takes ? deviceView(d) : null, extra = (m.extra[d.id] || "").trim(), hidden = m.hide[d.id] || [];
+  const allModes = takes ? inNameOrder([...new Set([...v.modes, ...(extra ? [extra] : []), ...hidden])]) : [];
+  const extraBox = takes ? `<label class="field" for="extra-${d.id}">Extra mode, optional<input id="extra-${d.id}" data-mextra="${d.id}" type="text" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" placeholder="For example normal" value="${esc(m.extra[d.id] || "")}"><span class="small muted">A mode the device has that Home Assistant doesn't list, named as the device reports it. Controls offers it, and reaches it by moving the target humidity one step and back.</span></label>` : "";
+  const modes = allModes.length ? `<fieldset class="chips" id="modes-${d.id}"><legend>Modes offered in Controls</legend><div class="chiprow">${allModes.map((mode) => `<label class="chip"><input type="checkbox" data-mhide="${d.id}" value="${esc(mode)}"${hidden.includes(mode) ? "" : " checked"}>${esc(cap(mode))}</label>`).join("")}</div><span class="small muted">Untick a mode you don't use to keep the row short. The device still has it, and the mode it's in always shows.</span></fieldset>` : "";
+  const detail = !on ? "" : `<div class="ents">${nameField(m, d.id, haNameOf(d), `md-${d.id}`)}${chips(role ? "This is a" : "This is a, pick one", `role-${d.id}`, ROLES.map((r) => [r, r]), role, `data-mrole="${d.id}"`)}${other.length ? `<p class="dev-sub">Shared. Also in ${esc(other.join(", "))}.</p>` : ""}${swap}${extraBox}${modes}<p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${other.length ? `, in ${esc(other.join(" and "))} too` : ""}.</p></div>`;
+  return `<div class="pickwrap" id="md-${d.id}"><button class="pickrow" data-mdevice="${d.id}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(on ? shownName(m, d.id, haNameOf(d)).trim() || d.name : d.name)}</strong><span class="dev-sub">${esc(d.family)}, ${esc(LINK[d.link])}. ${esc(entity)}</span></span>${pill}</button>${detail}</div>`;
+}
+function virtualRow(m, v) {
+  const name = v.name.trim(), taken = !!name && m.virt.some((x) => x.id !== v.id && x.name.trim().toLowerCase() === name.toLowerCase());
+  return `<div class="pickwrap virt" id="mv-${v.id}"><div class="pickrow"><span class="pick-text"><strong>${esc(name || "New virtual device")}</strong><span class="dev-sub">Virtual, ${esc(v.type)}. Only drawn on the map.</span></span>${!name ? '<span class="pill high">Name it</span>' : taken ? '<span class="pill high">Name taken</span>' : ""}</div>
+    <div class="ents"><label class="field" for="mv-${v.id}-name">Name<input id="mv-${v.id}-name" data-mvname="${v.id}" type="text" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="For example Drain tank" aria-invalid="${!name || taken}" value="${esc(v.name)}"></label>
+    ${chips(`Type of ${name || "this virtual device"}`, `vtype-${v.id}`, VIRTUAL_TYPES.map((t) => [t, t]), v.type, `data-mvtype="${v.id}"`)}
+    <div class="row"><button class="btn danger" data-mvremove="${v.id}">Remove ${esc(name || "this virtual device")}</button></div></div></div>`;
 }
 function mapList(m) {
   const z = zoneById(m.id), q = m.q.trim().toLowerCase(), hit = (t) => !q || t.toLowerCase().includes(q);
   const items = m.step === 1
-    ? catalog().filter((s) => hit(s.name + " " + s.family)).map((s) => ({ near: s.area === z.name || !!m.pickS[s.id], html: sensorRow(m, z, s) }))
-    : devices.filter((d) => d.ctl && hit(d.name + " " + d.family)).map((d) => ({ near: d.zones.includes(z.id) || !!m.pickD[d.id], html: deviceMapRow(m, z, d) }));
+    ? catalog().filter((s) => hit(`${s.name} ${s.family || ""} ${allReadings(s).map(([e]) => e).join(" ")}`)).map((s) => ({ near: s.area === z.name || !!m.pickS[s.id], html: sensorRow(m, z, s) }))
+    : devices.filter((d) => d.ctl && hit(`${d.name} ${d.family} ${d.entity}`)).map((d) => ({ near: d.zones.includes(z.id) || !!m.pickD[d.id], html: deviceMapRow(m, z, d) }));
   const near = items.filter((i) => i.near), rest = items.filter((i) => !i.near);
-  if (!items.length) return `<p class="small muted">Nothing matches that search.</p>`;
-  return near.map((i) => i.html).join("") + (rest.length ? `<p class="small muted">Everything else in Home Assistant</p>${rest.map((i) => i.html).join("")}` : "");
+  if (!items.length) return `<p class="small muted">${q ? "Nothing matches that search." : m.step === 1 ? "Home Assistant has no sensors to map." : "Home Assistant has no switches, lights, fans or humidifiers."}</p>`;
+  return near.map((i) => i.html).join("") + (rest.length ? `<p class="small muted">${near.length ? "Everything else in Home Assistant" : "Everything in Home Assistant"}</p>${rest.map((i) => i.html).join("")}` : "");
 }
 /* Anything that reports on or off can mark day. Detection only ever reads these. */
 const ALL_ON_OFF = [
@@ -1556,36 +1604,62 @@ function linkIssues(m, aim) {
 }
 function mapIssues(m) {
   const cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]), out = [];
-  for (const s of chosen) for (const n of needsChoice(m, s)) out.push({ text: `${s.name}: pick which ${n} entity to use.`, step: 1, target: `ms-${s.id}` });
-  for (const s of chosen) { const miss = missingRequired(m, s); if (miss.length) out.push({ text: `${s.name}: an ${SENSOR_CLASS[classOf(m, s)].toLowerCase()} sensor needs ${miss.map((k) => METRIC_NAME[k].toLowerCase()).join(" and ")}. Pick ${miss.length > 1 ? "them" : "it"}, or change its class.`, step: 1, target: `ms-${s.id}` }); }
-  for (const d of devices) if (m.pickD[d.id] && !m.roles[d.id]) out.push({ text: `${d.name}: say what it is.`, step: 2, target: `md-${d.id}` });
-  if (!chosen.some((s) => classOf(m, s) === "env")) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
+  for (const s of chosen) {
+    const own = Object.keys(slotsOf(s, classOf(m, s))), slots = m.choice[s.id] || {};
+    for (const k of own) if (slots[k] === "") out.push({ text: `${s.name}: pick which ${METRIC_NAME[k]} entity to use.`, step: 1, target: `ms-${s.id}` });
+    if (own.every((k) => slots[k] === "none")) out.push({ text: `${s.name}: pick at least one reading, or leave this sensor out.`, step: 1, target: `ms-${s.id}` });
+  }
+  if (!chosen.length) out.push({ text: "Add at least one environment sensor, so this zone has readings to show.", step: 1, target: "map-q" });
+  for (const s of chosen) if (s.id in m.names && !m.names[s.id].trim()) out.push({ text: `${s.name}: give it a name, or put Home Assistant's back.`, step: 1, target: `ms-${s.id}` });
+  for (const d of devices) if (m.pickD[d.id]) {
+    if (!m.roles[d.id]) out.push({ text: `${d.name}: say what it is.`, step: 2, target: `md-${d.id}` });
+    if (d.id in m.names && !m.names[d.id].trim()) out.push({ text: `${d.name}: give it a name, or put Home Assistant's back.`, step: 2, target: `md-${d.id}` });
+  }
+  m.virt.forEach((v, i) => {
+    const name = v.name.trim();
+    if (!name) out.push({ text: "A virtual device needs a name.", step: 2, target: `mv-${v.id}` });
+    else if (m.virt.findIndex((x) => x.name.trim().toLowerCase() === name.toLowerCase()) !== i) out.push({ text: `There's already a virtual device called ${name}.`, step: 2, target: `mv-${v.id}` });
+  });
   return out;
+}
+/* The steps at the top of a wizard: the one you're on, and buttons for the rest, as the panel has them since #34. */
+const stepsHead = (names, at, attr) => `<ol class="steps">${names.map((n, i) => `<li${i === at ? ' aria-current="step"' : ""}>${i === at ? `${i + 1}. ${n}` : `<button ${attr}="${i}">${i + 1}. ${n}</button>`}</li>`).join("")}</ol>`;
+/* A wizard's buttons ride in the bar at the foot of the window, with its count of changes or what to fix first (#49, #54). */
+function wizBar({ where = "", back, next, blocked = false, changes = 0, fix = "", attr }) {
+  const text = fix || (changes ? `<strong>${plural(changes, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>` : esc(where));
+  return `<div class="draftbar wizbar" role="region" aria-label="Steps"${fix ? " data-blocked" : ""}${!fix && !changes ? " data-bare" : ""}>${changes && !fix ? `<span class="draft-count">${changes}</span>` : ""}<span class="draft-text">${text}</span><button class="draft-discard" ${attr}="back">${back}</button>${next ? `<button class="draft-review" ${attr}="next"${blocked ? " disabled" : ""}>${next}</button>` : ""}</div>`;
 }
 function renderMap() {
   const m = ui.mapw, z = zoneById(m.id), cat = catalog(), chosen = cat.filter((s) => m.pickS[s.id]);
-  const steps = `<ol class="steps">${MAP_STEPS.map((n, i) => `<li${m.step === i + 1 ? ' aria-current="step"' : ""}>${i + 1}. ${n}</li>`).join("")}</ol>`;
-  const search = `<label class="field" for="map-q">Search Home Assistant<input id="map-q" type="search" value="${esc(m.q)}" placeholder="Name or integration"></label>`;
+  const search = `<label class="field" for="map-q">Search Home Assistant<input id="map-q" type="search" value="${esc(m.q)}" placeholder="Name, entity or integration"></label>`;
   let body = "";
   if (m.step === 1) {
-    const counted = (c) => chosen.filter((s) => classOf(m, s) === c && m.avg[s.id] !== false).length, classes = Object.keys(SENSOR_CLASS).filter((c) => counted(c) >= 2);
-    const combineBox = !classes.length ? "" : `<div class="combine"><p class="muted">How should each class of sensor combine into the zone's reading?</p><div class="fields">${classes.map((c) => `<label class="field" for="map-c-${c}">${SENSOR_CLASS[c]}, ${counted(c)} sensors<select id="map-c-${c}" data-mcombine="${c}">${Object.entries(METHODS).map(([id, l]) => `<option value="${id}"${m.combine[c] === id ? " selected" : ""}>${l}</option>`).join("")}</select></label>`).join("")}</div></div>`;
-    body = `<p class="muted">Pick the sensors in ${esc(z.name)}. Each one is a physical device. Its class says which readings it's asked for, and they're matched for you.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>${combineBox}`;
+    const counted = chosen.filter((s) => classOf(m, s) === "env" && m.avg[s.id] !== false).length;
+    const combine = counted >= 2 ? `<div class="combine">${chips(`How should these ${counted} environment sensors combine into the zone's reading?`, "combine-env", Object.entries(METHODS), m.combine.env, 'data-mcombine="env"')}</div>` : "";
+    body = `<p class="muted">Pick the sensors in ${esc(z.name)}. Each one is a physical device. Its readings are suggested by what Home Assistant says each entity measures, and any sensor on the device can be put to any reading.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>${combine}`;
   }
-  if (m.step === 2) body = `<p class="muted">Pick what runs in ${esc(z.name)}. Shared hardware can be added to several zones.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>`;
+  if (m.step === 2) body = `<div class="row"><button class="btn primary add" data-maddvirt${m.virt.length >= MAX_VIRTUAL ? " disabled" : ""}>${icon("plus")}Add a virtual device</button>${m.virt.length >= MAX_VIRTUAL ? `<span class="small muted">A zone can have up to ${MAX_VIRTUAL} virtual devices.</span>` : ""}</div>
+    <p class="muted">Pick what runs in ${esc(z.name)}: climate hardware and lights. Shared hardware can be in several zones.</p>${search}<div class="picklist" id="map-list">${mapList(m)}</div>
+    <div class="virt-head"><h2>Virtual devices</h2><p class="small muted">Something worth seeing on ${esc(z.name)}'s map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p></div>
+    ${m.virt.length ? `<div class="picklist">${m.virt.map((v) => virtualRow(m, v)).join("")}</div>` : '<p class="small muted">None yet. Add one with the button at the top of this step.</p>'}`;
+  const issues = mapIssues(m);
   if (m.step === 3) {
-    const ds = devices.filter((d) => m.pickD[d.id]), issues = mapIssues(m), unplaced = chosen.filter((s) => { const had = z.sensors.find((x) => x.id === s.id); return !had || had.kind !== classOf(m, s); }).length;
-    body = `<div class="review"><div><strong>${chosen.length} sensors</strong><p class="small muted">${esc(chosen.map((s) => s.name).join(", ")) || "None"}</p></div>
-      <div><strong>${ds.length} devices</strong><p class="small muted">${esc(ds.map((d) => `${d.name} (${m.roles[d.id] || "not set"})`).join(", ")) || "None"}</p></div>
-</div>
+    const ss = chosen.map((s) => `${shownName(m, s.id, haNameOf(s)).trim() || s.name} (${SENSOR_CLASS[classOf(m, s)].toLowerCase()})`);
+    const cs = devices.filter((d) => m.pickD[d.id]).map((d) => `${shownName(m, d.id, haNameOf(d)).trim() || d.name} (${m.roles[d.id] || "not set"})`);
+    const vs = m.virt.map((v) => `${v.name.trim() || "not named"} (${v.type.toLowerCase()})`);
+    body = `<div class="review"><div><strong>${plural(ss.length, "sensor")}</strong><p class="small muted">${esc(ss.join(", ")) || "None"}</p></div><div><strong>${plural(cs.length, "device")}</strong><p class="small muted">${esc(cs.join(", ")) || "None"}</p></div>${vs.length ? `<div><strong>${plural(vs.length, "virtual device")}</strong><p class="small muted">${esc(vs.join(", "))}</p></div>` : ""}</div>
       ${issues.map((i) => `<button class="notice fix" data-mfix="${i.step}" data-target="${i.target}"><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("")}
-      ${unplaced ? `<p class="small muted">${unplaced} new sensor${unplaced > 1 ? "s" : ""} will need placing next.</p>` : ""}
-      <p class="small muted">Applying only changes Environment Control. Nothing in Home Assistant changes.</p>`;
+      <p class="small muted">Applying only changes Environment Control. Home Assistant asks you before any device becomes controllable.</p>`;
   }
-  const here = mapIssues(m).filter((i) => i.step === m.step), blocked = here.length > 0 || (m.step === 3 && mapIssues(m).length > 0);
-  return `<div class="wrap"><div><h1>Map devices: ${esc(z.name)}</h1></div><section class="card">${steps}${body}
-    <div class="row"><button class="btn" data-mstep="back">${m.step === (m.entry || 1) ? "Cancel" : "Back"}</button><button class="btn primary" data-mstep="next"${blocked ? " disabled" : ""}>${m.step === 3 ? (mapDraft(m).items.length ? "Review and apply" : "Finish") : "Next"}</button>${here.length ? `<button class="fixlink" data-mfix="${here[0].step}" data-target="${here[0].target}">${esc(here[0].text)} &rsaquo;</button>` : ""}</div></section></div>`;
+  return `<div class="wrap"><div><h1>Device identification: ${esc(z.name)}</h1></div><section class="card">${stepsHead(MAP_STEPS, m.step - 1, "data-mgo")}${body}
+    ${mapBar(m)}</section></div>`;
 }
+function mapBar(m) {
+  const issues = mapIssues(m), here = issues.filter((i) => i.step === m.step), blocked = m.step === 3 ? issues.length > 0 : here.length > 0, changes = mapDraft(m).items.length;
+  return wizBar({ where: `Step ${m.step} of 3`, back: m.step === (m.entry || 1) ? "Cancel" : "Back", next: m.step === 3 ? (changes ? "Review and apply" : "Finish") : "Next", blocked, changes, fix: here.length ? `<button class="fixlink" data-mfix="${m.step}" data-target="${here[0].target}">${esc(here[0].text)} &rsaquo;</button>` : "", attr: "data-mstep" });
+}
+/* Typing a name changes the count and what's left to fix, so the bar is redrawn under the box without redrawing the box. */
+const mapBarSync = () => { const bar = $("#main .wizbar"); if (bar && ui.mapw) bar.outerHTML = mapBar(ui.mapw); };
 function saveMap(m) {
   const z = zoneById(m.id), cat = catalog();
   z.sensors = cat.filter((s) => m.pickS[s.id]).map((s) => {
@@ -1595,19 +1669,28 @@ function saveMap(m) {
     /* A sensor new to Environment Control with nowhere to hold an offset starts at 0, like everything else a new zone brings. */
     return had || { ...s, kind: cls, pos: null, ...(s.leaf === undefined ? { leaf: 0 } : {}) };
   });
-  for (const s of z.sensors) s.avg = m.avg[s.id] !== false;
-  for (const s of z.sensors) if (s.leafEntity) {
-    const was = s.leafUnused;
-    s.leafUnused = (m.choice[s.id] || {}).leaf === "none";
-    if (s.leafUnused && !was) s.leaf = s.leafLive;
+  for (const s of z.sensors) {
+    s.avg = m.avg[s.id] !== false;
+    const ha = haNameOf(s);
+    if (s.id in m.names && m.names[s.id].trim()) { s.haName = ha; s.name = m.names[s.id].trim(); } else if (s.haName) { s.name = s.haName; delete s.haName; }
   }
   z.combine = { ...m.combine };
-  for (const d of devices) if (d.ctl) {
+  for (const d of devices.slice()) if (d.ctl) {
     const has = d.zones.includes(z.id);
     if (m.pickD[d.id] && !has) d.zones = [...d.zones, z.id];
     if (!m.pickD[d.id] && has) { d.zones = d.zones.filter((id) => id !== z.id); forgetPlace(d, z.id); }
-    if (m.pickD[d.id]) d.type = m.roles[d.id];
+    if (!m.pickD[d.id]) continue;
+    d.type = m.roles[d.id];
+    const ha = haNameOf(d);
+    if (d.id in m.names && m.names[d.id].trim()) { d.haName = ha; d.name = m.names[d.id].trim(); } else if (d.haName) { d.name = d.haName; delete d.haName; }
+    const extra = (m.extra[d.id] || "").trim(); if (extra) d.nudgeMode = extra; else delete d.nudgeMode;
+    if ((m.hide[d.id] || []).length) d.hiddenModes = [...m.hide[d.id]]; else delete d.hiddenModes;
+    /* Moved to another entity, it keeps its name, type and place. The entity's own unmapped record is folded into it. */
+    const to = m.swap[d.id];
+    if (to && to !== d.entity) { const was = devices.find((o) => o.entity === to && o.id !== d.id); if (was) devices.splice(devices.indexOf(was), 1); d.entity = to; }
   }
+  z.virtual = m.virt.map((v) => ({ id: v.id, name: v.name.trim(), type: v.type, ...(v.pos ? { pos: v.pos } : {}) }));
+  if (!z.virtual.length) delete z.virtual;
 }
 
 /* Leaf VPD by Tetens, the same sum the zone's sensors use. */
@@ -1909,7 +1992,7 @@ const LEAF_GIVE_UP_MS = 1500;
 const leafSends = [];
 function leafRows(z) {
   const rows = {};
-  for (const s of envOf(z)) { const o = leafOf(s); rows[s.id] = { mag: Math.abs(o), dir: o > 0 ? 1 : -1, status: "" }; }
+  for (const s of envOf(z)) { const o = leafOf(s); rows[s.id] = { mag: Math.abs(o), dir: o > 0 ? 1 : -1, status: "", src: hasLeafEntity(s) ? s.leafEntity : "kept" }; }
   return rows;
 }
 function openCalibration(id) {
@@ -1919,6 +2002,9 @@ function openCalibration(id) {
 }
 const lValue = (r) => (r.mag === 0 ? 0 : r.mag * r.dir);
 const boardOffline = (s) => hasLeafEntity(s) && (s.t === null || s.t === undefined || !!s.leafDown);
+/* Where a row's offset is held in the draft: on the board, or kept in Environment Control. Chosen here since #17. */
+const rowOnBoard = (s, r) => !!s.leafEntity && r.src !== "kept";
+const rowOffline = (s, r) => rowOnBoard(s, r) && (s.t === null || s.t === undefined || !!s.leafDown);
 const previewVpd = (s, o) => (s.vpd !== undefined && o === leafOf(s) ? s.vpd : calcVpd(s.t, s.h, o));
 function lPreview(s, r) {
   const o = lValue(r);
@@ -1941,16 +2027,18 @@ function lZoneHtml(l, z) {
   if (v === null) return `<strong>${esc(z.name)} VPD --</strong>`;
   return `<strong>${esc(z.name)} VPD ${fmt("vpd", v)} kPa</strong>${fmt("vpd", v) === saved ? "" : `<span class="small muted">Now ${saved} kPa</span>`}`;
 }
-const lStatus = (s, r) => (boardOffline(s) ? "This board is offline, so its offset can't change until it's back."
+const lStatus = (s, r) => (rowOffline(s, r) ? "This board is offline, so its offset can't change until it's back."
   : r.status === "sending" ? "Sending to the board..."
   : r.status === "stuck" ? `Not confirmed. The board still reports ${leafPhrase(s.leafLive)}.` : "");
 function lRow(s, r, sending) {
-  const locked = sending || boardOffline(s) ? " disabled" : "";
+  const locked = sending || rowOffline(s, r) ? " disabled" : "";
   const dir = (d, label) => `<button data-ldir="${s.id}:${d}" aria-pressed="${r.dir === d}"${locked}>${label}</button>`;
   /* Phone number pads often have no minus key, so the box holds the size and the direction is a button. */
   const field = `<div class="lfield"><label class="lcell"><input id="lin-${s.id}" data-lin="${s.id}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${r.mag.toFixed(1)}" aria-label="${esc(s.name)} degrees from air" aria-invalid="false"${locked}><span>°C</span></label><div class="seg" role="group" aria-label="${esc(s.name)} leaf against air">${dir(-1, "Below air")}${dir(1, "Above air")}</div></div>`;
-  const home = hasLeafEntity(s) ? `On the board: ${esc(s.leafEntity)}` : "This sensor has nowhere to hold an offset, so it's kept in Environment Control.";
-  return `<div class="lrow" id="lr-${s.id}"><div class="lrow-top"><strong>${esc(s.name)}</strong><span class="pill plain">${LEVELS[s.level]}</span></div>${field}<div class="dev-sub" id="lp-${s.id}">${esc(lPreview(s, r))}</div><div class="dev-sub lid">${home}</div><div class="lstatus" id="ls-${s.id}" role="status">${esc(lStatus(s, r))}</div></div>`;
+  const friendly = ((haStates[s.leafEntity] || {}).attributes || {}).friendly_name || s.leafEntity;
+  const where = s.leafEntity ? `<div id="lsrc-${s.id}">${chips(`Where ${s.name}'s offset is held`, `lsrc-${s.id}`, [[s.leafEntity, `On the board, ${friendly}`], ["kept", "Kept in Environment Control"]], r.src, `data-lsrc="${s.id}"`)}</div>` : `<div class="small muted">This sensor has nowhere to hold an offset, so it's kept in Environment Control.</div>`;
+  const limits = rowOnBoard(s, r) ? `<div class="small muted">${friendly !== s.leafEntity ? `${esc(s.leafEntity)}. ` : ""}Between ${LEAF_MAX.below} °C below and ${LEAF_MAX.above} °C above air, in steps of 0.1.</div>` : "";
+  return `<div class="lrow" id="lr-${s.id}"><div class="lrow-top"><strong>${esc(s.name)}</strong><span class="pill plain">${LEVELS[s.level] || "Height not set"}</span></div>${where}${field}<div class="small muted" id="lp-${s.id}">${esc(lPreview(s, r))}</div>${limits}<div class="lstatus" id="ls-${s.id}" role="status">${esc(lStatus(s, r))}</div></div>`;
 }
 function lBasisNote(l, z) {
   const offsetOf = (s) => lValue(l.rows[s.id]), used = countedEnv(z), at = leafPhrase(chartLeaf(z, l.basis, offsetOf));
@@ -1967,7 +2055,7 @@ function lBasisHtml(l, z) {
 function renderCalibration() {
   const l = ui.leafw, z = zoneById(l.id), envs = envOf(z), issues = lProblems(l, z);
   const head = `<div><h1>Sensor Calibration: ${esc(z.name)}</h1></div>`, back = `<button class="btn" data-lexit${l.sending ? " disabled" : ""}>Back</button>`;
-  if (!envs.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no sensors yet.</p><div class="row">${back}<button class="btn" data-mapw="${z.id}">Map devices</button></div></section></div>`;
+  if (!envs.length) return `<div class="wrap">${head}<section class="card"><p class="muted">${esc(z.name)} has no environment sensors yet, and only those have a leaf temperature offset.</p><div class="row"><button class="btn" data-mapw="${z.id}">Device identification</button></div></section>${pageBar("data-lexit", z, "calibrate")}</div>`;
   const note = envs.some(hasLeafEntity) ? `<p class="small muted">Offsets are changed on the board itself. Its VPD, and anything reading it like your alerts, follow straight away.</p>` : "";
   const leaf = !envs.length ? "" : `<section class="card" id="cal-leaf"><div><h2>Leaf temperature offset</h2><p class="muted small">How far leaf temperature sits from air temperature at each sensor. Only VPD uses it.</p></div>
     <div class="now" id="l-zone">${lZoneHtml(l, z)}</div>
@@ -1975,7 +2063,7 @@ function renderCalibration() {
     <div class="vissues" id="l-issues" data-html="${esc(lIssueHtml(issues))}">${lIssueHtml(issues)}</div>
     ${lBasisHtml(l, z)}${note}
     </section>`;
-  return `<div class="wrap">${head}${confirmNote(z, "calibrate", envs.some(hasLeafEntity) ? "Check each sensor's offset, then Confirm. A board keeps the offset it already holds, and one kept here starts at 0." : "Each offset starts at 0. Check them, then Confirm.")}${leaf}<div class="row">${back}${confirmRow(z, "calibrate")}</div></div>`;
+  return `<div class="wrap">${head}${confirmNote(z, "calibrate", envs.some((x) => x.leafEntity) ? "Check each sensor's offset, then Confirm. A board keeps the offset it already holds, and one kept here starts at 0." : "Each offset starts at 0. Check them, then Confirm.")}${leaf}${pageBar("data-lexit", z, "calibrate", l.sending ? " disabled" : "")}</div>`;
 }
 /* Updates what changed in place, so moving from one box to the next keeps the phone keyboard open. */
 function lSync() {
@@ -2032,12 +2120,16 @@ function lFollowChart(z) {
 /* A board's value only counts once the board reports it, so nothing here assumes the write landed. */
 async function saveLeaf(l, done) {
   /* What's kept here, the chart's choice and offsets for sensors with nowhere to hold one, is saved first. Boards are written after. */
-  const kept = (s) => !hasLeafEntity(s) && s.leaf !== lValue(l.rows[s.id]), was = zoneById(l.id);
-  if ((was.leafBasis || "") !== (l.basis || "") || envOf(was).some(kept)) {
+  const moved = (s) => !!s.leafEntity && hasLeafEntity(s) !== rowOnBoard(s, l.rows[s.id]);
+  const kept = (s) => !rowOnBoard(s, l.rows[s.id]) && (s.leaf !== lValue(l.rows[s.id]) || moved(s)), was = zoneById(l.id);
+  if ((was.leafBasis || "") !== (l.basis || "") || envOf(was).some(kept) || envOf(was).some(moved)) {
     const r = await saveConfig(() => {
       const z = zoneById(l.id);
       z.leafBasis = l.basis;
-      for (const s of envOf(z)) if (kept(s)) { delete s.vpd; s.leaf = lValue(l.rows[s.id]); }
+      for (const s of envOf(z)) {
+        if (s.leafEntity) s.leafUnused = !rowOnBoard(s, l.rows[s.id]);
+        if (kept(s)) { delete s.vpd; s.leaf = lValue(l.rows[s.id]); }
+      }
     });
     if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
   }
@@ -2045,7 +2137,7 @@ async function saveLeaf(l, done) {
   for (const s of envOf(z)) {
     const r = l.rows[s.id];
     r.status = "";
-    if (hasLeafEntity(s) && !boardOffline(s) && lValue(r) !== s.leafLive) { sends.push(s); r.status = "sending"; }
+    if (rowOnBoard(s, r) && !rowOffline(s, r) && lValue(r) !== s.leafLive) { sends.push(s); r.status = "sending"; }
   }
   const finish = () => {
     l.sending = false;
@@ -2272,7 +2364,7 @@ function tdDraft(td) {
   const fresh = src.length && [...linksInUse(m, aim).map((n) => m.links[n]), ...(m.period === "helper" ? [m.onHelper, m.offHelper] : [])].some((e) => e && !known.has(e));
   const note = [fresh ? "Home Assistant asks you to allow each helper this panel hasn't linked before." : "", sd.note, vd.note].filter(Boolean).join(" ");
   return { zone: sd.zone, items: [...src, ...sd.items, ...vd.items], skipped: [], bar: true, busy: !!td.busy || sd.busy, blocked: tdIssues().length ? "fix the problems before review" : sd.blocked || vd.blocked, note,
-    apply: (done) => applyTd(td, done), discard: () => { td.m = openSources(z); ui.sched.vals = schedValues(z); ui.sched.status = ""; Object.assign(ui.vpdw, { bands: vDraftBands(z), stage: null, sel: null }); render(); } };
+    apply: (done) => applyTd(td, done), discard: () => { td.m = openSources(z); ui.sched.vals = schedValues(z); ui.sched.status = ""; Object.assign(ui.vpdw, { bands: vDraftBands(z), stage: null, sel: null }); render(); } , back: () => guarded(() => leaveTd(m.id), [tdDraft(td)]) };
 }
 /* Sources first, so the times and limits after them land on whatever they now come from. */
 async function applyTd(td, done) {
@@ -2344,7 +2436,7 @@ function renderTd() {
     ${renderVpd()}
     <div class="vissues" id="td-issues">${tdIssueHtml(src)}</div>
     <div class="lstatus" id="s-status" role="status">${esc(s.status)}</div>
-    <div class="row"><button class="btn" data-tdexit${lock}>Back</button>${confirmRow(zoneById(m.id), "targets")}</div></div>`;
+    ${pageBar("data-tdexit", zoneById(m.id), "targets", lock)}</div>`;
 }
 
 /* A new zone is set up a step at a time, and every step can wait. What's left shows on Setup and on the zone's page until it's done. */
@@ -2388,6 +2480,9 @@ function guideReturn(id, step, confirmed) {
 }
 const stepOpen = (z, step) => !!(z && z.setup && z.setup[step] !== "done");
 /* Pages edited freely have no last button to press, so an unconfirmed step gets one. Applying a change confirms it too. */
+/* A page edited freely keeps its Back, and Confirm while its step isn't confirmed, in the bar at the foot of the window.
+   Once something differs from what's saved, the draft bar takes over, with Back beside Discard and Review and apply. */
+const pageBar = (backAttr, z, step, lock = "") => `<div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" ${backAttr}${lock}>Back</button>${stepOpen(z, step) ? `<button class="draft-review" data-confirmstep="${step}">Confirm</button>` : ""}</div>`;
 function confirmRow(z, step) {
   if (!stepOpen(z, step)) return "";
   return `<button class="btn primary" data-confirmstep="${step}">Confirm</button>`;
@@ -2593,12 +2688,14 @@ const changeList = () => { const items = []; return [items, (label, before, afte
 const offsetWords = (x) => (x === 0 ? "Same as air" : `${Math.abs(x).toFixed(1)} °C ${x < 0 ? "below" : "above"} air`);
 function leafDraft(l) {
   const z = zoneById(l.id), [items, add] = changeList(), named = (id) => (envOf(z).find((s) => s.id === id) || { name: "Average" }).name;
-  for (const s of envOf(z)) if (!boardOffline(s)) add(`${s.name} leaf temperature offset`, offsetWords(leafOf(s)), offsetWords(lValue(l.rows[s.id])));
-  const boards = envOf(z).some((s) => !boardOffline(s) && hasLeafEntity(s) && lValue(l.rows[s.id]) !== leafOf(s)), next = lZoneVpd(l, z);
+  const heldWords = (on) => (on ? "On the board" : "Kept in Environment Control");
+  for (const s of envOf(z)) if (s.leafEntity) add(`${s.name} offset held`, heldWords(hasLeafEntity(s)), heldWords(rowOnBoard(s, l.rows[s.id])));
+  for (const s of envOf(z)) if (!rowOffline(s, l.rows[s.id])) add(`${s.name} leaf temperature offset`, offsetWords(leafOf(s)), offsetWords(lValue(l.rows[s.id])));
+  const boards = envOf(z).some((s) => !rowOffline(s, l.rows[s.id]) && rowOnBoard(s, l.rows[s.id]) && lValue(l.rows[s.id]) !== s.leafLive), next = lZoneVpd(l, z);
   add("VPD chart uses", named(z.leafBasis), named(l.basis));
   const moves = next !== null && fmt("vpd", next) !== fmt("vpd", z.now.vpd) ? `${z.name} VPD goes from ${fmt("vpd", z.now.vpd)} to ${fmt("vpd", next)} kPa. ` : "";
   return { zone: z.name, items, skipped: [], bar: true, busy: !!l.sending, blocked: lProblems(l, z).length ? "fix the problems before review" : "", note: boards ? `${moves}Offsets change on the board itself, and anything reading its VPD, like your alerts, follows straight away.` : moves,
-    apply: (done) => saveLeaf(l, done), discard: () => { l.rows = leafRows(z); l.basis = z.leafBasis || ""; render(); } };
+    apply: (done) => saveLeaf(l, done), discard: () => { l.rows = leafRows(z); l.basis = z.leafBasis || ""; render(); }, back: () => guarded(leaveLeaf, [leafDraft(l)]) };
 }
 /* Which of a zone's limits sit on a helper. Each one changes there, through the host, and counts once HA reports it. */
 const BAND_SLOT = { 0: "min", 2: "target", 4: "max" };
@@ -2667,13 +2764,21 @@ function mapDraft(m) {
     if (!had || !on) continue;
     add(`${s.name} class`, SENSOR_CLASS[was.kind], SENSOR_CLASS[classOf(m, s)]);
     add(`${s.name} average`, yes(was.avg !== false, "Included", "Excluded"), yes(m.avg[s.id] !== false, "Included", "Excluded"));
-    if (s.leafEntity) add(`${s.name} leaf temperature offset`, yes(!!s.leafUnused, "Kept here", "On the board"), yes((m.choice[s.id] || {}).leaf === "none", "Kept here", "On the board"));
+    add(`${s.name} name`, s.name, shownName(m, s.id, haNameOf(s)).trim() || haNameOf(s));
   }
   for (const d of devices) if (d.ctl) {
     const had = d.zones.includes(z.id), on = !!m.pickD[d.id];
     add(d.name, yes(had, "In this zone", "Not in this zone"), yes(on, "In this zone", "Not in this zone"));
-    if (on) add(`${d.name} type`, d.type || "Not set", m.roles[d.id] || "Not set");
+    if (!on) continue;
+    add(`${d.name} type`, d.type || "Not set", m.roles[d.id] || "Not set");
+    add(`${d.name} name`, d.name, shownName(m, d.id, haNameOf(d)).trim() || haNameOf(d));
+    add(`${d.name} entity`, d.entity, m.swap[d.id] || d.entity);
+    add(`${d.name} extra mode`, d.nudgeMode || "None", (m.extra[d.id] || "").trim() || "None");
+    add(`${d.name} modes left out`, (d.hiddenModes || []).join(", ") || "None", (m.hide[d.id] || []).join(", ") || "None");
   }
+  const vwas = virtualOf(z);
+  for (const v of m.virt) { const old = vwas.find((x) => x.id === v.id); add(old ? `${old.name} (virtual)` : `${v.name.trim() || "New virtual device"} (virtual)`, old ? `${old.name}, ${(old.type || "Other").toLowerCase()}` : "Not added", `${v.name.trim()}, ${v.type.toLowerCase()}`); }
+  for (const old of vwas) if (!m.virt.some((v) => v.id === old.id)) add(`${old.name} (virtual)`, `${old.name}, ${(old.type || "Other").toLowerCase()}`, "Removed");
   for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
   return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved.").then(done); } };
 }
@@ -2755,9 +2860,16 @@ function draftSync() {
   bar.hidden = !on;
   document.body.classList.toggle("drafting", on);
   $("[data-dreview]").disabled = on && (!!d.blocked || d.busy);
-  /* With changes open, applying them is how the step is confirmed, so the bar takes over. */
-  const confirm = $("[data-confirmstep]");
-  if (confirm) { confirm.hidden = n > 0; confirm.disabled = !!d && (!!d.blocked || d.busy); }
+  /* With changes open, applying them is how the step is confirmed, so the draft bar takes over from the page's. */
+  const confirm = $("[data-confirmstep]"), page = $("#pagebar");
+  if (confirm) confirm.disabled = !!d && (!!d.blocked || d.busy);
+  if (page) {
+    page.hidden = on;
+    const why = confirm && d && d.blocked ? `Fix first: ${d.blocked}` : "";
+    $("#pagebar-why").innerHTML = why ? `<strong>${esc(why)}</strong>` : "";
+    page.toggleAttribute("data-blocked", !!why); page.toggleAttribute("data-bare", !why);
+  }
+  $("[data-dback]").hidden = !(on && d.back);
   if (!on) return;
   const only = d.items[0] || d.skipped[0];
   $("#draft-count").textContent = n;
@@ -2887,6 +2999,7 @@ document.addEventListener("click", (e) => {
     if (q("[data-gkeep], [data-rback]") || !q(".dialog")) closeModal();
     return;
   }
+  if (q("[data-dback]")) { const d = topDraft(); if (d && d.back) d.back(); return; }
   if (q("[data-ddiscard]")) { const d = topDraft(); if (d) { d.discard(); toast("Changes discarded."); } return; }
   if (q("[data-dreview]")) { openReview(); return; }
   if ((el = q("button[data-dev]"))) { const d = devices.find((x) => x.id === el.dataset.dev); if (d) sendControl(d, el.dataset.act); return; }
@@ -2958,6 +3071,17 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-msensor]"))) { toggleSensor(m, catalog().find((s) => s.id === el.dataset.msensor)); render(); return; }
     if ((el = q("[data-mdevice]"))) { const id = el.dataset.mdevice; if (m.pickD[id]) delete m.pickD[id]; else m.pickD[id] = true; render(); return; }
     if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; render(); jumpTo(el.dataset.target); return; }
+    if ((el = q("[data-mgo]"))) { m.step = Number(el.dataset.mgo) + 1; m.q = ""; render(); window.scrollTo(0, 0); return; }
+    if ((el = q("[data-mmore]"))) { m.more[el.dataset.mmore] = !m.more[el.dataset.mmore]; render(); return; }
+    if ((el = q("[data-mnamereset]"))) { delete m.names[el.dataset.mnamereset]; render(); return; }
+    if ((el = q("[data-mswap]"))) { m.swap[el.dataset.mswap] = el.dataset.entity; m.swapQ[el.dataset.mswap] = ""; render(); return; }
+    if (q("[data-maddvirt]")) {
+      let n = 1; while (m.virt.some((v) => v.id === `v-new_${n}`) || virtualOf(zoneById(m.id)).some((v) => v.id === `v-new_${n}`)) n++;
+      m.virt.push({ id: `v-new_${n}`, name: "", type: "Other" }); render();
+      const box = document.getElementById(`mv-v-new_${n}-name`); if (box) { box.scrollIntoView({ block: "center" }); box.focus({ preventScroll: true }); }
+      return;
+    }
+    if ((el = q("[data-mvremove]"))) { m.virt = m.virt.filter((v) => v.id !== el.dataset.mvremove); render(); return; }
     if ((el = q("[data-mstep]"))) {
       const leaveMap = () => { ui.mapw = null; render(); window.scrollTo(0, 0); };
       if (el.dataset.mstep === "back") { if (m.step === (m.entry || 1)) guarded(leaveMap); else { m.step--; m.q = ""; render(); window.scrollTo(0, 0); } return; }
@@ -3088,12 +3212,22 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.dialin) { const [id, action] = e.target.dataset.dialin.split(":"), d = devices.find((x) => x.id === id); if (d) dialSettle(d, action); return; }
   if (e.target.dataset.vin) { vCommit(e.target); return; }
   if (e.target.dataset.lin) { lCommit(e.target); return; }
+  if (e.target.dataset.lsrc && ui.leafw) {
+    /* Moved to the board, the row shows what the board holds; kept here, it keeps the value on show. */
+    const s2 = envOf(zoneById(ui.leafw.id)).find((x) => x.id === e.target.dataset.lsrc), r = ui.leafw.rows[s2.id];
+    r.src = e.target.value;
+    if (r.src !== "kept") { const o = s2.leafLive; r.mag = Math.abs(o); r.dir = o > 0 ? 1 : -1; }
+    render(); return;
+  }
   if (e.target.dataset.sin) { sCommit(e.target); return; }
   const m = ui.mapw;
   if (m) {
     const t = e.target.dataset;
-    if (t.mmetric) { const [id, k] = t.mmetric.split(":"); m.choice[id] = m.choice[id] || {}; m.choice[id][k] = e.target.value; render(); }
+    if (t.mmetric) { const [id, k] = t.mmetric.split(":"); m.choice[id] = m.choice[id] || {}; m.choice[id][k] = e.target.value; m.more[t.mmetric] = false; render(); }
     if (t.mrole) { m.roles[t.mrole] = e.target.value; render(); }
+    if (t.mcombine) { m.combine[t.mcombine] = e.target.value; render(); }
+    if (t.mhide) { const list = m.hide[t.mhide] || [], mode = e.target.value; m.hide[t.mhide] = e.target.checked ? list.filter((x) => x !== mode) : [...list, mode]; render(); }
+    if (t.mvtype) { const v = m.virt.find((x) => x.id === t.mvtype); if (v) v.type = e.target.value; render(); }
     if (t.mavg) { m.avg[t.mavg] = !e.target.checked; render(); }
     if (t.mclass) {
       /* Picks are kept per class, so changing class and back restores what was chosen. */
@@ -3155,6 +3289,13 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
   if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
   if (e.target.dataset && e.target.dataset.dialin) { const o = dialSpec(devices.find((x) => x.id === e.target.dataset.dialin.split(":")[0]), e.target.dataset.dialin.split(":")[1]); dialTo(e.target.dataset.dialin, dialSnap(o, Number(e.target.value))); const again = document.querySelector(`[data-dialin="${e.target.dataset.dialin}"]`); if (again) again.focus(); }
+  if (ui.mapw && e.target.dataset) {
+    const m = ui.mapw, t = e.target.dataset;
+    if (t.mname !== undefined) { const v = e.target.value; if (v === t.haname) delete m.names[t.mname]; else m.names[t.mname] = v; mapBarSync(); }
+    if (t.mextra) { const v = e.target.value; if (v.trim()) m.extra[t.mextra] = v; else delete m.extra[t.mextra]; mapBarSync(); }
+    if (t.mvname) { const v = m.virt.find((x) => x.id === t.mvname); if (v) v.name = e.target.value; mapBarSync(); }
+    if (t.mswapq) { m.swapQ[t.mswapq] = e.target.value; const id = e.target.id, at = e.target.selectionStart; render(); const box = document.getElementById(id); if (box) { box.focus(); box.setSelectionRange(at, at); } }
+  }
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.td) { ui.td.m.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.td.m, zoneById(ui.td.m.id)); }
   if (e.target.id === "map-lq" && ui.td) { ui.td.m.lq = e.target.value; $("#map-lights").innerHTML = lightRows(ui.td.m, zoneById(ui.td.m.id)); }

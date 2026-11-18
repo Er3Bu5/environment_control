@@ -850,9 +850,10 @@ check("Basis: a sensor left out of the reading isn't offered", (await ev(`!docum
 await ev(`ui.leafw=null;zones[0].sensors.find(s=>s.id==="g-under").avg=true;zones[0].sensors.find(s=>s.id==="g-under").leaf=-1;zones[0].leafBasis=undefined;render()`);
 await openL();
 check("Basis: matching sensors say so", (await ev(`document.querySelector("#l-basis-note").textContent`)).includes("Every sensor matches"), await ev(`document.querySelector("#l-basis-note").textContent`));
-const saveTop = await ev(`document.querySelector("[data-lexit]").getBoundingClientRect().top+scrollY`);
+/* Since #54 Back rides in the bar at the foot of the window, with the draft bar taking over once something differs. */
+check("Basis: Back is in the bar at the foot of the window", (await ev(`(()=>{const b=document.querySelector("#pagebar [data-lexit]").getBoundingClientRect();return b.bottom<=innerHeight&&b.bottom>innerHeight-120})()`)) === true);
 await tap("#lin-g-left"); await type("2"); await key("Enter", 13);
-check("Basis: offsets starting to differ doesn't move Back", (await ev(`document.querySelector("[data-lexit]").getBoundingClientRect().top+scrollY`)) === saveTop);
+check("Basis: offsets starting to differ keep Back at the foot, beside Discard", (await ev(`(()=>{const b=document.querySelector("#draftbar [data-dback]");if(!b||b.hidden)return false;const r=b.getBoundingClientRect();return r.bottom<=innerHeight&&r.bottom>innerHeight-160})()`)) === true);
 await ev(`ui.leafw=null;zones[0].sensors.find(s=>s.id==="g-under").leaf=-0.5;render()`);
 await openL("veg");
 check("Basis: not offered with one sensor", (await ev(`!document.querySelector("#l-basis")`)) === true);
@@ -888,14 +889,15 @@ check("Finish: and it says the Target moved", (await ev(`document.querySelector(
 await ev(`(document.querySelector("[data-tdexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
 await boardSet([["number.nursery_environment_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
 
-// Mapping decides whether a sensor has an offset on the device
+// Where a sensor's offset is held is chosen on Sensor Calibration, as the panel has it since #17, not in Device identification
 await ev(`ui.vpdw=null;ui.td=null;ui.sched=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
-check("Map: the leaf temperature offset entity is matched with the rest", (await ev(`!!document.querySelector('[data-mmetric="v-env:leaf"]')`)) === true);
-await ev(`(()=>{const e=document.querySelector('[data-mmetric="v-env:leaf"]');e.value="none";e.dispatchEvent(new Event("change",{bubbles:true}));saveMap(ui.mapw);ui.mapw=null;render()})()`); await sleep(50);
-await openL("veg");
-check("Map: Not used stores the offset here, starting from the board's last value", (await ev(`document.querySelector("#lin-v-env").value==="1.0" && document.querySelector("#lr-v-env").textContent.includes("kept in Environment Control")`)) === true);
+check("Calibration: Device identification doesn't ask about the offset", (await ev(`!document.querySelector('[data-mmetric^="v-env:leaf"]')`)) === true);
+await ev(`ui.mapw=null;render()`); await openL("veg");
+check("Calibration: a board's sensor asks where its offset is held, on the board by default", (await ev(`document.querySelector('[data-lsrc="v-env"][value="number.veg_environment_leaf_temperature_offset"]').checked`)) === true);
+await ev(`(()=>{const e=document.querySelector('[data-lsrc="v-env"][value="kept"]');e.checked=true;e.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40);
+check("Calibration: kept here starts from the board's last value", (await ev(`document.querySelector("#lin-v-env").value`)) === "1.0");
 await tap("#lin-v-env"); await type("2"); await key("Enter", 13); await leafSave(60);
-check("Map: and saving it writes nothing to the board", (await sends()).length === 0 && (await ev(`zones[1].sensors[0].leafLive`)) === -1 && (await saved("v-env")) === -2, await sends());
+check("Calibration: and saving it writes nothing to the board", (await sends()).length === 0 && (await ev(`zones[1].sensors[0].leafLive`)) === -1 && (await saved("v-env")) === -2 && (await ev(`zones[1].sensors[0].leafUnused`)) === true, await sends());
 await ev(`zones[1].sensors[0].leafUnused=false;zones[1].sensors[0].leaf=undefined;render()`);
 await ev(`zones[1].sensors[0].t=null;zones[1].sensors[0].h=null`); await openL("veg");
 check("Leaf: a dead sensor shows no data, never a number", await ev(`(()=>{const t=document.querySelector("#main").textContent;return t.includes("No data from this sensor")&&!t.includes("NaN")&&t.includes("VPD --")})()`), await ev(`document.querySelector("#l-zone").textContent`));
@@ -930,31 +932,59 @@ await ev(`envOf(zones[0]).forEach((s,i)=>{[s.leafLive,s.leaf]=window.__lk[i]});r
 // ---------- Map devices: sensor classes
 await phone(390, 844); await reset();
 const mOpen = async (id) => { await ev(`ui.screen="setup";ui.wiz=null;openMap("${id}");render()`); await sleep(40); };
-const mChange = async (sel, v) => { await ev(`(()=>{const e=document.querySelector('${sel}');if(e.type==="checkbox")e.checked=${JSON.stringify(v)};else e.value=${JSON.stringify(v)};e.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
-const slotNames = (id) => ev(`[...document.querySelectorAll("#ms-${id} .ent > span")].map(e=>e.textContent)`);
-const combineSel = () => ev(`[...document.querySelectorAll("[data-mcombine]")].map(e=>e.dataset.mcombine)`);
+/* Choices are radio chips since #24, so a value is picked by checking its chip. */
+const mChange = async (sel, v) => { await ev(`(()=>{let e=document.querySelector('${sel}');if(e.type==="radio"){e=document.querySelector('${sel}[value="'+${JSON.stringify(String(v))}+'"]');e.checked=true}else if(e.type==="checkbox")e.checked=${JSON.stringify(v)};else e.value=${JSON.stringify(v)};e.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(40); };
+const slotNames = (id) => ev(`[...document.querySelectorAll("#ms-${id} fieldset.chips legend")].map(e=>e.textContent.replace(", pick one",""))`);
+const combineSel = () => ev(`[...document.querySelectorAll(".combine legend")].map(e=>e.textContent)`);
 await mOpen("garden");
 check("Map: with only the Environment class, no class box is shown", (await ev(`document.querySelectorAll("[data-mclass]").length`)) === 0);
-check("Map: an environment sensor is asked for temperature, humidity, VPD, light and leaf temperature offset", same(await slotNames("g-left"), ["Temperature", "Humidity", "VPD", "Light", "Leaf temperature offset"]), await slotNames("g-left"));
+check("Map: an environment sensor is asked for temperature, humidity, VPD and light, never its offset", same(await slotNames("g-left"), ["Temperature", "Humidity", "VPD", "Light"]), await slotNames("g-left"));
 check("Map: no soil probes offered until irrigation", (await ev(`catalog().every(s=>s.kind==="env") && !/soil/i.test(document.querySelector("#main").textContent)`)) === true);
 check("Map: every sensor is in the average until excluded", (await ev(`[...document.querySelectorAll("[data-mavg]")].every(e=>!e.checked) && document.querySelectorAll("[data-mavg]").length===3 && document.querySelector('#ms-g-left .inavg').textContent.trim()==="Exclude from average"`)) === true);
-check("Map: one combine choice for the environment sensors", same(await combineSel(), ["env"]), await combineSel());
+check("Map: one combine choice for the environment sensors", same(await combineSel(), ["How should these 3 environment sensors combine into the zone's reading?"]), await combineSel());
 await mChange('[data-mavg="g-right"]', true);
-check("Map: two still counted keeps the choice", same(await combineSel(), ["env"]) && (await ev(`document.querySelector(".combine").textContent`)).includes("Environment, 2 sensors"));
+check("Map: two still counted keeps the choice", same(await combineSel(), ["How should these 2 environment sensors combine into the zone's reading?"]), await combineSel());
 await mChange('[data-mavg="g-under"]', true);
 check("Map: one left counted hides it", (await ev(`document.querySelectorAll(".combine").length`)) === 0);
 await mChange('[data-mavg="g-under"]', false);
 await ev(`document.querySelector('[data-msensor="x-pulse"]').click()`); await sleep(40);
-check("Map: a sensor with no offset entity keeps it in Environment Control", (await ev(`[...document.querySelector('[data-mmetric="x-pulse:leaf"]').options].map(o=>o.textContent).join("|")`)) === "None, kept in Environment Control");
-await mChange('[data-mmetric="x-pulse:humidity"]', "none");
-check("Map: an environment sensor with no humidity stops Next", (await ev(`mapIssues(ui.mapw).some(i=>i.text==="Air monitor: an environment sensor needs humidity. Pick it, or change its class.") && document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`mapIssues(ui.mapw).map(i=>i.text)`));
+check("Map: any other sensor on the device can be put to a reading, on request", (await ev(`document.querySelector('[data-mmore="x-pulse:humidity"]').textContent.trim()`)) === "From this device: 3 more sensors ›", await ev(`document.querySelector('[data-mmore="x-pulse:humidity"]').textContent.trim()`));
+for (const k of ["temperature", "humidity", "vpd", "light"]) await mChange(`[data-mmetric="x-pulse:${k}"]`, "none");
+check("Map: a sensor with every reading Not used stops Next", (await ev(`mapIssues(ui.mapw).some(i=>i.text==="Air monitor: pick at least one reading, or leave this sensor out.") && document.querySelector('[data-mstep="next"]').disabled`)) === true, await ev(`mapIssues(ui.mapw).map(i=>i.text)`));
 await ev(`document.querySelector('[data-msensor="x-pulse"]').click()`); await sleep(40);
-await mChange("#map-c-env", "median");
+await mChange('[data-mcombine="env"]', "median");
 check("Map: the review lists exclusion and method", (await ev(`(()=>{const it=mapDraft(ui.mapw).items;return it.some(i=>i.label==="Environment right average"&&i.after==="Excluded")&&it.some(i=>i.label==="Environment sensors combine by"&&i.before==="Average"&&i.after==="Median")})()`)) === true, await ev(`mapDraft(ui.mapw).items`));
 await ev(`saveMap(ui.mapw);ui.mapw=null;render()`);
 check("Map: saved, the zone combines by the environment method", (await ev(`methodOf(zones[0])==="median"`)) === true);
 check("Map: and the excluded sensor is out of the reading", (await ev(`zones[0].sensors.find(s=>s.id==="g-right").avg===false && Math.abs(zoneAverage(zones[0],"humidity")-combine("median",envOf(zones[0]).filter(s=>s.id!=="g-right").map(s=>s.h)))<1e-9`)) === true);
 await ev(`zones[0].sensors.find(s=>s.id==="g-right").avg=true;zones[0].combine=undefined;ui.screen="overview";render()`); await sleep(40);
+// ---------- Device identification: names, entities, modes and virtual devices, as the panel has them since #36
+await mOpen("garden"); await ev(`ui.mapw.step=2;ui.mapw.roles.plug="Other";render()`); await sleep(30);
+const inputType = (sel, v) => ev(`(()=>{const e=document.querySelector('${sel}');e.value=${JSON.stringify(v)};e.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+await inputType("#name-md-heater", "Mains heater"); await sleep(30);
+check("Ident: renaming a device counts in the bar at the foot, beside the plug's type", (await ev(`document.querySelector("#main .wizbar .draft-count").textContent`)) === "2", await ev(`document.querySelector("#main .wizbar").textContent`));
+await ev(`render()`); await sleep(20);
+check("Ident: a renamed device says what HA calls it, with a way to put that back", (await ev(`document.querySelector("#md-heater").textContent`)).includes("Home Assistant calls it Heater.") && !!(await ev(`document.querySelector('[data-mnamereset="heater"]')`)));
+await inputType("#swap-heater", "spare"); await sleep(40);
+await ev(`document.querySelector('[data-mswap="heater"]').click()`); await sleep(30);
+check("Ident: a device can move to an entity no zone uses yet", (await ev(`mapDraft(ui.mapw).items.some(i=>i.label==="Heater entity"&&i.before==="switch.heater_mains"&&i.after==="switch.spare_plug")`)) === true && (await ev(`document.querySelector("#md-heater").textContent`)).includes("On switch.spare_plug."));
+await ev(`delete ui.mapw.swap.heater;render()`); await sleep(20);
+check("Ident: a dehumidifier offers an extra mode and which modes Controls shows", (await ev(`!!document.querySelector('[data-mextra="dehu"]') && [...document.querySelectorAll('[data-mhide="dehu"]')].map(e=>e.value).join()==="boost,comfort,eco,sleep"`)) === true);
+await inputType('[data-mextra="dehu"]', "normal"); await ev(`render()`); await sleep(20);
+await mChange('[data-mhide="dehu"][value="sleep"]', false);
+check("Ident: the extra mode joins the modes offered, and a mode can be left out", (await ev(`[...document.querySelectorAll('[data-mhide="dehu"]')].map(e=>e.value+(e.checked?"":"-")).join()`)) === "boost,comfort,eco,normal,sleep-");
+await ev(`document.querySelector("[data-maddvirt]").click()`); await sleep(40);
+check("Ident: adding a virtual device opens its name box, and it must be named", (await ev(`document.activeElement.dataset.mvname`)) === "v-new_1" && (await ev(`document.querySelector("#main .wizbar").textContent`)).includes("A virtual device needs a name.") && (await ev(`document.querySelector('[data-mstep="next"]').disabled`)) === true);
+await inputType('[data-mvname="v-new_1"]', "Drain tank"); await mChange('[data-mvtype="v-new_1"]', "Tank");
+check("Ident: named and typed, it's Virtual, Tank", (await ev(`document.querySelector("#mv-v-new_1").textContent`)).includes("Virtual, Tank."));
+await ev(`document.querySelector('[data-mgo="0"]').click()`); await sleep(30);
+check("Ident: a step can be gone to by tapping it", (await ev(`ui.mapw.step`)) === 1);
+await ev(`ui.mapw.step=3;render()`); await sleep(20);
+check("Ident: Check lists the virtual device and the new name", (await ev(`document.querySelector("#main .review").textContent`)).includes("Drain tank (tank)") && (await ev(`document.querySelector("#main .review").textContent`)).includes("Mains heater (Heater)"), await ev(`document.querySelector("#main .review").textContent`));
+await ev(`document.querySelector('[data-mstep="next"]').click()`); await sleep(40); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(300);
+check("Ident: applied, the name, extra mode, modes and virtual device are saved, HA's name kept", (await ev(`(()=>{const h=devices.find(d=>d.id==="heater"),d=devices.find(d=>d.id==="dehu"),v=(zones[0].virtual||[]).find(v=>v.name==="Drain tank");return h.name==="Mains heater"&&h.haName==="Heater"&&d.nudgeMode==="normal"&&d.hiddenModes.join()==="sleep"&&v&&v.type==="Tank"})()`)) === true);
+await ev(`(()=>{const h=devices.find(d=>d.id==="heater");h.name="Heater";delete h.haName;const d=devices.find(d=>d.id==="dehu");delete d.nudgeMode;delete d.hiddenModes;delete zones[0].virtual;devices.find(d=>d.id==="plug").type=null;ui.mapw=null;render()})()`); await sleep(20);
+
 // ---------- Tiles: tracks in one row line up
 const trackTops = (id) => ev(`(()=>{ui.screen="zone";ui.zone="${id}";render();return [...document.querySelectorAll("#main .tiles .tile")].map(t=>{const r=t.getBoundingClientRect(),k=t.querySelector(".track");return {row:Math.round(r.top),top:k?Math.round(k.getBoundingClientRect().top*10)/10:null}}).filter(x=>x.top!==null)})()`);
 const rowsLineUp = (tops) => Object.values(tops.reduce((a, x) => ((a[x.row] ||= []).push(x.top), a), {})).every((r) => r.every((t) => Math.abs(t - r[0]) < 0.6));
@@ -1112,7 +1142,7 @@ check("Zone: Confirm counts it as done with nothing changed, and goes back to th
 await cClick("#g-targets [data-vpd]"); await sleep(60);
 await ev(`ui.sched.vals.day="06:00";ui.sched.vals.night="18:00";render()`); await sleep(40);
 await cClick('[data-vstage="veg"]'); await sleep(60);
-check("Zone: with changes open, applying them is how Targets is confirmed", (await ev(`document.querySelector("[data-confirmstep]").hidden && !document.querySelector("#draftbar").hidden && !document.querySelector("[data-dreview]").disabled`)) === true, await ev(`[document.querySelector("[data-confirmstep]")?.hidden, document.querySelector("#draftbar").hidden, document.querySelector("#td-issues").textContent, document.querySelector("#v-issues")?.textContent]`));
+check("Zone: with changes open, applying them is how Targets is confirmed", (await ev(`document.querySelector("#pagebar").hidden && !document.querySelector("#draftbar").hidden && !document.querySelector("[data-dreview]").disabled`)) === true, await ev(`[document.querySelector("[data-confirmstep]")?.hidden, document.querySelector("#draftbar").hidden, document.querySelector("#td-issues").textContent, document.querySelector("#v-issues")?.textContent]`));
 await cClick("[data-dreview]"); await cClick("[data-rapply]"); await sleep(400);
 check("Zone: applying Targets counts it as done, and finishes setup", (await guideRows())[5] === "g-targets:Done" && (await ev(`document.querySelector("[data-gfinish]").textContent`)) === "Done", await guideRows());
 await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
@@ -1400,7 +1430,7 @@ await plugRole("Light"); await goTab("Garden");
 check("Lights: a plug marked Light joins them", (await groupNames()).includes("Plug 7"), await groupNames());
 await ev(`devices.find(d=>d.id==="plug").type=null;render()`);
 await ev(`openMap("garden");ui.mapw.step=2;render()`); await sleep(40);
-check("Lights: Map devices lists them and offers Light as a type", (await ev(`!!document.querySelector('[data-mdevice="lc-over"]') && [...document.querySelector('[data-mrole="lc-over"]').options].some(o=>o.textContent==="Light")`)) === true);
+check("Lights: Map devices lists them and offers Light as a type", (await ev(`!!document.querySelector('[data-mdevice="lc-over"]') && !!document.querySelector('[data-mrole="lc-over"][value="Light"]')`)) === true);
 await ev(`ui.mapw=null;render()`);
 
 // ---------- Day and night
