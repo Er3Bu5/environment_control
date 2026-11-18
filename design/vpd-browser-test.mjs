@@ -117,10 +117,10 @@ if (process.env.SMOKE) {
     check(`${id} Day and night: the page holds HA's times, and no light limits`, v.day === want2.day && v.night === want2.night && v.dayMin === undefined && v.nightMax === undefined, v);
     await shot(`real-sched-${id}`);
     await go(`document.querySelector("[data-tdexit]").click()`);
-    await go(`ui.screen="zone";ui.zone="${id}";render()`);
+    await go(`ui.screen="zone";ui.zone="${id}";render();document.querySelector('[data-viewtargets="${id}"]').click()`);
     const rows = await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[...t.querySelectorAll("tr")].pop().textContent)`);
-    check(`${id} Targets: the zone page holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
-    await go(`document.querySelector('[data-vpd="${id}"]').click();ui.vpdw.period="day";render()`); await clean(`${id} Targets`);
+    check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
+    await go(`document.querySelector('[data-tset="${id}"]').click();ui.vpdw.period="day";render()`); await clean(`${id} Targets`);
     const day = await ev(`document.querySelector("#vin-light-0").value`);
     await go(`ui.vpdw.period="night";render()`);
     const night = await ev(`document.querySelector("#vin-light-0").value`);
@@ -141,7 +141,7 @@ if (process.env.SMOKE) {
   check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false]));
   for (const id of ["veg", "nursery"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
-    check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`document.querySelector("#main .tbl-wrap tbody tr").textContent`)).includes("-"));
+    check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`(()=>{const d=document.createElement("div");d.innerHTML=targetsTable(zoneById(ui.zone));return d.querySelector("tbody tr").textContent})()`)).includes("-"));
   }
   /* Nothing in the real room is placed yet, so every zone's map says so, and says it's fine. */
   for (const id of ["garden", "veg", "nursery"]) {
@@ -190,7 +190,7 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
   const hidden = [];
   for (const k of ["temperature", "humidity", "vpd"]) for (const i of [0, 2, 4]) {
     await tap(`#vin-${k}-${i}`); await sleep(420);
-    const r = await ev(`(()=>{const e=document.querySelector("#vin-${k}-${i}").getBoundingClientRect(),bar=document.querySelector(".topbar"),head=getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0;return {top:e.top,bottom:e.bottom,head,h:innerHeight,active:document.activeElement.id}})()`);
+    const r = await ev(`(()=>{const e=document.querySelector("#vin-${k}-${i}").getBoundingClientRect(),bar=document.querySelector(".topbar"),head=bar&&getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0;return {top:e.top,bottom:e.bottom,head,h:innerHeight,active:document.activeElement.id}})()`);
     const line = r.h * (1 - kb);
     if (r.active !== `vin-${k}-${i}` || r.top < r.head - 1 || r.bottom > line) hidden.push([`${k}-${i}`, Math.round(r.top), Math.round(r.bottom), "limit " + Math.round(line), r.active]);
     await key("Escape", 27); await sleep(40);
@@ -199,11 +199,11 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
 }
 // Keyboard laid over the frame, as in Claude's viewer: nothing resizes
 await phone(800, 1000); await open(); await tap("#vin-vpd-1"); await sleep(420);
-const over = await ev(`(()=>{const c=document.querySelector("#vwrap").getBoundingClientRect(),b=document.querySelector("#vin-vpd-1").getBoundingClientRect();return {chartVisible:c.bottom-document.querySelector(".topbar").getBoundingClientRect().bottom,boxBottom:b.bottom,h:innerHeight}})()`);
+const over = await ev(`(()=>{const c=document.querySelector("#vwrap").getBoundingClientRect(),b=document.querySelector("#vin-vpd-1").getBoundingClientRect();return {chartVisible:c.bottom-0,boxBottom:b.bottom,h:innerHeight}})()`);
 check("overlaid keyboard: box sits just above where it starts", over.boxBottom <= over.h * 0.5 && over.boxBottom > over.h * 0.4, over);
 await key("Escape", 27);
 await tap("#vin-temperature-1"); await sleep(420);
-const chart1 = await ev(`document.querySelector("#vwrap").getBoundingClientRect().bottom - document.querySelector(".topbar").getBoundingClientRect().bottom`);
+const chart1 = await ev(`document.querySelector("#vwrap").getBoundingClientRect().bottom - 0`);
 check("overlaid keyboard: chart stays in view above the first row", chart1 > 100, chart1);
 await key("Escape", 27); await sleep(60);
 
@@ -213,7 +213,7 @@ for (const [w, h, name] of [[800, 1000, "foldable"], [390, 844, "phone"]]) {
   await phone(w, h); await open(); await sleep(60);
   await tap("#vin-humidity-1"); await sleep(40);
   await outer(`document.querySelector("environment-control-panel").style.bottom="41%"`); await sleep(500);
-  const m = await ev(`(()=>{const b=document.querySelector("#vin-humidity-1").getBoundingClientRect(),c=document.querySelector("#vwrap").getBoundingClientRect(),bar=document.querySelector(".topbar");return {boxTop:b.top,boxBottom:b.bottom,h:innerHeight,chart:c.bottom-(getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0),active:document.activeElement.id}})()`);
+  const m = await ev(`(()=>{const b=document.querySelector("#vin-humidity-1").getBoundingClientRect(),c=document.querySelector("#vwrap").getBoundingClientRect(),bar=document.querySelector(".topbar");return {boxTop:b.top,boxBottom:b.bottom,h:innerHeight,chart:c.bottom-(bar&&getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0),active:document.activeElement.id}})()`);
   check(`resized host ${name}: box is pushed up to just above the keyboard`, m.boxBottom <= m.h && m.boxBottom > m.h - 90 && m.active === "vin-humidity-1", m);
   check(`resized host ${name}: chart stays in view`, m.chart > 40, m);
   await tap("#vin-vpd-3"); await sleep(200);
@@ -361,13 +361,15 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
   check(`${w}px: box text is 16px so iOS won't zoom`, fit.size === "16px", fit.size);
 }
 // ---------- Controls
-const goTab = async (name) => { await ev(`[...document.querySelectorAll("#tabs button")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
-const reset = () => ev(`ui.review=null;ui.guard=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
+/* The pages are in the page menu since #37, so going to one is picking it there. */
+const menuItems = () => ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].map(b=>b.textContent)`);
+const goTab = async (name) => { await ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
+const reset = () => ev(`ui.review=null;ui.guard=null;ui.tview=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
 const groupNames = () => ev(`[...document.querySelectorAll("[data-cgroup] .dev-name span:first-child")].map(e=>e.textContent)`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 await phone(390, 844); await reset(); await goTab("Garden");
-check("Controls: there's no Controls tab", same(await ev(`[...document.querySelectorAll("#tabs button")].map(b=>b.textContent)`), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), await ev(`[...document.querySelectorAll("#tabs button")].map(b=>b.textContent)`));
-check("Controls: they sit straight under the readings", (await ev(`document.querySelector(".tiles").nextElementSibling.firstElementChild.id`)) === "controls");
+check("Controls: there's no Controls page in the menu", same(await menuItems(), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), await menuItems());
+check("Controls: History, then Device placement and Controls, as the panel has had them since #33", (await ev(`(()=>{const s=document.querySelector(".split");return s.previousElementSibling.querySelector("h2").textContent==="History"&&s.firstElementChild.querySelector("h2").textContent==="Device placement"&&s.lastElementChild.id==="controls"})()`)) === true);
 check("Controls: garden shows its climate devices and lights, and nothing else", same(await groupNames(), ["Dehumidifier", "Auxiliary dehumidifier", "Air conditioner", "Heater", "Intake fan", "Air conditioner exhaust fan", "Overhead light controller", "Overhead lights 1", "Overhead lights 2", "Under canopy light controller", "Red lights"]), await groupNames());
 check("Controls: grouped by what they do", same(await ev(`[...document.querySelectorAll("[data-cgroup] h3")].map(e=>e.textContent)`), ["Humidity", "Temperature", "Airflow", "Lights"]));
 check("Controls: humidity and temperature sit beside the live reading", (await ev(`[...document.querySelectorAll("[data-cgroup] .ctl-reading")].map(e=>e.textContent).join("|")`)).startsWith(await ev(`fmt("humidity",zones[0].now.humidity)`)), await ev(`[...document.querySelectorAll("[data-cgroup] .ctl-reading")].map(e=>e.textContent)`));
@@ -395,7 +397,6 @@ check("Controls: a dropped command is never shown as done", heater.on === true &
 await tap('[data-devrow="heater"] .sw'); await sleep(REPORT); heater = await devRow("heater");
 check("Controls: trying again works and clears the warning", heater.on === false && heater.status === "", heater);
 await goTab("Overview");
-const onCount = await ev(`document.querySelector('.zone-card[data-zone="veg"]').textContent.match(/(\\d+) of (\\d+) devices on/).slice(1).join("/")`);
 await goTab("Veg"); await tap('[data-devrow="fans"] .sw'); await sleep(REPORT);
 check("Controls: the fans report off", (await devRow("fans")).on === false, await devRow("fans"));
 await sleep(1300); let fans = await devRow("fans");
@@ -403,7 +404,7 @@ check("Controls: a failsafe putting it back is explained, not left looking broke
 await tap('[data-devrow="lp-tent"] .sw'); await sleep(REPORT); await sleep(3300); const tent = await devRow("lp-tent");
 check("Controls: a light against its schedule is put back too", tent.on === false && tent.status.startsWith("Put back"), tent);
 await goTab("Overview");
-check("Controls: Overview's device count follows what HA reports", (await ev(`document.querySelector('.zone-card[data-zone="veg"]').textContent.match(/(\\d+) of (\\d+) devices on/).slice(1).join("/")`)) === onCount);
+check("Controls: Overview counts a zone's devices, as the panel does", (await ev(`document.querySelector('.zone-card[data-zone="veg"]').textContent`)).includes("5 devices."));
 await goTab("Garden");
 await ev(`(()=>{const r=document.querySelector('[data-devrow="lc-over"] input[type=range]');r.value=60;r.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(REPORT);
 check("Controls: brightness is sent as a percentage and shown once reported", same((await haCalls()).at(-1), ["light.turn_on", "light.garden_light_controller_overhead", 60]) && (await devRow("lc-over")).text.includes("On, 60%") && (await ev(`document.querySelector('[data-devrow="lc-over"] input[type=range]').value`)) === "60", (await devRow("lc-over")).text);
@@ -521,9 +522,9 @@ await ev(`devices.find(d=>d.id==="plug").type=null;render()`);
 for (const [w, h] of [[390, 844], [320, 640]]) {
   await phone(w, h); await reset(); await goTab("Garden"); await sleep(60);
   check(`Controls ${w}px: no sideways scroll`, await ev(`document.documentElement.scrollWidth<=innerWidth`), await ev(`document.documentElement.scrollWidth`));
-  check(`Controls ${w}px: its tab is on screen`, await ev(`(()=>{const c=document.querySelector("#tabs [aria-current]").getBoundingClientRect();return c.left>=0&&c.right<=innerWidth})()`));
+  check(`Controls ${w}px: the page menu's button is on screen`, await ev(`(()=>{const c=document.querySelector(".navmenu .burger").getBoundingClientRect();return c.left>=0&&c.right<=innerWidth&&c.top>=0})()`));
   await goTab("Setup");
-  check(`Setup ${w}px: the last tab is on screen`, await ev(`(()=>{const c=document.querySelector("#tabs [aria-current]").getBoundingClientRect();return c.left>=0&&c.right<=innerWidth})()`));
+  check(`Setup ${w}px: the page menu's button is on screen`, await ev(`(()=>{const c=document.querySelector(".navmenu .burger").getBoundingClientRect();return c.left>=0&&c.right<=innerWidth&&c.top>=0})()`));
 }
 
 // ---------- Leaf temperature offset
@@ -722,7 +723,7 @@ await setupNow();
 check("Appearance: Setup offers Home Assistant, Light and Dark", same(await ev(`[...document.querySelectorAll("#appearance [data-appearance]")].map(b=>b.textContent)`), ["Home Assistant", "Light", "Dark"]));
 check("Appearance: Home Assistant is the default", (await lookOn()) === "ha");
 check("Appearance: it takes your HA primary colour, red here", (await primaryNow()) === "rgb(244, 67, 54)", await primaryNow());
-check("Appearance: the open tab follows it too", (await ev(`getComputedStyle(document.querySelector('.tabs [aria-current="page"]')).color`)) === "rgb(244, 67, 54)");
+check("Appearance: Add zone follows it too", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`)) === "rgb(244, 67, 54)", await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`));
 check("Appearance: white text on red", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).color`)) === "rgb(255, 255, 255)");
 await ev(`window.scrollTo(0,0)`); await shot("appearance-red-phone");
 await onHA(`setPrimary("")`); await sleep(100);
@@ -863,7 +864,7 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
   const hidden = [];
   for (const id of ["g-left", "g-right", "g-under"]) {
     await tap(`#lin-${id}`); await sleep(420);
-    const r = await ev(`(()=>{const e=document.querySelector("#lin-${id}").getBoundingClientRect(),bar=document.querySelector(".topbar"),head=getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0;return {top:e.top,bottom:e.bottom,head,h:innerHeight,active:document.activeElement.id}})()`);
+    const r = await ev(`(()=>{const e=document.querySelector("#lin-${id}").getBoundingClientRect(),bar=document.querySelector(".topbar"),head=bar&&getComputedStyle(bar).position==="sticky"?bar.getBoundingClientRect().bottom:0;return {top:e.top,bottom:e.bottom,head,h:innerHeight,active:document.activeElement.id}})()`);
     const line = r.h * (1 - kb);
     if (r.active !== `lin-${id}` || r.top < r.head - 1 || r.bottom > line) hidden.push([id, Math.round(r.top), Math.round(r.bottom), "limit " + Math.round(line), r.active]);
     await key("Escape", 27); await sleep(40);
@@ -875,13 +876,13 @@ await phone(320, 640); await openL(); await sleep(60);
 check("Leaf 320px: a long entity id wraps instead of widening the page", await ev(`document.documentElement.scrollWidth<=innerWidth`));
 check("Leaf: box text is 16px on touch", (await ev(`getComputedStyle(document.querySelector("[data-lin]")).fontSize`)) === "16px");
 // ---------- VPD tile: leaf link names the offset as signed degrees
-const leafLink = async () => ev(`(()=>{ui.screen="zone";ui.zone=zones[0].id;render();return document.querySelector('#main .tile [data-calw]').textContent.trim()})()`);
+const leafLink = async () => ev(`(()=>{ui.screen="zone";ui.zone=zones[0].id;render();return document.querySelector('#main .tile [data-calw]').closest(".tavg").textContent.trim()})()`);
 await ev(`window.__lk=envOf(zones[0]).map(s=>[s.leafLive,s.leaf]);envOf(zones[0]).forEach(s=>{s.leafLive=-1;s.leaf=-1})`);
-check("VPD tile: a shared offset reads as signed degrees", (await leafLink()) === "Leaf temperature offset -1.0 °C ›", await leafLink());
+check("VPD tile: a shared offset reads as signed degrees", (await leafLink()) === "Leaf temperature offset -1.0 °C. Change ›", await leafLink());
 await ev(`envOf(zones[0]).forEach(s=>{s.leafLive=0.5;s.leaf=0.5})`);
-check("VPD tile: an offset above air carries a plus", (await leafLink()) === "Leaf temperature offset +0.5 °C ›", await leafLink());
+check("VPD tile: an offset above air carries a plus", (await leafLink()) === "Leaf temperature offset +0.5 °C. Change ›", await leafLink());
 await ev(`envOf(zones[0]).forEach((s,i)=>{s.leafLive=i?-1:-0.5;s.leaf=s.leafLive})`);
-check("VPD tile: offsets that differ say per sensor", (await leafLink()) === "Leaf temperature offset per sensor ›", await leafLink());
+check("VPD tile: offsets that differ say per sensor", (await leafLink()) === "Leaf temperature offset per sensor. Change ›", await leafLink());
 await ev(`envOf(zones[0]).forEach((s,i)=>{[s.leafLive,s.leaf]=window.__lk[i]});render()`);
 // ---------- Map devices: sensor classes
 await phone(390, 844); await reset();
@@ -995,7 +996,7 @@ check("Zone: the guide runs in the order of a first setup, details done and devi
 const zeroed = (z) => ["day", "night"].every((p) => ["temperature", "humidity", "vpd"].every((k) => z.bands[p][k].every((v) => v === 0))) && z.lightLimits.dayMin === 0 && z.lightLimits.nightMax === 0 && z.dayAt === 0 && z.nightAt === 0;
 check("Zone: a new zone starts at 0, every limit day and night, both light limits and both times", (await ev(`(${zeroed})(zoneById("${newId}"))`)) === true && (await onHA(`(${zeroed})(JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${newId}"))`)) === true, await ev(`JSON.stringify([zoneById("${newId}").bands.day, zoneById("${newId}").lightLimits, zoneById("${newId}").dayAt, zoneById("${newId}").nightAt])`));
 check("Zone: it's saved straight away, description and all", (await onHA(`(JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${newId}")||{}).description`)) === "Flowering tent <b>bold</b>");
-check("Zone: it's in the tabs", (await ev(`[...document.querySelectorAll("#tabs button")].some(b=>b.textContent.startsWith("Flower <img"))`)) === true);
+check("Zone: it's in the page menu", (await menuItems()).some((t) => t.startsWith("Flower <img")));
 await shot("newzone-guide-phone");
 await cClick('[data-glater="layout"]'); await sleep(120);
 check("Zone: a step can wait, and that's saved too", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${newId}").setup.layout`)) === "later" && (await guideRows())[2] === "g-layout:Later", await guideRows());
@@ -1008,7 +1009,7 @@ for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overvie
   if (/NaN|undefined/.test(await ev(`document.querySelector("#main").textContent`))) newScreens.push(name);
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
-check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img, #tabs img")`)) === true);
+check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img")`)) === true);
 check("Zone: Continue setup stays on the row, and the menu follows the setup order, with no Sensor Calibration until it has sensors", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Map devices", "Zone layout", "Placement", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
@@ -1079,7 +1080,7 @@ await ev(`ui.screen="setup";render()`); await sleep(40);
 await ev(`document.querySelector('[data-details="veg"]').click()`); await sleep(40);
 check("Zone: an existing zone's Zone details can rename it", (await ev(`document.querySelector("#wiz-name").value`)) === "Veg" && (await nextOff()) === false && (await ev(`document.querySelector("#main h1").textContent`)) === "Zone details: Veg");
 await tap("#wiz-name"); await type("Veg north"); await wizNext(); await cClick("[data-rapply]");
-check("Zone: renaming keeps its id and everything on it", (await ev(`zoneById("veg").name`)) === "Veg north" && (await ev(`zoneById("veg").sensors.length`)) > 0 && (await ev(`[...document.querySelectorAll("#tabs button")].some(b=>b.textContent==="Veg north")`)) === true);
+check("Zone: renaming keeps its id and everything on it", (await ev(`zoneById("veg").name`)) === "Veg north" && (await ev(`zoneById("veg").sensors.length`)) > 0 && (await menuItems()).includes("Veg north"));
 await ev(`ui.screen="setup";ui.wiz=null;openWizard("garden",[1,2]);ui.wiz.step=2;ui.wiz.units=1;ui.wiz.rows=1;ui.wiz.cols=1;render()`); await sleep(40);
 check("Zone: a layout that strands a placed sensor carries on to the map", same(await ev(`[...document.querySelectorAll(".steps li")].map(e=>e.textContent)`), ["1. Size", "2. Units", "3. Sensors and devices"]) && (await ev(`document.querySelector('[data-wiz="next"]').textContent`)) === "Next", await ev(`[...document.querySelectorAll(".steps li")].map(e=>e.textContent)`));
 await wizNext();
@@ -1120,7 +1121,7 @@ check("Confirm: the review shows before and after", review.includes("Review chan
 check("Confirm: it counts what it will apply", (await ev(`document.querySelector("[data-rapply]").textContent`)) === "Apply 2 changes");
 check("Confirm: it says what follows", review.includes("follows straight away"), review);
 check("Confirm: opening it sends nothing", (await sends()).length === 0);
-check("Confirm: the page behind can't be reached", (await ev(`document.querySelector("#main").inert && document.querySelector(".topbar").inert`)) === true);
+check("Confirm: the page behind can't be reached", (await ev(`document.querySelector("#main").inert`)) === true);
 check("Confirm: focus lands in it", (await active()) === "dlg-title", await active());
 await shot("confirm-review-phone");
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await shot("confirm-review-dark"); await send("Emulation.setEmulatedMedia", { features: [] });
@@ -1471,8 +1472,12 @@ const typeLimit = async (v) => { await ev(`(()=>{const e=document.querySelector(
 const noChart = () => ev(`ui.vpdw.edit`);
 const lightNote = () => ev(`(()=>{const n=document.querySelector("#vnote-light"),b=document.querySelector("#vin-light-0"),r=n.getBoundingClientRect(),c=b.getBoundingClientRect(),row=n.closest(".vrow").getBoundingClientRect();return {text:n.textContent,same:r.top<c.bottom&&r.bottom>c.top,right:r.left>=c.right,left:r.right<=c.left,inside:r.left>=row.left&&r.right<=row.right&&r.bottom<=row.bottom,described:b.getAttribute("aria-describedby")==="vnote-light"}})()`);
 await reset(); await goTab("Garden");
-check("Limits: the zone page lists them with the other thresholds", same(await limitTables(), ["Lightlx2,000", "Lightlx200"]), await limitTables());
-await ev(`document.querySelector('[data-vpd="garden"]').click()`); await sleep(50); await period2("day");
+/* Since #33 the zone's targets are behind View targets in its heading, and Set targets there opens the page. */
+const viaTargets = async (id = "garden") => { await ev(`document.querySelector('[data-viewtargets="${id}"]').click()`); await sleep(40); await ev(`document.querySelector('[data-tset="${id}"]').click()`); await sleep(50); };
+await ev(`document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
+check("Limits: View targets lists them with the other thresholds", same(await limitTables(), ["Lightlx2,000", "Lightlx200"]), await limitTables());
+await ev(`document.querySelector("[data-tclose]").click()`); await sleep(30);
+await viaTargets(); await period2("day");
 check("Limits: Day holds the minimum, in lux, in one column, with no Target", (await limitBox()) === "2000" && (await limitCell()) === "Min" && (await ev(`[...document.querySelector('[data-vrow="light"]').children].filter(e=>!e.classList.contains("vnote")).map(e=>e.textContent).join("")`)) === "Light lxMin" && (await ev(`document.querySelector("#vin-light-0").closest("label").getBoundingClientRect().width<document.querySelector("#vin-temperature-0").closest("label").getBoundingClientRect().width*1.2`)) === true);
 { const n = await lightNote(); check("Limits: Day says what falling below the minimum means, beside the box", n.text === "Below this light level, lights are considered off or malfunctioning." && n.same && n.right && n.inside && n.described, n); }
 await shot("limits-note-day");
@@ -1507,20 +1512,22 @@ check("Limits: a zone not on helpers lists both for review", (await ev(`vpdDraft
 await clickIt("[data-rapply]"); await sleep(60);
 check("Limits: and saves them, without touching the schedule", same(await ev(`[zoneById("garden").lightLimits.dayMin,zoneById("garden").lightLimits.nightMax,zoneById("garden").dayAt,schedSends.length]`), [2500, 150, 7 * 60, await schedSent()]), await ev(`zoneById("garden").lightLimits`));
 check("Limits: no working field leaks into the saved bands", (await ev(`zoneById("garden").bands.day.light===undefined && zoneById("garden").bands.night.light===undefined`)) === true);
-check("Limits: the zone page follows", same(await limitTables(), ["Lightlx2,500", "Lightlx150"]), await limitTables());
+await ev(`ui.screen="zone";ui.zone="garden";ui.td=null;ui.sched=null;ui.vpdw=null;render();document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
+check("Limits: View targets follows", same(await limitTables(), ["Lightlx2,500", "Lightlx150"]), await limitTables());
+await ev(`document.querySelector("[data-tclose]").click()`); await sleep(30);
 await ev(`Object.assign(zoneById("garden"),{linked:true,lightLimits:{dayMin:2000,nightMax:200}});render()`);
 await reset(); await goTab("Veg");
 const vegLimit = await ev(`zoneById("veg").lightLimits.dayMin`), nurseryLimit = await ev(`zoneById("nursery").lightLimits.dayMin`);
 check("Limits: Veg and Nursery each have their own", vegLimit !== nurseryLimit, [vegLimit, nurseryLimit]);
 for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390, 844, "phone", KEYBOARD.portrait], [320, 640, "small phone", KEYBOARD.portrait], [844, 390, "landscape", KEYBOARD.landscape]]) {
-  await phone(w, h); await reset(); await goTab("Garden"); await ev(`document.querySelector('[data-vpd="garden"]').click()`); await sleep(60);
+  await phone(w, h); await reset(); await goTab("Garden"); await viaTargets(); await sleep(10);
   await tap("#vin-light-0"); await sleep(420);
   const r = await ev(`(()=>{const e=document.querySelector("#vin-light-0").getBoundingClientRect();return {bottom:e.bottom,h:innerHeight,active:document.activeElement.id}})()`);
   check(`Limits ${name} ${w}x${h}: the box stays above the keyboard`, r.active === "vin-light-0" && r.bottom <= r.h * (1 - kb), r);
   await key("Escape", 27); await sleep(40);
   check(`Limits ${name}: no sideways scroll`, await ev(`document.documentElement.scrollWidth<=innerWidth`));
   if (w >= 500) { const e = await ev(`(()=>{const i=document.querySelector("#vin-light-0");i.value="10000";const r=[i.scrollWidth,i.clientWidth];i.value=2000;return r})()`); check(`Limits ${name}: the widest value fits one column`, e[0] <= e[1], e); }
-  if (w === 800) { await ev(`document.querySelector('[data-vrow="light"]').scrollIntoView({block:"center"})`); await shot("limits-targets-foldable"); await reset(); await goTab("Garden"); await ev(`document.querySelector(".tbl-wrap").scrollIntoView({block:"center"})`); await sleep(40); await shot("limits-table-foldable"); check("Limits foldable: every table fits its card", await ev(`[...document.querySelectorAll(".tbl-wrap")].every((t)=>t.scrollWidth<=t.clientWidth)`), await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[t.scrollWidth,t.clientWidth])`)); }
+  if (w === 800) { await ev(`document.querySelector('[data-vrow="light"]').scrollIntoView({block:"center"})`); await shot("limits-targets-foldable"); await reset(); await goTab("Garden"); await ev(`document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40); await ev(`document.querySelector(".tbl-wrap").scrollIntoView({block:"center"})`); await sleep(40); await shot("limits-table-foldable"); check("Limits foldable: every table fits its card", await ev(`[...document.querySelectorAll(".tbl-wrap")].every((t)=>t.scrollWidth<=t.clientWidth)`), await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[t.scrollWidth,t.clientWidth])`)); }
 }
 for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390, 844, "phone", KEYBOARD.portrait], [320, 640, "small phone", KEYBOARD.portrait], [844, 390, "landscape", KEYBOARD.landscape]]) {
   await phone(w, h); await schedOpen("garden"); await sleep(60);
@@ -1629,7 +1636,7 @@ check("No target: an Athena stage on a zone with helpers writes them, and the pa
 const noAimDisk = await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery").bands`);
 check("No target: saved as no value in both periods", ["day", "night"].every((p) => ["temperature", "humidity", "vpd"].every((k) => noAimDisk[p][k][2] === null)), noAimDisk);
 await ev(`ui.screen="zone";ui.zone="nursery";render()`); await sleep(60);
-const noAimPage = await ev(`({ticks:document.querySelectorAll("#main .track .tick").length,tracks:document.querySelectorAll("#main .track").length,range:document.querySelector("#main .tile .range").textContent,table:document.querySelector("#main .tbl-wrap tbody tr").textContent,bad:/NaN|undefined|null/.test(document.querySelector("#main").textContent)})`);
+const noAimPage = await ev(`({ticks:document.querySelectorAll("#main .track .tick").length,tracks:document.querySelectorAll("#main .track").length,range:document.querySelector("#main .tile .range").textContent,table:(()=>{const d=document.createElement("div");d.innerHTML=targetsTable(zoneById(ui.zone));return d.querySelector("tbody tr").textContent})(),bad:/NaN|undefined|null/.test(document.querySelector("#main").textContent)})`);
 check("No target: the zone page draws its tracks without a Target tick, and shows - for it", noAimPage.ticks === 0 && noAimPage.tracks > 0 && noAimPage.range.includes("-Target") && noAimPage.table.includes("-") && !noAimPage.bad, noAimPage);
 check("No target: readings are still judged against the limits", ["ok", "low", "high", "critlow", "crithigh"].includes(await ev(`bandState(zoneById("nursery"),"temperature")`)));
 await reset(); await ev(`openVpd("nursery");render()`); await sleep(40);

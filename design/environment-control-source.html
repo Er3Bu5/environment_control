@@ -530,10 +530,6 @@ body.drafting .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 400px) { .mrow { grid-template-columns: 36px 72px minmax(0, 1fr) 62px; gap: 6px; } }
 </style>
 
-<header class="topbar">
-  <div class="bar" id="bar"></div>
-  <nav class="tabs" id="tabs" aria-label="Views"></nav>
-</header>
 <main id="main"></main>
 <div class="draftbar" id="draftbar" role="region" aria-label="Unsaved changes" hidden><span class="draft-count" id="draft-count"></span><span class="draft-text"><strong id="draft-what"></strong><span id="draft-why"></span></span><button class="draft-discard" data-ddiscard>Discard</button><button class="draft-review" data-dreview>Review and apply</button></div>
 <div class="modal" id="modal" hidden></div>
@@ -646,7 +642,7 @@ const zoneLeaf = (z) => chartLeaf(z, z.leafBasis, leafOf);
 function leafLine(z) {
   const vals = new Set(envOf(z).map(leafOf));
   const x = [...vals][0];
-  return vals.size === 1 ? `Leaf temperature offset ${x > 0 ? "+" : ""}${x.toFixed(1)} °C` : "Leaf temperature offset per sensor";
+  return vals.size === 1 ? `Leaf temperature offset ${x > 0 ? "+" : ""}${x.toFixed(1)} °C.` : "Leaf temperature offset per sensor.";
 }
 const sideName = (s) => s.short.replace(/^Env /, "").replace(/^[a-z]/, (c) => c.toUpperCase());
 function combinedNote(z) {
@@ -661,6 +657,7 @@ function avgNote(z, k) {
   const dead = envs.filter((s) => s.avg !== false && sensorValue(z, s, k) === null).map(sideName), out = envs.filter((s) => s.avg === false).map(sideName);
   return `<div class="tavg">${METHODS[methodOf(z, k)]} of ${live.length}: ${esc(parts.join(", "))}${dead.length ? `. ${esc(dead.join(", "))} has no data, left out` : ""}${out.length ? `. ${esc(out.join(", "))} not counted` : ""}</div>`;
 }
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const span = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 
 /* Wrap-safe: the veg runs 16:00 to 10:00, across midnight. */
@@ -685,7 +682,9 @@ const edge = (z) => (((isDay(z, NOW) ? z.nightAt : z.dayAt) - NOW) % 1440 + 1440
 
 /* An Overview card is a button itself, so it can't hold the link. */
 function periodBlock(z, link = true) {
-  if (!targetsSet(z)) return `<div class="period"><div class="period-top"><span><strong>Day and night not set up</strong></span>${link ? `<button class="fixlink" data-vpd="${z.id}">Set them &rsaquo;</button>` : ""}</div></div>`;
+  if (!targetsSet(z)) return `<div class="period"><div class="period-top"><span><strong>Day and night not set up</strong></span><span class="muted">Set with Targets, day and night</span></div></div>`;
+  /* Following switches has no times and no countdown: it's day when they say so. */
+  if (z.periodMode === "detected") return `<div class="period"><div class="period-top"><span><strong>${isDay(z, NOW) ? "Lights on" : "Lights off"}</strong>${z.now.light === null || z.now.light === undefined ? "" : `<span class="lux">${fmt("light", z.now.light)} lx</span>`}</span><span class="muted">Following its light switches</span></div></div>`;
   const seg = (a, b) => `<i style="left:${a / 14.4}%;width:${(b - a) / 14.4}%"></i>`;
   const lit = z.dayAt < z.nightAt ? seg(z.dayAt, z.nightAt) : seg(z.dayAt, 1440) + seg(0, z.nightAt);
   const when = z.periodMode === "detected" ? `Detected from ${z.lights.length} switch${z.lights.length > 1 ? "es" : ""}` : `${hhmm(z.dayAt)} - ${hhmm(z.nightAt)}, ${span(edge(z))} left`;
@@ -700,37 +699,37 @@ function track(z, k) {
   return `<div class="track" aria-hidden="true"><span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span>${tg === null ? "" : `<span class="tick" style="left:${x(tg)}%"></span>`}${v === null ? "" : `<span class="dot ${bandState(z, k)}" style="left:${x(v)}%"></span>`}</div>`;
 }
 
-function renderChrome() {
-  $("#bar").innerHTML = `${icon("menu")}<span>Environment Control</span><span class="sample">${DATA_LABEL}, ${hhmm(NOW)}</span>`;
-  const cur = (test) => (test ? ' aria-current="page"' : "");
-  $("#tabs").innerHTML = `<button data-go="overview"${cur(ui.screen === "overview")}>Overview</button>` +
-    zones.map((z) => `<button data-go="zone" data-zone="${z.id}"${cur(ui.screen === "zone" && ui.zone === z.id)}>${esc(z.name)}</button>`).join("") +
-    `<button data-go="devices"${cur(ui.screen === "devices")}>Devices</button><button data-go="setup"${cur(ui.screen === "setup")}>Setup</button>`;
-  const tabs = $("#tabs"), now = tabs.querySelector("[aria-current]");
-  if (now) tabs.scrollLeft = now.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - now.offsetWidth) / 2;
+/* The pages are in a menu behind one button at the top left of every page, as the panel has it since #37. The mock's
+   own data label sits at the foot of the menu, since the panel has no title bar to carry it. */
+function navMenu() {
+  const item = (label, go, zone) => { const cur = ui.screen === go && (go !== "zone" || ui.zone === zone) || (go === "zone" && ui.screen === "autos" && ui.zone === zone); return `<button role="menuitem" data-go="${go}"${zone ? ` data-zone="${zone}"` : ""}${cur ? ' aria-current="page"' : ""}>${esc(label)}</button>`; };
+  return `<nav class="zmenu navmenu" aria-label="Environment Control"><button class="btn burger" data-zmenu="nav" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-nav" aria-label="Menu">${icon("menu")}</button>
+    <div class="menu" id="zmenu-nav" role="menu" hidden>${item("Overview", "overview")}${zones.length ? `<hr>${zones.map((z) => item(z.name, "zone", z.id)).join("")}` : ""}<hr>${item("Devices", "devices")}${item("Setup", "setup")}<hr><p class="small muted navnote">${DATA_LABEL}, ${hhmm(NOW)}</p></div></nav>`;
 }
+function renderChrome() {}
 
 function renderOverview() {
-  if (!zones.length) return `<div class="wrap"><section class="card"><h2>No zones yet</h2><p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p><div class="row"><button class="btn primary add" data-addzone>${icon("plus")}Add a zone</button></div></section></div>`;
+  if (!zones.length) return `<div class="wrap"><div><h1>Overview</h1></div><section class="card"><h2>No zones yet</h2><p class="muted">Add a zone, then map its sensors and devices from Home Assistant.</p><div class="row"><button class="btn primary add" data-addzone>${icon("plus")}Add a zone</button></div></section></div>`;
   const states = zones.filter((z) => envOf(z).length).flatMap((z) => ["temperature", "humidity", "vpd"].filter((k) => !["ok", "unset"].includes(bandState(z, k))).map((k) => [`${z.name} ${M[k].short} ${ISSUE[bandState(z, k)]}`, bandState(z, k).startsWith("crit"), z.id, k]));
   const link = ([text, , id, k]) => `<button class="fixlink" data-go="zone" data-zone="${id}" data-gometric="${k}">${esc(text)} &rsaquo;</button>`;
   const group = (list, title, cls) => (list.length ? `<div class="notice ${cls}"><strong>${title}</strong>${list.map(link).join("")}</div>` : "");
-  const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : `<div class="notice calm"><strong>All zones ideal</strong></div>`;
+  const judgedAny = zones.some((z) => targetsSet(z) && envOf(z).length);
+  const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : judgedAny ? `<div class="notice calm"><strong>All zones ideal</strong></div>` : "";
   const card = (z) => {
     const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id)), on = ds.filter((d) => d.on).length;
-    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2>${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}${targetsSet(z) ? `<span class="pill plain">${period(z) === "day" ? "Day" : "Night"} band</span>` : ""}</div>${z.description ? `<p class="small muted zdesc">${esc(z.description)}</p>` : ""}
+    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2>${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}</div>${z.description ? `<p class="small muted">${esc(z.description)}</p>` : ""}
       ${periodBlock(z, false)}
       <div class="rows">${["temperature", "humidity", "vpd"].map((k) => `<div class="mrow">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="t1">${M[k].label}</div><div class="t2">${fmt(k, z.now[k])}<span>${M[k].unit}</span></div></div>${track(z, k)}<div class="pillcell">${statePill(bandState(z, k))}</div></div>`).join("")}
         <div class="mrow">${ic(M.light.icon, `var(${M.light.c})`)}<div><div class="t1">${M.light.label}</div><div class="t2">${fmt("light", z.now.light)}<span>${M.light.unit}</span></div></div>${lightSpark(z)}</div></div>
-      ${combinedNote(z)}<p class="small muted">${on} of ${ds.length} devices on. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed.</p></button>`;
+      ${combinedNote(z)}<p class="small muted">${plural(ds.length, "device")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></button>`;
   };
-  return `<div class="wrap">${banner}<div class="cards">${zones.map(card).join("")}</div></div>`;
+  return `<div class="wrap"><div><h1>Overview</h1></div>${banner}<div class="cards">${zones.map(card).join("")}</div></div>`;
 }
 
 function tile(z, k) {
   const b = k === "light" ? null : z.bands[period(z)][k];
   return `<div class="tile"><div class="tile-top">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="name">${M[k].label}</div><div class="val">${fmt(k, z.now[k])} <small>${M[k].unit}</small></div></div></div>
-    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<button class="fixlink small" data-calw="${z.id}">${esc(leafLine(z))} &rsaquo;</button>` : ""}</div>${b && !targetsSet(z) ? `${track(z, k)}<button class="fixlink small" data-vpd="${z.id}">Targets not set up yet &rsaquo;</button>` : b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i] === null ? "-" : b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
+    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<div class="tavg">${esc(leafLine(z))} <button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div>` : ""}</div>${b && !targetsSet(z) ? `${track(z, k)}<div><button class="fixlink small" data-vpd="${z.id}">Targets not set up yet &rsaquo;</button></div><div></div>` : b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i] === null ? "-" : b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
 }
 
 /* Light as the HA dashboard shows it: name, value, then a 4 hour line running black to yellow between 1210 and 2120 lx. */
@@ -750,8 +749,8 @@ function lightSvg(id, name, pts, H, cls) {
       <path d="${line}L${W} ${H}L0 ${H}Z" fill="url(#${id})" opacity=".22"/><path d="${line}" fill="none" stroke="url(#${id})" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
 }
 function lightCard(id, name, pts) {
-  return `<div class="lcard"><div class="lname">${esc(name)}</div><div class="lval">${Math.round(pts[48]).toLocaleString("en-NZ")} <small>lx</small></div>
-    ${lightSvg(id, name, pts, 60, "")}</div>`;
+  return `<div class="lcard"><div class="name">${esc(name)}</div><div class="val">${Math.round(pts[48]).toLocaleString("en-NZ")} <small>lx</small></div>
+    ${lightSvg(id, name, pts, 60, "lline")}</div>`;
 }
 /* The zone's combined light over 4 hours, the one line both the zone's light card and Overview draw. */
 function lightLine(z) {
@@ -763,7 +762,7 @@ function lightLine(z) {
 }
 function lightCards(z) {
   const l = lightLine(z);
-  return l ? lightCard(`lg-${z.id}`, l.name, l.pts) : `<div class="lcard"><div class="lname">Light</div><div class="lval">-- <small>lx</small></div></div>`;
+  return l ? lightCard(`lg-${z.id}`, l.name, l.pts) : `<div class="lcard"><div class="name">Light</div><div class="val">-- <small>lx</small></div></div>`;
 }
 function lightSpark(z) {
   const l = lightLine(z);
@@ -837,7 +836,7 @@ function drawMarks(sensors, g, attrsFor, picked) {
   }).join("");
 }
 /* The key shows every class, so a mark can be read without tapping it. */
-const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span>${Object.entries(LEVELS).map(([k, n]) => `<span>${mk({ icon: "chip", c: LEVEL_COLOR[k], fill: true })}Sensor, ${n.toLowerCase()}</span>`).join("")}${Object.values(CLASS_LOOK).map((k) => `<span>${mk(k)}${k.label}</span>`).join("")}<span>${mk({ icon: "plug", c: "var(--muted)" })}Not said what it is</span><span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
+const keyHtml = `<div class="key"><span><i style="border:1px solid var(--off);border-radius:50%;background:var(--tile)"></i>Unit</span>${Object.entries(LEVELS).map(([k, n]) => `<span>${mk({ icon: "chip", c: LEVEL_COLOR[k], fill: true })}Sensor, ${n.toLowerCase()}</span>`).join("")}${Object.values(CLASS_LOOK).map((k) => `<span>${mk(k)}${k.label}</span>`).join("")}<span>${mk({ icon: "plug", c: "var(--muted)" })}Unknown device type</span><span>${mk({ icon: "cube", c: "var(--muted)", dash: true })}Virtual device</span><span><i style="border:2px solid var(--muted);background:none"></i>Wall</span></div>`;
 /* Devices have no height, so the height filter shows them only under All. */
 function mapHtml(z) {
   const shown = z.sensors.filter((s) => ui.level === "all" || s.level === ui.level), devs = ui.level === "all" ? devMarks(z) : [];
@@ -1036,17 +1035,17 @@ function renderZone() {
   const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
   const left = setupLeft(z);
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Not set up yet. Still to confirm: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
-  return `<div class="wrap"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units</p></div>
+  /* Since #33: History, then Device placement and Controls. The targets moved behind View targets in the heading. */
+  return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div><button class="btn" data-viewtargets="${z.id}">View targets</button></div>
     ${unfinished}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
-    <div class="split">
-      ${controlsCard(z)}
-      <section class="card"><div class="card-head"><h2>Placement</h2>${seg("data-level", ui.level, [["all", "All"], ...Object.entries(LEVELS)], "Height")}</div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
-    </div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div></section>
-    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div>${activityList(z)}</section>
-    <section class="card"><div class="card-head"><h2>Targets</h2><div class="row"><button class="btn" data-vpd="${z.id}">Set targets</button></div></div>${targetsTable(z)}</section></div>`;
+    <div class="split">
+      <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
+      ${controlsCard(z)}
+    </div>
+    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</section></div>`;
 }
 
 /* Seeded so a redraw keeps the same line. */
@@ -1664,7 +1663,8 @@ function vReveal() {
   const row = a.closest(".vrow, .lfield, .field").getBoundingClientRect(), h = vViewHeight();
   const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
   const edge = h < vFull.h * 0.8 ? h : assumed;
-  const head = getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
+  /* No sticky bar since the page menu replaced it, so nothing covers the top of the window. */
+  const head = bar && getComputedStyle(bar).position === "sticky" ? bar.getBoundingClientRect().bottom : 0;
   window.scrollBy(0, row.top - Math.max(head + 8, edge - row.height - 8));
 }
 function vSelect(input) {
@@ -2621,7 +2621,13 @@ function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes
 }
 /* Removing a zone can't be undone, so its name has to be typed first, exactly, as GitHub asks before deleting a repository. */
 const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm") || {}).value === ui.guard.confirm;
+function targetsDialog(z) {
+  return `<div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Targets: ${esc(z.name)}</h2>
+    <div class="review-scroll">${targetsSet(z) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
+    <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
+}
 function modalHtml() {
+  if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   const g = ui.guard;
   if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="row"><button class="btn" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="btn danger" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
@@ -2635,7 +2641,7 @@ function modalHtml() {
 }
 let modalOpener = null;
 function renderModal() {
-  const box = $("#modal"), open = !!(ui.guard || ui.review), wasOpen = !box.hidden;
+  const box = $("#modal"), open = !!(ui.guard || ui.review || ui.tview), wasOpen = !box.hidden;
   if (open && !wasOpen) modalOpener = document.activeElement;
   box.hidden = !open;
   box.innerHTML = open ? modalHtml() : "";
@@ -2645,7 +2651,7 @@ function renderModal() {
 }
 function closeModal() {
   if (ui.review && ui.review.busy) return;
-  ui.guard = null; ui.review = null;
+  ui.guard = null; ui.review = null; ui.tview = null;
   renderModal();
 }
 
@@ -2654,7 +2660,10 @@ function render() {
   refreshReadings();
   renderChrome();
   document.body.classList.remove("vtyping");
-  $("#main").innerHTML = { overview: renderOverview, zone: renderZone, devices: renderDevices, setup: renderSetup }[ui.screen]();
+  const screen = { overview: renderOverview, zone: renderZone, devices: renderDevices, setup: renderSetup }[ui.screen];
+  $("#main").innerHTML = screen();
+  const wrap = $("#main .wrap");
+  if (wrap) wrap.insertAdjacentHTML("afterbegin", navMenu());
   drawChart();
   draftSync();
 }
@@ -2697,6 +2706,12 @@ document.addEventListener("click", (e) => {
   /* iOS can leave a box focused when a button is tapped, so its change event never comes. Commit it before acting on the button. */
   if (ui.vpdw && q("button")) vCommitActive();
   if (ui.wiz && q("button") && typedBox(document.activeElement)) document.activeElement.blur();
+  if (ui.tview) {
+    if ((el = q("[data-tset]"))) { const id = el.dataset.tset; ui.tview = null; renderModal(); openTd(id); ui.screen = "setup"; render(); window.scrollTo(0, 0); return; }
+    if (q("[data-tclose]") || !q(".dialog")) closeModal();
+    return;
+  }
+  if ((el = q("[data-viewtargets]"))) { ui.tview = el.dataset.viewtargets; renderModal(); return; }
   if (ui.guard || ui.review) {
     if (q("[data-gdiscard]")) { if (!guardConfirmed()) return; const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
     if (q("[data-rapply]")) { applyReview(); return; }
