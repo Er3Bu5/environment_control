@@ -802,7 +802,7 @@ const beyondWall = (p, L) => p[0] < -0.5 || p[0] > L.rows - 0.5 || p[1] < -0.5 |
 function baseMap(L, g) {
   let s = `<rect x="${g.wx}" y="${g.wy}" width="${g.W - g.wx * 2}" height="${g.H - g.wy * 2}" rx="4" fill="none" stroke="var(--muted)" stroke-width="2"><title>Wall</title></rect>`;
   for (let r = 0.5; r < L.rows - 0.5; r++) s += `<line x1="${g.wx}" x2="${g.W - g.wx}" y1="${g.Y(r)}" y2="${g.Y(r)}" stroke="var(--line)" stroke-dasharray="4 5"/>`;
-  for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) s += `<circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${g.X(c)}" y="${g.Y(r) + 5}" text-anchor="middle" fill="var(--muted)">${r * L.cols + c + 1}</text>`;
+  for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) if (planted(L, r, c)) { const n = r * L.cols + c + 1, label = (L.labels || {})[n]; s += `<circle cx="${g.X(c)}" cy="${g.Y(r)}" r="${g.R}" fill="var(--tile)" stroke="var(--off)"/><text x="${g.X(c)}" y="${g.Y(r) + 5}" text-anchor="middle" fill="var(--muted)"${label ? ' font-size="11"' : ""}>${esc(label || n)}</text>`; }
   return s;
 }
 /* A device mark is outlined rather than filled, because fill colour on the map means a sensor's height. A virtual device's
@@ -2442,11 +2442,11 @@ function renderTd() {
 /* A new zone is set up a step at a time, and every step can wait. What's left shows on Setup and on the zone's page until it's done. */
 const SETUP_STEPS = [
   ["details", "Zone details", "Its name, and a description if you want one.", (z) => `<button class="btn" data-details="${z.id}">Zone details</button>`, () => ""],
-  ["devices", "Map devices", "Pick its sensors and devices from Home Assistant.", (z) => `<button class="btn" data-mapw="${z.id}">Map devices</button>`, () => ""],
+  ["devices", "Device identification", "Pick its sensors and devices from Home Assistant.", (z) => `<button class="btn" data-mapw="${z.id}">Device identification</button>`, () => ""],
   ["layout", "Zone layout", "Its size, and how many units it holds in what grid.", (z) => `<button class="btn" data-layout="${z.id}">Zone layout</button>`, () => ""],
-  ["place", "Placement", "Put its sensors on the map at their height, and any devices you want to see there.", (z) => `<button class="btn" data-wizard="${z.id}" data-wstep="3">Placement</button>`, (z) => (z.sensors.length || placeable(z).length ? "" : "Needs sensors from Map devices")],
-  ["calibrate", "Sensor Calibration", "Each sensor's leaf temperature offset. One kept here starts at 0.", (z) => `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>`, (z) => (envOf(z).length ? "" : "Needs sensors from Map devices")],
-  ["targets", "Targets, day and night", "When it's day, and the limits its readings are judged against. All start at 0, and readings aren't judged until this is confirmed.", (z) => `<button class="btn" data-vpd="${z.id}">Targets, day and night</button>`, () => ""],
+  ["place", "Device placement", "Put its sensors on the map at their height, and any devices you want to see there.", (z) => `<button class="btn" data-wizard="${z.id}" data-wstep="3">Device placement</button>`, (z) => (z.sensors.length || placeable(z).length || virtualOf(z).length ? "" : "Needs sensors from Device identification")],
+  ["calibrate", "Sensor Calibration", "Each sensor's leaf temperature offset.", (z) => `<button class="btn" data-calw="${z.id}">Sensor Calibration</button>`, (z) => (envOf(z).length ? "" : "Needs sensors from Device identification")],
+  ["targets", "Targets, day and night", "When it's day, and the limits its readings are judged against. Readings aren't judged until this is confirmed.", (z) => `<button class="btn" data-vpd="${z.id}">Targets, day and night</button>`, () => ""],
 ];
 const setupLeft = (z) => (z && z.setup ? SETUP_STEPS.filter(([k]) => z.setup[k] !== "done") : []);
 function renderGuide() {
@@ -2454,15 +2454,14 @@ function renderGuide() {
   const next = (SETUP_STEPS.find(([k, , , , needs]) => z.setup[k] === "todo" && !needs(z)) || [])[0];
   const rows = SETUP_STEPS.map(([k, title, text, open, needs], i) => {
     const state = z.setup[k], blocked = needs(z);
-    const pill = state === "done" ? '<span class="pill ok">Done</span>' : state === "later" ? '<span class="pill plain">Later</span>' : blocked ? `<span class="pill dead">${esc(blocked)}</span>` : "";
+    const pill = state === "done" ? '<span class="pill ok">Done</span>' : blocked ? `<span class="pill dashed">${esc(blocked)}</span>` : state === "later" ? '<span class="pill plain">Later</span>' : "";
     const button = blocked ? "" : open(z).replace('class="btn"', `class="btn${k === next ? " primary" : ""}"`);
     const later = state === "todo" ? `<button class="btn" data-glater="${k}">Later</button>` : "";
-    const left = k === "place" && state === "done" ? unplaced(z) : [];
-    const extra = left.length ? ` <span class="g-unplaced">${unplacedWords(left)}: ${esc(left.map((d) => d.name).join(", "))}. That's fine, placing them is optional.</span>` : "";
-    return `<div class="task" id="g-${k}"${k === next ? ' aria-current="step"' : ""}><div><strong>${i + 1}. ${title}</strong><p class="small muted">${text}${extra}</p></div><div class="row">${pill}${button}${later}</div></div>`;
+    return `<div class="task" id="g-${k}"${k === next ? ' aria-current="step"' : ""}><div><strong>${i + 1}. ${title}</strong><p class="small muted">${text}</p></div><div class="row">${pill}${button}${later}</div></div>`;
   }).join("");
   return `<div class="wrap"><div><h1>Set up ${esc(z.name)}</h1><p class="muted small">${esc(z.name)} is saved, with everything at 0 and marked not set up. Each step counts as done once you've been through it and confirmed it, even if you change nothing. Any step can wait: what's left shows on Setup and on its page.</p></div>
-    <section class="card"><div>${rows}</div><div class="row"><button class="btn" data-gfinish>${setupLeft(z).length ? "Finish for now" : "Done"}</button></div></section></div>`;
+    <section class="card"><div>${rows}</div>
+    <div class="draftbar wizbar" role="region" aria-label="Page buttons" data-bare><span class="draft-text"></span><button class="draft-discard" data-gfinish>${setupLeft(z).length ? "Finish for now" : "Done"}</button>${next ? `<button class="draft-review" data-gcontinue="${next}">Continue</button>` : ""}</div></section></div>`;
 }
 async function markSetup(id, step, state) {
   const z = zoneById(id);
@@ -2524,7 +2523,8 @@ function suggestGrid(n, w, d) {
   }
   return best;
 }
-const wizLayout = (w) => ({ w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols });
+/* Unit labels are optional, by unit number, and a label for a unit past the count is dropped. */
+const wizLayout = (w) => { const labels = Object.fromEntries(Object.entries(w.labels || {}).filter(([n, t]) => Number(n) <= w.units && String(t).trim()).map(([n, t]) => [n, String(t).trim()])); return { w: w.w, d: w.d, units: w.units, rows: w.rows, cols: w.cols, ...(Object.keys(labels).length ? { labels } : {}) }; };
 /* Anything can go on any spot inside the wall: a unit, between units, an empty unit's spot, an aisle, or between the outer
    units and the wall. Only devices, real or virtual, go outside it: a sensor there would be measuring the room, not the
    zone, and would quietly pull the zone's reading towards the room's. */
@@ -2555,14 +2555,14 @@ const wizItem = (w, id) => w.sensors.find((s) => s.id === id) || w.devs.find((d)
 /* Zone details, Zone layout and Placement are one wizard opened at different steps: 0 is the name and description, 1 the
    size, 2 the units and grid, 3 the map. A layout that strands something carries on to the map, because it can't save
    with a sensor or virtual device left off it. */
-const WIZ_STEP = { 0: "Zone details", 1: "Size", 2: "Units", 3: "Sensors and devices" };
+const WIZ_STEP = { 0: "Zone details", 1: "Size", 2: "Units and labels", 3: "Sensors and devices" };
 const WIZ_KEY = { 0: "details", 1: "layout", 3: "place" };
 const wizFlow = (w) => (w.flow.includes(2) && w.id && (w.step === 3 || [...w.sensors, ...w.virt].some((s) => s.pos && !fits(s, w))) ? [...w.flow, 3] : w.flow);
 function openWizard(id, flow = [3]) {
   const z = zoneById(id);
   ui.wiz = { id, flow, name: z.name, desc: z.description || "", step: flow[0], ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
     devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
-    virt: virtualOf(z).map((v) => ({ ...v, kind: "virtual", pos: [...v.pos] })), vname: "", vissue: "", pick: null };
+    virt: virtualOf(z).map((v) => ({ ...v, kind: "virtual", pos: v.pos ? [...v.pos] : null })), labels: { ...(z.layout.labels || {}) }, vname: "", vissue: "", pick: null };
 }
 function openNewZone() {
   ui.wiz = { id: null, flow: [0], name: "", desc: "", step: 0, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
@@ -2616,9 +2616,9 @@ async function removeZone(id) {
 function renderWizard() {
   const w = ui.wiz, lost = stranded(w), lostS = lost.filter((s) => s.kind !== "virtual"), lostV = lost.filter((s) => s.kind === "virtual"), movedOff = w.devs.filter((d) => d.pos && !fits(d, w)), nameIssue = zoneNameIssue(w), called = w.name.trim();
   const flow = wizFlow(w), at = flow.indexOf(w.step), last = at === flow.length - 1;
-  const steps = flow.length > 1 ? `<ol class="steps">${flow.map((n, i) => `<li${i === at ? ' aria-current="step"' : ""}>${i + 1}. ${WIZ_STEP[n]}</li>`).join("")}</ol>` : "";
+  const steps = flow.length > 1 ? stepsHead(flow.map((n) => WIZ_STEP[n]), at, "data-wgo") : "";
   let body = "";
-  if (w.step === 0) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}"></label></div>
+  if (w.step === 0) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}" aria-describedby="wiz-name-why"></label></div><div class="lstatus" id="wiz-name-why" role="status">${nameIssue && called ? esc(nameIssue) : ""}</div>
     <label class="field" for="wiz-desc">Description, optional<textarea id="wiz-desc" data-wbox="desc" rows="3" maxlength="200" enterkeyhint="done" placeholder="For example Flowering tent by the window">${esc(w.desc)}</textarea></label>
     ${w.id ? "" : `<p class="small muted">Size and units come later, after its devices are mapped.</p>`}`;
   if (w.step === 1) body = `<p class="muted">Measure the inside of the zone.</p><div class="fields">
@@ -2630,6 +2630,8 @@ function renderWizard() {
     <button class="btn" data-suggest>Suggest a grid</button></div>
     <p class="small muted">Each circle is one unit. Units sit about ${(w.w / w.cols).toFixed(2)} x ${(w.d / w.rows).toFixed(2)} m apart.</p>
     <div class="map"><svg viewBox="0 0 ${geom(w).W} ${geom(w).H}" role="img" aria-label="${w.units} units in ${w.rows} rows">${baseMap(wizLayout(w), geom(w))}</svg></div>
+    ${w.units >= 1 && w.units <= 200 && w.rows * w.cols >= w.units ? `<div class="ulabels"><h2>Unit labels</h2><p class="small muted">Optional. Type a short name for a unit, such as the plant in it, into the box with its number. The map shows it in place of the number.</p>
+      <div class="ugrid-wrap"><div class="ugrid" style="grid-template-columns:repeat(${w.cols}, minmax(72px, 1fr))">${Array.from({ length: w.rows * w.cols }, (_, i) => i + 1).map((n) => (n > w.units ? "<span></span>" : `<input type="text" data-wlabel="${n}" aria-label="Label for unit ${n}" placeholder="${n}" maxlength="12" autocomplete="off" enterkeyhint="next" value="${esc((w.labels || {})[n] || "")}">`)).join("")}</div></div></div>` : ""}
     ${w.rows * w.cols >= w.units ? "" : `<div class="notice"><strong>Too few spaces</strong><span>This grid holds ${w.rows * w.cols} units, and you have ${w.units}.</span></div>`}
     ${lostS.length ? `<div class="notice"><strong>${lostS.length} sensor${lostS.length > 1 ? "s" : ""} no longer fit${lostS.length > 1 ? "" : "s"}</strong><span>${esc(lostS.map((s) => s.name).join(", "))}. You'll place ${lostS.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}
     ${lostV.length ? `<div class="notice"><strong>${lostV.length} virtual device${lostV.length > 1 ? "s" : ""} no longer fit${lostV.length > 1 ? "" : "s"}</strong><span>${esc(lostV.map((s) => s.name).join(", "))}. You'll place ${lostV.length > 1 ? "them" : "it"} again in the next step.</span></div>` : ""}
@@ -2648,37 +2650,42 @@ function renderWizard() {
     let spots = "";
     if (sel) { const e = reach(sel); for (let r = -e; r <= L.rows - 1 + e; r += 0.5) for (let c = -e; c <= L.cols - 1 + e; c += 0.5) spots += planted(L, r, c) ? unitSpot(r, c) : plus(r, c); }
     const attrsFor = (s) => `role="button" tabindex="0" data-pick="${s.id}" aria-label="Select ${esc(s.name)}"`;
-    const where = (s, missing) => (fits(s, L) ? `<span class="small muted">${esc(posText(s.pos, L))}</span>` : missing);
+    const where = (s, missing) => (!fits(s, L) ? missing : s.kind === "env" && !s.level ? '<span class="pill high">Needs a height</span>' : `<span class="small muted">${esc(posText(s.pos, L))}</span>`);
     const list = w.sensors.map((s) => `<button class="sensor-opt" data-pick="${s.id}" aria-pressed="${w.pick === s.id}"><span class="opt-name">${mk(look(s))}${esc(s.name)}</span>${where(s, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const devList = w.devs.map((d) => `<button class="sensor-opt" data-pick="${d.id}" aria-pressed="${w.pick === d.id}"><span class="opt-name">${mk(look(d))}${esc(d.name)}</span>${where(d, '<span class="pill plain">Not placed</span>')}</button>`).join("");
-    const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span class="opt-name">${mk(look(v))}${esc(v.name)}</span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
+    const virtList = w.virt.map((v) => `<button class="sensor-opt" data-pick="${v.id}" aria-pressed="${w.pick === v.id}"><span class="opt-name">${mk(look(v))}${esc(v.name)} <span class="small muted">${esc(v.type || "Other")}</span></span>${where(v, '<span class="pill high">Needs placing</span>')}</button>`).join("");
     const left = devsOff(w);
     const prompt = !sel ? "Pick a sensor or device." : free ? `Tap a unit or any +, inside the wall or outside it, for ${esc(sel.name)}.` : `Tap a unit or any + inside the wall for ${esc(sel.name)}.`;
-    const height = !sel || free ? "" : `<div class="seg" role="group" aria-label="Height of ${esc(sel.name)}">${["above", "in", "under"].map((k) => `<button data-wizlevel="${k}" aria-pressed="${sel.level === k}">${LEVELS[k]}</button>`).join("")}</div>`;
-    const offMap = sel && sel.kind === "device" && fits(sel, L) ? `<div class="now"><strong>On the map</strong><button class="btn" data-wunplace>Take ${esc(sel.name)} off the map</button></div>`
-      : sel && sel.kind === "virtual" ? `<div class="now"><strong>Virtual device</strong><button class="btn" data-vremove>Remove ${esc(sel.name)}</button></div>` : "";
+    const height = !sel || free ? "" : chips(`Height of ${sel.name}`, `level-${sel.id}`, Object.entries(LEVELS), sel.level || "", "data-wizlevel");
+    const offMap = sel && sel.kind === "device" && fits(sel, L) ? `<div class="now"><strong>On the map</strong><button class="btn" data-wunplace>Take ${esc(sel.name)} off the map</button></div>` : "";
     const devNotice = left.length ? `<div class="notice" id="wiz-unplaced"><strong>${unplacedWords(left)}</strong><span>${esc(left.map((d) => d.name).join(", "))}. They don't need to be: placing a device is optional, and only placed devices show on ${esc(called)}'s map.</span></div>` : "";
-    const addVirtual = `<div class="small muted">Virtual devices, not in Home Assistant</div>${virtList ? `<div class="sensor-list">${virtList}</div>` : ""}
-      <p class="small muted">Something worth seeing on the map that Home Assistant doesn't have, like a drain tank. It's only drawn: nothing reads or controls it.</p>
-      <div class="row vadd"><label class="field" for="wiz-vname">Add a virtual device<input id="wiz-vname" type="text" maxlength="40" enterkeyhint="done" autocomplete="off" placeholder="For example Drain tank" value="${esc(w.vname)}" aria-invalid="${!!w.vissue}" aria-describedby="wiz-vissue"></label><button class="btn" data-vadd>Add</button></div>
-      <p class="small" id="wiz-vissue" role="status">${esc(w.vissue)}</p>`;
-    body = `${w.sensors.length ? `<div class="small muted">Sensors</div><div class="sensor-list">${list}</div>` : `<div class="notice"><strong>No sensors yet</strong><span>Map devices picks ${esc(called)}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
+    /* Since #36 Device placement only places: sensors, devices and virtual devices are added and named in Device identification. */
+    const addVirtual = `${virtList ? `<div class="small muted">Virtual devices, not in Home Assistant</div><div class="sensor-list">${virtList}</div>` : ""}
+      <div class="row"><button class="btn" data-weditdevs>Add or edit devices</button><span class="small muted">Sensors, devices and virtual devices are added, named and removed in Device identification.</span></div>`;
+    body = `${w.sensors.length ? `<div class="small muted">Sensors</div><div class="sensor-list">${list}</div>` : `<div class="notice"><strong>No sensors yet</strong><span>Device identification picks ${esc(called)}'s sensors from Home Assistant. Devices can be placed now.</span></div>`}
       ${w.devs.length ? `<div class="small muted">Devices, optional</div><div class="sensor-list">${devList}</div>` : ""}${addVirtual}
       <div class="now"><strong>${prompt}</strong></div>
       <div class="map"><svg viewBox="0 0 ${g.W} ${g.H}" role="group" aria-label="Places for ${sel ? esc(sel.name) : "a sensor or device"}">${baseMap(L, g)}${spots}${drawMarks(placedOk, g, attrsFor, w.pick)}</svg></div>
-      ${height ? `<div class="now"><strong>Height</strong>${height}</div>` : ""}${offMap}${keyHtml}${devNotice}`;
+      ${height ? `<div class="now">${height}</div>` : ""}${offMap}${keyHtml}${devNotice}`;
   }
-  const blocked = (w.step === 3 && lost.length > 0) || (w.step === 0 && !!nameIssue);
-  const saveLabel = wizDraft(w).items.length ? "Review and apply" : w.flow[0] !== 3 || w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Map devices";
-  const fix = w.step === 0 ? `<button class="fixlink" id="wiz-name-fix" data-wfixname${nameIssue ? "" : " hidden"}>${esc(nameIssue)} &rsaquo;</button>` : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : "";
-  return `<div class="wrap"><div><h1 id="wiz-title">${w.id ? `${{ 0: "Zone details", 1: "Zone layout", 3: "Placement" }[w.flow[0]]}: ${esc(zoneById(w.id).name)}` : "Add a zone"}</h1></div><section class="card">${steps}${body}
-    <div class="row"><button class="btn" data-wiz="back">${at === 0 ? "Cancel" : "Back"}</button><button class="btn primary" data-wiz="next"${blocked ? " disabled" : ""}>${last ? saveLabel : "Next"}</button>${fix}</div></section></div>`;
+  /* An environment sensor needs a height to save, since its height decides where it reads (#36). */
+  const heightless = w.step === 3 ? w.sensors.filter((x) => x.kind === "env" && fits(x, wizLayout(w)) && !x.level) : [];
+  const blocked = (w.step === 3 && (lost.length > 0 || heightless.length > 0)) || (w.step === 0 && !!nameIssue);
+  const changes = wizDraft(w).items.length;
+  const saveLabel = changes ? "Review and apply" : w.flow[0] !== 3 || w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Device identification";
+  const fix = w.step === 0 ? (nameIssue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(nameIssue)} &rsaquo;</button>` : "") : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : heightless.length ? `<button class="fixlink" data-pick="${heightless[0].id}">Set ${esc(heightless[0].name)}'s height to save &rsaquo;</button>` : "";
+  const title = w.id ? (w.flow[0] === 0 ? "Zone details" : `${{ 1: "Zone layout", 3: "Device placement" }[w.flow[0]]}: ${esc(zoneById(w.id).name)}`) : "Add zone";
+  return `<div class="wrap"><div><h1 id="wiz-title">${title}</h1></div><section class="card">${steps}${body}
+    ${wizBar({ where: flow.length > 1 ? `Step ${at + 1} of ${flow.length}` : "", back: at === 0 ? "Cancel" : "Back", next: last ? saveLabel : "Next", blocked, changes, fix, attr: "data-wiz" })}</section></div>`;
 }
 /* Updates in place, so typing a name keeps the phone keyboard open. */
+/* A name that can't be used is said under its box and in the bar, since on a touch screen the bar is out of the way while typing. */
 function wizNameSync(input) {
-  const w = ui.wiz, issue = zoneNameIssue(w), fix = $("#wiz-name-fix");
-  input.setAttribute("aria-invalid", String(!!issue && !!w.name.trim()));
-  fix.hidden = !issue; fix.textContent = `${issue} \u203a`;
+  const w = ui.wiz, issue = zoneNameIssue(w), typed = !!w.name.trim();
+  input.setAttribute("aria-invalid", String(!!issue && typed));
+  $("#wiz-name-why").textContent = issue && typed ? issue : "";
+  const bar = $("#main .wizbar");
+  if (bar) { bar.querySelector(".draft-text").innerHTML = issue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(issue)} &rsaquo;</button>` : ""; bar.toggleAttribute("data-blocked", !!issue); bar.toggleAttribute("data-bare", !issue); }
   $('[data-wiz="next"]').disabled = !!issue;
 }
 
@@ -2798,7 +2805,8 @@ function wizDraft(w) {
   const size = (x) => `${x.w} x ${x.d} m`, units = (x) => String(x.units), grid = (x) => `${x.rows} rows, ${x.cols} columns`;
   add("Zone name", z ? z.name : "New zone", w.name.trim());
   add("Description", (z && z.description) || "None", w.desc.trim() || "None");
-  if (z) { add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L)); }
+  const labelWords = (x) => Object.entries((x && x.labels) || {}).map(([n, t]) => `${n}: ${t}`).join(", ") || "None";
+  if (z) { add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L)); add("Unit labels", labelWords(z.layout), labelWords(L)); }
   for (const s of w.sensors) {
     const old = z && z.sensors.find((x) => x.id === s.id), where = (p, g) => (p ? posText(p, g) : "Not placed");
     if (old) { add(`${s.name} position`, where(old.pos, z.layout), where(s.pos, L)); add(`${s.name} height`, LEVELS[old.level], LEVELS[s.level]); }
@@ -2809,7 +2817,7 @@ function wizDraft(w) {
   }
   for (const v of w.virt) {
     const was = z && virtualOf(z).find((x) => x.id === v.id);
-    add(`${v.name}, virtual`, was ? posText(was.pos, z.layout) : "Not added", fits(v, L) ? posText(v.pos, L) : "Not placed");
+    add(`${v.name}, virtual`, was ? (was.pos ? posText(was.pos, z.layout) : "Not placed") : "Not added", fits(v, L) ? posText(v.pos, L) : "Not placed");
   }
   for (const v of z ? virtualOf(z) : []) if (!w.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, posText(v.pos, z.layout), "Removed");
   const left = devsOff(w);
@@ -2822,7 +2830,8 @@ async function saveWizard(w, said) {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
     if (w.desc.trim()) z.description = w.desc.trim(); else delete z.description;
-    const virt = w.virt.filter((v) => fits(v, L)).map((v) => ({ id: v.id, name: v.name, pos: [...v.pos] }));
+    /* A virtual device keeps its type, and one added in Device identification may wait for a spot (#36). */
+    const virt = w.virt.map((v) => ({ id: v.id, name: v.name, type: v.type || "Other", ...(fits(v, L) ? { pos: [...v.pos] } : {}) }));
     if (virt.length) z.virtual = virt; else delete z.virtual;
     for (const wd of w.devs) {
       const d = devices.find((x) => x.id === wd.device); if (!d) continue;
@@ -3022,6 +3031,7 @@ document.addEventListener("click", (e) => {
   }
   if ((el = q("[data-guide]"))) { const id = el.dataset.guide; guarded(() => { Object.assign(ui, { guide: { id }, screen: "setup", wiz: null, mapw: null, vpdw: null, leafw: null, sched: null, td: null }); render(); window.scrollTo(0, 0); }); return; }
   if ((el = q("[data-glater]"))) { markSetup(ui.guide.id, el.dataset.glater, "later"); return; }
+  if ((el = q("[data-gcontinue]"))) { const b = document.querySelector(`#g-${el.dataset.gcontinue} .row .btn.primary`); if (b) b.click(); return; }
   if (q("[data-gfinish]")) { const id = ui.guide.id; ui.guide = null; ui.screen = "zone"; ui.zone = id; render(); window.scrollTo(0, 0); return; }
   if ((el = q("[data-metric]"))) { ui.metric = el.dataset.metric; render(); return; }
   if ((el = q("[data-range]"))) { ui.range = Number(el.dataset.range); render(); return; }
@@ -3123,9 +3133,8 @@ document.addEventListener("click", (e) => {
   if (q("[data-suggest]")) { [w.rows, w.cols] = suggestGrid(w.units, w.w, w.d); render(); return; }
   /* The list can be long, so a pick brings the map into view for the tap that places it. */
   if ((el = q("[data-pick]"))) { w.pick = el.dataset.pick; render(); const map = $("#main .map"); if (map) map.scrollIntoView({ block: "nearest" }); return; }
-  if ((el = q("[data-wizlevel]"))) { const s = w.sensors.find((x) => x.id === w.pick); if (s) { s.level = el.dataset.wizlevel; render(); } return; }
-  if (q("[data-vadd]")) { addVirtual(w); return; }
-  if (q("[data-vremove]")) { w.virt = w.virt.filter((v) => v.id !== w.pick); w.pick = null; render(); return; }
+  if ((el = q("[data-wgo]"))) { const flow = wizFlow(w); w.step = flow[Number(el.dataset.wgo)]; if (w.step === 3 && !w.pick) { const first = stranded(w)[0] || w.sensors[0] || devsOff(w)[0] || w.devs[0]; w.pick = first ? first.id : null; } render(); window.scrollTo(0, 0); return; }
+  if (q("[data-weditdevs]")) { const id = w.id; guarded(() => { ui.wiz = null; openMap(id); ui.mapw.step = 2; render(); window.scrollTo(0, 0); }); return; }
   if (q("[data-wunplace]")) { const d = w.devs.find((x) => x.id === w.pick); if (d) { d.pos = null; render(); } return; }
   if ((el = q("[data-spot]"))) {
     const s = wizItem(w, w.pick); if (!s) return;
@@ -3202,6 +3211,7 @@ document.addEventListener("focusout", (e) => {
   if (!pressing && typedBox(e.target) && !typedBox(e.relatedTarget)) document.body.classList.remove("vtyping");
 });
 document.addEventListener("change", (e) => {
+  if (e.target.dataset && e.target.dataset.wizlevel && ui.wiz) { const s2 = ui.wiz.sensors.find((x) => x.id === ui.wiz.pick); if (s2) { s2.level = e.target.value; render(); } return; }
   if (e.target.name === "link-filter" && e.target.dataset.link) { ui.linkFilter = e.target.dataset.link; render(); return; }
   if (e.target.dataset.dev && e.target.dataset.act === "mode") {
     /* A mode HA lists is asked for by name; the extra one is reached by moving the target one step and back. */
@@ -3287,6 +3297,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-name" && ui.wiz) { ui.wiz.name = e.target.value; wizNameSync(e.target); }
   if (e.target.id === "wiz-vname" && ui.wiz) ui.wiz.vname = e.target.value;
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
+  if (e.target.dataset && e.target.dataset.wlabel && ui.wiz) { (ui.wiz.labels ||= {})[e.target.dataset.wlabel] = e.target.value; const bar = $("#main .wizbar"); if (bar) { const n = wizDraft(ui.wiz).items.length; bar.querySelector(".draft-text").innerHTML = n ? `<strong>${plural(n, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>` : ""; } }
   if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
   if (e.target.dataset && e.target.dataset.dialin) { const o = dialSpec(devices.find((x) => x.id === e.target.dataset.dialin.split(":")[0]), e.target.dataset.dialin.split(":")[1]); dialTo(e.target.dataset.dialin, dialSnap(o, Number(e.target.value))); const again = document.querySelector(`[data-dialin="${e.target.dataset.dialin}"]`); if (again) again.focus(); }
   if (ui.mapw && e.target.dataset) {
