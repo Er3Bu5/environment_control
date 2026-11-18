@@ -657,6 +657,18 @@ function avgNote(z, k) {
   const dead = envs.filter((s) => s.avg !== false && sensorValue(z, s, k) === null).map(sideName), out = envs.filter((s) => s.avg === false).map(sideName);
   return `<div class="tavg">${METHODS[methodOf(z, k)]} of ${live.length}: ${esc(parts.join(", "))}${dead.length ? `. ${esc(dead.join(", "))} has no data, left out` : ""}${out.length ? `. ${esc(out.join(", "))} not counted` : ""}</div>`;
 }
+/* A short fixed choice, as the panel draws it: radio chips, never a native select, whose Android picker draws odd separators. */
+const chips = (legend, name, options, current, attr) => `<fieldset class="chips"><legend>${esc(legend)}</legend><div class="chiprow">${options.map(([v, l]) => `<label class="chip"><input type="radio" name="${name}" ${attr}="${esc(v)}" value="${esc(v)}"${String(current) === String(v) ? " checked" : ""}>${esc(l)}</label>`).join("")}</div></fieldset>`;
+const HISTORY_DEFAULT = { metric: "temperature", hours: 24 };
+const historyWords = (v) => `${M[v.metric].label}, ${(RANGES.find((r) => r[0] === v.hours) || [0, `${v.hours}h`])[1]}`;
+/* What a zone's History opens on is stored with the zone and changed through a review, like any other setting. */
+function historyDefault(z, view) {
+  const item = { label: `${z.name}'s History opens on`, before: historyWords(z.history || HISTORY_DEFAULT), after: historyWords(view) };
+  const apply = (done) => saveConfig(() => { const zz = zoneById(z.id); if (view.metric === HISTORY_DEFAULT.metric && view.hours === HISTORY_DEFAULT.hours) delete zz.history; else zz.history = { ...view }; })
+    .then((r) => { if (!r.ok) { done([`Not saved. ${r.error}`]); return; } toast(`${z.name}'s History now opens on ${historyWords(view)}.`); done([]); render(); });
+  ui.review = { d: { zone: z.name, items: [item], skipped: [], note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply }, busy: false, errors: [] };
+  renderModal();
+}
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const span = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 
@@ -1169,6 +1181,11 @@ function activityList(z) {
   if (!rows.length) return `<p class="small muted">Nothing of this kind today.</p>`;
   return `<div class="act">${rows.map(([t, k, text, by]) => `<div class="act-row"><span class="act-time">${t}</span>${ic(ACT_KIND[k][0], ACT_KIND[k][1])}<div><div class="act-text">${esc(text)}</div><div class="act-by">${esc(by)}</div></div></div>`).join("")}</div>`;
 }
+/* What's showing can be made what this zone's History opens on, offered at the foot of the card where it doesn't move the chart. */
+function alwaysOpen(z) {
+  const opens = z.history || HISTORY_DEFAULT;
+  return opens.metric === ui.metric && opens.hours === ui.range ? "" : `<div class="row"><button class="fixlink" data-histdefault="${z.id}">Always open on ${esc(historyWords({ metric: ui.metric, hours: ui.range }))} &rsaquo;</button></div>`;
+}
 function renderZone() {
   const z = zoneById(ui.zone);
   const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
@@ -1179,7 +1196,7 @@ function renderZone() {
     ${unfinished}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
-      <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div></section>
+      <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
     <div class="split">
       <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
       ${controlsCard(z)}
@@ -1301,14 +1318,19 @@ function chartPointer(e) {
 function renderDevices() {
   const filters = [["all", "All"], ["ethernet", "Ethernet"], ["wifi", "WiFi"], ["zigbee", "Zigbee"], ["cloud", "Cloud"], ["unknown", "Not known"]];
   const list = devices.filter(inAZone).filter((d) => ui.linkFilter === "all" || (ui.linkFilter === "cloud" ? d.path === "Cloud" : d.link === ui.linkFilter));
-  const src = { detected: "Detected", confirmed: "You confirmed", unknown: "Setup will ask" };
+  const src = { detected: "Detected", confirmed: "You confirmed" };
   const rows = list.map((d) => `<tr><td>${esc(d.name)}<span class="sub">${esc(d.zones.map((id) => zoneById(id).name).join(", "))}</span></td>
-    <td>${d.type ? esc(d.type) : '<button class="pill dead fixpill" data-go="setup">Not known yet &rsaquo;</button>'}</td><td>${esc(d.family)}<span class="sub">${esc(d.integration)}</span></td>
-    <td>${d.link === "unknown" ? `<button class="pill dead fixpill" data-go="setup">${esc(LINK[d.link])} &rsaquo;</button>` : `<span class="pill plain">${esc(LINK[d.link])}</span>`}<span class="sub">${src[d.source]}</span></td>
-    <td>${esc(d.path)}${d.hub ? `<span class="sub">via ${esc(d.hub)}</span>` : ""}</td><td>${d.stale ? `<span class="pill dead">${esc(d.state)}</span>` : esc(d.state)}</td></tr>`).join("");
-  return `<div class="wrap"><div><h1>Devices</h1><p class="muted small">What each device is and how it reaches Home Assistant</p></div>
-    <section class="card"><div class="seg" role="group" aria-label="Filter by link">${filters.map(([k, l]) => `<button data-link="${k}" aria-pressed="${ui.linkFilter === k}">${l}</button>`).join("")}</div>
-    <div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Device</th><th>Role</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${ui.linkFilter === "all" ? "No devices are in a zone yet." : "Nothing on this link."}</td></tr>`}</tbody></table></div></section></div>`;
+    <td>${d.type ? esc(d.type) : '<span class="pill dead">Not known yet</span>'}</td><td>${esc(d.family)}</td>
+    <td><span class="pill ${d.link === "unknown" ? "dead" : "plain"}">${esc(LINK[d.link])}</span><span class="sub">${d.link === "unknown" ? "Setup will ask" : src[d.source] || ""}</span></td>
+    <td>${esc(d.path)}${d.hub ? `<span class="sub">via ${esc(d.hub)}</span>` : ""}</td><td>${d.stale || d.state === "Unavailable" ? `<span class="pill dead">${esc(d.state)}</span>` : esc(d.state)}</td></tr>`).join("");
+  /* Everything Home Assistant has, by area, as the panel's catalog lists it. The mock's catalog is its own devices and sensors. */
+  const byArea = new Map();
+  for (const d of devices) { const area = (d.zones[0] && zoneById(d.zones[0]) || {}).name || "No area"; byArea.set(area, [...(byArea.get(area) || []), d]); }
+  const everything = `<p class="small muted">${plural(devices.length, "device")} in Home Assistant. How each is connected is read from Home Assistant, and anything it can't tell says not known.</p>${[...byArea].map(([area, ds]) => `<h3>${esc(area)}</h3><ul>${ds.map((d) => `<li class="device"><div class="name">${esc(d.name)}</div><div class="facts">${[d.family, LINK[d.link], d.path, d.hub ? `Through ${d.hub}` : ""].filter(Boolean).map((c) => `<span class="pill ${d.link === "unknown" && c === LINK[d.link] ? "dashed" : "plain"}">${esc(c)}</span>`).join("")}</div></li>`).join("")}</ul>`).join("")}`;
+  return `<div class="wrap"><div><h1>Devices</h1><p class="muted small">What each mapped device and sensor is, and how it reaches Home Assistant.</p></div>
+    <section class="card">${chips("Link", "link-filter", filters, ui.linkFilter, "data-link")}
+    <div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Device</th><th>Role</th><th>Integration</th><th>Link</th><th>Path</th><th>State</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${ui.linkFilter === "all" ? "Nothing is in a zone yet. Device identification adds them." : "Nothing on this link."}</td></tr>`}</tbody></table></div></section>
+    <section class="card"><details><summary>Everything in Home Assistant</summary>${everything}</details></section></div>`;
 }
 
 /* Climate hardware and lights. Anything else mapped to a zone, such as a plug marked Other, stays on Devices. */
@@ -2378,13 +2400,12 @@ function renderSetup() {
   if (ui.mapw) return renderMap();
   if (ui.wiz) return renderWizard();
   if (ui.guide && zoneById(ui.guide.id)) return renderGuide();
-  const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">ESPHome doesn't say whether a board is wired or on WiFi. How is this one connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("") +
-    devices.filter((d) => inAZone(d) && !d.type).map((d) => `<div class="task" id="task-${d.id}"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant only sees a smart plug. What is plugged into it?</p></div><div class="row"><button class="btn" data-role="${d.id}" data-val="Heater">Heater</button><button class="btn" data-role="${d.id}" data-val="Fan">Fan</button><button class="btn" data-role="${d.id}" data-val="Light">Light</button><button class="btn" data-role="${d.id}" data-val="Other">Other</button></div></div>`).join("") +
-    zones.filter((z) => z.sensors.some((s) => !s.pos)).map((z) => { const n = z.sensors.filter((s) => !s.pos).length; return `<div class="task"><div><strong>${esc(z.name)}</strong><p class="small muted">${n} sensor${n > 1 ? "s" : ""} still need${n > 1 ? "" : "s"} placing on the map.</p></div><div class="row"><button class="btn" data-wizard="${z.id}" data-wstep="3">Place sensors</button></div></div>`; }).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units in ${z.layout.rows} rows. ${z.sensors.filter((s) => s.pos).length} of ${z.sensors.length} sensors placed${placeable(z).length ? `, ${placeable(z).length - unplaced(z).length} of ${placeable(z).length} devices` : ""}. Day and night: ${esc(zonePeriod(z))}${z.periodMode === "detected" ? "" : `, ${dayLength(z.dayAt, z.nightAt)} of light`}.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Map devices</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Placement</button>${z.sensors.length ? `<button role="menuitem" data-calw="${z.id}">Sensor Calibration</button>` : ""}<button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
-  return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control. Sensor Calibration writes only to a sensor's own settings, and Targets, day and night only to the helpers it's linked to.</p></div>
-    ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : devices.some(inAZone) ? `<div class="notice calm"><strong>Every device is identified</strong></div>` : ""}
-    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div><div>${zoneRows || '<p class="muted small">No zones yet.</p>'}</div></section>
+  /* Since #36 a device's type is said in Device identification, so Setup asks only what HA can't tell: how a board connects. */
+  const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant doesn't say whether this ${d.ctl ? "device" : "board"} is wired or on WiFi. How is it connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Device identification</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Device placement</button><button role="menuitem" data-calw="${z.id}">Sensor Calibration</button><button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
+  return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control.</p></div>
+    ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : ""}
+    <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div>${zoneRows ? `<div>${zoneRows}</div>` : '<p class="muted small">No zones yet.</p>'}</section>
     ${appearanceCard()}</div>`;
 }
 
@@ -2392,7 +2413,12 @@ const APPEARANCE_SAYS = { ha: "Matching your Home Assistant theme, its colours a
 function appearanceCard() {
   return `<section class="card" id="appearance"><div><h2>Appearance</h2><p class="small muted">${APPEARANCE_SAYS[appearance]}</p></div>
     <div class="looks" role="group" aria-label="Appearance">${Object.entries(APPEARANCE).map(([k, [ico, label]]) => `<button class="look" data-appearance="${k}" aria-pressed="${appearance === k}">${icon(ico)}<span>${label}</span></button>`).join("")}</div>
-    <p class="small muted">Only on this device. Nothing changes in Home Assistant or in Environment Control's settings.</p></section>`;
+    <p class="small muted">Only on this device. Nothing changes in Home Assistant or in Environment Control's settings.</p>
+    ${zones.length ? `<div class="opens"><div><h3>History opens on</h3><p class="small muted">The graph and range each zone's History starts on. Kept with the zone, so it's the same on every device.</p></div>${zones.map((z) => {
+      const at = z.history || HISTORY_DEFAULT;
+      const seg = (label, items, cur, attr) => `<div class="seg" role="group" aria-label="${esc(z.name)}: ${label}">${items.map(([v, l]) => `<button data-opens="${z.id}" ${attr}="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join("")}</div>`;
+      return `<div class="opens-row"><strong>${esc(z.name)}</strong><div class="row">${seg("graph", Object.keys(M).map((k) => [k, M[k].short]), at.metric, "data-ometric")}${seg("range", RANGES, at.hours, "data-ohours")}</div></div>`;
+    }).join("")}</div>` : ""}</section>`;
 }
 
 function suggestGrid(n, w, d) {
@@ -2852,6 +2878,8 @@ document.addEventListener("click", (e) => {
     if (q("[data-tclose]") || !q(".dialog")) closeModal();
     return;
   }
+  if ((el = q("[data-histdefault]"))) { historyDefault(zoneById(el.dataset.histdefault), { metric: ui.metric, hours: ui.range }); return; }
+  if ((el = q("[data-opens]"))) { const z = zoneById(el.dataset.opens), at = z.history || HISTORY_DEFAULT, view = el.dataset.ometric ? { metric: el.dataset.ometric, hours: at.hours } : { metric: at.metric, hours: Number(el.dataset.ohours) }; if (view.metric !== at.metric || view.hours !== at.hours) historyDefault(z, view); return; }
   if ((el = q("[data-viewtargets]"))) { ui.tview = el.dataset.viewtargets; renderModal(); return; }
   if (ui.guard || ui.review) {
     if (q("[data-gdiscard]")) { if (!guardConfirmed()) return; const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
@@ -2876,7 +2904,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-mapvirt]"))) { ui.picked = el.dataset.mapvirt; render(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
-    guarded(() => { ui.guide = null; ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    guarded(() => { ui.guide = null; if (go === "zone" && (ui.screen !== "zone" || ui.zone !== zone)) { const h = (zoneById(zone) || {}).history || HISTORY_DEFAULT; ui.metric = h.metric; ui.range = h.hours; } ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
     return;
   }
   if ((el = q("[data-guide]"))) { const id = el.dataset.guide; guarded(() => { Object.assign(ui, { guide: { id }, screen: "setup", wiz: null, mapw: null, vpdw: null, leafw: null, sched: null, td: null }); render(); window.scrollTo(0, 0); }); return; }
@@ -3050,6 +3078,7 @@ document.addEventListener("focusout", (e) => {
   if (!pressing && typedBox(e.target) && !typedBox(e.relatedTarget)) document.body.classList.remove("vtyping");
 });
 document.addEventListener("change", (e) => {
+  if (e.target.name === "link-filter" && e.target.dataset.link) { ui.linkFilter = e.target.dataset.link; render(); return; }
   if (e.target.dataset.dev && e.target.dataset.act === "mode") {
     /* A mode HA lists is asked for by name; the extra one is reached by moving the target one step and back. */
     const d = devices.find((x) => x.id === e.target.dataset.dev);

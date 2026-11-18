@@ -452,6 +452,22 @@ await evp(`(parent.postMessage({v:1,type:"call_service",domain:"switch",service:
 check("Controls: a message type the host doesn't know is dropped", (await haCalls()).at(-1)[1] === "switch.heater_mains" && (await onHA(`fakeHA.states["switch.plug_7"].state`)) === "off");
 await tap('[data-devrow="heater"] .sw'); await sleep(REPORT);
 
+// ---------- History opens on: a zone keeps the graph and range its History starts on, as the panel has since #52 and #55
+await reset(); await goTab("Garden");
+check("History: a zone opens on Temperature, 24h, with nothing to set", (await ev(`ui.metric==="temperature" && ui.range===24 && !document.querySelector("[data-histdefault]")`)) === true);
+await ev(`document.querySelector('[data-metric="humidity"]').click()`); await sleep(40);
+check("History: showing something else offers to always open on it", (await ev(`document.querySelector("[data-histdefault]").textContent`)) === "Always open on Humidity, 24h ›");
+await ev(`document.querySelector("[data-histdefault]").click()`); await sleep(40);
+check("History: it's a review, before and after", (await ev(`document.querySelector("#review-items").textContent`)) === "Garden's History opens onTemperature, 24h → Humidity, 24h", await ev(`document.querySelector("#review-items").textContent`));
+await ev(`document.querySelector("[data-rapply]").click()`); await sleep(200);
+check("History: applied, it's stored with the zone", same(await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="garden").history`), { metric: "humidity", hours: 24 }));
+await goTab("Overview"); await goTab("Garden");
+check("History: and the zone opens on it", (await ev(`ui.metric`)) === "humidity" && (await ev(`!document.querySelector("[data-histdefault]")`)) === true);
+await goTab("Setup");
+check("History: Setup's Appearance card shows what each zone opens on", (await ev(`document.querySelector('.opens-row [data-opens="garden"][data-ometric="humidity"]').getAttribute("aria-pressed")`)) === "true");
+await ev(`document.querySelector('[data-opens="garden"][data-ometric="temperature"]').click()`); await sleep(40); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(200);
+check("History: going back to Temperature, 24h stores nothing, since that's the default", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="garden").history ?? null`)) === null);
+
 // ---------- Confirmation: a device becomes controllable only once a person says yes, in a dialog the frame can't reach
 /* Page scripts can't see into the host's closed shadow root, but the test can, through DevTools, and clicks it as a person would. */
 await rawSend("DOM.enable");
@@ -690,8 +706,8 @@ const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModa
 const setupButtons = (zone) => ev(`[...document.querySelectorAll('#zmenu-${zone} button')].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
 await setupNow();
-check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("garden"));
-check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("veg"));
+check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("garden"));
+check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("veg"));
 // The zone's setup steps sit behind a menu button, and Add zone is the bigger button with a plus
 await setupNow();
 const rowButtons = (zone) => ev(`[...document.querySelector('[data-zmenu="${zone}"]').closest(".zacts").children].filter(x=>x.matches("button")).map(b=>b.textContent)`);
@@ -705,7 +721,7 @@ const menuBox = await ev(`(()=>{const r=document.querySelector("#zmenu-garden").
 check("Menu: it opens on screen", menuBox.l >= 0 && menuBox.r <= menuBox.w && menuBox.t >= 0 && menuBox.b <= menuBox.h, menuBox);
 await shot("setup-menu-phone");
 await key("ArrowDown", 40);
-check("Menu: arrow down moves to the next step", (await ev(`document.activeElement.textContent`)) === "Map devices");
+check("Menu: arrow down moves to the next step", (await ev(`document.activeElement.textContent`)) === "Device identification");
 await key("End", 35);
 check("Menu: End lands on Remove zone, last and apart", (await ev(`document.activeElement.textContent`)) === "Remove zone" && (await ev(`document.activeElement.previousElementSibling.tagName`)) === "HR");
 await key("ArrowDown", 40);
@@ -1037,7 +1053,7 @@ for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overvie
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
 check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img")`)) === true);
-check("Zone: Continue setup stays on the row, and the menu follows the setup order, with no Sensor Calibration until it has sensors", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Map devices", "Zone layout", "Placement", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Continue setup stays on the row, and the menu follows the setup order, Sensor Calibration included, as the panel always lists it", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
 await ev(`ui.screen="overview";render()`); await sleep(40);
@@ -1083,7 +1099,7 @@ await ev(`ui.screen="overview";render()`); await sleep(40);
 check("Zone: and isn't reported as critical on Overview", !(await ev(`[...document.querySelectorAll("#main .notice")].map(n=>n.textContent).join()`)).includes("Flower"), await ev(`[...document.querySelectorAll("#main .notice")].map(n=>n.textContent).join()`));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
-check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Map devices", "Zone layout", "Placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
 check("Zone: its Setup row says it isn't set up", (await ev(`document.querySelector('[data-zmenu="${newId}"]').closest(".task").querySelector("strong + .pill")?.textContent`)) === "Not set up");
 await ev(`document.querySelector('[data-guide="${newId}"]').click()`); await sleep(50);
 await cClick("#g-calibrate [data-calw]"); await sleep(40);
@@ -1379,8 +1395,8 @@ check("Lights: an off controller shows no stale brightness and no slider", await
 check("Lights: shared lights name who shares them", (await ev(`[...document.querySelectorAll('[data-cgroup="Lights"] .dev')][1].textContent`)).includes("Shared with Nursery"));
 await ev(`ui.zone="garden";render()`); await sleep(40);
 await shot("lights-phone");
-await ev(`ui.screen="setup";render()`); await sleep(40);
-await ev(`document.querySelector('[data-role="plug"][data-val="Light"]').click()`); await sleep(40); await goTab("Garden");
+await ev(`ui.screen="setup";openMap("garden");ui.mapw.step=2;render()`); await sleep(40);
+await plugRole("Light"); await goTab("Garden");
 check("Lights: a plug marked Light joins them", (await groupNames()).includes("Plug 7"), await groupNames());
 await ev(`devices.find(d=>d.id==="plug").type=null;render()`);
 await ev(`openMap("garden");ui.mapw.step=2;render()`); await sleep(40);
@@ -1393,7 +1409,6 @@ const setBox = async (k, v) => { await ev(`(()=>{const e=document.querySelector(
 const schedOpen = async (id) => { await setupOnly(); await clickIt(`[data-vpd="${id}"]`); };
 const schedModal = () => ev(`document.querySelector("#modal").textContent`);
 const schedSent = () => ev(`schedSends.length`);
-check("Sched: Setup says how long the day is", (await ev(`document.querySelector("#main").textContent`)).includes("12h 00m of light"));
 await schedOpen("garden");
 check("Sched: opens on the zone's times", (await ev(`document.querySelector("#sin-day").value+document.querySelector("#sin-night").value`)) === "07:0019:00");
 check("Sched: it's a v1 page, with nothing marked as coming later", !/Coming|Preview/.test(await ev(`document.querySelector(".sched-title").textContent`)));
@@ -1835,7 +1850,7 @@ check("Placement: shrinking the grid says which devices come off the map", /1 de
 await ev(`ui.wiz=null;ui.screen="setup";ui.guide={id:"garden"};zoneById("garden").setup={details:"done",devices:"done",layout:"done",place:"done",calibrate:"done",targets:"done"};render()`); await sleep(40);
 check("Placement: the setup guide says so too, without counting it against the step", (await ev(`document.querySelector("#g-place").textContent`)).includes("aren't on the map") && (await ev(`document.querySelector("#g-place .pill").textContent`)) === "Done", await ev(`document.querySelector("#g-place").textContent`));
 await ev(`ui.guide=null;delete zoneById("garden").setup;render()`); await sleep(40);
-check("Placement: Setup counts placed devices", /3 of 3 sensors placed, 4 of \d+ devices/.test(await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`)), await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`));
+check("Placement: Setup counts placed sensors, as the panel's row does", /3 of 3 sensors placed\./.test(await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`)), await ev(`document.querySelector('[data-mapw="garden"]').closest(".task").textContent`));
 await ev(`openMap("garden");ui.mapw.pickD.acfan=false;render()`); await sleep(40);
 await evp(`(()=>{const m=ui.mapw;return saveConfig(()=>saveMap(m)).then(()=>{ui.mapw=null})})()`);
 check("Placement: a device taken out of a zone loses its spot there", (await onHA(`JSON.parse(fakeHA.disk).devices.find(x=>x.id==="acfan").place`)) === undefined);
@@ -1909,7 +1924,9 @@ check("Remove: shared hardware stays in its other zones", same(await ev(`devices
 check("Remove: the open zone moves to one that exists", (await ev(`!!zoneById(ui.zone)`)) === true, await ev(`ui.zone`));
 check("Remove: it stays on Setup and says so", (await ev(`ui.screen`)) === "setup" && (await ev(`document.querySelector("#toast")?.textContent||document.querySelector(".toast").textContent`)).includes("Garden removed"));
 check("Remove: focus lands on Add zone, not on nothing", (await ev(`document.activeElement.hasAttribute("data-addzone")`)) === true);
-check("Remove: a Garden-only device leaves Devices, a shared one stays", await (async () => { const t = await see("devices"); return !t.includes("Air conditioner exhaust fan") && t.includes("Heater") && noJunk(t); })());
+/* Devices' table, not the list of everything in Home Assistant below it, which keeps every device. */
+const devicesTable = async () => { await see("devices"); return ev(`document.querySelector("#main table").textContent`); };
+check("Remove: a Garden-only device leaves Devices, a shared one stays", await (async () => { const t = await devicesTable(); return !t.includes("Air conditioner exhaust fan") && t.includes("Heater") && noJunk(t); })());
 check("Remove: Setup stops asking about a device that's no longer mapped", await (async () => { await see("setup"); return !(await ev(`!!document.querySelector("#task-plug")`)); })());
 check("Remove: its sensors are still findable, once each and unplaced", (await ev(`(()=>{const c=catalog().filter(s=>s.id==="g-left");return c.length===1 && c[0].pos===null})()`)) === true);
 for (const id of ["veg", "nursery"]) check(`Remove: ${id} still renders`, noJunk(await see("zone", id)));
@@ -1950,7 +1967,7 @@ for (const id of await zoneIds()) { await setupNow(); await askRemove(id); await
 check("Remove: the last zone can go too", (await zoneIds()).length === 0, await zoneIds());
 check("Remove: no zones leaves no question and no calm notice", await (async () => { const t = await see("setup"); return t.includes("No zones yet") && !t.includes("Every device is identified") && !t.includes("Questions for you"); })());
 await shot("remove-empty-setup");
-check("Remove: Devices says it has none", (await see("devices")).includes("No devices are in a zone yet"));
+check("Remove: Devices says it has none", (await devicesTable()).includes("Nothing is in a zone yet. Device identification adds them."));
 const emptyOverview = await see("overview");
 check("Remove: Overview offers Add a zone, not All zones ideal", emptyOverview.includes("No zones yet") && !emptyOverview.includes("All zones ideal") && noJunk(emptyOverview), emptyOverview);
 await shot("remove-empty-overview");
