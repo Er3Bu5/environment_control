@@ -76,7 +76,7 @@ class FakeHA {
     if (entity.split(".")[0] !== domain) this.fail(`${domain}.${service} can't act on ${entity}`);
     const a = s.attributes, num = (v) => typeof v === "number" && Number.isFinite(v);
     const key = `${domain}.${service}`;
-    const known = ["switch.turn_on", "switch.turn_off", "fan.turn_on", "fan.turn_off", "light.turn_on", "light.turn_off", "humidifier.turn_on", "humidifier.turn_off", "humidifier.set_mode", "humidifier.set_humidity", "number.set_value", "input_number.set_value", "input_datetime.set_datetime"];
+    const known = ["automation.turn_on", "automation.turn_off", "switch.turn_on", "switch.turn_off", "fan.turn_on", "fan.turn_off", "light.turn_on", "light.turn_off", "humidifier.turn_on", "humidifier.turn_off", "humidifier.set_mode", "humidifier.set_humidity", "number.set_value", "input_number.set_value", "input_datetime.set_datetime"];
     if (!known.includes(key)) this.fail(`Service ${key} not found`);
     if (key === "light.turn_on" && data.brightness_pct !== undefined && !(num(data.brightness_pct) && data.brightness_pct >= 0 && data.brightness_pct <= 100)) this.fail(`Value ${data.brightness_pct} for brightness_pct is out of range`);
     if (key === "humidifier.set_mode" && !(a.available_modes || []).includes(data.mode)) this.fail(`Mode ${data.mode} is not one of ${(a.available_modes || []).join(", ")}`);
@@ -137,6 +137,27 @@ class FakeHA {
     const spotOk = (p, L) => !!L && Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -1 && p[0] <= L.rows && p[1] >= -1 && p[1] <= L.cols;
     const ok = c && Array.isArray(c.zones) && Array.isArray(c.devices) && c.zones.length <= 20 && c.devices.length <= 200;
     if (!ok) this.fail("Config isn't zones and devices");
+    /* Settings for the whole room rather than one zone: so far only the helper every alert's repeat rate comes from. */
+    if (c.room !== undefined) {
+      const room = c.room, keys = room && typeof room === "object" && !Array.isArray(room) ? Object.keys(room) : null;
+      if (!keys || keys.some((k) => k !== "alertRepeat")) this.fail("Room settings hold only the alert repeat rate");
+      if (room.alertRepeat !== undefined && !(typeof room.alertRepeat === "string" && /^input_number\.[a-z0-9_]+$/.test(room.alertRepeat))) this.fail("The alert repeat rate links to something that isn't a number helper");
+    }
+    /* Automations a zone switches: an automation entity, a group, and an id the frame names it by. Nothing else. */
+    const GROUPS = ["alert_day", "alert_night", "alert_device", "failsafe", "control"];
+    for (const z of c.zones) {
+      if (z.automations === undefined) continue;
+      if (!Array.isArray(z.automations) || z.automations.length > 200) this.fail(`${z.id} links automations that aren't a short list`);
+      const aids = new Set(), ents = new Set();
+      for (const a of z.automations) {
+        const keys = a && typeof a === "object" ? Object.keys(a).sort().join() : "";
+        if (keys !== "entity,group,id") this.fail(`${z.id} links an automation with something other than an id, an entity and a group`);
+        if (typeof a.id !== "string" || !/^[a-z0-9_-]{1,64}$/.test(a.id) || aids.has(a.id)) this.fail(`${z.id} has automation links without unique ids`);
+        if (typeof a.entity !== "string" || !/^automation\.[a-z0-9_]+$/.test(a.entity) || ents.has(a.entity)) this.fail(`${z.id} links something that isn't an automation, or one twice`);
+        if (!GROUPS.includes(a.group)) this.fail(`${z.id} puts an automation in a group this panel doesn't know`);
+        aids.add(a.id); ents.add(a.entity);
+      }
+    }
     const ids = new Set(c.zones.map((z) => z.id));
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
     const helper = (v) => v === undefined || (typeof v === "string" && /^input_(number|datetime)\.[a-z0-9_]+$/.test(v)) || (v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every(helper));

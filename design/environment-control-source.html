@@ -483,6 +483,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .ctl-dim input { width: 130px; accent-color: var(--primary); }
 .ctl-status.stuck, .ctl-status.error { color: var(--crit); }
 .ctl-status.back { color: var(--warn); }
+.crit-text { color: var(--crit); }
+[data-agroup] .devs, #z-autos .pickrow + .pickrow { margin-top: 0; }
 .lrow { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--tile); min-width: 0; }
 .lrow strong { font-weight: 500; }
 .lid { overflow-wrap: anywhere; }
@@ -562,6 +564,9 @@ const ICON = {
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
   reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
+  bell: "M21 19v1H3v-1l2-2v-6c0-3.1 2-5.8 5-6.7V4a2 2 0 0 1 4 0v.3c3 .9 5 3.6 5 6.7v6l2 2Zm-7 2a2 2 0 0 1-4 0",
+  shield: "M10 17 6 13l1.4-1.4 2.6 2.6 6.6-6.6L18 9l-8 8ZM12 1 3 5v6c0 5.6 3.8 10.7 9 12 5.2-1.3 9-6.4 9-12V5l-9-4Z",
+  clock: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-18a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm.5 5v5.2l4.5 2.7-.8 1.2-5.2-3.1V7h1.5Z",
   cube: "M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.4V9.7Zm8 10v-6.6l6-3.4v6.6l-6 3.4Z",
 };
 const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
@@ -572,6 +577,8 @@ let zones = [];
 let configRevision = 0;
 /* Mapped devices and what Home Assistant reports for them both arrive from the host. Nothing here is a device's state until HA says so. */
 let devices = [];
+/* Settings for the whole room rather than one zone. So far only the helper every alert's repeat rate comes from. */
+let room = {};
 const haStates = {};
 const LINK = { ethernet: "Ethernet", wifi: "WiFi", zigbee: "Zigbee", derived: "Calculated", unknown: "Not known yet" };
 const ACTIVITY = {
@@ -1169,6 +1176,12 @@ function statesChanged(states) {
     if (now !== was) ctlState[d.id] = now;
     redrawDevice(d);
   }
+  for (const [e, st] of Object.entries(states)) {
+    if (!e.startsWith("automation.")) continue;
+    const c = autoCtl[e];
+    if (c && (c.status === "sending" || c.status === "stuck") && st && st.state === c.want) { clearTimeout(c.timer); autoCtl[e] = { status: "done" }; }
+    redrawAuto(e);
+  }
 }
 function targetsTable(z) {
   const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td>${v === null ? "-" : v}</td>`).join("")}</tr>`;
@@ -1195,7 +1208,7 @@ function renderZone() {
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Not set up yet. Still to confirm: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
   /* Since #33: History, then Device placement and Controls. The targets moved behind View targets in the heading. */
   return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div><button class="btn" data-viewtargets="${z.id}">View targets</button></div>
-    ${unfinished}${periodBlock(z)}
+    ${unfinished}${autosNotice(z)}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
@@ -1203,7 +1216,8 @@ function renderZone() {
       <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
       ${controlsCard(z)}
     </div>
-    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</section></div>`;
+    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</section>
+    ${autosCard(z)}</div>`;
 }
 
 /* Seeded so a redraw keeps the same line. */
@@ -1354,6 +1368,247 @@ function controlsCard(z) {
   }).join("");
   const empty = `<p class="small muted">No devices in ${esc(z.name)} yet.</p><div class="row"><button class="btn" data-mapw="${z.id}">Device identification</button></div>`;
   return `<section class="card" id="controls"><div><h2>Controls</h2><p class="muted small">A tap is sent to Home Assistant, and a control only moves once the device reports back.</p></div>${unknown}${groups || (unknown ? "" : empty)}</section>`;
+}
+
+/* Automations a zone links. Home Assistant keeps running them, and the panel only switches them on and off, the way Controls
+   switch a device: sent, then what Home Assistant reports, never assumed. */
+const AUTO_GROUPS = { alert_day: ["alert", "Day alerts"], alert_night: ["alert", "Night alerts"], alert_device: ["alert", "Device alerts"], failsafe: ["failsafe", "Failsafes"], control: ["control", "Control"] };
+const AUTO_PAGES = {
+  alert: { title: "Alerts", icon: "bell", about: "Home Assistant's alerts for this zone. Switched off, an alert stops notifying you until it's switched on again." },
+  failsafe: { title: "Failsafes", icon: "shield", about: "Home Assistant's failsafes for this zone. Each puts hardware back when something goes wrong, such as a fan plug turning off. While one is off, nothing does that." },
+  control: { title: "Control", icon: "clock", about: "The automations that switch this zone's hardware, such as its lights on their schedule. Switched off, the hardware stays as it is until something else moves it." },
+};
+const pageOf = (a) => AUTO_GROUPS[a.group][0];
+const autosOf = (z, page) => (z.automations || []).filter((a) => AUTO_GROUPS[a.group] && (!page || pageOf(a) === page));
+const autoSt = (a) => haStates[a.entity];
+const autoOn = (a) => (autoSt(a) || {}).state === "on";
+const autoDown = (a) => !autoSt(a) || autoSt(a).state === "unavailable";
+const autoName = (a) => ((autoSt(a) || {}).attributes || {}).friendly_name || a.entity;
+const sharedAuto = (z, entity) => zones.filter((o) => o.id !== z.id && (o.automations || []).some((x) => x.entity === entity)).map((o) => o.name);
+/* Only a suggestion. Names follow no rule Home Assistant enforces, and this room's own dashboard keeps an alert named ..._day
+   with its device alerts, so the group can always be changed. */
+function suggestGroup(entity) {
+  const n = entity.split(".")[1] || "";
+  if (/^(failsafe|startup)_/.test(n)) return "failsafe";
+  if (/^(critical|warning)_/.test(n)) return /_day$/.test(n) ? "alert_day" : /_night$/.test(n) ? "alert_night" : "alert_device";
+  return "control";
+}
+/* The mock's clock is fixed, so "last triggered" reads the same on every run. The panel uses the real time. */
+const MOCK_CLOCK = Date.parse("2026-11-17T13:30:00+13:00");
+function ranWords(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const at = new Date(t).toLocaleTimeString("en-NZ", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const days = Math.round((new Date(MOCK_CLOCK).setHours(0, 0, 0, 0) - new Date(t).setHours(0, 0, 0, 0)) / 864e5);
+  return days === 0 ? `today at ${at}` : days === 1 ? `yesterday at ${at}` : `${new Date(t).toLocaleDateString("en-NZ", { day: "numeric", month: "short" })} at ${at}`;
+}
+const autoCtl = {};
+function autoCount(key) {
+  const [zid, g] = key.split(":"), z = zoneById(zid), list = z ? autosOf(z).filter((a) => a.group === g || (g in AUTO_PAGES && pageOf(a) === g)) : [];
+  return list.length ? `${list.filter(autoOn).length} of ${list.length} on` : "None linked";
+}
+function autoRow(a, z) {
+  const st = autoSt(a), c = autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a), shared = sharedAuto(z, a.entity);
+  const last = st && st.attributes && st.attributes.last_triggered;
+  const now = !st ? "Home Assistant doesn't have it any more." : down ? "Unavailable in Home Assistant." : on ? "On." : "Off.";
+  const sub = [now, st ? (last ? `Last triggered ${ranWords(last)}.` : "Never triggered.") : "", shared.length ? `Shared with ${shared.join(" and ")}.` : ""].filter(Boolean).join(" ");
+  const sw = `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
+  const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
+  return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}">${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
+}
+/* Redraws every row for one automation, in any zone that links it, and puts focus back on the switch. */
+function redrawAuto(entity) {
+  for (const el of document.querySelectorAll(`[data-autorow="${CSS.escape(entity)}"]`)) {
+    const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.entity === entity);
+    if (!a) continue;
+    const focused = el.contains(document.activeElement);
+    el.outerHTML = autoRow(a, z);
+    if (focused) { const again = document.querySelector(`[data-autorow="${CSS.escape(entity)}"][data-zone="${z.id}"] [data-auto]`); if (again && !again.disabled) again.focus(); }
+  }
+  for (const el of document.querySelectorAll("[data-autocount]")) el.textContent = autoCount(el.dataset.autocount);
+}
+async function sendAuto(z, a, on) {
+  const want = on ? "on" : "off", c = { status: "sending", text: `Sent. Waiting for Home Assistant to report it ${want}.`, want };
+  autoCtl[a.entity] = c;
+  redrawAuto(a.entity);
+  const r = await ask("automation", { zone: z.id, link: a.id, on });
+  if (autoCtl[a.entity] !== c) return;
+  if (!r.ok) { autoCtl[a.entity] = { status: "error", text: `Not sent. ${r.error}` }; redrawAuto(a.entity); return; }
+  if ((autoSt(a) || {}).state === want) { autoCtl[a.entity] = { status: "done" }; redrawAuto(a.entity); return; }
+  c.timer = setTimeout(() => {
+    if (autoCtl[a.entity] !== c) return;
+    autoCtl[a.entity] = { status: "stuck", text: `Not confirmed. Home Assistant still reports it ${(autoSt(a) || {}).state || "missing"}. Try again.` };
+    redrawAuto(a.entity);
+  }, CTL_GIVE_UP_MS);
+}
+/* Switching a failsafe off is a safety decision, so it asks first. Switching one on, and alerts and control either way, don't. */
+function tapAuto(z, a) {
+  const on = autoOn(a);
+  if (on && pageOf(a) === "failsafe") {
+    const shared = sharedAuto(z, a.entity);
+    ui.guard = { action: () => sendAuto(z, a, false), title: `Switch off ${autoName(a)}?`, keep: "Keep it on", go: "Switch off",
+      text: `It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that${shared.length ? ` in ${[z.name, ...shared].join(" or ")}` : ""}. You can switch it on again here.` };
+    renderModal();
+    return;
+  }
+  sendAuto(z, a, !on);
+}
+function autosNotice(z) {
+  const off = autosOf(z, "failsafe").filter((a) => !autoDown(a) && !autoOn(a));
+  if (!off.length) return "";
+  return `<button class="notice fix" data-autos="failsafe" data-zone="${z.id}"><span>${off.length === 1 ? `A failsafe is off: ${esc(autoName(off[0]))}.` : `${off.length} failsafes are off.`} While ${off.length === 1 ? "it's" : "they're"} off, nothing puts that hardware back.</span><span class="fixgo">Failsafes &rsaquo;</span></button>`;
+}
+function autosCard(z) {
+  const rows = Object.entries(AUTO_PAGES).map(([k, p]) => `<button class="pickrow" data-autos="${k}" data-zone="${z.id}">${ic(p.icon, "var(--primary)")}<span class="pick-text"><strong>${p.title}</strong><span class="dev-sub" data-autocount="${z.id}:${k}">${autoCount(`${z.id}:${k}`)}</span></span><span class="fixgo">&rsaquo;</span></button>`).join("");
+  return `<section class="card" id="z-autos"><div class="card-head"><h2>Automations</h2><button class="btn" data-linkautos="${z.id}">Link automations</button></div><p class="small muted">Home Assistant runs these. Here you switch them on and off.</p><div>${rows}</div></section>`;
+}
+function renderAutos() {
+  if (ui.linkw) return renderLinkAutos();
+  const { zone, page } = ui.autos, z = zoneById(zone), p = AUTO_PAGES[page], list = autosOf(z, page);
+  const sections = Object.entries(AUTO_GROUPS).filter(([, [pg]]) => pg === page).map(([g, [, title]]) => {
+    const rows = list.filter((a) => a.group === g);
+    return rows.length ? `<section class="card" data-agroup="${g}"><div class="card-head"><h2>${title}</h2><span class="small muted" data-autocount="${z.id}:${g}">${autoCount(`${z.id}:${g}`)}</span></div><div class="devs">${rows.map((a) => autoRow(a, z)).join("")}</div></section>` : "";
+  }).join("");
+  const empty = `<div class="notice calm"><strong>No ${p.title.toLowerCase()} linked to ${esc(z.name)} yet</strong><button class="fixlink" data-linkautos="${z.id}">Link automations &rsaquo;</button></div>`;
+  /* Back rides in the bar at the foot, as on every page since #54; the draft bar takes over while the repeat rate differs. */
+  return `<div class="wrap"><div><h1>${p.title}: ${esc(z.name)}</h1><p class="muted small">${p.about}</p></div>
+    ${page === "alert" ? repeatCard() : ""}${sections || empty}${sections ? `<div class="row"><button class="btn" data-linkautos="${z.id}">Link automations</button></div>` : ""}
+    <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-go="zone" data-zone="${z.id}">Back</button></div></div>`;
+}
+
+/* Every alert's repeat rate is one Home Assistant helper, linked once for the whole room on Setup and changed here. */
+function repeatProblem(v, a) {
+  const n = Number(v);
+  if (String(v).trim() === "" || !Number.isFinite(n)) return "Type a number of minutes.";
+  const steps = (n - a.min) / a.step;
+  if (n < a.min || n > a.max || Math.abs(steps - Math.round(steps)) > 1e-6) return `It has to be between ${a.min} and ${a.max}, in steps of ${a.step}, as your helper allows.`;
+  return "";
+}
+function repeatCard() {
+  const e = room.alertRepeat, st = e && haStates[e];
+  if (!e) return `<section class="card" id="alert-repeat"><h2>Alert repeat</h2><p class="small muted">How often an alert may buzz your phone comes from one Home Assistant helper shared by every alert. Link it on Setup to change it here.</p><button class="fixlink" data-go="setup" data-gotarget="room-alerts">Link it on Setup &rsaquo;</button></section>`;
+  if (!st || st.state === "unavailable") return `<section class="card" id="alert-repeat"><h2>Alert repeat</h2><p class="small muted">Home Assistant doesn't have ${esc(e)} right now, so it can't be changed.</p></section>`;
+  const a = st.attributes || {}, v = ui.autos.repeat === undefined ? st.state : ui.autos.repeat, bad = repeatProblem(v, a);
+  return `<section class="card" id="alert-repeat"><h2>Alert repeat</h2><p class="small muted">While an alert stays breached, it buzzes your phone at most once every this many minutes, and 0 buzzes on every update. One helper sets it for every alert in Home Assistant, irrigation and power included.</p>
+    <label class="field" for="repeat-in">Minutes between buzzes<input id="repeat-in" type="number" inputmode="numeric" min="${esc(a.min)}" max="${esc(a.max)}" step="${esc(a.step)}" value="${esc(v)}" aria-invalid="${!!bad}" aria-describedby="repeat-bad"></label><p class="small crit-text" id="repeat-bad"${bad ? "" : " hidden"}>${esc(bad)}</p><p class="small muted">On your helper, ${esc(e)}.</p></section>`;
+}
+function repeatDraft(au) {
+  const e = room.alertRepeat, st = e && haStates[e];
+  if (!au || au.page !== "alert" || au.repeat === undefined || !st) return null;
+  const [items, add] = changeList(), a = st.attributes || {}, unit = a.unit_of_measurement ? ` ${a.unit_of_measurement}` : "";
+  add("Alert repeat", `${st.state}${unit}`, `${String(au.repeat).trim()}${unit}`);
+  if (items.length && Number(au.repeat) === Number(st.state)) items.length = 0;
+  return { zone: "Alerts", affects: "This changes every alert in Home Assistant, not just this zone's.", items, skipped: [], bar: true, busy: !!au.sending, blocked: repeatProblem(au.repeat, a) ? "fix the problem before review" : "",
+    note: `On your helper, ${e}. Every alert follows it straight away.`, apply: (done) => saveRepeat(au, done), discard: () => { au.repeat = undefined; render(); },
+    back: () => guarded(() => { Object.assign(ui, { screen: "zone", autos: null }); render(); window.scrollTo(0, 0); }) };
+}
+async function saveRepeat(au, done) {
+  const e = room.alertRepeat, value = Number(au.repeat);
+  au.sending = true;
+  draftSync();
+  const r = await ask("setting", { name: "alertRepeat", value });
+  if (!r.ok) { au.sending = false; done([`Alert repeat wasn't changed. ${r.error}`]); return; }
+  const ok = await untilState(() => Number((haStates[e] || {}).state) === value, 4000);
+  au.sending = false;
+  if (!ok) { done([`Alert repeat: Home Assistant still reports ${(haStates[e] || {}).state}.`]); return; }
+  au.repeat = undefined;
+  toast("Alert repeat changed.");
+  render();
+  done([]);
+}
+
+/* Linking: which of Home Assistant's automations a zone switches, and in which group. Only Environment Control's own record
+   changes, and a newly linked automation becomes switchable only once a person allows it in the host's own dialog. */
+let autoCatalog = null, autoCatalogLoading = null;
+function loadAutomations() {
+  if (autoCatalogLoading) return autoCatalogLoading;
+  autoCatalogLoading = (async () => {
+    const r = await ask("automations", {});
+    if (!r.ok || !Array.isArray(r.automations)) { autoCatalogLoading = null; return; }
+    autoCatalog = r.automations.filter((x) => x && typeof x.entity === "string" && x.attributes).sort((p, q) => String(p.attributes.friendly_name || p.entity).localeCompare(String(q.attributes.friendly_name || q.entity)));
+    if (ui.linkw && !ui.review) render();
+  })();
+  return autoCatalogLoading;
+}
+function openLinkAutos(id) {
+  const z = zoneById(id), was = Object.fromEntries(autosOf(z).map((a) => [a.entity, a.group]));
+  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, autos: ui.autos, zone: ui.zone } };
+  ui.screen = "autos";
+  ui.zone = id;
+}
+function closeLinkAutos() {
+  const b = ui.linkw.back;
+  ui.linkw = null;
+  Object.assign(ui, { screen: b.screen === "autos" && !b.autos ? "zone" : b.screen, autos: b.autos, zone: b.zone || ui.zone });
+  render();
+  window.scrollTo(0, 0);
+}
+const autoTitle = (it) => (it.attributes || {}).friendly_name || it.entity;
+function linkRow(lw, z, it) {
+  const g = lw.pick[it.entity], on = g !== undefined, shared = sharedAuto(z, it.entity);
+  const sub = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${shared.join(" and ")}` : ""].filter(Boolean).join(", ");
+  const groupBox = on ? `<div class="ents"><label class="ent"><span>Group</span><select data-lgroup="${esc(it.entity)}" aria-label="${esc(autoTitle(it))} group">${Object.entries(AUTO_GROUPS).map(([k, [, t]]) => `<option value="${k}"${g === k ? " selected" : ""}>${t}</option>`).join("")}</select></label></div>` : "";
+  return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">${esc(sub)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button>${groupBox}</div>`;
+}
+/* Suggested: what the zone links already, and automations in its Home Assistant area or named for it. The rest of Home
+   Assistant's automations, the house's included, come up only by searching. */
+function linkList(lw, z) {
+  const q = lw.q.trim().toLowerCase(), word = new RegExp(`(^|_)${slug(z.name)}(_|$)`);
+  const near = (it) => lw.pick[it.entity] !== undefined || lw.was[it.entity] !== undefined || (it.area || "").toLowerCase() === z.name.toLowerCase() || word.test(it.entity.split(".")[1]);
+  const shown = autoCatalog.filter((it) => (q ? `${it.entity} ${autoTitle(it)}`.toLowerCase().includes(q) : near(it)));
+  const more = q ? 0 : autoCatalog.length - shown.length;
+  return (shown.length ? shown.map((it) => linkRow(lw, z, it)).join("") : `<p class="muted small">No automation matches.</p>`) +
+    (more ? `<p class="small muted" id="link-more">${more} more in Home Assistant. Search to find them.</p>` : "");
+}
+function renderLinkAutos() {
+  const lw = ui.linkw, z = zoneById(lw.id);
+  const head = `<div><h1>Link automations: ${esc(z.name)}</h1><p class="muted small">Pick the automations ${esc(z.name)} should switch, and put each in a group. The group is suggested from the automation's name, so change it if yours follow other names. Home Assistant keeps running them either way.</p></div>`;
+  if (!autoCatalog) { loadAutomations(); return `<div class="wrap">${head}<p class="muted">Reading Home Assistant's automations.</p><div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text"></span><button class="draft-discard" data-linkback>Back</button></div></div>`; }
+  return `<div class="wrap">${head}<section class="card"><label class="field" for="link-q">Search Home Assistant<input id="link-q" type="search" value="${esc(lw.q)}" placeholder="Name or entity id"></label><div class="picklist" id="link-list">${linkList(lw, z)}</div></section>
+    <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-linkback>Back</button></div></div>`;
+}
+function linkDraft(lw) {
+  const z = zoneById(lw.id), [items, add] = changeList(), label = (g) => (g === undefined ? "Not linked" : AUTO_GROUPS[g][1]);
+  const nameOf = (e) => { const it = (autoCatalog || []).find((x) => x.entity === e); return it ? autoTitle(it) : ((haStates[e] || {}).attributes || {}).friendly_name || e; };
+  for (const e of new Set([...Object.keys(lw.was), ...Object.keys(lw.pick)])) add(nameOf(e), label(lw.was[e]), label(lw.pick[e]));
+  return { zone: z.name, items, skipped: [], bar: true, busy: !!lw.sending, blocked: "",
+    note: "Only Environment Control changes, and Home Assistant keeps running every automation as it is. Home Assistant asks you before a newly linked one can be switched from here.",
+    apply: (done) => saveLinks(lw, done), discard: () => { lw.pick = { ...lw.was }; render(); }, back: () => guarded(closeLinkAutos) };
+}
+async function saveLinks(lw, done) {
+  lw.sending = true;
+  draftSync();
+  const r = await saveConfig(() => {
+    const z = zoneById(lw.id), had = z.automations || [], used = new Set(had.map((a) => a.id));
+    let n = had.reduce((m, a) => Math.max(m, Number(String(a.id).replace(/^a/, "")) || 0), 0);
+    z.automations = Object.entries(lw.pick).map(([entity, group]) => {
+      const old = had.find((a) => a.entity === entity);
+      if (old) return { id: old.id, entity, group };
+      let id;
+      do id = `a${++n}`; while (used.has(id));
+      used.add(id);
+      return { id, entity, group };
+    });
+    return z.name;
+  });
+  lw.sending = false;
+  if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
+  toast(`${r.value}'s automations saved.`);
+  done([]);
+  closeLinkAutos();
+}
+
+/* Setup's Alerts card: the one helper every alert's repeat rate comes from, linked for the whole room. */
+function repeatList() {
+  if (!helperCatalog) { loadHelpers().then(() => { if (ui.repeatPick && ui.screen === "setup" && !ui.review) render(); }); return `<p class="muted small">Reading Home Assistant's helpers.</p>`; }
+  const list = helperCatalog.filter((h) => h.entity.startsWith("input_number.") && h.entity !== room.alertRepeat).sort((p, q) => Number(/repeat/.test(q.entity)) - Number(/repeat/.test(p.entity)));
+  return list.map((h) => `<button class="pickrow" data-repeatlink="${esc(h.entity)}"><span class="pick-text"><strong>${esc(h.attributes.friendly_name || h.entity)}</strong><span class="dev-sub">${esc(h.entity)}</span></span><span class="pill plain">${esc(h.state)} ${esc(h.attributes.unit_of_measurement || "")}</span></button>`).join("") || `<p class="muted small">Home Assistant has no number helpers to link.</p>`;
+}
+function alertsCard() {
+  const e = room.alertRepeat, st = e && haStates[e], unit = st && st.attributes && st.attributes.unit_of_measurement ? ` ${st.attributes.unit_of_measurement}` : "";
+  const linked = e ? `<div class="task"><div><strong>Alert repeat</strong><p class="small muted">${st ? `${esc(st.state)}${esc(unit)}.` : "Home Assistant doesn't have it right now."} On your helper, ${esc(e)}. Change it on any zone's Alerts page.</p></div><div class="row"><button class="btn" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link another</button><button class="btn" data-repeatunlink>Unlink</button></div></div>`
+    : `<div class="row"><button class="btn primary" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link a helper</button></div>`;
+  return `<section class="card" id="room-alerts"><div><h2>Alerts</h2><p class="small muted">How often an alert may buzz your phone comes from one number helper shared by every alert in Home Assistant, so it's linked here, for the whole room, rather than per zone.</p></div>${linked}${ui.repeatPick ? `<div class="picklist" id="repeat-list">${repeatList()}</div>` : ""}</section>`;
 }
 
 /* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
@@ -2530,11 +2785,11 @@ function renderSetup() {
   if (ui.guide && zoneById(ui.guide.id)) return renderGuide();
   /* Since #36 a device's type is said in Device identification, so Setup asks only what HA can't tell: how a board connects. */
   const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant doesn't say whether this ${d.ctl ? "device" : "board"} is wired or on WiFi. How is it connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Device identification</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Device placement</button><button role="menuitem" data-calw="${z.id}">Sensor Calibration</button><button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Device identification</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Device placement</button><button role="menuitem" data-calw="${z.id}">Sensor Calibration</button><button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><button role="menuitem" data-linkautos="${z.id}">Automations</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : ""}
     <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div>${zoneRows ? `<div>${zoneRows}</div>` : '<p class="muted small">No zones yet.</p>'}</section>
-    ${appearanceCard()}</div>`;
+    ${alertsCard()}${appearanceCard()}</div>`;
 }
 
 const APPEARANCE_SAYS = { ha: "Matching your Home Assistant theme, its colours and dark mode included, and following it when it changes.", light: "Light, whatever Home Assistant uses.", dark: "Dark, whatever Home Assistant uses." };
@@ -2628,7 +2883,8 @@ function removeRows(z) {
   const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
-    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")]].filter(([, text]) => text);
+    ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")],
+    ["Automations", autosOf(z).length ? `${autosOf(z).length} unlinked. They keep running in Home Assistant` : ""]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -2884,8 +3140,9 @@ async function saveWizard(w, said) {
   ui.screen = "zone"; toast(said); render();
   return [];
 }
-const openDrafts = () => [ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
-const topDraft = () => (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null);
+const autoDrafts = () => (ui.screen !== "autos" ? null : ui.linkw ? linkDraft(ui.linkw) : repeatDraft(ui.autos));
+const openDrafts = () => [autoDrafts(), ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
+const topDraft = () => (autoDrafts() || (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null));
 const draftCount = (d) => d.items.length + d.skipped.length;
 /* This frame can't raise the browser's leave prompt, so it tells the host whether leaving now would lose anything, and only
    when that changes. */
@@ -2909,7 +3166,7 @@ function draftSync() {
   if (page) {
     page.hidden = on;
     const why = confirm && d && d.blocked ? `Fix first: ${d.blocked}` : "";
-    $("#pagebar-why").innerHTML = why ? `<strong>${esc(why)}</strong>` : "";
+    const whyBox = $("#pagebar-why"); if (whyBox) whyBox.innerHTML = why ? `<strong>${esc(why)}</strong>` : "";
     page.toggleAttribute("data-blocked", !!why); page.toggleAttribute("data-bare", !why);
   }
   $("[data-dback]").hidden = !(on && d.back);
@@ -2957,7 +3214,7 @@ function modalHtml() {
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
   const failed = errors.length ? `<div class="notice critical" role="alert"><strong>Some changes were not applied.</strong>${errors.map((e) => `<span>${esc(e)}</span>`).join("")}<span>Anything that went through is saved. What's left is still here to try again.</span></div>` : "";
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">Review changes</h2>
-    <p class="muted small" id="dlg-text">These changes affect ${esc(d.zone)} only. Confirm each value before applying.</p>
+    <p class="muted small" id="dlg-text">${esc(d.affects || `These changes affect ${d.zone} only.`)} Confirm each value before applying.</p>
     <div class="review-scroll">${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
     <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="draft-review" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
 }
@@ -2982,7 +3239,7 @@ function render() {
   refreshReadings();
   renderChrome();
   document.body.classList.remove("vtyping");
-  const screen = { overview: renderOverview, zone: renderZone, devices: renderDevices, setup: renderSetup }[ui.screen];
+  const screen = { overview: renderOverview, zone: renderZone, autos: renderAutos, devices: renderDevices, setup: renderSetup }[ui.screen];
   $("#main").innerHTML = screen();
   const wrap = $("#main .wrap");
   if (wrap) wrap.insertAdjacentHTML("afterbegin", navMenu());
@@ -3058,9 +3315,24 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-mapdev]"))) { ui.picked = `d:${el.dataset.mapdev}`; render(); return; }
   if ((el = q("[data-mapvirt]"))) { ui.picked = el.dataset.mapvirt; render(); return; }
+  if ((el = q("[data-auto]"))) { const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.id === el.dataset.auto); if (a) tapAuto(z, a); return; }
+  if ((el = q("[data-autos]"))) { const zone = el.dataset.zone, page = el.dataset.autos; guarded(() => { Object.assign(ui, { screen: "autos", zone, autos: { zone, page }, linkw: null }); render(); window.scrollTo(0, 0); }); return; }
+  if ((el = q("[data-linkautos]"))) { const id = el.dataset.linkautos; guarded(() => { openLinkAutos(id); render(); window.scrollTo(0, 0); }); return; }
+  if (q("[data-linkback]")) { guarded(closeLinkAutos); return; }
+  if ((el = q("[data-lpick]"))) {
+    const lw = ui.linkw, ent = el.dataset.lpick;
+    if (lw.pick[ent] !== undefined) delete lw.pick[ent]; else lw.pick[ent] = lw.was[ent] || suggestGroup(ent);
+    $("#link-list").innerHTML = linkList(lw, zoneById(lw.id));
+    const again = document.querySelector(`[data-lpick="${CSS.escape(ent)}"]`); if (again) again.focus({ preventScroll: true });
+    draftSync();
+    return;
+  }
+  if (q("[data-repeatpick]")) { ui.repeatPick = !ui.repeatPick; render(); if (ui.repeatPick) jumpTo("room-alerts"); return; }
+  if ((el = q("[data-repeatlink]"))) { const ent = el.dataset.repeatlink; saveConfig(() => { room.alertRepeat = ent; }).then((r) => { if (r.ok) ui.repeatPick = false; toast(r.ok ? "Alert repeat linked." : `Not saved. ${r.error}`); render(); }); return; }
+  if (q("[data-repeatunlink]")) { saveConfig(() => { delete room.alertRepeat; }).then((r) => { toast(r.ok ? "Alert repeat unlinked. Your helper stays as it is." : `Not saved. ${r.error}`); render(); }); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
-    guarded(() => { ui.guide = null; if (go === "zone" && (ui.screen !== "zone" || ui.zone !== zone)) { const h = (zoneById(zone) || {}).history || HISTORY_DEFAULT; ui.metric = h.metric; ui.range = h.hours; } ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    guarded(() => { ui.guide = null; if (go === "zone" && (ui.screen !== "zone" || ui.zone !== zone)) { const h = (zoneById(zone) || {}).history || HISTORY_DEFAULT; ui.metric = h.metric; ui.range = h.hours; } ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.autos = null; ui.linkw = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
     return;
   }
   if ((el = q("[data-guide]"))) { const id = el.dataset.guide; guarded(() => { Object.assign(ui, { guide: { id }, screen: "setup", wiz: null, mapw: null, vpdw: null, leafw: null, sched: null, td: null }); render(); window.scrollTo(0, 0); }); return; }
@@ -3245,6 +3517,7 @@ document.addEventListener("focusout", (e) => {
   if (!pressing && typedBox(e.target) && !typedBox(e.relatedTarget)) document.body.classList.remove("vtyping");
 });
 document.addEventListener("change", (e) => {
+  if (e.target.dataset && e.target.dataset.lgroup && ui.linkw) { ui.linkw.pick[e.target.dataset.lgroup] = e.target.value; draftSync(); return; }
   if (e.target.dataset && e.target.dataset.wizlevel && ui.wiz) { const s2 = ui.wiz.sensors.find((x) => x.id === ui.wiz.pick); if (s2) { s2.level = e.target.value; render(); } return; }
   if (e.target.name === "link-filter" && e.target.dataset.link) { ui.linkFilter = e.target.dataset.link; render(); return; }
   if (e.target.dataset.dev && e.target.dataset.act === "mode") {
@@ -3346,6 +3619,13 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
   if (e.target.dataset && e.target.dataset.wlabel && ui.wiz) { (ui.wiz.labels ||= {})[e.target.dataset.wlabel] = e.target.value; const bar = $("#main .wizbar"); if (bar) { const n = wizDraft(ui.wiz).items.length; bar.querySelector(".draft-text").innerHTML = n ? `<strong>${plural(n, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>` : ""; } }
   if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
+  if (e.target.id === "link-q" && ui.linkw) { ui.linkw.q = e.target.value; $("#link-list").innerHTML = linkList(ui.linkw, zoneById(ui.linkw.id)); }
+  if (e.target.id === "repeat-in" && ui.autos) {
+    ui.autos.repeat = e.target.value;
+    const st = haStates[room.alertRepeat], bad = st ? repeatProblem(e.target.value, st.attributes || {}) : "";
+    e.target.setAttribute("aria-invalid", String(!!bad)); $("#repeat-bad").textContent = bad; $("#repeat-bad").hidden = !bad;
+    draftSync();
+  }
   if (e.target.dataset && e.target.dataset.dialin) { const o = dialSpec(devices.find((x) => x.id === e.target.dataset.dialin.split(":")[0]), e.target.dataset.dialin.split(":")[1]); dialTo(e.target.dataset.dialin, dialSnap(o, Number(e.target.value))); const again = document.querySelector(`[data-dialin="${e.target.dataset.dialin}"]`); if (again) again.focus(); }
   if (e.target.dataset && e.target.dataset.hq && helperQ && ui.td) { helperQ = { key: e.target.dataset.hq, q: e.target.value, active: -1 }; redrawPicker(e.target.dataset.hq); }
   if (ui.mapw && e.target.dataset) {
@@ -3371,20 +3651,21 @@ if (window.visualViewport) window.visualViewport.addEventListener("resize", vRev
 const DERIVED = ["on", "state", "brightness", "mode", "modes", "setpoint", "unitRh", "minRh", "maxRh", "modeNote"];
 const clone = (x) => JSON.parse(JSON.stringify(x));
 function configOf() {
-  return { zones: clone(zones), devices: devices.map((d) => { const out = clone(d); if (d.entity) for (const k of DERIVED) delete out[k]; return out; }) };
+  return { zones: clone(zones), devices: devices.map((d) => { const out = clone(d); if (d.entity) for (const k of DERIVED) delete out[k]; return out; }), room: clone(room) };
 }
 function adoptConfig(c) {
   zones = clone(c.zones);
   devices = clone(c.devices);
+  room = clone(c.room || {});
   configRevision = c.revision;
   devices.forEach(deviceFromState);
   sensorsFromStates();
   if (ui.zone && !zoneById(ui.zone)) ui.zone = zones.length ? zones[0].id : null;
 }
 function withConfig(c, change) {
-  const held = [zones, devices];
-  zones = c.zones; devices = c.devices;
-  try { return change(); } finally { [zones, devices] = held; }
+  const held = [zones, devices, room];
+  zones = c.zones; devices = c.devices; room = c.room;
+  try { return change(); } finally { [zones, devices, room] = held; }
 }
 async function saveConfig(change) {
   const next = configOf(), value = withConfig(next, change);

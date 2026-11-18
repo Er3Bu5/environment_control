@@ -1,7 +1,7 @@
 "use strict";
 /* The panel element Home Assistant mounts, and the only code that holds your login. The whole UI runs in a sandboxed
    frame with its own origin and no network, and this element is its only way out: it hands the frame the states of
-   mapped entities and runs the few actions in the v1 write table, looking every entity up in the config it fetched
+   mapped entities and runs the few actions in the v1 write table (devices, calibration, settings and automation switches), looking every entity up in the config it fetched
    itself. The frame sends ids, never an entity or a service, and anything not on the allowlist is dropped. The one list
    it hands over beyond mapped entities is HA's number and time helpers, read only, so Setup can offer them to link.
    It also hands over HA's theme colours, each checked to be a plain colour, so the panel can match your theme.
@@ -10,11 +10,16 @@
   const WRITE_DOMAINS = ["switch", "light", "fan", "humidifier"];
   const ACTIONS = ["turn_on", "turn_off", "brightness", "mode", "humidity"];
   /* Only what the UI draws. Anything else an integration puts in its attributes stays here. */
-  const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
+  const ATTRS = ["friendly_name", "last_triggered", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
   const isId = (v) => typeof v === "string" && /^[a-z0-9_-]{1,64}$/.test(v);
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
   const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
+  /* Automations a zone links can be switched on and off, and nothing else: HA keeps running them. */
+  const AUTOMATION = /^automation\.[a-z0-9_]{1,200}$/;
+  const automationLinks = (z) => (Array.isArray(z.automations) ? z.automations : []).filter((a) => a && typeof a.entity === "string" && AUTOMATION.test(a.entity));
+  /* The room's own settings: the one helper every alert's repeat rate comes from. */
+  const roomHelper = (config) => { const e = config && config.room && config.room.alertRepeat; return typeof e === "string" && /^input_number\.[a-z0-9_]{1,200}$/.test(e) ? e : null; };
   /* The settings a zone can link to a helper. The frame names one of these, never an entity. */
   const SETTINGS = ["day", "night", "morning", "daylight", "evening", "light.dayMin", "light.nightMax",
     ...["day", "night"].flatMap((p) => ["temperature", "humidity", "vpd"].flatMap((k) => ["min", "target", "max"].map((slot) => `bands.${p}.${k}.${slot}`)))];
@@ -126,6 +131,8 @@
       for (const d of this.config.devices) if (d.entity && d.zones.length) out.add(d.entity);
       for (const z of this.config.zones) for (const x of z.sensors || []) if (x && typeof x.leafEntity === "string" && !x.leafUnused) out.add(x.leafEntity);
       for (const z of this.config.zones) for (const e of helperLinks(z)) out.add(e);
+      for (const z of this.config.zones) for (const a of automationLinks(z)) out.add(a.entity);
+      if (roomHelper(this.config)) out.add(roomHelper(this.config));
       return out;
     }
     pick(st) {
@@ -173,7 +180,7 @@
       this.post({ type: "init", ...this.stored(), states, theme: this.sendTheme(true) });
       this.ready = true;
     }
-    stored() { return { revision: this.config.revision, zones: this.config.zones, devices: this.config.devices }; }
+    stored() { return { revision: this.config.revision, zones: this.config.zones, devices: this.config.devices, room: this.config.room || {} }; }
     async reload() {
       if (!this.frame) { this.start(); return; }
       try { this.config = await this._hass.connection.sendMessagePromise({ type: "environment_control/config" }); } catch { return; }
@@ -202,6 +209,8 @@
       else if (m.type === "calibrate") this.calibrate(m);
       else if (m.type === "setting") this.setting(m);
       else if (m.type === "helpers") this.helpers(m);
+      else if (m.type === "automation") this.automation(m);
+      else if (m.type === "automations") this.automations(m);
       else if (m.type === "appearance") this.setAppearance(m);
     }
     /* Setup's helper picker: number helpers and time-only date helpers, with only the allowlisted attributes. Reading the list
@@ -218,6 +227,20 @@
         if (list.length >= 2000) break;
       }
       this.post({ type: "result", req: m.req, ok: true, helpers: list });
+    }
+    /* The automation picker: every automation HA has, with its name, state, last run and area, read only. Like the helper
+       list, reading it links nothing: switching one needs a save that links it, and that save asks you first. */
+    automations(m) {
+      if (!Number.isInteger(m.req)) return;
+      const list = [], areas = this._hass.areas || {};
+      for (const [e, st] of Object.entries(this._hass.states)) {
+        if (!AUTOMATION.test(e) || !st) continue;
+        const reg = (this._hass.entities || {})[e] || {}, area = reg.area_id && areas[reg.area_id] ? String(areas[reg.area_id].name) : "";
+        const { state, attributes } = this.pick(st);
+        list.push({ entity: e, state, attributes, area });
+        if (list.length >= 2000) break;
+      }
+      this.post({ type: "result", req: m.req, ok: true, automations: list });
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 
@@ -241,6 +264,24 @@
       if (!call) return refuse("That value isn't one this device takes.");
       try {
         await this._hass.callService(...call);
+        this.reply(m.req, true);
+      } catch (err) {
+        refuse(String((err && err.message) || err));
+      }
+    }
+
+    /* The automation write: a zone and the id of one of its automation links, on or off. The automation is the one that zone
+       links in this element's config, so a frame can switch only what a person allowed it to. */
+    async automation(m) {
+      const refuse = (why) => this.reply(m.req, false, why);
+      if (!isId(m.zone) || !isId(m.link) || typeof m.on !== "boolean") return refuse("Not an automation this panel knows.");
+      const z = this.config.zones.find((x) => x && x.id === m.zone), a = z && automationLinks(z).find((x) => x.id === m.link);
+      if (!a) return refuse("That zone doesn't link that automation.");
+      const st = this._hass.states[a.entity];
+      if (!st) return refuse(`Home Assistant has no ${a.entity}.`);
+      if (st.state === "unavailable") return refuse("It's unavailable in Home Assistant.");
+      try {
+        await this._hass.callService("automation", m.on ? "turn_on" : "turn_off", { entity_id: a.entity });
         this.reply(m.req, true);
       } catch (err) {
         refuse(String((err && err.message) || err));
@@ -272,10 +313,18 @@
        element's config, and the value has to fit that helper's own limits and step, or be a time for a time helper. */
     async setting(m) {
       const refuse = (why) => this.reply(m.req, false, why);
-      if (!isId(m.zone) || !SETTINGS.includes(m.name)) return refuse("Not a setting this panel knows.");
-      const z = this.config.zones.find((x) => x && x.id === m.zone), entity = z && linkAt(z, m.name);
-      if (typeof entity !== "string" || !HELPER.test(entity)) return refuse("That setting isn't linked to a helper.");
-      if (/^(bands|light)\./.test(m.name) && z.linked !== true) return refuse("That zone's limits are set in Environment Control, not on its helpers.");
+      let entity;
+      if (m.zone === undefined && m.name === "alertRepeat") {
+        /* The one room setting: every alert's repeat rate, on the number helper the room links. */
+        entity = roomHelper(this.config);
+        if (!entity) return refuse("The alert repeat rate isn't linked to a helper.");
+      } else {
+        if (!isId(m.zone) || !SETTINGS.includes(m.name)) return refuse("Not a setting this panel knows.");
+        const z = this.config.zones.find((x) => x && x.id === m.zone);
+        entity = z && linkAt(z, m.name);
+        if (typeof entity !== "string" || !HELPER.test(entity)) return refuse("That setting isn't linked to a helper.");
+        if (/^(bands|light)\./.test(m.name) && z.linked !== true) return refuse("That zone's limits are set in Environment Control, not on its helpers.");
+      }
       const st = this._hass.states[entity];
       if (!st || st.state === "unavailable") return refuse(`Home Assistant has no ${entity} it can set.`);
       let call;
@@ -301,7 +350,7 @@
       const refuse = (why) => this.reply(m.req, false, why);
       if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
       if (JSON.stringify(m.config).length > 512 * 1024) return refuse("That setup is too large to save.");
-      const config = { zones: m.config.zones, devices: m.config.devices };
+      const config = { zones: m.config.zones, devices: m.config.devices, ...(m.config.room === undefined ? {} : { room: m.config.room }) };
       /* A mapping decides what a button moves, so a device becomes controllable only once a person says yes here, outside the frame. */
       const added = this.newlyControlled(config);
       if (typeof added === "string") return refuse(added);
@@ -328,11 +377,28 @@
         if (!this._hass.states[d.entity]) return `Home Assistant has no ${d.entity}.`;
         out.push({ entity: d.entity, zones: d.zones });
       }
-      const linked = new Set(this.config.zones.flatMap(helperLinks));
+      /* An automation linked to any zone can already be switched, so linking it to another zone adds nothing to ask about. */
+      const switched = new Set(this.config.zones.flatMap((z) => automationLinks(z).map((a) => a.entity)));
+      for (const z of config.zones) for (const a of z && typeof z === "object" && Array.isArray(z.automations) ? z.automations : []) {
+        if (!a || typeof a.entity !== "string") return "That isn't an automation this panel can switch.";
+        if (switched.has(a.entity)) continue;
+        if (!AUTOMATION.test(a.entity)) return "That isn't an automation this panel can switch.";
+        if (!this._hass.states[a.entity]) return `Home Assistant has no ${a.entity}.`;
+        const had = out.find((x) => x.entity === a.entity);
+        if (had) { had.zones.push(z.id); continue; }
+        out.push({ entity: a.entity, zones: [z.id], automation: true, failsafe: a.group === "failsafe" });
+      }
+      const linked = new Set([...this.config.zones.flatMap(helperLinks), ...(roomHelper(this.config) ? [roomHelper(this.config)] : [])]);
       for (const z of config.zones) for (const e of z && typeof z === "object" ? helperLinks(z) : []) {
         if (linked.has(e) || out.some((x) => x.entity === e)) continue;
         if (!this._hass.states[e]) return `Home Assistant has no ${e}.`;
         out.push({ entity: e, zones: [z.id], helper: true });
+      }
+      const repeat = config.room && config.room.alertRepeat;
+      if (repeat !== undefined && !roomHelper(config)) return "The alert repeat rate can only link to a number helper.";
+      if (repeat !== undefined && !linked.has(repeat) && !out.some((x) => x.entity === repeat)) {
+        if (!this._hass.states[repeat]) return `Home Assistant has no ${repeat}.`;
+        out.push({ entity: repeat, zones: [], helper: true, room: true });
       }
       return out;
     }
@@ -342,10 +408,11 @@
       const area = reg.area_id && areas[reg.area_id] ? areas[reg.area_id].name : null;
       const zones = item.zones.map((id) => (config.zones.find((z) => z && z.id === id) || {}).name).filter((n) => typeof n === "string");
       const domain = item.entity.split(".")[0], a = st.attributes || {};
-      const can = item.helper ? "Its value can be changed." : domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
+      const can = item.room ? "Its value can be changed. Every alert's repeat rate comes from it." : item.helper ? "Its value can be changed." : item.automation ? "Can be switched on and off. While it's off, Home Assistant doesn't run it." : domain === "light" && !(a.supported_color_modes || []).some((c) => c !== "onoff") ? CAN.switch : CAN[domain];
       /* Zone names are the user's own and can be a single letter, so each is named as an area or zone, and every line ends in
          a full stop, so a short name never reads as text cut off. */
-      const flag = item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
+      /* Automations rarely have an area, so only a failsafe is flagged, because switching one off stops it protecting hardware. */
+      const flag = item.automation ? (item.failsafe ? "A failsafe. Once allowed, the panel can switch it off." : "") : item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
       const facts = [reg.platform, area].filter(Boolean).map(String).join(", ");
       return { name: String(a.friendly_name || item.entity), facts: facts ? `${facts}.` : "", can, flag, zones };
     }
@@ -367,16 +434,19 @@
           return li;
         };
         /* Devices move hardware, so they're always listed. Helpers fold away under a count. */
-        const devices = rows.filter((r) => !r.it.helper), helpers = rows.filter((r) => r.it.helper), list = make("ul");
+        const devices = rows.filter((r) => !r.it.helper && !r.it.automation), autos = rows.filter((r) => r.it.automation), helpers = rows.filter((r) => r.it.helper), list = make("ul");
         devices.forEach((r) => list.append(item(r)));
+        /* Automations are listed too, never folded: a failsafe switched off is a safety decision. */
+        autos.forEach((r) => list.append(item(r)));
         const fold = make("details"), hlist = make("ul");
         fold.append(make("summary", `${helpers.length} helper${helpers.length > 1 ? "s" : ""}: values can be changed.`), hlist);
         helpers.forEach((r) => hlist.append(item(r)));
         const count = (n, word) => (n ? `${n} ${word}${n > 1 ? "s" : ""}` : "");
-        const cancel = make("button", "Cancel"), allow = make("button", `Allow ${[count(devices.length, "device"), count(helpers.length, "helper")].filter(Boolean).join(" and ")}`, "allow");
+        const parts = [count(devices.length, "device"), count(autos.length, "automation"), count(helpers.length, "helper")].filter(Boolean);
+        const cancel = make("button", "Cancel"), allow = make("button", `Allow ${parts.length > 2 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts.join(" and ")}`, "allow");
         cancel.dataset.host = "cancel"; allow.dataset.host = "allow";
         const row = make("div", undefined, "row"); row.append(cancel, allow);
-        dlg.append(style, title, sub, ...(devices.length ? [list] : []), ...(helpers.length ? [fold] : []), row);
+        dlg.append(style, title, sub, ...(devices.length || autos.length ? [list] : []), ...(helpers.length ? [fold] : []), row);
         let timer;
         const arm = () => { allow.disabled = true; clearTimeout(timer); timer = setTimeout(() => { allow.disabled = false; }, ARM_MS); };
         const seen = () => { if (document.visibilityState === "visible") arm(); };
