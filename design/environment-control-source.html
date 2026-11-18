@@ -760,7 +760,7 @@ function lightSvg(id, name, pts, H, cls) {
   const line = pts.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join("");
   return `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(name)} over the last 4 hours">
       <defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="${Y(2120)}" y2="${Y(1210)}"><stop offset="0" style="stop-color:var(--lhigh)"/><stop offset="1" style="stop-color:var(--llow)"/></linearGradient></defs>
-      <path d="${line}L${W} ${H}L0 ${H}Z" fill="url(#${id})" opacity=".22"/><path d="${line}" fill="none" stroke="url(#${id})" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+      <path d="${line}" fill="none" stroke="url(#${id})" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
 }
 function lightCard(id, name, pts) {
   return `<div class="lcard"><div class="name">${esc(name)}</div><div class="val">${Math.round(pts[48]).toLocaleString("en-NZ")} <small>lx</small></div>
