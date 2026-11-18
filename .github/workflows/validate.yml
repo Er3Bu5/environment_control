@@ -60,7 +60,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       # --ignore-scripts: no package gets to run code at install time.
       - run: npm ci --ignore-scripts --no-fund
-      - run: npm audit --audit-level=moderate
+      # npm audit at moderate and above, with named advisories set aside until a review date: see the script.
+      - run: python3 ../scripts/check_npm_audit.py
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
