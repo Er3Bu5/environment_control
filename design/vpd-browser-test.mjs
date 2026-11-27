@@ -1911,7 +1911,11 @@ await reset();
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }); await phone(390, 844); await setupNow();
 const zoneIds = () => ev(`zones.map(z=>z.id)`);
 const startZones = await zoneIds();
-const askRemove = (id) => cClick(`[data-rmzone="${id}"]`);
+/* The zone's menu is opened with a real tap, as a person opens it, which puts keyboard focus in the panel's frame.
+   The dialog needs that for its title to take focus and for Escape and Enter to reach it: a scripted click gives no
+   focus, and since Chrome 158 a frame that isn't focused can no longer take focus for itself from code. The item is
+   then clicked from code, because at 320 px, under the design's 500 px floor, the menu hangs off the left edge. */
+const askRemove = async (id) => { await tap(`[data-zmenu="${id}"]`); await cClick(`[data-rmzone="${id}"]`); };
 const typeName = (text) => ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=${JSON.stringify(text)};i.dispatchEvent(new Event("input",{bubbles:true}))})()`);
 const removeOff = () => ev(`document.querySelector("[data-gdiscard]").disabled`);
 const confirmRemove = async () => { await ev(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})()`); await cClick("[data-gdiscard]"); };
@@ -2068,7 +2072,9 @@ check("Storage: the backend refuses a device in a missing zone, an entity it can
 
 // ---------- Leaving the page: the frame can't raise the browser's leave prompt, so it tells the host a draft is open
 const leaveAsks = () => onHA(`(()=>{const e=new Event("beforeunload",{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented})()`);
-const openDetails = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();openWizard(zones[0].id,[0]);ui.screen="setup";render()`); await sleep(50); await ev(`document.querySelector("#wiz-name").focus()`); await type("x"); await sleep(50); };
+/* The name box is tapped, not focused from code: typing goes to whatever holds keyboard focus, and since Chrome 158 a
+   frame that isn't focused can't take focus for itself. */
+const openDetails = async () => { await ev(`ui.review=null;ui.guard=null;renderModal();openWizard(zones[0].id,[0]);ui.screen="setup";render()`); await sleep(50); await tap("#wiz-name"); await type("x"); await sleep(50); };
 await ev(`ui.review=null;ui.guard=null;renderModal();ui.wiz=null;ui.screen="setup";render()`); await sleep(50);
 check("Leaving: with nothing unsaved, closing the page doesn't ask", (await leaveAsks()) === false);
 await openDetails();
