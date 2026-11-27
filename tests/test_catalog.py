@@ -209,3 +209,44 @@ async def test_the_catalog_is_for_admins_only(hass, loaded, room, hass_ws_client
     reply = await client.receive_json()
     assert not reply["success"]
     assert reply["error"]["code"] == "unauthorized"
+
+
+async def test_automations_are_listed_on_their_own_for_a_zone_to_link(hass, loaded, room, hass_ws_client) -> None:
+    """Only what the picker shows: which automation, its name, whether it's on, when it last ran and its area."""
+    entities, garden = er.async_get(hass), ar.async_get(hass).async_get_area_by_name("Garden")
+    entities.async_update_entity("automation.lights_on", area_id=garden.id)
+    hass.states.async_set(
+        "automation.lights_on",
+        "on",
+        {
+            "friendly_name": "Garden Lights On",
+            "last_triggered": "2026-11-17T07:00:00+13:00",
+            "id": "1699",
+            "mode": "single",
+        },
+    )
+    entities.async_get_or_create(
+        "automation", "automation", "old", suggested_object_id="retired", disabled_by=er.RegistryEntryDisabler.USER
+    )
+    entities.async_get_or_create("automation", "automation", "never", suggested_object_id="never_ran")
+    hass.states.async_set("automation.never_ran", "off", {"friendly_name": "Never Ran", "last_triggered": None})
+
+    result = await _catalog(hass, await hass_ws_client(hass))
+    assert result["automations"] == [
+        {
+            "entity_id": "automation.lights_on",
+            "name": "Garden Lights On",
+            "state": "on",
+            "area": "Garden",
+            "last_triggered": "2026-11-17T07:00:00+13:00",
+        },
+        {
+            "entity_id": "automation.never_ran",
+            "name": "Never Ran",
+            "state": "off",
+            "area": None,
+            "last_triggered": None,
+        },
+    ]
+    # They stay out of the entities a sensor, a device or a helper is picked from.
+    assert not any(e["entity_id"].startswith("automation.") for e in result["entities"])

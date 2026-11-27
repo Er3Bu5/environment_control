@@ -16,8 +16,10 @@ from pathlib import Path
 # The write paths the host may call, as a count of callService sites. Each milestone that adds a write adds it here,
 # in the same change as its tests. Milestone 5 added the calibration write, number.set_value on a board's leaf offset;
 # Targets adds the setting write, input_number.set_value or input_datetime.set_datetime on a zone's linked helper;
-# manual controls add the device write, the plan's v1 table: on or off, brightness, humidifier mode and target humidity.
-HOST_CALL_SERVICE_SITES = 3
+# manual controls add the device write, the plan's v1 table: on or off, brightness, humidifier mode and target humidity;
+# automation switches add the automation write, automation.turn_on or turn_off on an automation a zone links. The
+# room's alert repeat rate goes through the setting write, so it adds none.
+HOST_CALL_SERVICE_SITES = 4
 # The messages the host acts on from the frame. Each is a way into the code that holds the login, so adding one is a
 # deliberate change here, made with its tests.
 HOST_ACCEPTS = {
@@ -31,6 +33,7 @@ HOST_ACCEPTS = {
     "history",
     "setting",
     "device",
+    "automation",
     "nav",
 }
 FRAME_BANNED = {

@@ -1,7 +1,8 @@
 """What Home Assistant has, for the panel's setup: devices, their entities, and how each device is connected.
 
 Read only, from HA's registries and states. Only names, areas, entity ids, domains, device classes, units, states and
-the detected connection leave this module. Identifiers, connection values (MACs), serial numbers, configuration URLs
+the detected connection leave this module, and for an automation only its name, area, whether it's on and when it last
+ran: never what triggers it or what it does. Identifiers, connection values (MACs), serial numbers, configuration URLs
 (which often hold an address), firmware versions and config-entry data never do.
 
 How a device is connected is detected, never guessed: anything the registries can't tell is "unknown", and Setup asks.
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -19,7 +21,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integrations
 
-from .const import MAX_CATALOG_DEVICES, MAX_CATALOG_ENTITIES
+from .const import MAX_CATALOG_AUTOMATIONS, MAX_CATALOG_DEVICES, MAX_CATALOG_ENTITIES
 
 # The domains setup can use: readings and settings from sensors, and the things a zone switches, dims or detects day by.
 DOMAINS = frozenset(
@@ -117,8 +119,23 @@ def _entity(hass: HomeAssistant, entry: er.RegistryEntry, areas: ar.AreaRegistry
     return out
 
 
+def _automation(hass: HomeAssistant, entry: er.RegistryEntry, areas: ar.AreaRegistry) -> dict[str, Any]:
+    """An automation as a zone's picker shows it. Listing it links nothing: the panel can switch one only once a save
+    links it, and the panel's host asks a person before that save."""
+    state = hass.states.get(entry.entity_id)
+    attrs = state.attributes if state else {}
+    ran = attrs.get("last_triggered")
+    return {
+        "entity_id": entry.entity_id,
+        "name": attrs.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
+        "state": state.state if state else None,
+        "area": _area_name(areas, entry.area_id),
+        "last_triggered": ran.isoformat() if isinstance(ran, datetime) else ran if isinstance(ran, str) else None,
+    }
+
+
 async def async_build_catalog(hass: HomeAssistant) -> dict[str, Any]:
-    """Every enabled device with an entity setup can use, then entities that belong to no device."""
+    """Every enabled device with an entity setup can use, entities that belong to no device, then automations."""
     devices, entities, areas = dr.async_get(hass), er.async_get(hass), ar.async_get(hass)
 
     usable: dict[str, list[er.RegistryEntry]] = {}
@@ -180,4 +197,12 @@ async def async_build_catalog(hass: HomeAssistant) -> dict[str, Any]:
         for e in sorted(loose, key=lambda e: e.entity_id)[: max(0, MAX_CATALOG_ENTITIES - count)]
     ]
     out_devices.sort(key=lambda d: (d["area"] or "~", d["name"].lower()))
-    return {"devices": out_devices, "entities": out_loose}
+    automations = sorted(
+        (e for e in entities.entities.values() if e.domain == "automation" and not e.disabled_by),
+        key=lambda e: e.entity_id,
+    )[:MAX_CATALOG_AUTOMATIONS]
+    return {
+        "devices": out_devices,
+        "entities": out_loose,
+        "automations": [_automation(hass, e, areas) for e in automations],
+    }

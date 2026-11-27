@@ -20,6 +20,18 @@ HELPER = re.compile(r"^input_(number|datetime)\.[a-z0-9_]{1,200}$")
 ON_OFF = re.compile(r"^(switch|light|input_boolean)\.[a-z0-9_]{1,200}$")
 NUMBER_ENTITY = re.compile(r"^number\.[a-z0-9_]{1,200}$")
 SENSOR_ENTITY = re.compile(r"^sensor\.[a-z0-9_]{1,200}$")
+NUMBER_HELPER = re.compile(r"^input_number\.[a-z0-9_]{1,200}$")
+# Automations a zone links can be switched on and off by the panel's host, and nothing else: Home Assistant keeps
+# running them. A link is only which automation, under what id, in which group.
+AUTOMATION = re.compile(r"^automation\.[a-z0-9_]{1,200}$")
+AUTOMATION_GROUPS = ("alert_day", "alert_night", "alert_device", "failsafe", "control")
+LINK_ID = re.compile(r"^[a-z0-9_-]{1,64}$")
+MAX_AUTOMATIONS_PER_ZONE = 200
+# What a setup holds. Room settings are for the whole room rather than one zone: so far only the number helper every
+# alert's repeat rate comes from.
+# A setup read back from storage carries its revision; the store sets that itself on every save, whatever is sent.
+CONFIG_KEYS = frozenset({"zones", "devices", "room", "revision"})
+ROOM_KEYS = frozenset({"alertRepeat"})
 # A sensor is an HA device id, a device entry an id the panel makes; both stay short and safe in an id or a URL.
 ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # Environment readings, then a soil probe's; which a sensor may use follows its class.
@@ -202,10 +214,47 @@ def _check_sensor(zid: str, x: Any) -> None:
         _fail(f"{sid} has a height this panel doesn't know")
 
 
+def _check_automations(zid: str, links: Any) -> None:
+    """A zone's automation links: each exactly an id, an automation entity and a group, with no id or automation twice.
+
+    Nothing else may ride along, so a link can never name a service or anything but an automation. The same automation
+    may be linked in several zones, as a failsafe on shared hardware is.
+    """
+    if not isinstance(links, list) or len(links) > MAX_AUTOMATIONS_PER_ZONE:
+        _fail(f"{zid} links automations that aren't a short list")
+    ids: set[str] = set()
+    entities: set[str] = set()
+    for a in links:
+        if not isinstance(a, dict) or set(a) != {"id", "entity", "group"}:
+            _fail(f"{zid} links an automation with something other than an id, an entity and a group")
+        aid, entity = a["id"], a["entity"]
+        if not isinstance(aid, str) or not LINK_ID.match(aid) or aid in ids:
+            _fail(f"{zid} has automation links without unique ids")
+        if not isinstance(entity, str) or not AUTOMATION.match(entity) or entity in entities:
+            _fail(f"{zid} links something that isn't an automation, or one twice")
+        if a["group"] not in AUTOMATION_GROUPS:
+            _fail(f"{zid} puts an automation in a group this panel doesn't know")
+        ids.add(aid)
+        entities.add(entity)
+
+
+def _check_room(room: Any) -> None:
+    """Settings for the whole room: only the number helper every alert's repeat rate comes from."""
+    if not isinstance(room, dict) or not set(room) <= ROOM_KEYS:
+        _fail("Room settings hold only the alert repeat rate")
+    repeat = room.get("alertRepeat")
+    if "alertRepeat" in room and not (isinstance(repeat, str) and NUMBER_HELPER.match(repeat)):
+        _fail("The alert repeat rate links to something that isn't a number helper")
+
+
 def validate_config(c: Any) -> None:
     """Raise InvalidConfig if the setup can't be stored."""
     if not isinstance(c, dict) or not isinstance(c.get("zones"), list) or not isinstance(c.get("devices"), list):
         _fail("Config isn't zones and devices")
+    if not set(c) <= CONFIG_KEYS:
+        _fail("Config holds something other than zones, devices and room settings")
+    if "room" in c:
+        _check_room(c["room"])
     if len(json.dumps(c)) > MAX_CONFIG_BYTES:
         _fail("That setup is too large to save")
     zones, devices = c["zones"], c["devices"]
@@ -259,6 +308,8 @@ def validate_config(c: Any) -> None:
         if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > 200):
             _fail(f"{zid} has a description that isn't short text")
         _check_limits(zid, z)
+        if "automations" in z:
+            _check_automations(zid, z["automations"])
         opens = z.get("history")
         if opens is not None and not (
             isinstance(opens, dict)
