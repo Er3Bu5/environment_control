@@ -629,6 +629,9 @@ nA = (await haCalls()).length;
 const autoRefused = await evp(`Promise.all([ask("automation",{zone:"garden",link:"nope",on:false}),ask("automation",{zone:"veg",link:"a1",on:"off"}),ask("automation",{zone:"nowhere",link:"a1",on:false}),ask("automation",{zone:"garden",on:false})]).then(rs=>rs.map(r=>r.ok))`);
 check("Automations: the host refuses a link the zone doesn't have, an on that isn't true or false, and an unknown zone", same(autoRefused, [false, false, false, false]) && (await haCalls()).length === nA, autoRefused);
 await evp(`ask("automation",{zone:"garden",link:"a1",on:false,entity_id:"automation.porch_light_on",service:"turn_on"})`);
+await onHA(`fakeHA.setState("automation.critical_garden_temperature_high_day","off",{mode:"single",id:"1699"})`); await sleep(80);
+check("Automations: only an automation's name and last run reach the frame, never its id or run mode", same(Object.keys(await ev(`haStates["automation.critical_garden_temperature_high_day"].attributes`)).sort(), ["friendly_name", "last_triggered"]), await ev(`haStates["automation.critical_garden_temperature_high_day"].attributes`));
+await onHA(`fakeHA.setState("automation.critical_garden_temperature_high_day","on",{})`); await sleep(80);
 check("Automations: an entity or service named by the frame is ignored", same((await haCalls()).at(-1), ["automation.turn_off", "automation.critical_garden_temperature_high_day", null]) && (await onHA(`fakeHA.states["automation.porch_light_on"].state`)) === "on", (await haCalls()).at(-1));
 await sleep(REPORT); await evp(`ask("automation",{zone:"garden",link:"a1",on:true})`); await sleep(REPORT);
 
@@ -657,7 +660,7 @@ check("Link: once allowed it's saved in its group, and the page goes back to the
 check("Link: and the zone page counts it", (await ev(`document.querySelector('[data-autocount="nursery:alert"]').textContent`)) === "4 of 4 on");
 const sneakyAuto = evp(`saveConfig(()=>{zoneById("nursery").automations.push({id:"a99",entity:"automation.porch_light_on",group:"failsafe"})}).then(r=>r.ok)`);
 await sleep(300); dlg = await hostDialog();
-check("Link: the dialog names the real automation, and flags a failsafe as one", dlg.text.includes("Porch Light On") && dlg.text.includes("A failsafe. Once allowed, the panel can switch it off."), dlg.text);
+check("Link: the dialog names the real automation, and flags a failsafe as one", dlg.text.includes("Porch Light On") && dlg.text.includes("Linked as a failsafe. Once allowed, the panel can switch it off."), dlg.text);
 await key("Escape", 27); await sleep(150);
 check("Link: Escape is a no", (await sneakyAuto) === false && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.porch_light_on"));
 const already = await evp(`saveConfig(()=>{zoneById("garden").automations.push({id:"a99",entity:"automation.tent_lights_on",group:"control"})}).then(r=>r.ok)`); await sleep(100);

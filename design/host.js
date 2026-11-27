@@ -10,7 +10,10 @@
   const WRITE_DOMAINS = ["switch", "light", "fan", "humidifier"];
   const ACTIONS = ["turn_on", "turn_off", "brightness", "mode", "humidity"];
   /* Only what the UI draws. Anything else an integration puts in its attributes stays here. */
-  const ATTRS = ["friendly_name", "last_triggered", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
+  /* Of an automation the UI draws only its name and when it last ran, so nothing else of it is handed over: not its id,
+     and not its mode, which is on the list below for what a dehumidifier is set to. */
+  const AUTOMATION_ATTRS = ["friendly_name", "last_triggered"];
+  const ATTRS = ["friendly_name", "brightness", "supported_color_modes", "mode", "available_modes", "humidity", "current_humidity", "min_humidity", "max_humidity", "min", "max", "step", "unit_of_measurement"];
   const isId = (v) => typeof v === "string" && /^[a-z0-9_-]{1,64}$/.test(v);
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const ENTITY = /^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$/;
@@ -135,10 +138,10 @@
       if (roomHelper(this.config)) out.add(roomHelper(this.config));
       return out;
     }
-    pick(st) {
+    pick(st, entity) {
       if (!st) return null;
       const attributes = {};
-      for (const k of ATTRS) if (k in st.attributes) attributes[k] = st.attributes[k];
+      for (const k of entity.startsWith("automation.") ? AUTOMATION_ATTRS : ATTRS) if (k in st.attributes) attributes[k] = st.attributes[k];
       const c = st.context || {};
       return { state: String(st.state), attributes, by: c.user_id ? "user" : c.parent_id ? "automation" : "device" };
     }
@@ -176,7 +179,7 @@
 
     init() {
       const states = {};
-      for (const e of this.mapped()) { states[e] = this.pick(this._hass.states[e]); this.forwarded[e] = JSON.stringify(states[e]); }
+      for (const e of this.mapped()) { states[e] = this.pick(this._hass.states[e], e); this.forwarded[e] = JSON.stringify(states[e]); }
       this.post({ type: "init", ...this.stored(), states, theme: this.sendTheme(true) });
       this.ready = true;
     }
@@ -190,7 +193,7 @@
       if (!this.ready) return;
       const changed = {};
       for (const e of this.mapped()) {
-        const now = this.pick(this._hass.states[e]), key = JSON.stringify(now);
+        const now = this.pick(this._hass.states[e], e), key = JSON.stringify(now);
         if (this.forwarded[e] !== key) { changed[e] = now; this.forwarded[e] = key; }
       }
       if (Object.keys(changed).length) this.post({ type: "states", states: changed });
@@ -222,7 +225,7 @@
         if (!HELPER.test(e) || !st) continue;
         const a = st.attributes || {};
         if (e.startsWith("input_datetime.") && !(a.has_time === true && a.has_date === false)) continue;
-        const { state, attributes } = this.pick(st);
+        const { state, attributes } = this.pick(st, e);
         list.push({ entity: e, state, attributes });
         if (list.length >= 2000) break;
       }
@@ -236,7 +239,7 @@
       for (const [e, st] of Object.entries(this._hass.states)) {
         if (!AUTOMATION.test(e) || !st) continue;
         const reg = (this._hass.entities || {})[e] || {}, area = reg.area_id && areas[reg.area_id] ? String(areas[reg.area_id].name) : "";
-        const { state, attributes } = this.pick(st);
+        const { state, attributes } = this.pick(st, e);
         list.push({ entity: e, state, attributes, area });
         if (list.length >= 2000) break;
       }
@@ -350,7 +353,10 @@
       const refuse = (why) => this.reply(m.req, false, why);
       if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
       if (JSON.stringify(m.config).length > 512 * 1024) return refuse("That setup is too large to save.");
-      const config = { zones: m.config.zones, devices: m.config.devices, ...(m.config.room === undefined ? {} : { room: m.config.room }) };
+      /* Room settings ride along when the frame sends them. A frame that sends none keeps what's stored, so a save of
+         something else can't drop them. */
+      const room = m.config.room !== undefined ? m.config.room : this.config.room;
+      const config = { zones: m.config.zones, devices: m.config.devices, ...(room === undefined ? {} : { room }) };
       /* A mapping decides what a button moves, so a device becomes controllable only once a person says yes here, outside the frame. */
       const added = this.newlyControlled(config);
       if (typeof added === "string") return refuse(added);
@@ -412,7 +418,7 @@
       /* Zone names are the user's own and can be a single letter, so each is named as an area or zone, and every line ends in
          a full stop, so a short name never reads as text cut off. */
       /* Automations rarely have an area, so only a failsafe is flagged, because switching one off stops it protecting hardware. */
-      const flag = item.automation ? (item.failsafe ? "A failsafe. Once allowed, the panel can switch it off." : "") : item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
+      const flag = item.automation ? (item.failsafe ? "Linked as a failsafe. Once allowed, the panel can switch it off." : "") : item.helper ? "" : !area ? "Has no area in Home Assistant." : zones.some((z) => z.toLowerCase() === area.toLowerCase()) ? "" : `In the ${area} area in Home Assistant, not in the ${zones.join(" or ")} area${zones.length > 1 ? "s" : ""}.`;
       const facts = [reg.platform, area].filter(Boolean).map(String).join(", ");
       return { name: String(a.friendly_name || item.entity), facts: facts ? `${facts}.` : "", can, flag, zones };
     }
