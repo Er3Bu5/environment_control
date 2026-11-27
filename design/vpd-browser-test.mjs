@@ -1063,7 +1063,7 @@ check("Appearance: Setup offers Home Assistant, Light and Dark", same(await ev(`
 check("Appearance: Home Assistant is the default", (await lookOn()) === "ha");
 check("Appearance: it takes your HA primary colour, red here", (await primaryNow()) === "rgb(244, 67, 54)", await primaryNow());
 check("Appearance: Add zone follows it too", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`)) === "rgb(244, 67, 54)", await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`));
-check("Appearance: white text on red", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).color`)) === "rgb(255, 255, 255)");
+check("Appearance: dark text on red, since white on it is short of 4.5:1", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).color`)) === "rgb(17, 17, 17)");
 await ev(`window.scrollTo(0,0)`); await shot("appearance-red-phone");
 await onHA(`setPrimary("")`); await sleep(100);
 check("Appearance: a new primary colour in HA shows straight away", (await primaryNow()) === "rgb(3, 169, 244)", await primaryNow());
@@ -2306,6 +2306,13 @@ await reset();
 // ---------- Dialogs: a dialog's buttons are its own foot, and the bar pinned to the window is for pages
 const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&m.querySelector(".dialog"),b=d&&d.querySelector(".dlgfoot"),t=d&&d.querySelector("#dlg-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:Math.abs(r.bottom-q.bottom-parseFloat(getComputedStyle(d).paddingBottom)-parseFloat(getComputedStyle(d).borderBottomWidth))<1.5,bg:getComputedStyle(b).backgroundColor,dbg:getComputedStyle(d).backgroundColor,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].className==="btn"&&(bs.length<2||["btn primary","btn danger"].includes(bs[1].className))}})()`);
 const dlgOk = (f) => !!f && f.inside && f.last && f.foot && f.position === "static" && f.onScreen && f.titleShown && f.leaveFirst;
+/* WCAG contrast, the page's own primary colour, and computed styles, for the colour checks on dialogs and the foot bar. */
+const LOOK_JS = `const rgb=(c)=>c.match(/[0-9.]+/g).slice(0,3).map(Number),lin=(v)=>(v/=255)<=0.03928?v/12.92:((v+0.055)/1.055)**2.4,lum=(c)=>{const [r,g,b]=rgb(c);return 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b)},ratio=(a,b)=>{const x=lum(a),y=lum(b);return Math.round((Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)*100)/100},cs=(e)=>getComputedStyle(e),prim=(()=>{const i=document.createElement("i");i.style.color="var(--primary)";document.body.append(i);const c=cs(i).color;i.remove();return c})();`;
+const dlgLook = () => ev(`(()=>{${LOOK_JS}const d=document.querySelector("#modal .dialog"),f=d&&d.querySelector(".dlgfoot");if(!f)return null;const bs=[...f.querySelectorAll("button")],go=bs.length>1?bs.at(-1):null,leave=bs[0],fb=cs(d).backgroundColor;return {divider:cs(f).borderTopStyle!=="none"&&parseFloat(cs(f).borderTopWidth)>0,red:!!go&&go.classList.contains("danger"),goBg:go&&cs(go).backgroundColor,prim,goText:go&&ratio(cs(go).color,cs(go).backgroundColor),leaveText:ratio(cs(leave).color,fb),leaveBorder:cs(leave).borderTopColor!==fb}})()`);
+const dlgLookOk = (l) => !!l && l.divider && l.leaveBorder && l.leaveText >= 4.5 && (!l.goBg || l.red || (l.goBg === l.prim && l.goText >= 4.5));
+const barLook = () => ev(`(()=>{${LOOK_JS}const b=[...document.querySelectorAll(".draftbar")].find(e=>!e.hidden&&e.getBoundingClientRect().height>0);if(!b)return null;const bg=cs(b).backgroundColor,body=cs(document.body),go=b.querySelector(".draft-review"),n=b.querySelector(".draft-count");return {bg,fg:body.color,page:body.backgroundColor,prim,goBg:go&&cs(go).backgroundColor,goText:go&&ratio(cs(go).color,cs(go).backgroundColor),text:ratio(cs(b).color,bg),plain:[...b.querySelectorAll(".draft-discard")].map(p=>ratio(cs(p).color,bg)),count:n&&ratio(cs(n).color,cs(n).backgroundColor),edge:cs(b).boxShadow.includes("0px 0px 0px 1px")}})()`);
+const withAccent = (c) => ev(`(()=>{const r=document.documentElement;window.__acc=[r.style.getPropertyValue("--primary"),r.style.getPropertyValue("--on-primary")];r.style.setProperty("--primary","${c}");r.style.setProperty("--on-primary",onColor("${c}"))})()`);
+const restoreAccent = () => ev(`(()=>{const r=document.documentElement,a=window.__acc||["",""];[["--primary",a[0]],["--on-primary",a[1]]].forEach(([k,v])=>v?r.style.setProperty(k,v):r.style.removeProperty(k))})()`);
 /* 45 minutes, a value the helper doesn't hold at any point in the suite, so typing it is always a draft. */
 const typeRepeat = (v) => ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="${v}";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`);
 const DIALOGS = [
@@ -2326,11 +2333,44 @@ for (const theme of ["light", "dark"]) {
       const f = await dlgFit();
       if (theme === "light") check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
       check(`Dialogs ${size}, ${name}, ${theme}: its foot has no strip of its own, on the dialog's own background`, !!f && f.bg === f.dbg, f);
+      const l = await dlgLook();
+      check(`Dialogs ${size}, ${name}, ${theme}: a divider above its buttons, the leaving one outlined, the going-on one in the accent colour or red, each readable at 4.5:1`, dlgLookOk(l), l);
+      if (name === "review" && size === "desktop") {
+        await withAccent("#F44336"); const r = await dlgLook(); await restoreAccent();
+        check(`Dialogs, review, ${theme}: with a red accent its going-on button is red with readable text`, dlgLookOk(r) && r.goBg === "rgb(244, 67, 54)", r);
+      }
       await shot(`dialog-${name}-${size}${theme === "dark" ? "-dark" : ""}`);
       await tap(closeSel); await ev(`ui.mapw=null;if(ui.autos)ui.autos.repeat=undefined;render()`);
     }
   }
 }
+await send("Emulation.setEmulatedMedia", { features: [] });
+await phone(390, 844); await reset();
+
+// ---------- The bar pinned to the foot of the window: its own grey in both themes, the going-on button in the accent colour
+const BARS = [
+  ["wizard", async () => { await ev(`ui.screen="setup";openWizard("garden",[1,2]);render();window.scrollTo(0,0)`); await sleep(60); }],
+  ["draft", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await sleep(60); }],
+];
+const barOk = (b) => !!b && b.bg !== b.fg && b.bg !== b.page && b.edge && b.text >= 4.5 && b.plain.length > 0 && b.plain.every((x) => x >= 4.5) && (b.count === null || b.count >= 4.5) && b.goBg === b.prim && b.goText >= 4.5;
+for (const theme of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+  for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+    for (const [name, openIt] of BARS) {
+      await reset(); await openIt();
+      const b = await barLook();
+      check(`Foot bar ${size}, ${name}, ${theme}: a grey of its own, not the inverted colours, its text, count and plain buttons readable, the going-on button in the accent colour`, barOk(b), b);
+      await withAccent("#F44336"); const r = await barLook(); await restoreAccent();
+      check(`Foot bar ${size}, ${name}, ${theme}: with a red accent the going-on button is red with readable text`, barOk(r) && r.goBg === "rgb(244, 67, 54)", r);
+      await shot(`bar-${name}-${size}${theme === "dark" ? "-dark" : ""}`);
+      await ev(`if(ui.autos)ui.autos.repeat=undefined;render()`);
+    }
+    await reset(); await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render();window.scrollTo(0,0)`); await sleep(60);
+    await shot(`autos-head-${size}${theme === "dark" ? "-dark" : ""}`);
+  }
+}
+await ev(`if(ui.autos)ui.autos.repeat=undefined`);
 await send("Emulation.setEmulatedMedia", { features: [] });
 await phone(390, 844); await reset();
 await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await sleep(40);
