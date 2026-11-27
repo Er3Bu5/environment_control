@@ -1434,7 +1434,7 @@ test.describe("map devices", () => {
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
     /* It's Garden's too, so it asks first. */
-    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add", exact: true }).click();
     await next(frame).click();
   }
 
@@ -1461,7 +1461,7 @@ test.describe("map devices", () => {
     await expect(next(frame)).toBeDisabled();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
-    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add", exact: true }).click();
     await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
@@ -1484,14 +1484,20 @@ test.describe("map devices", () => {
     await next(frame).click();
     const dehu = row(frame, "Garden Dehumidifier").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
     await dehu.click();
-    await expect(ask.getByRole("heading", { name: "Add Garden Dehumidifier to Flower tent as well?", exact: true })).toBeFocused();
-    await expect(ask).toContainText("It's already in Garden. It's one device, so switching it here switches it there too.");
-    await dialogFoot(ask, ["Leave it out", "Add to Flower tent"]);
+    await expect(ask.getByRole("heading", { name: "Garden Dehumidifier", exact: true })).toBeFocused();
+    await expect(ask.locator(".review-scroll p")).toHaveText([
+      "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here?",
+      "This means that controls are in sync in both zones. Automations from Zone: Garden may affect the device state.",
+    ]);
+    await expect(ask).toHaveAccessibleDescription(
+      "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here? This means that controls are in sync in both zones. Automations from Zone: Garden may affect the device state.",
+    );
+    await dialogFoot(ask, ["Cancel", "Add"]);
     /* Adding loses nothing, so it's the usual button, not the red one. */
-    await expect(ask.getByRole("button", { name: "Add to Flower tent" })).not.toHaveClass(/danger/);
+    await expect(ask.getByRole("button", { name: "Add", exact: true })).not.toHaveClass(/danger/);
     await expect(dehu).toHaveAttribute("aria-pressed", "false");
-    /* Leave it out, Escape and the back gesture all leave it out. */
-    await ask.getByRole("button", { name: "Leave it out" }).click();
+    /* Cancel, Escape and the back gesture all leave it out. */
+    await ask.getByRole("button", { name: "Cancel" }).click();
     await expect(ask).toHaveCount(0);
     await expect(dehu).toHaveAttribute("aria-pressed", "false");
     await dehu.click();
@@ -1505,7 +1511,7 @@ test.describe("map devices", () => {
     await expect(dehu).toHaveAttribute("aria-pressed", "false");
     await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
     await dehu.click();
-    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    await ask.getByRole("button", { name: "Add", exact: true }).click();
     await expect(ask).toHaveCount(0);
     await expect(dehu).toHaveAttribute("aria-pressed", "true");
     await expect(row(frame, "Garden Dehumidifier")).toContainText("Shared. Also in Garden.");
@@ -1517,7 +1523,7 @@ test.describe("map devices", () => {
     await expect(row(frame, "Spare Plug").locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await dehu.click();
-    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    await ask.getByRole("button", { name: "Add", exact: true }).click();
     expect(await serviceCalls(page)).toBe(0);
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
@@ -1543,6 +1549,22 @@ test.describe("map devices", () => {
     await expect(ask).toHaveCount(0);
   });
 
+  test("a device in three other zones names all three in the order Overview shows them, not alphabetically", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await next(frame).click();
+    const aux = row(frame, "Auxiliary Dehumidifier").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
+    await aux.click();
+    await expect(ask.getByRole("heading", { name: "Auxiliary Dehumidifier", exact: true })).toBeFocused();
+    await expect(ask.locator(".review-scroll p")).toHaveText([
+      "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?",
+      "This means that controls are in sync in all of these zones. Automations from Zones: Garden, Veg, Nursery may affect the device state.",
+    ]);
+    await dialogFoot(ask, ["Cancel", "Add"]);
+    await ask.getByRole("button", { name: "Cancel" }).click();
+    await expect(aux).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("a sensor another zone has asks first too, as a sensor", async ({ page }) => {
     const frame = await newZoneMap(page);
     await row(frame, "Environment board").getByRole("button").first().click();
@@ -1554,10 +1576,14 @@ test.describe("map devices", () => {
     await app(frame).getByRole("menuitem", { name: "Device identification", exact: true }).click();
     const board = row(frame, "Environment board").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
     await board.click();
-    await expect(ask.getByRole("heading", { name: "Add Environment board to Veg as well?", exact: true })).toBeVisible();
-    await expect(ask).toContainText("It's already in Flower tent. It's one sensor, so its readings count there and here.");
+    await expect(ask.getByRole("heading", { name: "Environment board", exact: true })).toBeVisible();
+    await expect(ask.locator(".review-scroll p")).toHaveText([
+      "This sensor is already associated to Zone: Flower tent. Are you sure you want to duplicate it here?",
+      "This means that data is in sync in both zones.",
+    ]);
+    await dialogFoot(ask, ["Cancel", "Add"]);
     await expect(board).toHaveAttribute("aria-pressed", "false");
-    await ask.getByRole("button", { name: "Add to Veg" }).click();
+    await ask.getByRole("button", { name: "Add", exact: true }).click();
     await expect(board).toHaveAttribute("aria-pressed", "true");
   });
 

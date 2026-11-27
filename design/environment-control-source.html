@@ -3259,9 +3259,10 @@ function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes
    already. Adding isn't destructive, so the dialog shows its usual primary button, not the red one. */
 function askShare(kind, name, z, others, add) {
   if (!others.length) { add(); return; }
-  const where = others.join(" and ");
-  const text = { device: `It's already in ${where}. It's one device, so switching it here switches it there too.`, sensor: `It's already in ${where}. It's one sensor, so it reads the same here as there.` }[kind];
-  ui.guard = { action: add, primary: true, title: `Add ${name} to ${z.name} as well?`, text, keep: "Leave it out", go: `Add to ${z.name}` };
+  /* A plain list in the order Overview shows the zones, as the panel writes it. */
+  const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
+  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${where} may affect the device state.` : `This means that data is in sync in ${all}.`;
+  ui.guard = { action: add, primary: true, title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
   renderModal();
 }
 /* Removing a zone can't be undone, so its name has to be typed first, exactly, as GitHub asks before deleting a repository. */
@@ -3281,7 +3282,7 @@ function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar">${g.ok ? `<button class="draft-review" data-gkeep>${esc(g.ok)}</button>` : `<button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button>`}</div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="${g.more ? "dlg-text dlg-more" : "dlg-text"}"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.more ? `<p class="muted" id="dlg-more">${esc(g.more)}</p>` : ""}${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar">${g.ok ? `<button class="draft-review" data-gkeep>${esc(g.ok)}</button>` : `<button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button>`}</div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
