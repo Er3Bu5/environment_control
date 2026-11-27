@@ -37,11 +37,11 @@ export const styles = css`
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
   /* A zone's heading row: the menu button over the left-hand column, the name and its details in the middle, and
-     View targets at the right, the two buttons level with the foot of the details. */
+     the zone's own menu at the right, the two buttons level with the foot of the details. */
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
