@@ -101,3 +101,44 @@ async def test_commands_say_so_when_the_integration_is_not_loaded(hass, loaded, 
     client = await hass_ws_client(hass)
     r = await _send(client, type=f"{DOMAIN}/config")
     assert not r["success"] and r["error"]["code"] == "not_loaded"
+
+
+async def test_automation_links_and_the_room_setting_are_stored_and_read_back(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    links = [
+        {"id": "a1", "entity": "automation.critical_garden_humidity_high_day", "group": "alert_day"},
+        {"id": "a2", "entity": "automation.failsafe_garden_lights_recovery", "group": "failsafe"},
+    ]
+    room = {"alertRepeat": "input_number.alert_repeat_rate"}
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    zones[0]["automations"] = links
+    client = await hass_ws_client(hass)
+    # A revision sent inside the setup is ignored: the store sets its own.
+    cfg = {"zones": zones, "devices": sample_unlinked["devices"], "room": room, "revision": 99}
+    r = await _send(client, type=f"{DOMAIN}/config/save", revision=0, config=cfg)
+    assert r["success"], r
+    assert r["result"]["revision"] == 1
+    await hass.async_block_till_done()
+    stored = hass_storage[DOMAIN]["data"]
+    assert stored["zones"][0]["automations"] == links and stored["room"] == room and stored["revision"] == 1
+    r = await _send(client, type=f"{DOMAIN}/config")
+    assert r["result"]["zones"][0]["automations"] == links and r["result"]["room"] == room
+
+
+async def test_a_link_to_anything_but_an_automation_is_refused_and_nothing_is_stored(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    zones[0]["automations"] = [{"id": "a1", "entity": "switch.reservoir_pump", "group": "failsafe"}]
+    client = await hass_ws_client(hass)
+    r = await _send(
+        client,
+        type=f"{DOMAIN}/config/save",
+        revision=0,
+        config={"zones": zones, "devices": sample_unlinked["devices"]},
+    )
+    assert not r["success"] and r["error"]["code"] == "invalid_config"
+    assert "isn't an automation" in r["error"]["message"]
+    assert DOMAIN not in hass_storage
+    assert (await _send(client, type=f"{DOMAIN}/config"))["result"]["revision"] == 0

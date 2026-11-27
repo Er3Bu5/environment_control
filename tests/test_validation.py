@@ -162,6 +162,84 @@ CASES = {
         "isn't in",
     ),
     "too large": (lambda c: c["zones"][0].update(name="x" * 600_000), "too large"),
+    "automation links that aren't a list": (
+        lambda c: c["zones"][0].update(automations={"a1": "automation.x"}),
+        "short list",
+    ),
+    "too many automation links": (
+        lambda c: c["zones"][0].update(
+            automations=[{"id": f"a{i}", "entity": f"automation.x{i}", "group": "control"} for i in range(201)]
+        ),
+        "short list",
+    ),
+    "automation link that names a service": (
+        lambda c: c["zones"][0].update(
+            automations=[{"id": "a1", "entity": "automation.x", "group": "control", "service": "automation.trigger"}]
+        ),
+        "an id, an entity and a group",
+    ),
+    "automation link without a group": (
+        lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x"}]),
+        "an id, an entity and a group",
+    ),
+    "automation link that isn't an object": (
+        lambda c: c["zones"][0].update(automations=["automation.x"]),
+        "an id, an entity and a group",
+    ),
+    "automation link id with odd characters": (
+        lambda c: c["zones"][0].update(automations=[{"id": "A 1", "entity": "automation.x", "group": "control"}]),
+        "unique ids",
+    ),
+    "two automation links with one id": (
+        lambda c: c["zones"][0].update(
+            automations=[
+                {"id": "a1", "entity": "automation.x", "group": "control"},
+                {"id": "a1", "entity": "automation.y", "group": "control"},
+            ]
+        ),
+        "unique ids",
+    ),
+    "automation link to a pump": (
+        lambda c: c["zones"][0].update(
+            automations=[{"id": "a1", "entity": "switch.reservoir_pump", "group": "control"}]
+        ),
+        "isn't an automation",
+    ),
+    "automation link to a script": (
+        lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "script.x", "group": "control"}]),
+        "isn't an automation",
+    ),
+    "one automation linked twice in a zone": (
+        lambda c: c["zones"][0].update(
+            automations=[
+                {"id": "a1", "entity": "automation.x", "group": "alert_day"},
+                {"id": "a2", "entity": "automation.x", "group": "failsafe"},
+            ]
+        ),
+        "or one twice",
+    ),
+    "automation in a group the panel doesn't know": (
+        lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x", "group": "other"}]),
+        "group this panel doesn't know",
+    ),
+    "room settings that aren't settings": (lambda c: c.update(room=["input_number.x"]), "Room settings"),
+    "room setting the panel doesn't have": (
+        lambda c: c.update(room={"pump": "switch.reservoir_pump"}),
+        "Room settings",
+    ),
+    "alert repeat on a time helper": (
+        lambda c: c.update(room={"alertRepeat": "input_datetime.x"}),
+        "isn't a number helper",
+    ),
+    "alert repeat on a board's number": (
+        lambda c: c.update(room={"alertRepeat": "number.leaf_offset"}),
+        "isn't a number helper",
+    ),
+    "alert repeat that isn't an entity": (lambda c: c.update(room={"alertRepeat": 15}), "isn't a number helper"),
+    "something that isn't zones, devices or room settings": (
+        lambda c: c.update(scripts=["script.x"]),
+        "zones, devices and room settings",
+    ),
 }
 
 
@@ -303,3 +381,32 @@ def test_a_virtual_device_can_say_what_it_is(sample_config) -> None:
         lambda c: c["zones"][0].update(virtual=[{"id": "v-tank", "name": "Drain tank", "pos": [0, 0], "type": "Tank"}]),
     )
     validate_config(c)
+
+
+GROUPS = ("alert_day", "alert_night", "alert_device", "failsafe", "control")
+
+
+def test_a_zone_can_link_automations_in_every_group(sample_config) -> None:
+    """Only links are stored: which automation, under what id, in which group. Home Assistant keeps running them."""
+    c = _bad(
+        sample_config,
+        lambda c: c["zones"][0].update(
+            automations=[{"id": f"a{i}", "entity": f"automation.x_{g}", "group": g} for i, g in enumerate(GROUPS)]
+        ),
+    )
+    validate_config(c)
+
+
+def test_two_zones_can_share_an_automation(sample_config) -> None:
+    link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
+    c = _bad(sample_config, lambda c: [z.update(automations=[dict(link)]) for z in c["zones"][:2]])
+    validate_config(c)
+
+
+def test_a_zone_can_link_no_automations(sample_config) -> None:
+    validate_config(_bad(sample_config, lambda c: c["zones"][0].update(automations=[])))
+
+
+@pytest.mark.parametrize("room", [{}, {"alertRepeat": "input_number.alert_repeat_rate"}])
+def test_the_room_can_link_the_alert_repeat_helper_or_nothing(sample_config, room) -> None:
+    validate_config(_bad(sample_config, lambda c: c.update(room=room)))
