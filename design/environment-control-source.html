@@ -157,6 +157,15 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
      has empty alternative text: the box already says it's ticked, and the tick mustn't become part of its name. */
   .chip:has(input[type="checkbox"]:checked)::before { content: "✓" / ""; margin-right: 5px; font-size: 12px; }
   .chip.wait { border-style: dashed; color: var(--muted); }
+  /* A chip that switches something on its own is a button, pressed while it's on, ticked as a checkbox chip is. */
+  button.chip { color: var(--fg); }
+  button.chip[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
+  button.chip[aria-pressed="true"]::before { content: "✓" / ""; margin-right: 5px; font-size: 12px; }
+  /* Unavailable, yet still a button: tapping it says why it can't be picked. */
+  .pickrow[aria-disabled="true"] { cursor: help; }
+  .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
+  .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
+  .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
   .review { display: flex; flex-direction: column; gap: 10px; }
@@ -1409,7 +1418,8 @@ const autoSt = (a) => haStates[a.entity];
 const autoOn = (a) => (autoSt(a) || {}).state === "on";
 const autoDown = (a) => !autoSt(a) || autoSt(a).state === "unavailable";
 const autoName = (a) => ((autoSt(a) || {}).attributes || {}).friendly_name || a.entity;
-const sharedAuto = (z, entity) => zones.filter((o) => o.id !== z.id && (o.automations || []).some((x) => x.entity === entity)).map((o) => o.name);
+/* An automation belongs to one zone, so this is the zone, other than z, that has it saved, if any. */
+const autoZoneElsewhere = (z, entity) => zones.find((o) => o.id !== z.id && (o.automations || []).some((x) => x.entity === entity)) || null;
 /* Only a suggestion. Names follow no rule Home Assistant enforces, and this room's own dashboard keeps an alert named ..._day
    with its device alerts, so the group can always be changed. */
 function suggestGroup(entity) {
@@ -1441,15 +1451,15 @@ function autoChips(z, cur) {
   return `<div class="seg" role="group" aria-label="Automations">${Object.entries(AUTO_PAGES).map(([k, p]) => { const w = chipWords(`${z.id}:${k}`); return `<button data-autopage="${k}" data-autochip="${z.id}:${k}" aria-pressed="${k === cur}" aria-label="${esc(w.label)}">${p.title}<span class="segn">${w.count}</span></button>`; }).join("")}</div>`;
 }
 function autoRow(a, z) {
-  const st = autoSt(a), c = autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a), shared = sharedAuto(z, a.entity);
+  const st = autoSt(a), c = autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a);
   const last = st && st.attributes && st.attributes.last_triggered;
   const now = !st ? "Home Assistant doesn't have it any more." : down ? "Unavailable in Home Assistant." : on ? "On." : "Off.";
-  const sub = [now, st ? (last ? `Last triggered ${ranWords(last)}.` : "Never triggered.") : "", shared.length ? `Shared with ${shared.join(" and ")}.` : ""].filter(Boolean).join(" ");
+  const sub = [now, st ? (last ? `Last triggered ${ranWords(last)}.` : "Never triggered.") : ""].filter(Boolean).join(" ");
   const sw = `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
   const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
   return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}">${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
 }
-/* Redraws every row for one automation, in any zone that links it, and puts focus back on the switch. */
+/* Redraws an automation's row, and puts focus back on the switch. */
 function redrawAuto(entity) {
   for (const el of document.querySelectorAll(`[data-autorow="${CSS.escape(entity)}"]`)) {
     const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.entity === entity);
@@ -1479,9 +1489,8 @@ async function sendAuto(z, a, on) {
 function tapAuto(z, a) {
   const on = autoOn(a);
   if (on && pageOf(a) === "failsafe") {
-    const shared = sharedAuto(z, a.entity);
     ui.guard = { action: () => sendAuto(z, a, false), title: `Switch off ${autoName(a)}?`, keep: "Keep it on", go: "Switch off",
-      text: `It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that${shared.length ? ` in ${[z.name, ...shared].join(" or ")}` : ""}. You can switch it on again here.` };
+      text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here." };
     renderModal();
     return;
   }
@@ -1579,27 +1588,39 @@ function closeLinkAutos() {
 }
 const autoTitle = (it) => (it.attributes || {}).friendly_name || it.entity;
 function linkRow(lw, z, it) {
-  const g = lw.pick[it.entity], on = g !== undefined, shared = sharedAuto(z, it.entity);
-  const sub = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${shared.join(" and ")}` : ""].filter(Boolean).join(", ");
+  const g = lw.pick[it.entity], on = g !== undefined, other = autoZoneElsewhere(z, it.entity);
+  if (other) return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="false" aria-disabled="true"><span class="tick"></span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">In Zone: ${esc(other.name)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button></div>`;
+  const sub = [it.entity, it.area ? `${it.area} area` : ""].filter(Boolean).join(", ");
   /* Radio chips, not a select: a native select opens the system's own picker over the page on a phone. */
   const groupBox = on ? `<div class="ents">${chips("Group", `lgroup-${it.entity}`, Object.entries(AUTO_GROUPS).map(([k, [, t]]) => [k, t]), g, `data-lgroup="${esc(it.entity)}" data-x`).replace(/data-x="[^"]*"/g, "")}</div>` : "";
   return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">${esc(sub)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button>${groupBox}</div>`;
 }
 /* Suggested: what the zone links already, and automations in its Home Assistant area or named for it. The rest of Home
    Assistant's automations, the house's included, come up only by searching. */
-function linkList(lw, z) {
+/* An automation another zone has saved can't be linked here as well, so it's hidden unless the toggle shows it, and then
+   it's listed where it falls but can't be ticked. */
+function linkView(lw, z) {
   const q = lw.q.trim().toLowerCase(), word = new RegExp(`(^|_)${slug(z.name)}(_|$)`);
   const near = (it) => lw.pick[it.entity] !== undefined || lw.was[it.entity] !== undefined || (it.area || "").toLowerCase() === z.name.toLowerCase() || word.test(it.entity.split(".")[1]);
-  const shown = autoCatalog.filter((it) => (q ? `${it.entity} ${autoTitle(it)}`.toLowerCase().includes(q) : near(it)));
-  const more = q ? 0 : autoCatalog.length - shown.length;
+  const found = autoCatalog.filter((it) => (q ? `${it.entity} ${autoTitle(it)}`.toLowerCase().includes(q) : near(it)));
+  const elsewhere = found.filter((it) => autoZoneElsewhere(z, it.entity)).length;
+  const shown = lw.others ? found : found.filter((it) => !autoZoneElsewhere(z, it.entity));
+  return { found, shown, elsewhere, hidden: found.length - shown.length, more: q ? 0 : autoCatalog.length - found.length };
+}
+function linkList(lw, z) {
+  const { shown, hidden, more } = linkView(lw, z);
   return (shown.length ? shown.map((it) => linkRow(lw, z, it)).join("") : `<p class="muted small">No automation matches.</p>`) +
+    (hidden ? `<p class="small muted" id="link-hidden">${hidden === 1 ? "1 is hidden because another zone has it." : `${hidden} are hidden because another zone has them.`}</p>` : "") +
     (more ? `<p class="small muted" id="link-more">${more} more in Home Assistant. Search to find them.</p>` : "");
+}
+function linkOthers(lw, z) {
+  return linkView(lw, z).elsewhere ? `<button class="chip" data-lothers aria-pressed="${!!lw.others}">Show automations in other zones</button>` : "";
 }
 function renderLinkAutos() {
   const lw = ui.linkw, z = zoneById(lw.id);
   const head = `<div><h1>Link automations: ${esc(z.name)}</h1><p class="muted small">Pick the automations ${esc(z.name)} should switch, and put each in a group. The group is suggested from the automation's name, so change it if yours follow other names. Home Assistant keeps running them either way.</p></div>`;
   if (!autoCatalog) { loadAutomations(); return `<div class="wrap">${head}<p class="muted">Reading Home Assistant's automations.</p><div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text"></span><button class="draft-discard" data-linkback>Back</button></div></div>`; }
-  return `<div class="wrap">${head}<section class="card"><label class="field" for="link-q">Search Home Assistant<input id="link-q" type="search" value="${esc(lw.q)}" placeholder="Name or entity id"></label><div class="picklist" id="link-list">${linkList(lw, z)}</div></section>
+  return `<div class="wrap">${head}<section class="card"><label class="field" for="link-q">Search Home Assistant<input id="link-q" type="search" value="${esc(lw.q)}" placeholder="Name or entity id"></label><div class="linkopts" id="link-others">${linkOthers(lw, z)}</div><div class="picklist" id="link-list">${linkList(lw, z)}</div></section>
     <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-linkback>Back</button></div></div>`;
 }
 function linkDraft(lw) {
@@ -3233,13 +3254,13 @@ function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes
   ui.guard = { action, title, text: text || `You have ${n} unsaved ${n === 1 ? "change" : "changes"} in ${held[0].zone}. Leaving will discard ${n === 1 ? "it" : "them"}.` };
   renderModal();
 }
-/* Sharing stays allowed, since some hardware and automations really serve several zones, but it never happens with one
+/* Sharing stays allowed, since some hardware really serves several zones, but it never happens with one
    unnoticed tap. Only what other zones have saved counts, and only on adding: what this zone has saved was agreed to
    already. Adding isn't destructive, so the dialog shows its usual primary button, not the red one. */
 function askShare(kind, name, z, others, add) {
   if (!others.length) { add(); return; }
   const where = others.join(" and ");
-  const text = { device: `It's already in ${where}. It's one device, so switching it here switches it there too.`, sensor: `It's already in ${where}. It's one sensor, so it reads the same here as there.`, automation: `It's already linked in ${where}. It's one automation, so switching it off here switches it off there too.` }[kind];
+  const text = { device: `It's already in ${where}. It's one device, so switching it here switches it there too.`, sensor: `It's already in ${where}. It's one sensor, so it reads the same here as there.` }[kind];
   ui.guard = { action: add, primary: true, title: `Add ${name} to ${z.name} as well?`, text, keep: "Leave it out", go: `Add to ${z.name}` };
   renderModal();
 }
@@ -3260,7 +3281,7 @@ function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar"><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar">${g.ok ? `<button class="draft-review" data-gkeep>${esc(g.ok)}</button>` : `<button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button>`}</div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
@@ -3393,8 +3414,17 @@ document.addEventListener("click", (e) => {
     const lw = ui.linkw, ent = el.dataset.lpick, z = zoneById(lw.id);
     const redraw = () => { $("#link-list").innerHTML = linkList(lw, z); refocusSel(`[data-lpick="${CSS.escape(ent)}"]`); draftSync(); };
     if (lw.pick[ent] !== undefined) { delete lw.pick[ent]; redraw(); return; }
-    const it = (autoCatalog || []).find((x) => x.entity === ent);
-    askShare("automation", it ? autoTitle(it) : ent, z, lw.was[ent] !== undefined ? [] : sharedAuto(z, ent), () => { lw.pick[ent] = lw.was[ent] || suggestGroup(ent); redraw(); });
+    const it = (autoCatalog || []).find((x) => x.entity === ent), other = autoZoneElsewhere(z, ent);
+    /* An automation belongs to one zone: moving it is unlinking it there first, then linking it here. */
+    if (other) { ui.guard = { title: it ? autoTitle(it) : ent, text: `This automation is already associated to Zone: ${other.name}. Please remove it before associating it with a new zone.`, ok: "OK" }; renderModal(); return; }
+    lw.pick[ent] = lw.was[ent] || suggestGroup(ent);
+    redraw();
+    return;
+  }
+  if (q("[data-lothers]")) {
+    const lw = ui.linkw, z = zoneById(lw.id);
+    lw.others = !lw.others;
+    $("#link-others").innerHTML = linkOthers(lw, z); $("#link-list").innerHTML = linkList(lw, z); refocusSel("[data-lothers]");
     return;
   }
   if (q("[data-repeatpick]")) { ui.repeatPick = !ui.repeatPick; render(); if (ui.repeatPick) jumpTo("room-alerts"); return; }
@@ -3702,7 +3732,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
   if (e.target.dataset && e.target.dataset.wlabel && ui.wiz) { (ui.wiz.labels ||= {})[e.target.dataset.wlabel] = e.target.value; const bar = $("#main .wizbar"); if (bar) { const n = wizDraft(ui.wiz).items.length; bar.querySelector(".draft-text").innerHTML = n ? `<strong>${plural(n, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>` : ""; } }
   if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
-  if (e.target.id === "link-q" && ui.linkw) { ui.linkw.q = e.target.value; $("#link-list").innerHTML = linkList(ui.linkw, zoneById(ui.linkw.id)); }
+  if (e.target.id === "link-q" && ui.linkw) { const z = zoneById(ui.linkw.id); ui.linkw.q = e.target.value; $("#link-others").innerHTML = linkOthers(ui.linkw, z); $("#link-list").innerHTML = linkList(ui.linkw, z); }
   if (e.target.id === "repeat-in" && ui.autos) {
     ui.autos.repeat = e.target.value;
     const st = haStates[room.alertRepeat], bad = st ? repeatProblem(e.target.value, st.attributes || {}) : "";
