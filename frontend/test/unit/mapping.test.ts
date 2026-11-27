@@ -68,6 +68,7 @@ const catalog: Catalog = {
     },
   ],
   entities: [{ ...ent("light.group_lights"), integration: "group", family: "Group" }],
+  automations: [],
 };
 
 describe("candidates", () => {

@@ -1,7 +1,7 @@
 name: Publish
 
 # The build and the publish both release paths share: Release, run by hand for full releases and dry runs, and Beta,
-# which runs every hour and when started by hand. Never run on its own. It runs no tests: each caller first makes sure Validate has
+# which runs four times a day and when started by hand. Never run on its own. It runs no tests: each caller first makes sure Validate has
 # passed on the exact commit it passes in, so a release never waits on a second run of the suites.
 on:
   workflow_call:

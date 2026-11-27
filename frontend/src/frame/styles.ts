@@ -41,7 +41,14 @@ export const styles = css`
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu, .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  /* A page's own action is a word or two wide, not a button's width, so on a phone it takes the heading's last line, at
+     the right and level with the page menu, and the title keeps the whole width above. */
+  @media (max-width: 640px) {
+    .pagehead:has(> .btn) { grid-template-columns: 44px minmax(0, 1fr); }
+    .pagehead:has(> .btn) > div { grid-column: 1 / -1; padding-inline: 48px; }
+    .pagehead:has(> .btn) > .btn { grid-column: 2; grid-row: 2; }
+  }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -56,6 +63,7 @@ export const styles = css`
   .pill.dashed { color: var(--muted); border-color: var(--line); border-style: dashed; }
   .notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
   .notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+  .crit-text { color: var(--crit); }
 
   .task { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
   .task:first-child { border-top: 0; padding-top: 0; }

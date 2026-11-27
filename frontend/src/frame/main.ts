@@ -14,6 +14,7 @@ import {
   type HostMessage,
   type LinkKind,
   type PathKind,
+  type Room,
   type Stored,
   type Theme,
   readHostMessage,
@@ -30,6 +31,7 @@ import {
   STEP_TITLE,
   type SetupStep,
   type Device,
+  type AutomationLink,
   type Zone,
   addZone,
   copyConfig,
@@ -38,6 +40,7 @@ import {
   readZones,
   removeZone,
   confirmLink,
+  setAlertRepeat,
   setDetails,
   setHistory,
   shareAsk,
@@ -230,11 +233,48 @@ import {
   timesOf,
   toMin,
 } from "./schedule";
+import {
+  type AutoChip,
+  type AutoCtl,
+  type AutosPage,
+  type LinkDraft,
+  type LinkRow,
+  REPEAT_LIKELY,
+  SAID,
+  alertsCardText,
+  applyLinks,
+  autoAnswered,
+  autoGiveUp,
+  autoRow,
+  autoSend,
+  autoState,
+  autosReported,
+  chipViews,
+  failsafeNotice,
+  failsafesOff,
+  groupViews,
+  linkChanges,
+  linkList,
+  linkNote,
+  offQuestion,
+  openLinks,
+  removeRow,
+  repeatCard,
+  repeatChanges,
+  repeatHelperOptions,
+  repeatNote,
+  repeatRefused,
+  repeatStuck,
+  repeatValue,
+  setLinkGroup,
+  toggleLink,
+} from "./automations";
+import { alertsCard, automationsPage, failsafeNoticeView, linkPage } from "./automations-view";
 import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
-type Screen = "overview" | "zone" | "devices" | "setup";
+type Screen = "overview" | "zone" | "devices" | "setup" | "autos";
 type Appearance = Theme["appearance"];
 type Result = Extract<HostMessage, { type: "result" }>;
 interface Change {
@@ -368,6 +408,11 @@ export class EcApp extends LitElement {
     confirmText: { state: true },
     ctl: { state: true },
     ctlDrag: { state: true },
+    autos: { state: true },
+    linkw: { state: true },
+    autoCtl: { state: true },
+    repeatPick: { state: true },
+    repeatBusy: { state: true },
   };
   static styles = styles;
   declare private stored: Stored | null;
@@ -416,6 +461,15 @@ export class EcApp extends LitElement {
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
   declare private ctlDrag: Record<string, number>;
+  /* A zone's Automations page while it's open, Link automations while it's open, and what each automation's switch is
+     waiting for or last heard, by automation. */
+  declare private autos: AutosPage | null;
+  declare private linkw: LinkDraft | null;
+  declare private autoCtl: Record<string, AutoCtl>;
+  private linkBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
+  /* Setup's Alerts card: whether its helper search box is open, and a link or unlink being saved. */
+  declare private repeatPick: boolean;
+  declare private repeatBusy: boolean;
   private dialTimers: Record<string, number> = {};
   private nextReq = 1;
   private waiting = new Map<number, (r: Result) => void>();
@@ -457,6 +511,11 @@ export class EcApp extends LitElement {
     this.confirmText = "";
     this.ctl = {};
     this.ctlDrag = {};
+    this.autos = null;
+    this.linkw = null;
+    this.autoCtl = {};
+    this.repeatPick = false;
+    this.repeatBusy = false;
   }
 
   connectedCallback(): void {
@@ -510,7 +569,7 @@ export class EcApp extends LitElement {
     if (e.source !== parent) return;
     const m = readHostMessage(e.data);
     if (!m) return;
-    if (m.type === "init" || m.type === "config") this.stored = { revision: m.revision, zones: m.zones, devices: m.devices };
+    if (m.type === "init" || m.type === "config") this.stored = { revision: m.revision, zones: m.zones, devices: m.devices, ...(m.room ? { room: m.room } : {}) };
     if (m.type === "init" || m.type === "states") {
       const next: Record<string, HaState> = m.type === "init" ? {} : { ...this.states };
       for (const [e, raw] of Object.entries(m.states)) {
@@ -521,6 +580,10 @@ export class EcApp extends LitElement {
       [this.states, this.now] = [next, Date.now()];
     }
     if (m.type === "states") this.controlsReported(Object.keys(m.states));
+    if (m.type === "states") {
+      const settled = autosReported(this.autoCtl, this.states, Object.keys(m.states));
+      if (settled) this.autoCtl = settled;
+    }
     if (m.type === "init" || m.type === "theme") this.applyTheme(m.theme);
     if (m.type === "init" || m.type === "narrow") this.narrow = m.narrow;
     /* The host used up its history entry to tell us, so it's told afresh whether there's still somewhere to go back to. */
@@ -535,13 +598,14 @@ export class EcApp extends LitElement {
       resolve?.(m);
     }
     /* A zone removed elsewhere takes its tab, its guide and its open details with it. */
-    if (this.screen === "zone" && !this.zoneById(this.zoneId)) this.go("overview");
+    if ((this.screen === "zone" || this.screen === "autos") && !this.zoneById(this.zoneId)) this.go("overview");
     if (this.guide && !this.zoneById(this.guide)) this.guide = null;
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
     if (this.lay && !this.zoneById(this.lay.zoneId)) this.lay = null;
     if (this.leafw && !this.zoneById(this.leafw.zoneId)) this.leafw = null;
     if (this.sched && !this.zoneById(this.sched.zoneId)) [this.sched, this.tgt] = [null, null];
+    if (this.linkw && !this.zoneById(this.linkw.zoneId)) this.linkw = null;
   };
 
   /* What Home Assistant has: asked when the panel opens, and again each time a setup page that picks from it opens, so
@@ -634,7 +698,7 @@ export class EcApp extends LitElement {
      controllable, and the backend stores it. Only the backend's answer is kept. */
   private async save(change: (c: RawConfig) => void): Promise<Result> {
     if (!this.stored) return { type: "result", req: 0, ok: false, error: "Home Assistant hasn't answered yet." };
-    const c = copyConfig(this.stored.zones, this.stored.devices);
+    const c = copyConfig(this.stored.zones, this.stored.devices, this.stored.room);
     change(c);
     const r = await this.ask("save", { base: this.stored.revision, config: c });
     if (r.ok && r.stored) this.stored = r.stored;
@@ -665,7 +729,7 @@ export class EcApp extends LitElement {
   }
 
   private get config() {
-    return this.stored ? copyConfig(this.stored.zones, this.stored.devices) : { zones: [], devices: [] };
+    return this.stored ? copyConfig(this.stored.zones, this.stored.devices, this.stored.room) : { zones: [], devices: [] };
   }
 
   private mapChangeList(m: MapDraft): Change[] {
@@ -680,6 +744,8 @@ export class EcApp extends LitElement {
     /* Sensor Calibration opened from the chart keeps the page's own draft underneath, and leaving loses both. */
     if (this.leafw) return this.leafChangeList(this.leafw).length + (this.sched ? this.schedChangeList(this.sched).length : 0);
     if (this.sched) return this.schedChangeList(this.sched).length;
+    if (this.linkw) return this.linkChangeList(this.linkw).length;
+    if (this.autos) return this.repeatChangeList().length;
     return 0;
   }
 
@@ -700,7 +766,7 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide));
+    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos");
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
@@ -723,7 +789,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void, count?: number): void {
     const n = count ?? this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || (this.sched && this.zoneById(this.sched.zoneId)?.name) || "this zone";
+    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || (this.sched && this.zoneById(this.sched.zoneId)?.name) || (this.linkw && this.zoneById(this.linkw.zoneId)?.name) || (this.autos && this.zoneById(this.autos.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -740,7 +806,7 @@ export class EcApp extends LitElement {
   private backSaid: boolean | null = null;
 
   private go(screen: Screen, zoneId: string | null = null): void {
-    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && (a.screen !== "zone" || a.zoneId === b.zoneId);
+    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && ((a.screen !== "zone" && a.screen !== "autos") || a.zoneId === b.zoneId);
     const here = { screen: this.screen, zoneId: this.zoneId }, to = { screen, zoneId }, before = this.trail[this.trail.length - 1];
     if (!same(here, to)) {
       if (before && same(before, to)) this.trail.pop();
@@ -752,12 +818,15 @@ export class EcApp extends LitElement {
     this.zoneId = zoneId;
     this.menu = null;
     this.chartAt = null;
+    /* The Automations page's chip and its alert repeat draft go with it. Come back to by Back, it opens on Alerts. */
+    if (screen !== "autos") this.autos = null;
+    else if (this.autos?.zoneId !== zoneId && zoneId) this.autos = { zoneId, chip: "alert" };
     window.scrollTo(0, 0);
   }
 
   /* Whether Back has anything to do here. The host is told, because the back gesture reaches it and not the frame. */
   private get canGoBack(): boolean {
-    return !!(this.modal || this.menu || this.wiz || this.mapw || this.lay || this.leafw || this.sched || this.guide || this.trail.length);
+    return !!(this.modal || this.menu || this.wiz || this.mapw || this.lay || this.leafw || this.sched || this.linkw || this.autos || this.guide || this.trail.length);
   }
 
   /* One step back, whatever is in front: a dialog or a menu closes, an editor does what its own Back or Cancel does,
@@ -770,6 +839,8 @@ export class EcApp extends LitElement {
     if (this.lay) return void this.layBack();
     if (this.leafw) return void this.leafExit();
     if (this.sched) return void this.schedExit();
+    if (this.linkw) return void this.linkExit();
+    if (this.autos) return void this.autosBack();
     const before = this.trail[this.trail.length - 1];
     if (this.guide) return void this.leaveTo(before?.screen ?? "setup", before?.zoneId ?? null);
     if (before) this.go(before.screen, before.zoneId);
@@ -783,6 +854,7 @@ export class EcApp extends LitElement {
       this.leafw = null;
       this.sched = null;
       this.tgt = null;
+      this.linkw = null;
       this.guide = null;
       this.go(screen, zoneId);
     });
@@ -1678,6 +1750,7 @@ export class EcApp extends LitElement {
       ["Sensors", z.sensors.length ? `${z.sensors.length} unmapped` : ""],
       ["Devices", devicesWord],
       ["Targets", "Day and night values kept here"],
+      removeRow(z),
     ];
     this.confirmText = "";
     this.modal = {
@@ -1711,6 +1784,173 @@ export class EcApp extends LitElement {
     this.confirmText = "";
     g.action();
   };
+
+  private get room(): Room | undefined {
+    return this.stored?.room;
+  }
+
+  /* Automations: a zone's Home Assistant automations, switched from its own page. HA keeps running them. */
+  private openAutos(zoneId: string, chip: AutoChip): void {
+    this.go("autos", zoneId);
+    this.autos = { zoneId, chip };
+  }
+
+  private autosBack = (): void => {
+    const a = this.autos;
+    if (a) this.guarded(() => this.go("zone", a.zoneId));
+  };
+
+  private pickChip(chip: AutoChip): void {
+    if (!this.autos || this.autos.chip === chip) return;
+    this.guarded(() => (this.autos = this.autos && { ...this.autos, chip, repeat: undefined }));
+  }
+
+  private setAutoCtl(entity: string, c: AutoCtl | undefined): void {
+    const next = { ...this.autoCtl };
+    if (c) next[entity] = c;
+    else delete next[entity];
+    this.autoCtl = next;
+  }
+
+  /* The frame names a zone and one of its links, never the automation: the host looks it up in the setup it fetched.
+     A yes from the host means HA took the call, so the switch waits for HA to report the automation on or off. */
+  private async sendAuto(z: Zone, a: AutomationLink, on: boolean): Promise<void> {
+    const c = autoSend(on);
+    this.setAutoCtl(a.entity, c);
+    const r = await this.ask("automation", { zone: z.id, link: a.id, on });
+    if (this.autoCtl[a.entity] !== c) return;
+    const next = autoAnswered(c, r, this.states[a.entity]);
+    if (next !== c) return void this.setAutoCtl(a.entity, next);
+    setTimeout(() => {
+      if (this.autoCtl[a.entity] === c) this.setAutoCtl(a.entity, autoGiveUp(c));
+    }, CTL_GIVE_UP_MS);
+  }
+
+  private tapAuto(z: Zone, a: AutomationLink): void {
+    const st = this.states[a.entity], ask = offQuestion(a, st);
+    if (ask) this.modal = { kind: "guard", ...ask, action: () => void this.sendAuto(z, a, false) };
+    else void this.sendAuto(z, a, autoState(st) !== "on");
+  }
+
+  private repeatChangeList() {
+    return this.autos ? repeatChanges(this.room, this.states, this.autos.repeat) : [];
+  }
+
+  private repeatDiscard = (): void => {
+    if (this.autos) this.autos = { ...this.autos, repeat: undefined };
+  };
+
+  private repeatReview = (): void => {
+    this.commitTyped();
+    const a = this.autos, entity = this.room?.alertRepeat, changes = this.repeatChangeList();
+    if (!a || !entity || a.repeat === undefined || !changes.length) return;
+    const card = repeatCard(this.room, this.states, a.repeat), typed = a.repeat;
+    if (card.kind !== "ready" || card.problem) return;
+    this.modal = {
+      kind: "review",
+      changes,
+      note: repeatNote(entity),
+      busy: false,
+      error: "",
+      busyText: "Applying and verifying...",
+      apply: () => this.applyRepeat(entity, typed),
+      refresh: () => this.repeatChangeList(),
+      after: () => {
+        this.repeatDiscard();
+        this.toast(SAID.repeatChanged);
+      },
+    };
+  };
+
+  /* The helper is written, and counts only once HA reports it holding the value. */
+  private async applyRepeat(entity: string, typed: string): Promise<Result> {
+    const value = repeatValue(typed);
+    const r = await this.ask("setting", { name: "alertRepeat", value });
+    if (!r.ok) return { type: "result", req: 0, ok: false, error: repeatRefused(r.error ?? "").trim() };
+    if (await this.until(() => reports(entity, value, this.states))) return { type: "result", req: 0, ok: true };
+    return { type: "result", req: 0, ok: false, error: repeatStuck(this.states[entity]) };
+  }
+
+  /* Link automations: from a zone's Automations page, coming back to the chip it was opened on, or from Setup. */
+  private openLinkAutos(zoneId: string, from: AutoChip | null): void {
+    this.guarded(() => {
+      const z = this.zoneById(zoneId);
+      if (!z) return;
+      this.linkBack = { screen: this.screen, zoneId: this.zoneId };
+      this.menu = null;
+      this.linkw = openLinks(z, from);
+      void this.askCatalog();
+      this.go("setup");
+    });
+  }
+
+  private setLink(change: (d: LinkDraft) => void): void {
+    if (!this.linkw) return;
+    const d = structuredClone(this.linkw);
+    change(d);
+    this.linkw = d;
+  }
+
+  private linkChangeList(d: LinkDraft) {
+    return linkChanges(d, this.catalog?.automations ?? [], this.states);
+  }
+
+  private linkDone(d: LinkDraft): void {
+    this.linkw = null;
+    if (d.from && this.zoneById(d.zoneId)) this.openAutos(d.zoneId, d.from);
+    else this.go(this.linkBack.screen, this.linkBack.zoneId);
+  }
+
+  private linkExit = (): void => {
+    const d = this.linkw;
+    if (d) this.guarded(() => this.linkDone(d));
+  };
+
+  private linkDiscard = (): void => {
+    const d = this.linkw, z = d && this.zoneById(d.zoneId);
+    if (d && z) this.linkw = { ...openLinks(z, d.from), q: d.q };
+  };
+
+  private tickLink(r: LinkRow): void {
+    this.setLink((x) => toggleLink(x, r.entity));
+  }
+
+  private linkReview = (): void => {
+    const d = this.linkw, z = d && this.zoneById(d.zoneId);
+    if (!d || !z) return;
+    const changes = this.linkChangeList(d);
+    if (!changes.length) return;
+    this.modal = {
+      kind: "review",
+      changes,
+      note: linkNote(d),
+      busy: false,
+      error: "",
+      apply: () => this.save((c) => applyLinks(c, d.zoneId, d.pick)),
+      after: () => {
+        this.toast(SAID.linksSaved(z.name));
+        this.linkDone(d);
+      },
+    };
+  };
+
+  /* Setup's Alerts card links the room's one helper straight away, since linking changes no value anywhere. The host
+     asks before a helper this panel hasn't linked becomes writable. */
+  private async linkRepeat(entity: string): Promise<void> {
+    if (!entity || entity === this.room?.alertRepeat) return void (this.repeatPick = false);
+    this.repeatBusy = true;
+    const r = await this.save((c) => setAlertRepeat(c, entity));
+    this.repeatBusy = false;
+    if (r.ok) this.repeatPick = false;
+    this.toast(r.ok ? SAID.repeatLinked : `Not saved. ${r.error ?? ""}`.trim());
+  }
+
+  private async unlinkRepeat(): Promise<void> {
+    this.repeatBusy = true;
+    const r = await this.save((c) => setAlertRepeat(c, null));
+    this.repeatBusy = false;
+    this.toast(r.ok ? SAID.repeatUnlinked : `Not saved. ${r.error ?? ""}`.trim());
+  }
 
   /* Drawing. */
   /* Where to go: one button that opens the list of pages, in place of a title bar and a row of tabs. Every zone is in
@@ -2506,6 +2746,7 @@ export class EcApp extends LitElement {
             <span>Not set up yet. Still to confirm: ${left.map((k) => STEP_TITLE[k]).join(", ")}.</span><span class="fixgo">Continue setup &rsaquo;</span>
           </button>`
         : nothing}
+      ${failsafeNoticeView(failsafeNotice(failsafesOff(z, this.states)), () => this.openAutos(z.id, "failsafe"))}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
       ${this.historyCard(z)}
@@ -2525,8 +2766,68 @@ export class EcApp extends LitElement {
       <div class="menu" id="zmenu-${MORE}" role="menu" ?hidden=${!open}>
         ${item("View targets", () => this.viewTargets(z.id))}
         ${item("View activity", () => (this.modal = { kind: "activity", zoneId: z.id }))}
+        ${item("View automations", () => this.openAutos(z.id, "alert"))}
       </div>
     </div>`;
+  }
+
+  private autosScreen() {
+    const a = this.autos, z = a && this.zoneById(a.zoneId);
+    if (!a || !z) return nothing;
+    return automationsPage({
+      zone: z,
+      chip: a.chip,
+      chips: chipViews(z, this.states),
+      groups: groupViews(z, a.chip, this.states),
+      row: (l) => autoRow(l, this.states[l.entity], this.autoCtl[l.entity], this.now),
+      repeat: repeatCard(this.room, this.states, a.repeat),
+      icon,
+      onChip: (c) => this.pickChip(c),
+      onTap: (l) => this.tapAuto(z, l),
+      onLink: () => this.openLinkAutos(z.id, a.chip),
+      onRepeat: (v) => (this.autos = this.autos && { ...this.autos, repeat: v }),
+      onLinkOnSetup: () => {
+        this.leaveTo("setup");
+        void this.jumpToTarget("room-alerts");
+      },
+    });
+  }
+
+  private linkAutosPage(d: LinkDraft) {
+    const z = this.zoneById(d.zoneId);
+    if (!z) return nothing;
+    return linkPage({
+      zone: z,
+      list: this.catalog ? linkList(d, this.zones, this.catalog.automations, this.states) : null,
+      error: this.catalogError,
+      q: d.q,
+      chips: (legend, name, options, current, pick) => this.chips(legend, name, options, current, pick),
+      onRetry: this.askCatalog,
+      onQuery: (q) => this.setLink((x) => (x.q = q)),
+      onTick: (r) => this.tickLink(r),
+      onGroup: (entity, group) => this.setLink((x) => setLinkGroup(x, entity, group)),
+    });
+  }
+
+  private roomAlertsCard() {
+    const e = this.room?.alertRepeat ?? null;
+    const picker = this.catalog
+      ? this.helperChips("Alert repeat helper", "repeat-helper", repeatHelperOptions(this.catalog), e ?? "", REPEAT_LIKELY, (x) => void this.linkRepeat(x), this.repeatBusy)
+      : this.catalogError
+        ? html`<div class="notice"><span>${this.catalogError}</span><button class="btn" @click=${this.askCatalog}>Try again</button></div>`
+        : html`<p class="muted small">Reading Home Assistant's helpers.</p>`;
+    return alertsCard({
+      entity: e,
+      text: e ? alertsCardText(e, this.states[e]) : "",
+      picking: this.repeatPick,
+      busy: this.repeatBusy,
+      picker,
+      onPick: () => {
+        this.repeatPick = !this.repeatPick;
+        if (this.repeatPick) void this.askCatalog();
+      },
+      onUnlink: () => void this.unlinkRepeat(),
+    });
   }
 
   private entityRow(e: CatalogEntity) {
@@ -3427,7 +3728,7 @@ export class EcApp extends LitElement {
      hasn't been confirmed, until something differs from what's saved, and then the count, Discard and Review and apply
      beside Back. */
   private draftBar() {
-    if (this.screen !== "setup") return nothing;
+    if (this.screen !== "setup" && this.screen !== "autos") return nothing;
     let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
     if (this.leafw) {
       const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId), z = this.zoneById(d.zoneId);
@@ -3437,6 +3738,13 @@ export class EcApp extends LitElement {
       const d = this.sched, z = this.zoneById(d.zoneId);
       const open = !!z && d.seeded && (z.setup.targets === "todo" || z.setup.targets === "later");
       bar = { zoneId: d.zoneId, changes: this.schedChangeList(d), issue: this.pageIssues(d)[0]?.text, sending: d.sending, back: this.schedExit, discard: this.schedDiscard, review: this.schedReview, confirm: open ? this.schedConfirm : null };
+    } else if (this.linkw) {
+      const d = this.linkw;
+      bar = { zoneId: d.zoneId, changes: this.linkChangeList(d), issue: undefined, sending: false, back: this.linkExit, discard: this.linkDiscard, review: this.linkReview, confirm: null };
+    } else if (this.autos) {
+      const a = this.autos, changes = this.repeatChangeList(), card = repeatCard(this.room, this.states, a.repeat);
+      const issue = changes.length && card.kind === "ready" && card.problem ? card.problem : undefined;
+      bar = { zoneId: a.zoneId, changes, issue, sending: false, back: this.autosBack, discard: this.repeatDiscard, review: this.repeatReview, confirm: null };
     }
     if (!bar) return nothing;
     const n = bar.changes.length;
@@ -3919,6 +4227,7 @@ export class EcApp extends LitElement {
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Device placement</button>
             <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
             <button role="menuitem" @click=${() => this.openSchedule(z.id)}>Targets, day and night</button>
+            <button role="menuitem" @click=${() => this.openLinkAutos(z.id, null)}>Link automations</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -3933,6 +4242,7 @@ export class EcApp extends LitElement {
   }
 
   private setup() {
+    if (this.linkw) return this.linkAutosPage(this.linkw);
     if (this.leafw) return this.calibration(this.leafw);
     if (this.sched) return this.schedulePage(this.sched);
     if (this.wiz) return this.wizard(this.wiz);
@@ -3949,6 +4259,7 @@ export class EcApp extends LitElement {
         <div class="card-head"><h2>Zones</h2>${this.addButton("Add zone")}</div>
         ${this.zones.length ? html`<div>${this.zones.map((z) => this.zoneRow(z))}</div>` : html`<p class="muted small">No zones yet.</p>`}
       </section>
+      ${this.roomAlertsCard()}
       <section class="card" id="appearance">
         <div><h2>Appearance</h2><p class="small muted">${APPEARANCE_SAYS[appearance]}</p></div>
         <div class="looks" role="group" aria-label="Appearance">
@@ -4081,6 +4392,7 @@ export class EcApp extends LitElement {
       zone: () => this.zone(),
       devices: () => this.devicesScreen(),
       setup: () => this.setup(),
+      autos: () => this.autosScreen(),
     };
     return html`<main ?inert=${!!this.modal}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
       ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;

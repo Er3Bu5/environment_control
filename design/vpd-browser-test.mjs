@@ -2061,6 +2061,24 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
   check(`Chart ${w}px: no sideways scroll on 7d`, await ev(`document.documentElement.scrollWidth<=innerWidth`), await ev(`document.documentElement.scrollWidth`));
 }
 await phone(390, 844); await ev(`ui.range=24;ui.metric="vpd";render();document.querySelector("#chart").scrollIntoView({block:"start"})`); await shot("chart-phone");
+/* The stakeholder, #104: the plot sits evenly in the card, with no more room left of the axis numbers than they need. */
+const chartInsets = () => ev(`(()=>{const svg=document.querySelector("#chart svg"),card=svg.closest(".card"),cs=getComputedStyle(card),cr=card.getBoundingClientRect();
+  const inL=cr.left+parseFloat(cs.paddingLeft)+parseFloat(cs.borderLeftWidth),inR=cr.right-parseFloat(cs.paddingRight)-parseFloat(cs.borderRightWidth);
+  const box=(els)=>{let l=1e9,r=-1e9;for(const e of els){const b=e.getBoundingClientRect();if(!b.width&&!b.height)continue;l=Math.min(l,b.left);r=Math.max(r,b.right);}return {l,r};};
+  const all=box(svg.querySelectorAll(":scope > *:not(#chart-hover)"));chartAt(0);const h0=box(svg.querySelectorAll("#chart-hover *"));chartAt(chartNow.n);const h1=box(svg.querySelectorAll("#chart-hover *"));chartAt(null);
+  return {left:+(all.l-inL).toFixed(1),right:+(inR-all.r).toFixed(1),hoverL:+(h0.l-inL).toFixed(1),hoverR:+(inR-h1.r).toFixed(1)};})()`);
+for (const [w, h, mobile] of [[1280, 900, false], [500, 900, true]]) {
+  await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile }); await reset(); await goTab("Garden");
+  for (const k of ["temperature", "humidity", "vpd", "light"]) for (const r of [6, 24, 72, 168]) {
+    await ev(`ui.metric="${k}";ui.range=${r};render()`); await sleep(40);
+    const m = await chartInsets();
+    check(`Chart ${w}px ${k} ${r}h: as much room left of the axis numbers as right of the plot`, Math.abs(m.left - m.right) <= 2 && m.left >= 0 && m.right >= 0 && m.left <= 8, m);
+    check(`Chart ${w}px ${k} ${r}h: the hover line and dots stay inside the card at both ends`, m.hoverL >= 0 && m.hoverR >= 0, m);
+  }
+}
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await reset(); await goTab("Garden");
+await ev(`ui.metric="temperature";ui.range=24;render();document.querySelector("#chart").closest(".card").scrollIntoView({block:"start"})`); await shot("chart-history-desktop");
+await phone(390, 844);
 
 // ---------- Lights in Controls
 await reset(); await goTab("Garden");

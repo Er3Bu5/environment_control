@@ -38,6 +38,7 @@ const catalog: Catalog = {
     num("input_number.spare_humidity", "40", "%"),
     num("input_number.reservoir_target_ec", "1.8", "mS/cm", 0, 5),
   ],
+  automations: [],
 };
 const MIN = "input_number.garden_day_temperature_min_threshold", MAX = "input_number.garden_day_temperature_max_threshold", TGT = "input_number.garden_day_temperature_target";
 const bands = () => ({

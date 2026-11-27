@@ -37,11 +37,11 @@ hardware or reach the network.
   `dev` to `main` pull request only when asked to.
 - **Releases are the owner's.** An agent may run the Release workflow as a dry run only, and never starts the Beta
   workflow by hand: starting it publishes. A full release waits for the owner's approval on the `release`
-  environment. A beta doesn't: merging `dev` into `main` is its approval. The Beta workflow runs every hour, and
+  environment. A beta doesn't: merging `dev` into `main` is its approval. The Beta workflow runs four times a day, and
   when the owner starts it by hand, builds what's on `main` and publishes it as a pre-release through the `beta`
   environment, which has no reviewer, when something that ships has changed since the newest release. Both
   environments accept `main` only, `publish.yml` refuses anything but a beta version outside `release`, and
-  `scripts/check_workflows.py` holds all of that in place. The hourly run leaves a merge alone until `main` has been
+  `scripts/check_workflows.py` holds all of that in place. The scheduled run leaves a merge alone until `main` has been
   quiet for five minutes. Validate runs on every pull request, into `dev` or `main`, not on merges: its last job
   records the git tree it passed on, and Beta and Release build only a commit whose tree passed. For `main` that
   record comes from the `dev` to `main` pull request (Beta runs Validate itself when `main` moved after that pull
