@@ -25,6 +25,7 @@ import {
   MAX_ZONE_NAME,
   type RawConfig,
   SETUP_STEPS,
+  type ShareAsk,
   STEP_TEXT,
   STEP_TITLE,
   type SetupStep,
@@ -39,6 +40,7 @@ import {
   confirmLink,
   setDetails,
   setHistory,
+  shareAsk,
   stepsLeft,
   unknownLinks,
   zoneNameIssue,
@@ -64,6 +66,7 @@ import {
   controlCandidates,
   controlTarget,
   countedSensors,
+  deviceElsewhere,
   mapChanges,
   mapIssues,
   nameIt,
@@ -71,6 +74,7 @@ import {
   removeVirtual,
   seedSlots,
   sensorCandidates,
+  sensorElsewhere,
   sensorTarget,
   shownName,
   swapControl,
@@ -254,6 +258,8 @@ interface Guard {
   confirm?: string;
   keep: string;
   go: string;
+  /* Going on loses nothing, so its button is the usual one and not the red one. */
+  safe?: boolean;
   action: () => void;
 }
 interface Review {
@@ -275,8 +281,15 @@ interface TargetsView {
   zoneId: string;
 }
 
+interface ActivityView {
+  kind: "activity";
+  zoneId: string;
+}
+
 /* The page menu's own id among the menus. A zone's id is letters, digits and underscores, so it can't be one. */
 const NAV = "-nav";
+/* The zone page's own menu, for the same reason. */
+const MORE = "-more";
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
 const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate", "targets"]);
@@ -394,7 +407,7 @@ export class EcApp extends LitElement {
   private mapFromGuide = false;
   private mapToPlace: { back: { screen: Screen; zoneId: string | null }; fromGuide: boolean; draft: LayoutDraft } | null = null;
   declare private guide: string | null;
-  declare private modal: Guard | Review | TargetsView | null;
+  declare private modal: Guard | Review | TargetsView | ActivityView | null;
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
@@ -952,22 +965,37 @@ export class EcApp extends LitElement {
   }
 
   private toggleSensor(s: SensorCandidate): void {
-    this.setMap((m) => {
-      if (s.id in m.sensors) {
-        delete m.sensors[s.id];
-        delete m.cls[s.id];
-      } else {
-        m.cls[s.id] = s.detected;
-        m.sensors[s.id] = seedSlots(s);
-      }
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (s.id in m.sensors)
+      return this.setMap((d) => {
+        delete d.sensors[s.id];
+        delete d.cls[s.id];
+      });
+    const add = () =>
+      this.setMap((d) => {
+        if (s.id in d.sensors) return;
+        d.cls[s.id] = s.detected;
+        d.sensors[s.id] = seedSlots(s);
+      });
+    const others = sensorElsewhere(this.config, z.id, s.id);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    else add();
   }
 
   private toggleControl(c: ControlCandidate): void {
-    this.setMap((m) => {
-      if (c.entity in m.controls) delete m.controls[c.entity];
-      else m.controls[c.entity] = c.detected;
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
+    const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
+    const others = deviceElsewhere(this.config, z.id, c.entity);
+    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    else add();
+  }
+
+  /* Only ticks it in the draft: the review, and the host's own question about anything newly controllable, still follow. */
+  private askShare(ask: ShareAsk, add: () => void): void {
+    this.modal = { kind: "guard", ...ask, safe: true, action: add };
   }
 
   private async jumpTo(issue: Issue): Promise<void> {
@@ -1782,7 +1810,7 @@ export class EcApp extends LitElement {
       html`<div class="seg" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => pick(v)}>${l}</button>`)}</div>`;
     const head = html`<div class="card-head">
       <h2>History</h2>
-      <div class="row">
+      <div class="row segs">
         ${seg("Metric", METRIC_KEYS.map((m) => [m, METRIC[m].short]), k, (v) => ([this.metric, this.chartAt] = [v as Metric, null]))}
         ${seg("Range", RANGES.map((r) => [String(r.hours), r.label]), String(R.hours), (v) => ([this.range, this.chartAt] = [Number(v), null]))}
       </div>
@@ -2197,7 +2225,7 @@ export class EcApp extends LitElement {
     const shown = [...items.sensors, ...items.devs.filter((x) => x.pos), ...items.virt];
     const left = items.devs.filter((x) => !x.pos);
     return html`<section class="card">
-      <div class="card-head"><h2>Device placement</h2></div>
+      <div class="card-head"><h2>Zone map</h2></div>
       ${mapView(L, { items: shown, picked: this.picked, onPick: (id) => (this.picked = this.picked === id ? null : id), label: `Units, sensors and devices in ${z.name}` })}
       ${keyView}
       ${left.length
@@ -2469,7 +2497,7 @@ export class EcApp extends LitElement {
           ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
           <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
         </div>
-        <button class="btn" @click=${() => this.viewTargets(z.id)}>View targets</button>
+        ${this.zoneMore(z)}
       </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
@@ -2479,8 +2507,24 @@ export class EcApp extends LitElement {
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
       ${this.historyCard(z)}
-      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>
-      <p class="small muted">Activity arrives in a release that follows.</p>`;
+      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>`;
+  }
+
+  /* What's looked up now and then about a zone, behind one button so the heading stays a heading. */
+  private zoneMore(z: Zone) {
+    const open = this.menu === MORE;
+    /* Focus moves to the button first, so a dialog opened from the menu hands it back there and not to a hidden item. */
+    const item = (label: string, act: () => void) =>
+      html`<button role="menuitem" @click=${() => { this.menu = null; (this.shadowRoot?.querySelector(`[data-zmenu="${MORE}"]`) as HTMLElement | null)?.focus(); act(); }}>${label}</button>`;
+    return html`<div class="zmenu">
+      <button class="btn burger" data-zmenu=${MORE} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${MORE}" aria-label="More" @click=${() => this.toggleMenu(MORE)}>
+        ${icon("dots")}
+      </button>
+      <div class="menu" id="zmenu-${MORE}" role="menu" ?hidden=${!open}>
+        ${item("View targets", () => this.viewTargets(z.id))}
+        ${item("View activity", () => (this.modal = { kind: "activity", zoneId: z.id }))}
+      </div>
+    </div>`;
   }
 
   private entityRow(e: CatalogEntity) {
@@ -3924,7 +3968,7 @@ export class EcApp extends LitElement {
                   </div>`;
                 return html`<div class="opens-row">
                   <strong>${z.name}</strong>
-                  <div class="row">
+                  <div class="row segs">
                     ${seg("graph", METRIC_KEYS.map((m) => [m, METRIC[m].short]), at.metric, (v) => ({ metric: v as Metric, hours: at.hours }))}
                     ${seg("range", RANGES.map((r) => [String(r.hours), r.label]), String(at.hours), (v) => ({ metric: at.metric, hours: Number(v) }))}
                   </div>
@@ -3967,7 +4011,7 @@ export class EcApp extends LitElement {
             : nothing}
           <div class="dlgfoot">
             <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="btn danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+            <button class="btn ${m.safe ? "primary" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
           </div>
         </div>
       </div>`;
@@ -3984,6 +4028,19 @@ export class EcApp extends LitElement {
           <div class="dlgfoot">
             <button class="btn" @click=${() => this.closeModal()}>Close</button>
             <button class="btn primary" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (m.kind === "activity") {
+      const z = this.zoneById(m.zoneId);
+      if (!z) return nothing;
+      return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && this.closeModal()}>
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+          <h2 id="dlg-title" tabindex="-1">Activity: ${z.name}</h2>
+          <p class="muted" id="dlg-text">Activity arrives in a release that follows.</p>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;

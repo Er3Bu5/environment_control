@@ -246,7 +246,22 @@ AREAS = json.load(open(f"{root}/ha-snap/areas.json"))
 area_id = lambda name: re.sub(r"[^a-z0-9]+", "_", name.lower()) if name else None
 REGISTRY = {"entities": {d["entity"]: {"entity_id": d["entity"], "platform": d["integration"], "area_id": area_id(AREAS.get(d["entity"]))} for d in devices if "entity" in d},
             "areas": {area_id(n): {"area_id": area_id(n), "name": n} for n in set(AREAS.values()) if n}}
-seed = {"config": {"revision": 1, "zones": zones, "devices": devices}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY}
+# The automations each zone switches, if the snapshot read them: every automation for the picker, with its area, the
+# zone links in the groups the dashboards use, and the helper every alert's repeat rate comes from.
+ROOM = {}
+if os.path.exists(f"{root}/ha-snap/automations.json"):
+    A = json.load(open(f"{root}/ha-snap/automations.json"))
+    STATES.update(A["states"])
+    for e, name in A["areas"].items():
+        REGISTRY["entities"][e] = {"entity_id": e, "platform": "automation", "area_id": area_id(name)}
+        if name:
+            REGISTRY["areas"].setdefault(area_id(name), {"area_id": area_id(name), "name": name})
+    for z in zones:
+        z["automations"] = [{"id": f"a{i + 1}", **x} for i, x in enumerate(A["links"].get(z["id"], []))]
+    if A.get("repeat"):
+        STATES[A["repeat"]["entity"]] = {"state": A["repeat"]["state"], "attributes": A["repeat"]["attributes"]}
+        ROOM = {"alertRepeat": A["repeat"]["entity"]}
+seed = {"config": {"revision": 1, "zones": zones, "devices": devices, "room": ROOM}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY}
 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed, ACTIVITY]), re.I):
     sys.exit("network identifier in the snapshot")
 open(f"{root}/snapshot-ui.html", "w", encoding="utf-8").write(src)
