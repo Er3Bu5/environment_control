@@ -113,7 +113,8 @@ const SEED = (() => {
   states["input_datetime.reservoir_refill_time"] = time(9 * 60, "Reservoir refill time");
   states["input_datetime.last_reservoir_refill"] = { state: "2026-11-03 09:12:00", attributes: { friendly_name: "Last reservoir refill", has_date: true, has_time: true } };
   /* The automations behind each zone's alerts, failsafes and light schedule. Home Assistant runs them; the panel only
-     switches them on and off. Veg and Nursery share their light schedule, so they share its automations and failsafes.
+     switches them on and off. An automation belongs to one zone, so the tent's light schedule and fans, which Veg and
+     Nursery share, are linked by Veg, and Nursery links automations of its own.
      Each is [object id, friendly name, area, on, last triggered in hours before the mock's time or null for never]. */
   const AUTOMATIONS = [
     ["critical_garden_temperature_high_day", "Critical Garden Temperature High Day", "garden", true, 30],
@@ -152,6 +153,10 @@ const SEED = (() => {
     ["critical_nursery_temperature_high_day", "Critical Nursery Temperature High Day", "nursery", true, null],
     ["critical_nursery_temperature_low_night", "Critical Nursery Temperature Low Night", "nursery", true, 9],
     ["critical_nursery_environment_sensor_unavailable", "Critical Nursery Environment Sensor Unavailable", "nursery", true, null],
+    ["failsafe_nursery_heat_mat_auto_off", "Failsafe Nursery Heat Mat Auto Off", "nursery", true, 12],
+    ["failsafe_nursery_dome_fan_auto_on", "Failsafe Nursery Dome Fan Auto On", "nursery", true, null],
+    ["nursery_heat_mat_on", "Nursery Heat Mat On", "nursery", true, 6],
+    ["nursery_heat_mat_off", "Nursery Heat Mat Off", "nursery", true, 18],
     /* Not linked to any zone yet, for the picker: one the name suggests for Nursery, a climate limit, and two that belong
        to the house and must never be suggested. */
     ["critical_nursery_vpd_high_day", "Critical Nursery VPD High Day", "nursery", true, null],
@@ -172,18 +177,19 @@ const SEED = (() => {
     ...link(["failsafe_garden_lights_recovery", "failsafe_garden_red_lights_recovery", "failsafe_dehumidifier_mains_auto_on"], "failsafe"),
     ...link(["garden_lights_on", "garden_lights_off", "garden_red_lights_on", "garden_red_lights_off"], "control"),
   ]);
-  const tent = [...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"), ...link(["tent_lights_on", "tent_lights_off"], "control")];
   zones[1].automations = numbered([
     ...link(["critical_veg_temperature_high_day", "critical_veg_temperature_low_day"], "alert_day"),
     ...link(["critical_veg_temperature_high_night", "critical_veg_temperature_low_night"], "alert_night"),
     ...link(["critical_veg_environment_sensor_unavailable", "warning_veg_auxiliary_dehumidifier_full"], "alert_device"),
-    ...tent,
+    ...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"),
+    ...link(["tent_lights_on", "tent_lights_off"], "control"),
   ]);
   zones[2].automations = numbered([
     ...link(["critical_nursery_temperature_high_day"], "alert_day"),
     ...link(["critical_nursery_temperature_low_night"], "alert_night"),
     ...link(["critical_nursery_environment_sensor_unavailable"], "alert_device"),
-    ...tent,
+    ...link(["failsafe_nursery_heat_mat_auto_off", "failsafe_nursery_dome_fan_auto_on"], "failsafe"),
+    ...link(["nursery_heat_mat_on", "nursery_heat_mat_off"], "control"),
   ]);
   /* One helper sets how often every alert in Home Assistant may buzz a phone, so it's linked once, for the whole room. */
   states["input_number.alert_repeat_rate"] = helper(15, [0, 120, 1, "min"], "Alert repeat rate");
