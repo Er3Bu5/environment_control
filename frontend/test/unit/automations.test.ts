@@ -1,0 +1,559 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  AUTO_CHIPS,
+  CHIP,
+  GROUP,
+  REPEAT_LIKELY,
+  alertsCardText,
+  applyLinks,
+  autoAnswered,
+  autoGiveUp,
+  autoLine,
+  autoName,
+  autoReported,
+  autoRow,
+  autoSend,
+  autoState,
+  autosReported,
+  chipViews,
+  countOf,
+  countWords,
+  emptyText,
+  failsafeNotice,
+  failsafesOff,
+  groupViews,
+  groupsOf,
+  linkChanges,
+  linkList,
+  linkNote,
+  linksOf,
+  linksToSave,
+  offQuestion,
+  openLinks,
+  ranWords,
+  removeRow,
+  repeatCard,
+  repeatChanges,
+  repeatHelperOptions,
+  repeatLimits,
+  repeatNote,
+  repeatProblem,
+  repeatRefused,
+  repeatStuck,
+  setLinkGroup,
+  shareQuestion,
+  sharedWith,
+  suggestGroup,
+  toggleLink,
+} from "../../src/frame/automations";
+import type { Catalog, CatalogAutomation } from "../../src/frame/messages";
+import { AUTOMATION_GROUPS, type AutomationLink, copyConfig, readZones } from "../../src/frame/model";
+import type { HaState } from "../../src/frame/readings";
+
+const st = (state: string, attributes: Record<string, unknown> = {}): HaState => ({ state, attributes, at: null });
+const auto = (state: string, name: string, last: string | null = null) => st(state, { friendly_name: name, last_triggered: last });
+const link = (id: string, object: string, group: string) => ({ id, entity: `automation.${object}`, group });
+
+/* Garden links its own; Veg and Nursery share their tent's failsafe and schedule, as the sample room does. */
+const zones = readZones([
+  {
+    id: "garden",
+    name: "Garden",
+    automations: [
+      link("a1", "critical_garden_temperature_high_day", "alert_day"),
+      link("a2", "critical_garden_humidity_high_day", "alert_day"),
+      link("a3", "critical_garden_temperature_low_night", "alert_night"),
+      link("a4", "failsafe_garden_lights_recovery", "failsafe"),
+      link("a5", "failsafe_dehumidifier_mains_auto_on", "failsafe"),
+    ],
+  },
+  { id: "veg", name: "Veg", automations: [link("a1", "failsafe_tent_lights_recovery", "failsafe"), link("a2", "tent_lights_on", "control")] },
+  { id: "nursery", name: "Nursery", automations: [link("a1", "failsafe_tent_lights_recovery", "failsafe"), link("a7", "tent_lights_on", "control")] },
+]);
+const [garden, veg] = zones;
+const states: Record<string, HaState> = {
+  "automation.critical_garden_temperature_high_day": auto("on", "Critical Garden Temperature High Day"),
+  "automation.critical_garden_humidity_high_day": auto("off", "Critical Garden Humidity High Day"),
+  "automation.critical_garden_temperature_low_night": auto("unavailable", "Critical Garden Temperature Low Night"),
+  "automation.failsafe_garden_lights_recovery": auto("off", "Failsafe Garden Lights Recovery"),
+  "automation.failsafe_dehumidifier_mains_auto_on": auto("on", "Failsafe Dehumidifier Mains Auto On"),
+  "automation.failsafe_tent_lights_recovery": auto("on", "Failsafe Tent Lights Recovery"),
+  "automation.tent_lights_on": auto("on", "Tent Lights On"),
+};
+
+describe("groups and chips", () => {
+  it("puts every group under one of the three chips, in the order the page shows them", () => {
+    expect(AUTO_CHIPS.map((c) => [CHIP[c].title, CHIP[c].icon, groupsOf(c).map((g) => GROUP[g].title)])).toEqual([
+      ["Alerts", "bell", ["Day alerts", "Night alerts", "Device alerts"]],
+      ["Failsafes", "shield", ["Failsafes"]],
+      ["Control", "clock", ["Control"]],
+    ]);
+    expect(AUTO_CHIPS.flatMap(groupsOf).sort()).toEqual([...AUTOMATION_GROUPS].sort());
+    expect(CHIP.failsafe.about).toBe("Home Assistant's failsafes for this zone. Each puts hardware back when something goes wrong, such as a fan plug turning off. While one is off, nothing does that.");
+  });
+
+  it("picks out a zone's links on one chip", () => {
+    expect(linksOf(garden, "alert").map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
+    expect(linksOf(garden, "control")).toEqual([]);
+    expect(linksOf(garden)).toHaveLength(5);
+  });
+
+  it("suggests a group from the automation's name, and anything it can't tell is control", () => {
+    const cases: [string, string][] = [
+      ["automation.failsafe_veg_fans_auto_on", "failsafe"],
+      ["automation.startup_reservoir_pump_off", "failsafe"],
+      ["automation.critical_garden_temperature_high_day", "alert_day"],
+      ["automation.warning_veg_humidity_low_night", "alert_night"],
+      ["automation.critical_garden_dehumidifier_full", "alert_device"],
+      /* The sample room keeps this one with its device alerts: the name only suggests. */
+      ["automation.critical_garden_light_controller_overhead_off_day", "alert_day"],
+      ["automation.garden_lights_on", "control"],
+      ["automation.daytime_failsafe_check", "control"],
+    ];
+    for (const [entity, group] of cases) expect([entity, suggestGroup(entity)]).toEqual([entity, group]);
+  });
+});
+
+describe("when an automation last ran", () => {
+  /* A zone with daylight saving, so the day count can be shown not to slip across a change. Node takes a new TZ at once.
+     The frame's types leave Node's out, so its environment is reached untyped. */
+  const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env, tz = env.TZ;
+  beforeAll(() => {
+    env.TZ = "Pacific/Auckland";
+  });
+  afterAll(() => {
+    if (tz === undefined) delete env.TZ;
+    else env.TZ = tz;
+  });
+  const now = Date.parse("2026-11-17T13:30:00+13:00");
+
+  it("says today or yesterday, and otherwise the day and month, with a 24 hour time in the viewer's own zone", () => {
+    expect(ranWords("2026-11-17T00:05:00Z", now)).toBe("today at 13:05");
+    expect(ranWords("2026-11-17T00:01:00+13:00", now)).toBe("today at 00:01");
+    expect(ranWords("2026-11-16T23:59:00+13:00", now)).toBe("yesterday at 23:59");
+    expect(ranWords("2026-11-15T23:59:00+13:00", now)).toBe("15 Nov at 23:59");
+    expect(ranWords("2026-01-02T08:00:00+13:00", now)).toBe("2 Jan at 08:00");
+  });
+
+  it("says the year only when it isn't this one, and nothing for a time that isn't one", () => {
+    expect(ranWords("2025-11-12T09:00:00+13:00", now)).toBe("12 Nov 2025 at 09:00");
+    expect(ranWords("soon", now)).toBe("");
+  });
+
+  it("still calls the day before a daylight saving change yesterday", () => {
+    expect(ranWords("2026-09-27T01:00:00+12:00", Date.parse("2026-09-28T01:00:00+13:00"))).toBe("yesterday at 01:00");
+    expect(ranWords("2026-04-05T01:00:00+13:00", Date.parse("2026-04-06T01:00:00+12:00"))).toBe("yesterday at 01:00");
+  });
+});
+
+describe("an automation's row", () => {
+  const now = Date.now();
+  const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
+
+  it("reads only on and off as switchable, anything else as unavailable, and a missing state as gone", () => {
+    expect([st("on"), st("off"), st("unavailable"), st("unknown"), undefined].map(autoState)).toEqual(["on", "off", "unavailable", "unavailable", "gone"]);
+  });
+
+  it("names it as Home Assistant does, or by its entity id when HA has no name for it", () => {
+    expect(autoName("automation.x", auto("on", "Lights On"))).toBe("Lights On");
+    expect(autoName("automation.x", st("on", { friendly_name: " " }))).toBe("automation.x");
+    expect(autoName("automation.x", undefined)).toBe("automation.x");
+  });
+
+  it("says what HA reports, when it last ran and who shares it", () => {
+    const r = autoRow(veg.automations[0], auto("on", "Failsafe Tent Lights Recovery", at(1)), ["Nursery"], undefined, now);
+    expect(r).toMatchObject({ name: "Failsafe Tent Lights Recovery", state: "on", on: true, locked: false, line: null });
+    expect(r.sub).toMatch(/^On\. Last triggered (today|yesterday) at \d\d:\d\d\. Shared with Nursery\.$/);
+    expect(autoRow(veg.automations[1], auto("off", "Tent Lights On"), ["Nursery", "Flower"], undefined, now).sub).toBe("Off. Never triggered. Shared with Nursery and Flower.");
+  });
+
+  it("can't be switched while unavailable or gone, and says which", () => {
+    const down = autoRow(garden.automations[2], st("unavailable", { friendly_name: "Low Night" }), [], undefined, now);
+    expect([down.sub, down.locked, down.on]).toEqual(["Unavailable in Home Assistant.", true, false]);
+    const gone = autoRow(garden.automations[2], undefined, [], undefined, now);
+    expect([gone.name, gone.sub, gone.locked]).toEqual(["automation.critical_garden_temperature_low_night", "Home Assistant doesn't have it any more.", true]);
+  });
+
+  it("doesn't claim one never ran unless HA says so", () => {
+    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On", last_triggered: 5 }), [], undefined, now).sub).toBe("On.");
+    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On" }), [], undefined, now).sub).toBe("On.");
+  });
+
+  it("is held while a tap waits for its report, and free again once it gives up or is refused", () => {
+    const row = (c: Parameters<typeof autoRow>[3]) => autoRow(veg.automations[1], auto("off", "Tent Lights On"), [], c, now);
+    expect(row(autoSend(true)).locked).toBe(true);
+    expect(row({ status: "stuck", want: "on" }).locked).toBe(false);
+    expect(row({ status: "error", error: "No." }).locked).toBe(false);
+  });
+
+  it("names the other zones that link the same automation", () => {
+    expect(sharedWith(zones, "veg", "automation.failsafe_tent_lights_recovery")).toEqual(["Nursery"]);
+    expect(sharedWith(zones, "garden", "automation.tent_lights_on")).toEqual(["Veg", "Nursery"]);
+    expect(sharedWith(zones, "garden", "automation.failsafe_garden_lights_recovery")).toEqual([]);
+  });
+});
+
+describe("a switch after a tap", () => {
+  it("waits for HA to report the new state, never assuming it", () => {
+    const c = autoSend(false);
+    expect(c).toEqual({ status: "sending", want: "off" });
+    expect(autoAnswered(c, { ok: true }, st("on"))).toBe(c);
+    expect(autoAnswered(c, { ok: true }, st("off"))).toBeUndefined();
+    expect(autoReported(c, st("on"))).toBe(c);
+    expect(autoReported(c, st("off"))).toBeUndefined();
+  });
+
+  it("says the host's reason when the host refuses, or that HA didn't take it when it gives none", () => {
+    expect(autoAnswered(autoSend(true), { ok: false, error: "That zone doesn't link that automation." }, st("off"))).toEqual({ status: "error", error: "That zone doesn't link that automation." });
+    expect(autoAnswered(autoSend(true), { ok: false }, st("off"))).toEqual({ status: "error", error: "Home Assistant didn't take it." });
+  });
+
+  it("gives up after the wait, and still counts a report that comes after that", () => {
+    const stuck = autoGiveUp(autoSend(true));
+    expect(stuck).toEqual({ status: "stuck", want: "on" });
+    expect(autoReported(stuck, st("off"))).toBe(stuck);
+    expect(autoReported(stuck, st("on"))).toBeUndefined();
+    const error = { status: "error", error: "No." } as const;
+    expect(autoGiveUp(stuck)).toBe(stuck);
+    expect(autoGiveUp(error)).toBe(error);
+    expect(autoReported(error, st("on"))).toBe(error);
+  });
+
+  it("says what it's waiting for, what HA still reports, and why it wasn't sent", () => {
+    expect(autoLine(autoSend(true), st("off"))).toEqual({ text: "Sent. Waiting for Home Assistant to report it on.", tone: "" });
+    expect(autoLine(autoSend(false), st("on"))?.text).toBe("Sent. Waiting for Home Assistant to report it off.");
+    expect(autoLine({ status: "stuck", want: "on" }, st("off"))).toEqual({ text: "Not confirmed. Home Assistant still reports it off. Try again.", tone: "crit" });
+    expect(autoLine({ status: "stuck", want: "on" }, undefined)?.text).toBe("Not confirmed. Home Assistant still reports it missing. Try again.");
+    expect(autoLine({ status: "error", error: "It's unavailable in Home Assistant." }, st("off"))).toEqual({ text: "Not sent. It's unavailable in Home Assistant.", tone: "crit" });
+    expect(autoLine(undefined, st("on"))).toBeNull();
+  });
+
+  it("settles only the switches a report reaches, leaving the others and the old record alone", () => {
+    const ctl = { "automation.a": autoSend(true), "automation.b": autoSend(true) };
+    const now = { "automation.a": st("on"), "automation.b": st("on") };
+    expect(autosReported(ctl, now, ["automation.c"])).toBeNull();
+    expect(autosReported(ctl, { "automation.a": st("off") }, ["automation.a"])).toBeNull();
+    expect(autosReported(ctl, now, ["automation.a"])).toEqual({ "automation.b": autoSend(true) });
+    expect(Object.keys(ctl)).toEqual(["automation.a", "automation.b"]);
+  });
+});
+
+describe("switching a failsafe off", () => {
+  it("asks first, naming every zone it stops working in", () => {
+    expect(offQuestion(veg, zones, veg.automations[0], states["automation.failsafe_tent_lights_recovery"])).toEqual({
+      title: "Switch off Failsafe Tent Lights Recovery?",
+      text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that in Veg or Nursery. You can switch it on again here.",
+      keep: "Keep it on",
+      go: "Switch off",
+    });
+    expect(offQuestion(garden, zones, garden.automations[4], states["automation.failsafe_dehumidifier_mains_auto_on"])?.text).toBe(
+      "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.",
+    );
+  });
+
+  it("doesn't ask to switch one on, or anything that isn't a failsafe", () => {
+    expect(offQuestion(garden, zones, garden.automations[3], states["automation.failsafe_garden_lights_recovery"])).toBeNull();
+    expect(offQuestion(garden, zones, garden.automations[0], states["automation.critical_garden_temperature_high_day"])).toBeNull();
+    expect(offQuestion(veg, zones, veg.automations[1], states["automation.tent_lights_on"])).toBeNull();
+  });
+});
+
+describe("counts", () => {
+  it("counts what HA reports on, with unavailable and gone in the total", () => {
+    expect(countOf(linksOf(garden, "alert"), states)).toEqual({ on: 1, total: 3 });
+    expect(countWords({ on: 1, total: 3 })).toBe("1 of 3 on");
+    expect(countWords({ on: 0, total: 0 })).toBe("None linked");
+  });
+
+  it("gives each chip its count, and says it in words for a screen reader", () => {
+    expect(chipViews(garden, states)).toEqual([
+      { chip: "alert", title: "Alerts", count: "1/3", label: "Alerts, 1 of 3 on" },
+      { chip: "failsafe", title: "Failsafes", count: "1/2", label: "Failsafes, 1 of 2 on" },
+      { chip: "control", title: "Control", count: "0/0", label: "Control, none linked" },
+    ]);
+  });
+
+  it("makes a card only for a group that links anything, and says when a chip links nothing", () => {
+    expect(groupViews(garden, "alert", states).map((g) => [g.title, g.count, g.links.map((a) => a.id)])).toEqual([
+      ["Day alerts", "1 of 2 on", ["a1", "a2"]],
+      ["Night alerts", "0 of 1 on", ["a3"]],
+    ]);
+    expect(groupViews(garden, "control", states)).toEqual([]);
+    expect(emptyText("control", "Garden")).toBe("No control linked to Garden yet");
+    expect(emptyText("alert", "Veg")).toBe("No alerts linked to Veg yet");
+  });
+});
+
+describe("failsafes that are off", () => {
+  it("finds those HA reports off, leaving out one that's unavailable or gone", () => {
+    expect(failsafesOff(garden, states).map((x) => x.name)).toEqual(["Failsafe Garden Lights Recovery"]);
+    expect(failsafesOff(garden, { ...states, "automation.failsafe_garden_lights_recovery": st("unavailable") })).toEqual([]);
+    expect(failsafesOff(garden, {})).toEqual([]);
+  });
+
+  it("names one, counts several, and says nothing when none is off", () => {
+    expect(failsafeNotice([{ name: "Failsafe Garden Lights Recovery" }])).toBe("A failsafe is off: Failsafe Garden Lights Recovery. While it's off, nothing puts that hardware back.");
+    expect(failsafeNotice([{ name: "A" }, { name: "B" }])).toBe("2 failsafes are off. While they're off, nothing puts that hardware back.");
+    expect(failsafeNotice([])).toBeNull();
+  });
+});
+
+describe("the alert repeat", () => {
+  const helper = st("15", { friendly_name: "Alert repeat rate", min: 0, max: 120, step: 1, unit_of_measurement: "min" });
+  const room = { alertRepeat: "input_number.alert_repeat_rate" };
+  const live = { "input_number.alert_repeat_rate": helper };
+
+  it("reads the helper's own limits, and none it doesn't say or that make no sense", () => {
+    expect(repeatLimits(helper)).toEqual({ min: 0, max: 120, step: 1 });
+    expect(repeatLimits(st("15", { min: 0, max: 120 }))).toBeNull();
+    expect(repeatLimits(st("15", { min: 0, max: 120, step: 0 }))).toBeNull();
+    expect(repeatLimits(st("15", { min: 10, max: 1, step: 1 }))).toBeNull();
+    expect(repeatLimits(undefined)).toBeNull();
+  });
+
+  it("holds a typed value to a number inside the helper's min, max and step", () => {
+    const L = { min: 0, max: 120, step: 5 };
+    expect(["", "  ", "abc", "1e"].map((v) => repeatProblem(v, L))).toEqual(Array(4).fill("Type a number of minutes."));
+    for (const v of ["-5", "125", "7"]) expect(repeatProblem(v, L)).toBe("It has to be between 0 and 120, in steps of 5, as your helper allows.");
+    expect(["0", " 120 ", "35"].map((v) => repeatProblem(v, L))).toEqual(["", "", ""]);
+    expect(repeatProblem("1.5", { min: 0.5, max: 5, step: 0.5 })).toBe("");
+    expect(repeatProblem("1.25", { min: 0.5, max: 5, step: 0.5 })).not.toBe("");
+    expect([repeatProblem("999", null), repeatProblem("x", null)]).toEqual(["", "Type a number of minutes."]);
+  });
+
+  it("offers a link while none is linked, says so while HA doesn't have the helper, and otherwise shows the box", () => {
+    expect(repeatCard({}, live, undefined)).toEqual({ kind: "unlinked" });
+    expect(repeatCard(undefined, live, undefined)).toEqual({ kind: "unlinked" });
+    expect(repeatCard(room, {}, undefined)).toEqual({ kind: "missing", entity: "input_number.alert_repeat_rate" });
+    expect(repeatCard(room, { "input_number.alert_repeat_rate": st("unavailable") }, "20")).toEqual({ kind: "missing", entity: "input_number.alert_repeat_rate" });
+    expect(repeatCard(room, live, undefined)).toEqual({ kind: "ready", entity: "input_number.alert_repeat_rate", value: "15", limits: { min: 0, max: 120, step: 1 }, problem: "" });
+    expect(repeatCard(room, live, "500")).toMatchObject({ value: "500", problem: "It has to be between 0 and 120, in steps of 1, as your helper allows." });
+  });
+
+  it("is one change while the box differs from what the helper reports, and none for the same number written another way", () => {
+    expect(repeatChanges(room, live, "20")).toEqual([{ label: "Alert repeat", before: "15 min", after: "20 min" }]);
+    expect(repeatChanges(room, live, " 20 ")).toEqual([{ label: "Alert repeat", before: "15 min", after: "20 min" }]);
+    expect(repeatChanges(room, live, "15.0")).toEqual([]);
+    expect(repeatChanges(room, live, undefined)).toEqual([]);
+    expect(repeatChanges(room, live, "")).toHaveLength(1);
+    expect(repeatChanges(room, { "input_number.alert_repeat_rate": st("15", {}) }, "20")).toEqual([{ label: "Alert repeat", before: "15", after: "20" }]);
+  });
+
+  it("has nothing to apply while HA doesn't have the helper or none is linked", () => {
+    expect(repeatChanges(room, {}, "20")).toEqual([]);
+    expect(repeatChanges(room, { "input_number.alert_repeat_rate": st("unavailable") }, "20")).toEqual([]);
+    expect(repeatChanges({}, live, "20")).toEqual([]);
+  });
+
+  it("tells the review it changes every alert, and says what HA still reports when it doesn't take", () => {
+    expect(repeatNote("input_number.alert_repeat_rate")).toBe(
+      "This changes every alert in Home Assistant, not just this zone's. On your helper, input_number.alert_repeat_rate. Every alert follows it straight away.",
+    );
+    expect(repeatRefused("The alert repeat rate isn't linked to a helper.")).toBe("Alert repeat wasn't changed. The alert repeat rate isn't linked to a helper.");
+    expect([repeatStuck(helper), repeatStuck(undefined)]).toEqual(["Alert repeat: Home Assistant still reports 15.", "Alert repeat: Home Assistant still reports nothing."]);
+  });
+});
+
+describe("Setup's Alerts card", () => {
+  it("offers Home Assistant's number helpers, with what each holds, for the helper search box", () => {
+    const num = (entity_id: string, name: string, state: string, unit: string | null) => ({ entity_id, name, domain: "input_number", device_class: null, unit, state, category: null, area: null, integration: "input_number", family: "Helper" });
+    const catalog: Catalog = {
+      devices: [],
+      entities: [num("input_number.alert_repeat_rate", "Alert repeat rate", "15", "min"), { ...num("input_datetime.lights_on", "Lights on", "07:00:00", null), domain: "input_datetime" }, num("input_number.spare", "Spare", "1", null)],
+      automations: [],
+    };
+    expect(repeatHelperOptions(catalog)).toEqual([
+      { entity: "input_number.alert_repeat_rate", name: "Alert repeat rate", state: "15", unit: "min" },
+      { entity: "input_number.spare", name: "Spare", state: "1", unit: null },
+    ]);
+    expect(repeatHelperOptions(null)).toEqual([]);
+    expect(REPEAT_LIKELY).toEqual(["repeat", "alert"]);
+  });
+
+  it("says what the linked helper holds and where it's changed, or that HA doesn't have it right now", () => {
+    const e = "input_number.alert_repeat_rate";
+    expect(alertsCardText(e, st("15", { unit_of_measurement: "min" }))).toBe("15 min. On your helper, input_number.alert_repeat_rate. Change it on any zone's Automations page, under Alerts.");
+    for (const s of [undefined, st("unavailable")])
+      expect(alertsCardText(e, s)).toBe("Home Assistant doesn't have it right now. On your helper, input_number.alert_repeat_rate. Change it on any zone's Automations page, under Alerts.");
+  });
+});
+
+describe("Link automations", () => {
+  const ha = (entity_id: string, name: string, area: string | null = null, state = "on"): CatalogAutomation => ({ entity_id: `automation.${entity_id}`, name, state, area, last_triggered: null });
+  const catalog = [
+    ha("tent_lights_on", "Tent Lights On", "Veg"),
+    ha("failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery", "Veg"),
+    ha("critical_nursery_vpd_high_day", "Critical Nursery VPD High Day", null),
+    ha("nursery_fan_kick", "Fan kick", "Garden", "off"),
+    ha("day_humidity_upper_limit", "Day Humidity Upper Limit", "Garden", "off"),
+    ha("porch_light_on", "Porch Light On"),
+    ha("nurseryman_reminder", "Reminder", null),
+    ha("veg_heat_alarm", "Heat alarm", " nursery "),
+  ];
+  const nursery = zones[2];
+
+  it("opens on what the zone links as saved, and ticks a new automation in the group its name suggests", () => {
+    const d = openLinks(nursery, "failsafe");
+    expect([d.was, d.pick, d.q, d.sending, d.from]).toEqual([{ "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, { "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, "", false, "failsafe"]);
+    toggleLink(d, "automation.critical_nursery_vpd_high_day");
+    expect(d.pick["automation.critical_nursery_vpd_high_day"]).toBe("alert_day");
+    d.pick.x = "control";
+    expect(d.was).not.toHaveProperty("x");
+  });
+
+  it("puts one the zone had saved back in its own group when it's unticked and ticked again", () => {
+    const d = openLinks(nursery, null);
+    setLinkGroup(d, "automation.tent_lights_on", "alert_device");
+    toggleLink(d, "automation.tent_lights_on");
+    expect(d.pick).not.toHaveProperty("automation.tent_lights_on");
+    setLinkGroup(d, "automation.tent_lights_on", "failsafe");
+    expect(d.pick).not.toHaveProperty("automation.tent_lights_on");
+    toggleLink(d, "automation.tent_lights_on");
+    expect(d.pick["automation.tent_lights_on"]).toBe("control");
+  });
+
+  it("with nothing typed lists what the zone links, its area's automations and those named for it, and counts the rest", () => {
+    const d = openLinks(nursery, null);
+    const { rows, more } = linkList(d, zones, catalog, states);
+    expect(rows.map((r) => r.entity)).toEqual([
+      "automation.critical_nursery_vpd_high_day",
+      "automation.failsafe_tent_lights_recovery",
+      "automation.nursery_fan_kick",
+      "automation.veg_heat_alarm",
+      "automation.tent_lights_on",
+    ]);
+    expect(more).toBe(3);
+  });
+
+  it("says where each one is, who links it already, whether it's on, and the group of one that's ticked", () => {
+    const d = openLinks(nursery, null);
+    const rows = Object.fromEntries(linkList(d, zones, catalog, states).rows.map((r) => [r.entity, r]));
+    expect(rows["automation.tent_lights_on"]).toEqual({ entity: "automation.tent_lights_on", name: "Tent Lights On", sub: "automation.tent_lights_on, Veg area, linked in Veg", pill: "On", group: "control" });
+    expect(rows["automation.nursery_fan_kick"]).toMatchObject({ sub: "automation.nursery_fan_kick, Garden area", pill: "Off", group: null });
+    expect(rows["automation.critical_nursery_vpd_high_day"].sub).toBe("automation.critical_nursery_vpd_high_day");
+  });
+
+  it("searches every automation by each word typed, in its name or entity id, and counts none as more", () => {
+    const d = openLinks(nursery, null);
+    d.q = "  PORCH ";
+    expect(linkList(d, zones, catalog, states)).toEqual({ rows: [expect.objectContaining({ entity: "automation.porch_light_on" })], more: 0 });
+    d.q = "day upper";
+    expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Day Humidity Upper Limit"]);
+    d.q = "lights tent";
+    expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Failsafe Tent Lights Recovery", "Tent Lights On"]);
+    d.q = "nothing like it";
+    expect(linkList(d, zones, catalog, states)).toEqual({ rows: [], more: 0 });
+  });
+
+  it("keeps a linked automation Home Assistant no longer lists, so it can still be unlinked", () => {
+    const d = openLinks(garden, "alert");
+    const rows = linkList(d, zones, catalog, {}).rows;
+    expect(rows.map((r) => r.entity)).toContain("automation.critical_garden_temperature_low_night");
+    expect(rows.find((r) => r.entity === "automation.critical_garden_temperature_low_night")).toMatchObject({ name: "automation.critical_garden_temperature_low_night", pill: "Missing", group: "alert_night" });
+    expect(linkList(d, zones, catalog, states).rows.find((r) => r.entity === "automation.critical_garden_temperature_low_night")).toMatchObject({ name: "Critical Garden Temperature Low Night", pill: "Unavailable" });
+  });
+
+  it("lists every change for the review, as the group before and after", () => {
+    const d = openLinks(veg, "control");
+    toggleLink(d, "automation.critical_nursery_vpd_high_day");
+    toggleLink(d, "automation.failsafe_tent_lights_recovery");
+    setLinkGroup(d, "automation.tent_lights_on", "alert_device");
+    expect(linkChanges(d, catalog, states)).toEqual([
+      { label: "Failsafe Tent Lights Recovery", before: "Failsafes", after: "Not linked" },
+      { label: "Tent Lights On", before: "Control", after: "Device alerts" },
+      { label: "Critical Nursery VPD High Day", before: "Not linked", after: "Day alerts" },
+    ]);
+    expect(linkChanges(openLinks(veg, null), catalog, states)).toEqual([]);
+    const gone = openLinks(garden, null);
+    toggleLink(gone, "automation.critical_garden_temperature_low_night");
+    expect(linkChanges(gone, [], {})).toEqual([{ label: "automation.critical_garden_temperature_low_night", before: "Night alerts", after: "Not linked" }]);
+  });
+
+  it("says Home Assistant asks first only when something no zone links yet is being linked", () => {
+    const d = openLinks(nursery, null);
+    expect(linkNote(d, zones)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
+    toggleLink(d, "automation.failsafe_garden_lights_recovery");
+    expect(linkNote(d, zones)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
+    toggleLink(d, "automation.porch_light_on");
+    expect(linkNote(d, zones)).toBe(
+      "Only Environment Control changes, and Home Assistant keeps running every automation as it is. Home Assistant asks you before a newly linked one can be switched from here.",
+    );
+  });
+});
+
+describe("asking before an automation joins a second zone", () => {
+  it("asks when ticking one another zone links, naming every zone that does", () => {
+    const d = openLinks(zones[0], "control");
+    expect(shareQuestion(zones, d, "automation.tent_lights_on", "Tent Lights On")).toEqual({
+      title: "Add Tent Lights On to Garden as well?",
+      text: "It's already linked in Veg and Nursery. It's one automation, so switching it off here switches it off there too.",
+      keep: "Leave it out",
+      go: "Add to Garden",
+    });
+  });
+
+  it("never asks on unticking, for one no other zone has saved, or for one this zone had saved, even ticked again", () => {
+    const d = openLinks(veg, null);
+    expect(shareQuestion(zones, d, "automation.failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery")).toBeNull();
+    toggleLink(d, "automation.failsafe_tent_lights_recovery");
+    expect(shareQuestion(zones, d, "automation.failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery")).toBeNull();
+    expect(shareQuestion(zones, d, "automation.porch_light_on", "Porch Light On")).toBeNull();
+    const g = openLinks(zones[0], null);
+    toggleLink(g, "automation.porch_light_on");
+    expect(shareQuestion(zones, g, "automation.porch_light_on", "Porch Light On")).toBeNull();
+  });
+
+  it("goes by the saved setup, not by another zone's unsaved draft", () => {
+    const other = openLinks(veg, null);
+    toggleLink(other, "automation.porch_light_on");
+    expect(shareQuestion(zones, openLinks(zones[0], null), "automation.porch_light_on", "Porch Light On")).toBeNull();
+  });
+});
+
+describe("saving links", () => {
+  const had: AutomationLink[] = [
+    { id: "a1", entity: "automation.one", group: "alert_day" },
+    { id: "a4", entity: "automation.four", group: "failsafe" },
+    { id: "custom", entity: "automation.custom", group: "control" },
+  ];
+
+  it("keeps the id of a link that stays, in its saved place, with its group as picked", () => {
+    expect(linksToSave(had, { "automation.four": "control", "automation.one": "alert_day", "automation.custom": "control" })).toEqual([
+      { id: "a1", entity: "automation.one", group: "alert_day" },
+      { id: "a4", entity: "automation.four", group: "control" },
+      { id: "custom", entity: "automation.custom", group: "control" },
+    ]);
+  });
+
+  it("gives a new link a fresh id past the highest the zone had, never one a removed link had", () => {
+    expect(linksToSave(had, { "automation.one": "alert_day", "automation.new": "control", "automation.newer": "failsafe" })).toEqual([
+      { id: "a1", entity: "automation.one", group: "alert_day" },
+      { id: "a5", entity: "automation.new", group: "control" },
+      { id: "a6", entity: "automation.newer", group: "failsafe" },
+    ]);
+    expect(linksToSave([], { "automation.x": "control" })).toEqual([{ id: "a1", entity: "automation.x", group: "control" }]);
+    expect(linksToSave([{ id: "a01", entity: "automation.y", group: "control" }, { id: "a2x", entity: "automation.z", group: "control" }], { "automation.x": "control" })).toEqual([
+      { id: "a2", entity: "automation.x", group: "control" },
+    ]);
+  });
+
+  it("applies to the zone as it's stored when saving, and stores no list for a zone that links nothing", () => {
+    const c = copyConfig([{ id: "veg", name: "Veg", automations: had, extra: 1 }, { id: "garden", name: "Garden" }], []);
+    applyLinks(c, "veg", { "automation.four": "failsafe", "automation.new": "alert_night" });
+    expect(c.zones[0]).toEqual({ id: "veg", name: "Veg", extra: 1, automations: [{ id: "a4", entity: "automation.four", group: "failsafe" }, { id: "a5", entity: "automation.new", group: "alert_night" }] });
+    applyLinks(c, "veg", {});
+    expect("automations" in c.zones[0]).toBe(false);
+    applyLinks(c, "garden", { "automation.x": "control" });
+    expect(c.zones[1].automations).toEqual([{ id: "a1", entity: "automation.x", group: "control" }]);
+    applyLinks(c, "gone", { "automation.x": "control" });
+    expect(c.zones).toHaveLength(2);
+  });
+});
+
+describe("removing a zone", () => {
+  it("says its links go and the automations keep running, or nothing when it links none", () => {
+    expect(removeRow(zones[0])).toEqual(["Automations", "5 unlinked. They keep running in Home Assistant"]);
+    expect(removeRow({ ...zones[1], automations: [zones[1].automations[0]] })).toEqual(["Automations", "1 unlinked. It keeps running in Home Assistant"]);
+    expect(removeRow({ ...zones[1], automations: [] })).toEqual(["Automations", ""]);
+  });
+});

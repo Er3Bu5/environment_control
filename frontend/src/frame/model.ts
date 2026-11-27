@@ -66,7 +66,7 @@ function readHistory(v: unknown): HistoryView | null {
 
 /* A link that isn't the right shape is left out on its own, and so is a second one with an id or automation already
    seen, since the host would switch only the first. */
-function readLinks(v: unknown): AutomationLink[] {
+export function readLinks(v: unknown): AutomationLink[] {
   const out: AutomationLink[] = [];
   for (const a of Array.isArray(v) ? v : []) {
     if (!isObj(a) || typeof a.id !== "string" || !LINK_ID.test(a.id) || typeof a.entity !== "string" || !AUTOMATION_ID.test(a.entity)) continue;
