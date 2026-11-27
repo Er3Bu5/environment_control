@@ -25,6 +25,7 @@ import {
   MAX_ZONE_NAME,
   type RawConfig,
   SETUP_STEPS,
+  type ShareAsk,
   STEP_TEXT,
   STEP_TITLE,
   type SetupStep,
@@ -39,6 +40,7 @@ import {
   confirmLink,
   setDetails,
   setHistory,
+  shareAsk,
   stepsLeft,
   unknownLinks,
   zoneNameIssue,
@@ -64,6 +66,7 @@ import {
   controlCandidates,
   controlTarget,
   countedSensors,
+  deviceElsewhere,
   mapChanges,
   mapIssues,
   nameIt,
@@ -71,6 +74,7 @@ import {
   removeVirtual,
   seedSlots,
   sensorCandidates,
+  sensorElsewhere,
   sensorTarget,
   shownName,
   swapControl,
@@ -254,6 +258,8 @@ interface Guard {
   confirm?: string;
   keep: string;
   go: string;
+  /* Going on loses nothing, so its button is the usual one and not the red one. */
+  safe?: boolean;
   action: () => void;
 }
 interface Review {
@@ -944,22 +950,37 @@ export class EcApp extends LitElement {
   }
 
   private toggleSensor(s: SensorCandidate): void {
-    this.setMap((m) => {
-      if (s.id in m.sensors) {
-        delete m.sensors[s.id];
-        delete m.cls[s.id];
-      } else {
-        m.cls[s.id] = s.detected;
-        m.sensors[s.id] = seedSlots(s);
-      }
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (s.id in m.sensors)
+      return this.setMap((d) => {
+        delete d.sensors[s.id];
+        delete d.cls[s.id];
+      });
+    const add = () =>
+      this.setMap((d) => {
+        if (s.id in d.sensors) return;
+        d.cls[s.id] = s.detected;
+        d.sensors[s.id] = seedSlots(s);
+      });
+    const others = sensorElsewhere(this.config, z.id, s.id);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    else add();
   }
 
   private toggleControl(c: ControlCandidate): void {
-    this.setMap((m) => {
-      if (c.entity in m.controls) delete m.controls[c.entity];
-      else m.controls[c.entity] = c.detected;
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
+    const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
+    const others = deviceElsewhere(this.config, z.id, c.entity);
+    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    else add();
+  }
+
+  /* Only ticks it in the draft: the review, and the host's own question about anything newly controllable, still follow. */
+  private askShare(ask: ShareAsk, add: () => void): void {
+    this.modal = { kind: "guard", ...ask, safe: true, action: add };
   }
 
   private async jumpTo(issue: Issue): Promise<void> {
@@ -3975,7 +3996,7 @@ export class EcApp extends LitElement {
             : nothing}
           <div class="draftbar wizbar dlgbar" data-bare>
             <button class="draft-discard" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="draft-review danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+            <button class="draft-review ${m.safe ? "" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
           </div>
         </div>
       </div>`;

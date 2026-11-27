@@ -1369,6 +1369,8 @@ test.describe("map devices", () => {
     await row(frame, "Spare Plug").getByRole("button").first().click();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    /* It's Garden's too, so it asks first. */
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
     await next(frame).click();
   }
 
@@ -1395,9 +1397,93 @@ test.describe("map devices", () => {
     await expect(next(frame)).toBeDisabled();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
     await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+  });
+
+  test("ticking a device another zone has asks first, and only Add ticks it; the review and Home Assistant's question follow as before", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await next(frame).click();
+    const dehu = row(frame, "Garden Dehumidifier").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
+    await dehu.click();
+    await expect(ask.getByRole("heading", { name: "Add Garden Dehumidifier to Flower tent as well?", exact: true })).toBeFocused();
+    await expect(ask).toContainText("It's already in Garden. It's one device, so switching it here switches it there too.");
+    await expect(ask.locator(".dlgbar").getByRole("button")).toHaveText(["Leave it out", "Add to Flower tent"]);
+    /* Adding loses nothing, so it's the usual button, not the red one. */
+    await expect(ask.getByRole("button", { name: "Add to Flower tent" })).not.toHaveClass(/danger/);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    /* Leave it out, Escape and the back gesture all leave it out. */
+    await ask.getByRole("button", { name: "Leave it out" }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await page.keyboard.press("Escape");
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await expect(ask).toHaveCount(1);
+    await page.evaluate(() => history.back());
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
+    await dehu.click();
+    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await expect(row(frame, "Garden Dehumidifier")).toContainText("Shared. Also in Garden.");
+    /* Unticking never asks, and neither does a device no other zone has. */
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await row(frame, "Spare Plug").locator(".pickrow").click();
+    await expect(ask).toHaveCount(0);
+    await expect(row(frame, "Spare Plug").locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
+    await row(frame, "Spare Plug").getByLabel("Heater").check();
+    await dehu.click();
+    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    expect(await serviceCalls(page)).toBe(0);
+    await next(frame).click();
+    await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* Home Assistant still asks before the newly switchable plug is saved. */
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.waitForTimeout(1100);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    const saved = await stored(page);
+    expect(saved.devices.find((d) => d.entity === "humidifier.garden_dehumidifier")?.zones).toEqual(["garden", "flower_tent"]);
+    /* Now Flower tent has it saved, that sharing was agreed to: unticked and ticked again, it doesn't ask. */
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
+    await app(frame).locator(".steps").getByRole("button", { name: "2. Devices", exact: true }).click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await expect(ask).toHaveCount(0);
+  });
+
+  test("a sensor another zone has asks first too, as a sensor", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    for (let i = 0; i < 3; i++) await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Set up Veg" }).click();
+    await app(frame).getByRole("menuitem", { name: "Device identification", exact: true }).click();
+    const board = row(frame, "Environment board").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
+    await board.click();
+    await expect(ask.getByRole("heading", { name: "Add Environment board to Veg as well?", exact: true })).toBeVisible();
+    await expect(ask).toContainText("It's already in Flower tent. It's one sensor, so its readings count there and here.");
+    await expect(board).toHaveAttribute("aria-pressed", "false");
+    await ask.getByRole("button", { name: "Add to Veg" }).click();
+    await expect(board).toHaveAttribute("aria-pressed", "true");
   });
 
   test("a soil probe is detected as Soil and asked for moisture, EC and temperature, not humidity, VPD or light", async ({ page }) => {
