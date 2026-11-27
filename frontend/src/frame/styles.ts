@@ -315,6 +315,13 @@ export const styles = css`
   .seg button { border: 1px solid var(--line); background: none; padding: 3px 10px; min-height: 32px; border-radius: 16px; font-size: 13px; color: var(--muted); }
   .seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 18%, transparent); border-color: var(--primary); color: var(--fg); }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  /* A line between a graph's chips and a range's, so two picked chips side by side don't read as one group. It sits in
+     the gap, so once the groups are on lines of their own it falls outside the box at the start of the second line and
+     is clipped, with nothing left dangling. The padding keeps a chip's focus ring inside the clip and the margin gives
+     that room back. */
+  .segs { gap: 8px 16px; overflow: clip; padding: 4px; margin: -4px; }
+  .segs > .seg + .seg { position: relative; }
+  .segs > .seg + .seg::before { content: ""; position: absolute; left: -8.5px; top: 4px; bottom: 4px; width: 1px; background: var(--line); }
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong, .lrow strong, .lbasis strong { font-weight: 500; }
   .lrows { display: flex; flex-direction: column; gap: 8px; }

@@ -1767,7 +1767,7 @@ export class EcApp extends LitElement {
       html`<div class="seg" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => pick(v)}>${l}</button>`)}</div>`;
     const head = html`<div class="card-head">
       <h2>History</h2>
-      <div class="row">
+      <div class="row segs">
         ${seg("Metric", METRIC_KEYS.map((m) => [m, METRIC[m].short]), k, (v) => ([this.metric, this.chartAt] = [v as Metric, null]))}
         ${seg("Range", RANGES.map((r) => [String(r.hours), r.label]), String(R.hours), (v) => ([this.range, this.chartAt] = [Number(v), null]))}
       </div>
@@ -3909,7 +3909,7 @@ export class EcApp extends LitElement {
                   </div>`;
                 return html`<div class="opens-row">
                   <strong>${z.name}</strong>
-                  <div class="row">
+                  <div class="row segs">
                     ${seg("graph", METRIC_KEYS.map((m) => [m, METRIC[m].short]), at.metric, (v) => ({ metric: v as Metric, hours: at.hours }))}
                     ${seg("range", RANGES.map((r) => [String(r.hours), r.label]), String(at.hours), (v) => ({ metric: at.metric, hours: Number(v) }))}
                   </div>
