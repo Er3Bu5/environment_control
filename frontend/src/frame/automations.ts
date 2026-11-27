@@ -6,7 +6,7 @@
    what's saved, and the helper's value counts only once HA reports it. This only decides what to draw and what a report
    means; the host is what sends, and it checks every request against the setup it fetched itself. */
 import type { Catalog, CatalogAutomation, Room } from "./messages";
-import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type Zone, readLinks } from "./model";
+import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type ShareAsk, type Zone, readLinks, shareAsk } from "./model";
 import { type HaState, numberOf } from "./readings";
 
 /* The Automations page's three chips, and the groups each one holds. */
@@ -43,7 +43,6 @@ export interface AutosPage {
   zoneId: string;
   chip: AutoChip;
   repeat?: string;
-  sending: boolean;
 }
 
 /* What a review lists, in the shape main.ts's reviews take. */
@@ -53,12 +52,7 @@ export interface AutoChange {
   after: string;
 }
 /* A question the panel's own guard dialog puts before going on. */
-export interface Question {
-  title: string;
-  text: string;
-  keep: string;
-  go: string;
-}
+export type Question = ShareAsk;
 
 /* Zone names joined as the panel joins them everywhere else. */
 export const andList = (names: string[]) => names.join(" and ");
@@ -316,13 +310,12 @@ export interface LinkDraft {
   was: Record<string, AutomationGroup>;
   pick: Record<string, AutomationGroup>;
   q: string;
-  sending: boolean;
   /* The Automations page's chip it was opened from, to go back to; null when opened from Setup. */
   from: AutoChip | null;
 }
 export function openLinks(z: Zone, from: AutoChip | null): LinkDraft {
   const was = Object.fromEntries(z.automations.map((a) => [a.entity, a.group]));
-  return { zoneId: z.id, was, pick: { ...was }, q: "", sending: false, from };
+  return { zoneId: z.id, was, pick: { ...was }, q: "", from };
 }
 /* Ticked again, one the zone had saved goes back to its own group; a new one starts in the group its name suggests. */
 export function toggleLink(d: LinkDraft, entity: string): void {
@@ -338,13 +331,7 @@ export function setLinkGroup(d: LinkDraft, entity: string, group: AutomationGrou
 export function shareQuestion(zones: Zone[], d: LinkDraft, entity: string, name: string): Question | null {
   if (d.pick[entity] !== undefined || d.was[entity] !== undefined) return null;
   const z = zones.find((x) => x.id === d.zoneId), others = sharedWith(zones, d.zoneId, entity);
-  if (!z || !others.length) return null;
-  return {
-    title: `Add ${name} to ${z.name} as well?`,
-    text: `It's already linked in ${andList(others)}. It's one automation, so switching it off here switches it off there too.`,
-    keep: "Leave it out",
-    go: `Add to ${z.name}`,
-  };
+  return z && others.length ? shareAsk("automation", name, z.name, others) : null;
 }
 
 export interface LinkRow {
@@ -357,9 +344,14 @@ export interface LinkRow {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 const pillOf = (state: string | null | undefined) => (!state ? "Missing" : state === "on" ? "On" : state === "off" ? "Off" : cap(state));
 
+/* A search shows this many at most, as the helper search box does, so one letter typed into a Home Assistant with
+   hundreds of automations doesn't draw them all. */
+export const LINK_FOUND_MAX = 10;
+
 /* With nothing typed: what the zone links or has ticked, and automations in its Home Assistant area or with its name as
    a word in their entity id. The rest, the house's included, come up only by searching, and are counted. Typing
-   searches them all by name or entity id. A linked automation HA no longer lists is still there, so it can be unlinked. */
+   searches them all by name or entity id, and counts the matches past the first few. A linked automation HA no longer
+   lists is still there, so it can be unlinked. */
 export function linkList(d: LinkDraft, zones: Zone[], automations: CatalogAutomation[], states: Record<string, HaState>): { rows: LinkRow[]; more: number } {
   const z = zones.find((x) => x.id === d.zoneId), zname = z?.name.trim().toLowerCase() ?? "", word = slug(z?.name ?? "");
   const listed = new Set(automations.map((a) => a.entity_id));
@@ -374,13 +366,14 @@ export function linkList(d: LinkDraft, zones: Zone[], automations: CatalogAutoma
     d.was[it.entity] !== undefined ||
     (!!it.area && it.area.trim().toLowerCase() === zname) ||
     (!!word && `_${it.entity.split(".")[1]}_`.includes(`_${word}_`));
-  const shown = items.filter((it) => (words.length ? words.every((w) => `${it.entity} ${it.name}`.toLowerCase().includes(w)) : near(it)));
+  const found = items.filter((it) => (words.length ? words.every((w) => `${it.entity} ${it.name}`.toLowerCase().includes(w)) : near(it)));
+  const shown = words.length ? found.slice(0, LINK_FOUND_MAX) : found;
   const rows = shown.map((it) => {
     const shared = sharedWith(zones, d.zoneId, it.entity);
     const sub = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${andList(shared)}` : ""].filter(Boolean).join(", ");
     return { entity: it.entity, name: it.name, sub, pill: pillOf(it.state), group: d.pick[it.entity] ?? null };
   });
-  return { rows, more: words.length ? 0 : automations.length - shown.filter((it) => it.listed).length };
+  return { rows, more: words.length ? found.length - shown.length : automations.length - shown.filter((it) => it.listed).length };
 }
 
 export const linkLabel = (g: AutomationGroup | undefined) => (g === undefined ? "Not linked" : GROUP[g].title);

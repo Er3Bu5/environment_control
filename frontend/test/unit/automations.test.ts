@@ -3,6 +3,7 @@ import {
   AUTO_CHIPS,
   CHIP,
   GROUP,
+  LINK_FOUND_MAX,
   REPEAT_LIKELY,
   alertsCardText,
   applyLinks,
@@ -394,7 +395,7 @@ describe("Link automations", () => {
 
   it("opens on what the zone links as saved, and ticks a new automation in the group its name suggests", () => {
     const d = openLinks(nursery, "failsafe");
-    expect([d.was, d.pick, d.q, d.sending, d.from]).toEqual([{ "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, { "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, "", false, "failsafe"]);
+    expect([d.was, d.pick, d.q, d.from]).toEqual([{ "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, { "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, "", "failsafe"]);
     toggleLink(d, "automation.critical_nursery_vpd_high_day");
     expect(d.pick["automation.critical_nursery_vpd_high_day"]).toBe("alert_day");
     d.pick.x = "control";
@@ -443,6 +444,18 @@ describe("Link automations", () => {
     expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Failsafe Tent Lights Recovery", "Tent Lights On"]);
     d.q = "nothing like it";
     expect(linkList(d, zones, catalog, states)).toEqual({ rows: [], more: 0 });
+  });
+
+  it("shows a search's first few matches by name and counts the rest, so one letter can't draw every automation", () => {
+    const many = Array.from({ length: LINK_FOUND_MAX + 7 }, (_, i) => ha(`porch_${String(i).padStart(2, "0")}`, `Porch ${String(i).padStart(2, "0")}`));
+    const d = openLinks(nursery, null);
+    d.q = "p";
+    const { rows, more } = linkList(d, zones, [...catalog, ...many], states);
+    expect(rows).toHaveLength(LINK_FOUND_MAX);
+    expect(more).toBe(10);
+    expect(rows[0].name).toBe("Critical Nursery VPD High Day");
+    d.q = "porch_1";
+    expect(linkList(d, zones, [...catalog, ...many], states).rows.map((r) => r.name)).toEqual(["Porch 10", "Porch 11", "Porch 12", "Porch 13", "Porch 14", "Porch 15", "Porch 16"]);
   });
 
   it("keeps a linked automation Home Assistant no longer lists, so it can still be unlinked", () => {

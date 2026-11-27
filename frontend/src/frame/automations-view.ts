@@ -44,19 +44,20 @@ export function repeatCardView(card: RepeatCard, onType: (typed: string) => void
       <h2>Alert repeat</h2>
       <p class="small muted">Home Assistant doesn't have ${card.entity} right now, so it can't be changed.</p>
     </section>`;
-  const L = card.limits, whole = !L || Number.isInteger(L.step);
+  /* Text with a number keyboard, as every typed number on the panel is: a number box drops what it can't parse
+     without a word, and the problem line says why instead. */
+  const whole = !card.limits || Number.isInteger(card.limits.step);
   return html`<section class="card" id="alert-repeat">
     <h2>Alert repeat</h2>
     <p class="small muted">While an alert stays breached, it buzzes your phone at most once every this many minutes, and 0 buzzes on every update. One helper sets it for every alert in Home Assistant, irrigation and power included.</p>
     <label class="field" for="repeat-in"
       >Minutes between buzzes<input
         id="repeat-in"
-        type="number"
+        type="text"
         inputmode=${whole ? "numeric" : "decimal"}
         enterkeyhint="done"
-        min=${L ? L.min : nothing}
-        max=${L ? L.max : nothing}
-        step=${L ? L.step : nothing}
+        autocomplete="off"
+        data-lin="repeat"
         .value=${live(card.value)}
         aria-invalid=${card.problem ? "true" : "false"}
         aria-describedby="repeat-bad"
@@ -124,7 +125,7 @@ export interface LinkPageView {
   chips: Chips;
   onRetry: () => void;
   onQuery: (q: string) => void;
-  onTick: (entity: string) => void;
+  onTick: (row: LinkRow) => void;
   onGroup: (entity: string, group: AutomationGroup) => void;
 }
 
@@ -132,7 +133,7 @@ export interface LinkPageView {
 function linkRowView(r: LinkRow, o: LinkPageView) {
   const picked = r.group !== null;
   return html`<div class="pickwrap" id=${linkTarget(r.entity)}>
-    <button class="pickrow" aria-pressed=${picked ? "true" : "false"} @click=${() => o.onTick(r.entity)}>
+    <button class="pickrow" aria-pressed=${picked ? "true" : "false"} @click=${() => o.onTick(r)}>
       <span class="tick">${picked ? "✓" : ""}</span>
       <span class="pick-text"><strong>${r.name}</strong><span class="dev-sub">${r.sub}</span></span>
       <span class="pill plain">${r.pill}</span>
@@ -175,7 +176,9 @@ export function linkPage(o: LinkPageView) {
       /></label>
       <div class="picklist" id="link-list">
         ${rows.length ? repeat(rows, (r) => r.entity, (r) => linkRowView(r, o)) : html`<p class="muted small">No automation matches.</p>`}
-        ${more ? html`<p class="small muted" id="link-more">${more} more in Home Assistant. Search to find them.</p>` : nothing}
+        ${more
+          ? html`<p class="small muted" id="link-more">${o.q.trim() ? `${more} more match. Type more of the name to narrow them down.` : `${more} more in Home Assistant. Search to find them.`}</p>`
+          : nothing}
       </div>
     </section>`;
 }
