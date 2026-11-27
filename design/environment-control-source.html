@@ -335,6 +335,8 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   body.drafting:not(.vtyping) main { padding-bottom: 96px; }
   /* Back rides in the same place on a page, so a page's last button, such as Link automations, isn't left under it. */
   main:has(#pagebar:not([hidden])) { padding-bottom: 96px; }
+  /* Saving Link automations comes back to a page with Back in that bar, and the toast saying so mustn't lie over it. */
+  body:has(#pagebar:not([hidden])) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   body.drafting:not(.vtyping) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   body.vtyping .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
@@ -506,9 +508,7 @@ tr:last-child td { border-bottom: 0; }
 .fields.links { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .linkis { font-size: 12px; overflow-wrap: anywhere; }
 .field input, .field select, .field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); font-size: 15px; color: var(--fg); min-width: 0; width: 100%; }
-.ent { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
-.ent select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font-size: 13px; }
-@media (max-width: 460px) { .ents { padding-left: 10px; } .ent { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+@media (max-width: 460px) { .ents { padding-left: 10px; } }
 #vwrap { touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
 .vtabs { display: flex; }
 span.vrow-name { cursor: default; }
@@ -1552,7 +1552,8 @@ function loadAutomations() {
 }
 function openLinkAutos(id) {
   const z = zoneById(id), was = Object.fromEntries(autosOf(z).map((a) => [a.entity, a.group]));
-  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, autos: ui.autos, zone: ui.zone } };
+  /* An alert repeat draft was discarded on the way here, so coming back starts from the helper's value again. */
+  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, autos: ui.autos && { zone: ui.autos.zone, page: ui.autos.page }, zone: ui.zone } };
   ui.screen = "autos";
   ui.zone = id;
 }
@@ -1567,7 +1568,8 @@ const autoTitle = (it) => (it.attributes || {}).friendly_name || it.entity;
 function linkRow(lw, z, it) {
   const g = lw.pick[it.entity], on = g !== undefined, shared = sharedAuto(z, it.entity);
   const sub = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${shared.join(" and ")}` : ""].filter(Boolean).join(", ");
-  const groupBox = on ? `<div class="ents"><label class="ent"><span>Group</span><select data-lgroup="${esc(it.entity)}" aria-label="${esc(autoTitle(it))} group">${Object.entries(AUTO_GROUPS).map(([k, [, t]]) => `<option value="${k}"${g === k ? " selected" : ""}>${t}</option>`).join("")}</select></label></div>` : "";
+  /* Radio chips, not a select: a native select opens the system's own picker over the page on a phone. */
+  const groupBox = on ? `<div class="ents">${chips("Group", `lgroup-${it.entity}`, Object.entries(AUTO_GROUPS).map(([k, [, t]]) => [k, t]), g, `data-lgroup="${esc(it.entity)}" data-x`).replace(/data-x="[^"]*"/g, "")}</div>` : "";
   return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">${esc(sub)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button>${groupBox}</div>`;
 }
 /* Suggested: what the zone links already, and automations in its Home Assistant area or named for it. The rest of Home
