@@ -48,6 +48,8 @@ const CONTROL_ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater"
 const HISTORY_HOURS = [4, 6, 24, 72, 168];
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
 const MAX_CONFIG_BYTES = 512 * 1024;
+/* The backend's answer to a save built on an older setup than it holds, word for word, so the frame treats both alike. */
+const CONFLICT = "Setup was saved from somewhere else since this was opened. Reopen the panel to see it.";
 /* Allow stays off this long after the dialog appears or comes back into view, so a tap aimed at something else can't land on it. */
 const ARM_MS = 1000;
 /** @type {Record<string, string>} */
@@ -557,6 +559,9 @@ class EnvironmentControlPanel extends HTMLElement {
     const refuse = (why) => this.reply(m.req, false, why);
     if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
     if (JSON.stringify(m.config).length > MAX_CONFIG_BYTES) return refuse("That setup is too large to save.");
+    /* What a save makes newly controllable is worked out against the copy held here, so a frame that has seen a newer
+       setup, saved in another window, would be checked against the wrong one. Read it again and hand it over instead. */
+    if (m.base !== this.config.revision) { await this.reload(); return refuse(CONFLICT); }
     /* Room settings ride along when the frame sends them. A frame that sends none, as one from before they existed does,
        keeps what's stored, so a save of something else can't drop them. */
     const room = m.config.room !== undefined ? m.config.room : this.config.room;

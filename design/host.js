@@ -353,6 +353,9 @@
       const refuse = (why) => this.reply(m.req, false, why);
       if (!Number.isInteger(m.base) || !m.config || typeof m.config !== "object") return refuse("That isn't a setup this panel can save.");
       if (JSON.stringify(m.config).length > 512 * 1024) return refuse("That setup is too large to save.");
+      /* What a save makes newly controllable is worked out against the copy held here, so a frame that has seen a newer
+         setup, saved in another window, would be checked against the wrong one. Read it again and hand it over instead. */
+      if (m.base !== this.config.revision) { await this.reload(); return refuse("Setup was saved from somewhere else since this was opened. Reopen the panel to see it."); }
       /* Room settings ride along when the frame sends them. A frame that sends none keeps what's stored, so a save of
          something else can't drop them. */
       const room = m.config.room !== undefined ? m.config.room : this.config.room;
