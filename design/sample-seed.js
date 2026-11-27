@@ -86,6 +86,9 @@ const SEED = (() => {
     daylight: "input_number.emerson_effect_daylight_time", evening: "input_number.emerson_effect_evening_extension", bands: bandLinks("garden"), light: lightLinks("garden") };
   zones[1].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time", bands: bandLinks("veg"), light: lightLinks("veg") };
   zones[2].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time" };
+  /* Nursery is linked to Veg: it shares Veg's lights, light controller and fans, so its schedule is Veg's, and has an
+     environment sensor of its own, so its targets are its own. */
+  zones[2].parent = "veg";
   /* HA writes Celsius both ways, so Garden's temperature helpers say ℃ and the rest °C, as in this room. */
   const LIMITS = { temperature: [-20, 50, 0.1, "°C"], humidity: [0, 100, 0.1, "%"], vpd: [0, 3, 0.01, "kPa"], light: [0, 10000, 10, "lx"], minutes: [0, 59, 1, "minutes"] };
   const helper = (value, [min, max, step, unit], name) => ({ state: String(value), attributes: { friendly_name: name, min, max, step, mode: "box", unit_of_measurement: unit } });
