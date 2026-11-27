@@ -633,14 +633,14 @@ check("Zone menu: a tap anywhere else closes it", await moreClosed());
 await tap(MORE); await tellBack();
 check("Zone menu: Back closes it, focus back on its button, and stays on the zone", !(await moreOpen()) && (await moreFocused()) && (await ev(`ui.screen==="zone" && ui.zone==="garden"`)) === true);
 await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]');
-check("Zone menu: View targets opens the Targets dialog, and the menu closes", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Targets: Garden" && !(await moreOpen()) && same(await ev(`[...document.querySelectorAll("#modal .dlgbar button")].map(b=>b.textContent)`), ["Close", "Set targets"]));
+check("Zone menu: View targets opens the Targets dialog, and the menu closes", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Targets: Garden" && !(await moreOpen()) && same(await ev(`[...document.querySelectorAll("#modal .dlgfoot button")].map(b=>b.textContent)`), ["Close", "Set targets"]));
 await tap("[data-tclose]");
 check("Zone menu: closing Targets hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
 
 // The Activity design moved off the zone page into the dialog View activity opens
 check("Activity: the zone page has no Activity card", (await ev(`[...document.querySelectorAll("#main h2")].some(h=>h.textContent==="Activity") || !!document.querySelector("#main .act, #main [data-activity]")`)) === false);
 await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]');
-const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),note:d.textContent.includes("The panel doesn't have Activity yet: it says it arrives in a release that follows."),rows:[...d.querySelectorAll(".act-row")].length,bar:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent)}})()`);
+const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),note:d.textContent.includes("The panel doesn't have Activity yet: it says it arrives in a release that follows."),rows:[...d.querySelectorAll(".act-row")].length,bar:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent)}})()`);
 let ad = await actDlg();
 check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]) && (await ev(`document.activeElement.id`)) === "dlg-title", ad);
 check("Activity: it holds the design, its chips, its note and its list", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Climate", "Sensors"]) && ad.note && ad.rows === (await ev(`ACTIVITY.garden.length`)) && ad.rows > 0, ad);
@@ -1282,9 +1282,9 @@ check("Ident: applied, the name, extra mode, modes and virtual device are saved,
 await ev(`(()=>{const h=devices.find(d=>d.id==="heater");h.name="Heater";delete h.haName;const d=devices.find(d=>d.id==="dehu");delete d.nudgeMode;delete d.hiddenModes;delete zones[0].virtual;devices.find(d=>d.id==="plug").type=null;ui.mapw=null;render()})()`); await sleep(20);
 
 // ---------- Sharing asks first: something another zone has joins this one only once a person says so
-const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgbar button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
+const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgfoot button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
 const noAsk = async () => (await shareAsk()) === null && (await ev(`!ui.guard`)) === true;
-const DEHU_ASK = { role: "alertdialog", title: "Add Dehumidifier to Nursery as well?", text: "It's already in Garden. It's one device, so switching it here switches it there too.", buttons: ["Leave it out", "Add to Nursery"], red: false, primary: "draft-review", focus: "dlg-title" };
+const DEHU_ASK = { role: "alertdialog", title: "Add Dehumidifier to Nursery as well?", text: "It's already in Garden. It's one device, so switching it here switches it there too.", buttons: ["Leave it out", "Add to Nursery"], red: false, primary: "btn primary", focus: "dlg-title" };
 await phone(390, 844); await reset(); await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="dehu"]');
 check("Share: ticking a device another zone has asks first, in the panel's own dialog, with its primary button and not the red one", same(await shareAsk(), DEHU_ASK) && (await ev(`!ui.mapw.pickD.dehu`)) === true && (await hostDialog()).open === false, await shareAsk());
@@ -2304,7 +2304,7 @@ check("Placement: the backend refuses a spot off the map, between half-steps, or
 await reset();
 
 // ---------- Dialogs: a dialog's buttons are its own foot, and the bar pinned to the window is for pages
-const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&m.querySelector(".dialog"),b=d&&d.querySelector(".dlgbar"),t=d&&d.querySelector("#dlg-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:r.bottom-q.bottom<2,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].classList.contains("draft-discard")&&(bs.length<2||bs[1].classList.contains("draft-review"))}})()`);
+const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&m.querySelector(".dialog"),b=d&&d.querySelector(".dlgfoot"),t=d&&d.querySelector("#dlg-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:Math.abs(r.bottom-q.bottom-parseFloat(getComputedStyle(d).paddingBottom)-parseFloat(getComputedStyle(d).borderBottomWidth))<1.5,bg:getComputedStyle(b).backgroundColor,dbg:getComputedStyle(d).backgroundColor,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].className==="btn"&&(bs.length<2||["btn primary","btn danger"].includes(bs[1].className))}})()`);
 const dlgOk = (f) => !!f && f.inside && f.last && f.foot && f.position === "static" && f.onScreen && f.titleShown && f.leaveFirst;
 /* 45 minutes, a value the helper doesn't hold at any point in the suite, so typing it is always a draft. */
 const typeRepeat = (v) => ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="${v}";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`);
@@ -2317,16 +2317,21 @@ const DIALOGS = [
   ["share", async () => { await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await tap('[data-mdevice="dehu"]'); }, "[data-gkeep]"],
   ["remove", async () => { await setupNow(); await tap('[data-zmenu="veg"]'); await cClick('[data-rmzone="veg"]'); }, "[data-gkeep]"],
 ];
-for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
-  for (const [name, openIt, closeSel] of DIALOGS) {
-    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
-    await reset(); await openIt(); await sleep(80);
-    const f = await dlgFit();
-    check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
-    await shot(`dialog-${name}-${size}`);
-    await tap(closeSel); await ev(`ui.mapw=null;if(ui.autos)ui.autos.repeat=undefined;render()`);
+for (const theme of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+  for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+    for (const [name, openIt, closeSel] of DIALOGS) {
+      if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+      await reset(); await openIt(); await sleep(80);
+      const f = await dlgFit();
+      if (theme === "light") check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
+      check(`Dialogs ${size}, ${name}, ${theme}: its foot has no strip of its own, on the dialog's own background`, !!f && f.bg === f.dbg, f);
+      await shot(`dialog-${name}-${size}${theme === "dark" ? "-dark" : ""}`);
+      await tap(closeSel); await ev(`ui.mapw=null;if(ui.autos)ui.autos.repeat=undefined;render()`);
+    }
   }
 }
+await send("Emulation.setEmulatedMedia", { features: [] });
 await phone(390, 844); await reset();
 await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await sleep(40);
 check("Dialogs: a page with a draft keeps its bar pinned to the foot of the window", (await ev(`(()=>{const b=document.querySelector("#draftbar"),r=b.getBoundingClientRect();return !b.hidden&&getComputedStyle(b).position==="fixed"&&r.bottom<=innerHeight&&r.bottom>innerHeight-40})()`)) === true);
@@ -2402,7 +2407,7 @@ await cClick("[data-gkeep]");
 for (const [w, h, name] of [[390, Math.round(844 * (1 - KEYBOARD.portrait)), "phone"], [844, Math.round(390 * (1 - KEYBOARD.landscape)), "landscape"]]) {
   await phone(390, 844); await setupNow(); await askRemove("garden"); await tap("#dlg-confirm");
   await phone(w, h); await sleep(150);
-  const k = await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),bs=[...document.querySelectorAll("#modal .dlgbar button")],vis=(e)=>{const r=e.getBoundingClientRect();let ok=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;for(let p=e.parentElement;p&&ok;p=p.parentElement){if(getComputedStyle(p).overflowY==="visible")continue;const q=p.getBoundingClientRect();ok=r.top>=q.top-1&&r.bottom<=q.bottom+1}return ok},reach=(e)=>{e.scrollIntoView({block:"nearest"});return vis(e)},out={focused:document.activeElement===i,both:vis(i)&&bs.every(vis)};out.buttons=bs.every(reach);out.box=reach(i);return out})()`);
+  const k = await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),bs=[...document.querySelectorAll("#modal .dlgfoot button")],vis=(e)=>{const r=e.getBoundingClientRect();let ok=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;for(let p=e.parentElement;p&&ok;p=p.parentElement){if(getComputedStyle(p).overflowY==="visible")continue;const q=p.getBoundingClientRect();ok=r.top>=q.top-1&&r.bottom<=q.bottom+1}return ok},reach=(e)=>{e.scrollIntoView({block:"nearest"});return vis(e)},out={focused:document.activeElement===i,both:vis(i)&&bs.every(vis)};out.buttons=bs.every(reach);out.box=reach(i);return out})()`);
   check(`Remove, keyboard up ${name}: the box and the buttons are both reachable${name === "phone" ? ", and in view together" : ""}`, k.focused && k.box && k.buttons && (name !== "phone" || k.both), k);
   await shot(`remove-dialog-keyboard-${name}`);
   await key("Escape", 27); await sleep(40);

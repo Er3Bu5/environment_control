@@ -123,9 +123,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   /* Too short for a middle worth scrolling, as with a keyboard up in landscape, the middle keeps its height and the
      dialog scrolls as a whole, so the box being typed in isn't squeezed out of reach. */
   @media (max-height: 340px) { .dialog .review-scroll { min-height: auto; overflow: visible; } }
-  /* The dialog's foot, along its bottom edge, the leaving button first. It keeps the look of a page's bar, so its buttons
-     look as they did when they rode there. */
-  .dlgbar { flex: none; display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin: 0 -18px -18px; padding: 10px 12px; border-radius: 0 0 13px 13px; background: var(--fg); color: var(--bg); }
+  /* The dialog's foot is part of the dialog, on its own background, the leaving button first, as the panel draws it.
+     The inverted bar is for the foot of the window: in a dialog it read as a band of the other theme. */
+  .dlgfoot { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; background: var(--card); }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
@@ -3258,26 +3258,26 @@ const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm"
 function targetsDialog(z) {
   return `<div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Targets: ${esc(z.name)}</h2>
     <div class="review-scroll">${targetsSet(z) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
-    <div class="dlgbar"><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
+    <div class="dlgfoot"><button class="btn" data-tclose>Close</button><button class="btn primary" data-tset="${z.id}">Set targets</button></div></div>`;
 }
 /* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold. */
 function activityDialog(z) {
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Activity: ${esc(z.name)}</h2>${activityChips()}
     <div class="review-scroll"><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</div>
-    <div class="dlgbar"><button class="draft-discard" data-aclose>Close</button></div></div>`;
+    <div class="dlgfoot"><button class="btn" data-aclose>Close</button></div></div>`;
 }
 function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar"><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgfoot"><button class="btn" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="btn ${g.primary ? "primary" : "danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
   const failed = errors.length ? `<div class="notice critical" role="alert"><strong>Some changes were not applied.</strong>${errors.map((e) => `<span>${esc(e)}</span>`).join("")}<span>Anything that went through is saved. What's left is still here to try again.</span></div>` : "";
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">Review changes</h2>
     <div class="review-scroll"><p class="muted small" id="dlg-text">${esc(d.affects || `These changes affect ${d.zone} only.`)} Confirm each value before applying.</p>${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
-    <div class="dlgbar"><button class="draft-discard" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="draft-review" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
+    <div class="dlgfoot"><button class="btn" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="btn primary" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
 }
 let modalOpener = null;
 function renderModal() {
