@@ -781,7 +781,7 @@ check("Link: the rest are a search away", (await ev(`document.querySelector("#li
 await tap('[data-lpick="automation.critical_nursery_vpd_high_day"]');
 const groupChips = (e) => ev(`(()=>{const f=document.querySelector('[data-lgroup="${e}"]')?.closest("fieldset.chips");return f && {legend:f.querySelector("legend").textContent,chips:[...f.querySelectorAll("label.chip")].map(l=>{const i=l.querySelector("input");return l.textContent+"|"+i.type+"|"+i.value+(i.checked?"*":"")})}})()`);
 check("Link: picking one shows its group as radio chips, the one its name suggests picked", same(await groupChips("automation.critical_nursery_vpd_high_day"), { legend: "Group", chips: ["Day alerts|radio|alert_day*", "Night alerts|radio|alert_night", "Device alerts|radio|alert_device", "Failsafes|radio|failsafe", "Control|radio|control"] }), await groupChips("automation.critical_nursery_vpd_high_day"));
-check("Link: no native select anywhere on the page", (await ev(`document.querySelectorAll("select").length`)) === 0);
+check("Link: no native select anywhere on the page, a picked row's group being its chips", (await ev(`document.querySelectorAll("select").length===0 && document.querySelectorAll('input[type=radio][data-lgroup]').length>0`)) === true);
 check("Link: and the bar counts it, saving nothing yet", (await ev(`document.querySelector("#draft-count").textContent`)) === "1" && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day"));
 await ev(`(()=>{const i=document.querySelector("#link-q");i.value="porch";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(30);
 check("Link: search reaches the rest of Home Assistant's automations", same(await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`), ["automation.porch_light_on"]), await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`));
@@ -1288,12 +1288,14 @@ check("Share: ticking a device another zone has asks first, in the panel's own d
 await shot("share-ask-device-phone");
 await tap("[data-gkeep]");
 check("Share: Leave it out leaves the device unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="false" && document.activeElement.dataset.mdevice==="dehu"`)) === true);
-await tap('[data-mdevice="dehu"]'); await key("Escape", 27);
-check("Share: Escape leaves it unticked", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu`)) === true);
-await tap('[data-mdevice="dehu"]'); await tellBack();
-check("Share: so does the back gesture", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && !!ui.mapw`)) === true);
-await tap('[data-mdevice="dehu"]'); await ev(`document.querySelector("#modal").click()`); await sleep(40);
-check("Share: and a tap outside the dialog", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu`)) === true);
+/* Each way out is taken only once the question is showing, so a row ticked without asking can't pass for one left out. */
+let asked;
+await tap('[data-mdevice="dehu"]'); asked = await shareAsk(); await key("Escape", 27);
+check("Share: Escape leaves it unticked", !!asked && (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu`)) === true);
+await tap('[data-mdevice="dehu"]'); asked = await shareAsk(); await tellBack();
+check("Share: so does the back gesture", !!asked && (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && !!ui.mapw`)) === true);
+await tap('[data-mdevice="dehu"]'); asked = await shareAsk(); await ev(`document.querySelector("#modal").click()`); await sleep(40);
+check("Share: and a tap outside the dialog", !!asked && (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu`)) === true);
 await tap('[data-mdevice="dehu"]'); await tap("[data-gdiscard]");
 check("Share: Add ticks it in the draft, saving nothing, and the row still says who shares it", (await ev(`ui.mapw.pickD.dehu===true && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="true" && document.querySelector("#md-dehu").textContent.includes("Shared. Also in Garden.") && document.activeElement.dataset.mdevice==="dehu"`)) === true && !(await diskZone("nursery")) === false && (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="dehu").zones.join()`)) === "garden", await ev(`document.querySelector("#md-dehu")?.textContent`));
 await tap('[data-mdevice="heater"]');
@@ -1344,10 +1346,10 @@ check("Share: ticking an automation another zone links asks first", same(await s
 await shot("share-ask-automation-phone");
 await tap("[data-gkeep]");
 check("Share: Leave it out leaves the automation unticked, focus back on its row", (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]===undefined && document.activeElement.dataset.lpick==="${AUX_FULL}"`)) === true);
-await tap(`[data-lpick="${AUX_FULL}"]`); await key("Escape", 27);
-check("Share: Escape leaves the automation unticked", (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined);
-await tap(`[data-lpick="${AUX_FULL}"]`); await tellBack();
-check("Share: so does the back gesture, staying on Link automations", (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]===undefined && !!ui.linkw`)) === true);
+await tap(`[data-lpick="${AUX_FULL}"]`); asked = await shareAsk(); await key("Escape", 27);
+check("Share: Escape leaves the automation unticked", !!asked && (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined);
+await tap(`[data-lpick="${AUX_FULL}"]`); asked = await shareAsk(); await tellBack();
+check("Share: so does the back gesture, staying on Link automations", !!asked && (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]===undefined && !!ui.linkw`)) === true);
 await tap(`[data-lpick="${AUX_FULL}"]`); await tap("[data-gdiscard]");
 check("Share: Add ticks it in the draft, in its suggested group, and the row still says it's linked in Veg", (await ev(`ui.linkw.pick["${AUX_FULL}"]==="alert_device" && document.querySelector('[data-lpick="${AUX_FULL}"]').textContent.includes("linked in Veg") && document.activeElement.dataset.lpick==="${AUX_FULL}"`)) === true && (await diskZone("nursery")).automations.every((a) => a.entity !== AUX_FULL), await ev(`document.querySelector('[data-lpick="${AUX_FULL}"]')?.textContent`));
 await linkSearch("");
