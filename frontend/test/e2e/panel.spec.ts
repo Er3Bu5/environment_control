@@ -66,6 +66,15 @@ async function hostDialogText(page: Page): Promise<string> {
   await cdp.detach();
   return out.join(" ");
 }
+/* A graph's chips and a range's, in the box that holds both: whether they share a line, and whether the line between
+   them is drawn, and drawn in the gap between them. The line is clipped to the box, so one outside it isn't seen. */
+const segDivider = (row: Locator) =>
+  row.evaluate((el) => {
+    const [a, b] = [...el.querySelectorAll(":scope > .seg")].map((x) => x.getBoundingClientRect()), box = el.getBoundingClientRect();
+    const line = getComputedStyle(el.querySelectorAll(":scope > .seg")[1], "::before"), x = b.left + parseFloat(line.left);
+    const drawn = line.content !== "none" && line.content !== "normal" && line.display !== "none" && parseFloat(line.width) > 0 && x >= box.left;
+    return { sameLine: Math.abs(a.top - b.top) < 2, shown: drawn, between: drawn && x > a.right && x + parseFloat(line.width) < b.left };
+  });
 async function hostDialogOpen(page: Page): Promise<boolean> {
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
@@ -2253,6 +2262,27 @@ test.describe("what Home Assistant has", () => {
     await page.evaluate("catalogDown = false");
     await frame.locator("ec-app").getByRole("button", { name: "Try again" }).click();
     await expect.poll(() => frameText(frame)).toContain("Environment board");
+  });
+});
+
+test.describe("chip groups", () => {
+  test("a line parts the graph chips from the range chips while they share a line, and none dangles once they don't", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    const history = app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "History", exact: true }) }).locator(".card-head .row");
+    await expect(history.locator(".seg")).toHaveCount(2);
+    expect(await segDivider(history)).toEqual({ sameLine: true, shown: true, between: true });
+    await page.setViewportSize({ width: 400, height: 900 });
+    await expect.poll(() => segDivider(history)).toEqual({ sameLine: false, shown: false, between: false });
+    /* Appearance's rows on Setup have the same two groups for each zone. */
+    await goTo(frame, "Setup");
+    const opens = app(frame).locator(".opens-row .row");
+    await expect(opens).toHaveCount(3);
+    for (const row of await opens.all()) expect(await segDivider(row)).toEqual({ sameLine: false, shown: false, between: false });
+    await page.setViewportSize({ width: 1100, height: 900 });
+    for (const row of await opens.all()) await expect.poll(() => segDivider(row)).toEqual({ sameLine: true, shown: true, between: true });
   });
 });
 
