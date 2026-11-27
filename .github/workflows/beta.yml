@@ -1,8 +1,9 @@
 name: Beta
 
 # Every hour, and whenever it's started by hand from the Actions tab: the next beta, built from what's on main and
-# published with no approval. Merging to main is a beta's approval: main only changes through a pull request you
-# merge, with Validate passed. Full releases stay with Release, behind your approval in the release environment.
+# published with no approval. Not from the branch called beta: that is where work gathers before it reaches main.
+# Merging beta into main is a beta's approval: main only changes through a pull request you merge, with Validate
+# passed. Full releases stay with Release, behind your approval in the release environment.
 #
 # A run makes a beta only when something that ships has changed since the newest release, so most hourly runs do
 # nothing and finish in seconds. The number follows the newest release tag (b8, then b9).
