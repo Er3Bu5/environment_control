@@ -2300,6 +2300,45 @@ const placeOdd = await evp(`saveConfig(()=>{devices.find(x=>x.id==="intake").pla
 check("Placement: the backend refuses a spot off the map, between half-steps, or in a zone the device isn't in", placeOut[0] === false && placeOut[1].includes("outside garden's map") && placeOdd[0] === false && placeWrong[0] === false && placeWrong[1].includes("isn't in"), [placeOut, placeOdd, placeWrong]);
 await reset();
 
+// ---------- Dialogs: a dialog's buttons are its own foot, and the bar pinned to the window is for pages
+const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&m.querySelector(".dialog"),b=d&&d.querySelector(".dlgbar"),t=d&&d.querySelector("#dlg-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:r.bottom-q.bottom<2,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].classList.contains("draft-discard")&&(bs.length<2||bs[1].classList.contains("draft-review"))}})()`);
+const dlgOk = (f) => !!f && f.inside && f.last && f.foot && f.position === "static" && f.onScreen && f.titleShown && f.leaveFirst;
+/* 45 minutes, a value the helper doesn't hold at any point in the suite, so typing it is always a draft. */
+const typeRepeat = (v) => ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="${v}";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`);
+const DIALOGS = [
+  ["targets", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]'); }, "[data-tclose]"],
+  ["activity", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); }, "[data-aclose]"],
+  ["discard", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await tap('[data-autopage="failsafe"]'); }, "[data-gkeep]"],
+  ["review", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await tap("[data-dreview]"); }, "[data-rback]"],
+  ["failsafe-off", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"failsafe"};ui.linkw=null;render()`); await tap('[data-autorow="automation.failsafe_garden_lights_recovery"] .sw'); }, "[data-gkeep]"],
+  ["share", async () => { await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await tap('[data-mdevice="dehu"]'); }, "[data-gkeep]"],
+  ["remove", async () => { await setupNow(); await tap('[data-zmenu="veg"]'); await cClick('[data-rmzone="veg"]'); }, "[data-gkeep]"],
+];
+for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+  for (const [name, openIt, closeSel] of DIALOGS) {
+    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+    await reset(); await openIt(); await sleep(80);
+    const f = await dlgFit();
+    check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
+    await shot(`dialog-${name}-${size}`);
+    await tap(closeSel); await ev(`ui.mapw=null;if(ui.autos)ui.autos.repeat=undefined;render()`);
+  }
+}
+await phone(390, 844); await reset();
+await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await sleep(40);
+check("Dialogs: a page with a draft keeps its bar pinned to the foot of the window", (await ev(`(()=>{const b=document.querySelector("#draftbar"),r=b.getBoundingClientRect();return !b.hidden&&getComputedStyle(b).position==="fixed"&&r.bottom<=innerHeight&&r.bottom>innerHeight-40})()`)) === true);
+await ev(`ui.autos.repeat=undefined;render()`);
+/* A long review, longer than any window: thirty changes, drawn by the review dialog itself. */
+for (const [w, h, size] of [[390, 844, "phone"], [844, 390, "landscape"]]) {
+  await phone(w, h); await reset();
+  await ev(`ui.review={d:{zone:"Garden",items:Array.from({length:30},(_,i)=>({label:"Change "+(i+1),before:"Before",after:"After"})),skipped:[],note:"",apply:(done)=>done([])},busy:false,errors:[]};renderModal()`); await sleep(80);
+  const f = await dlgFit(), scroll = await ev(`(()=>{const s=document.querySelector("#modal .review-scroll");return {rows:document.querySelectorAll("#review-items .review-row").length,scrolls:s.scrollHeight>s.clientHeight}})()`);
+  check(`Dialogs ${size}: a long review scrolls its middle, its title and buttons in view inside the window`, dlgOk(f) && scroll.scrolls && scroll.rows === 30, [f, scroll]);
+  await shot(`dialog-long-review-${size}`);
+  await ev(`ui.review=null;renderModal()`);
+}
+await phone(390, 844); await reset();
+
 // Removing a zone. Last, because it takes the fixture's zones with it, so nothing here can call reset().
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }); await phone(390, 844); await setupNow();
 const zoneIds = () => ev(`zones.map(z=>z.id)`);
@@ -2353,7 +2392,19 @@ await phone(320, 640); await setupNow(); await askRemove("garden"); await sleep(
 const tight = await ev(`(()=>{const b=document.querySelector("[data-gdiscard]").getBoundingClientRect(),d=document.querySelector(".dialog").getBoundingClientRect();return {bottom:b.bottom,top:d.top,h:innerHeight,w:innerWidth,right:d.right}})()`);
 check("Remove: the dialog fits a 320x640 phone", tight.top >= 0 && tight.bottom <= tight.h && tight.right <= tight.w, tight);
 await shot("remove-dialog-small");
-await cClick("[data-gkeep]"); await phone(390, 844); await setupNow();
+await cClick("[data-gkeep]");
+/* The keyboard takes the foot of the window, as a host that resizes for it has it: the box and the dialog's own buttons
+   must both stay reachable, in view together where there's room for that. In view means not clipped by the dialog or
+   its scrolling middle either, not only inside the window. */
+for (const [w, h, name] of [[390, Math.round(844 * (1 - KEYBOARD.portrait)), "phone"], [844, Math.round(390 * (1 - KEYBOARD.landscape)), "landscape"]]) {
+  await phone(390, 844); await setupNow(); await askRemove("garden"); await tap("#dlg-confirm");
+  await phone(w, h); await sleep(150);
+  const k = await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),bs=[...document.querySelectorAll("#modal .dlgbar button")],vis=(e)=>{const r=e.getBoundingClientRect();let ok=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;for(let p=e.parentElement;p&&ok;p=p.parentElement){if(getComputedStyle(p).overflowY==="visible")continue;const q=p.getBoundingClientRect();ok=r.top>=q.top-1&&r.bottom<=q.bottom+1}return ok},reach=(e)=>{e.scrollIntoView({block:"nearest"});return vis(e)},out={focused:document.activeElement===i,both:vis(i)&&bs.every(vis)};out.buttons=bs.every(reach);out.box=reach(i);return out})()`);
+  check(`Remove, keyboard up ${name}: the box and the buttons are both reachable${name === "phone" ? ", and in view together" : ""}`, k.focused && k.box && k.buttons && (name !== "phone" || k.both), k);
+  await shot(`remove-dialog-keyboard-${name}`);
+  await key("Escape", 27); await sleep(40);
+}
+await phone(390, 844); await setupNow();
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await sleep(60); await toRow(); await shot("remove-setup-dark"); await askRemove("garden"); await shot("remove-dialog-dark"); await cClick("[data-gkeep]");
 await send("Emulation.setEmulatedMedia", { features: [] });
 

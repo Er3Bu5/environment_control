@@ -104,9 +104,18 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .field input[aria-invalid="true"] { border-color: var(--crit); }
   .task[aria-current="step"] strong { color: var(--primary); }
 
-  /* A dialog leaves the foot of the window to its buttons, which ride in the bar there. */
-  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px)); background: #00000080; }
-  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  /* A dialog's buttons are its own: the bar at the foot of the window is for pages, where many edits can be made. Its
+     middle scrolls, so its title and buttons stay in view however tall it is, and when even they don't fit, as with a
+     keyboard up in landscape, the whole dialog scrolls rather than leaving anything out of reach. */
+  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); background: #00000080; }
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px - env(safe-area-inset-bottom, 0px)); overflow-y: auto; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .dialog > h2 { flex: none; }
+  /* Too short for a middle worth scrolling, as with a keyboard up in landscape, the middle keeps its height and the
+     dialog scrolls as a whole, so the box being typed in isn't squeezed out of reach. */
+  @media (max-height: 340px) { .dialog .review-scroll { min-height: auto; overflow: visible; } }
+  /* The dialog's foot, along its bottom edge, the leaving button first. It keeps the look of a page's bar, so its buttons
+     look as they did when they rode there. */
+  .dlgbar { flex: none; display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin: 0 -18px -18px; padding: 10px 12px; border-radius: 0 0 13px 13px; background: var(--fg); color: var(--bg); }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
@@ -356,10 +365,6 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
   .draft-review.danger { background: var(--crit); color: #FFFFFF; }
   .draft-discard:disabled { opacity: .5; cursor: not-allowed; }
-  /* A dialog's buttons in the bar. The dialog stops short of the bar, so it never lies over a box being typed in. */
-  body.vtyping .dlgbar { display: flex; }
-  /* The page's own bar steps aside while a dialog is open, so the dialog's buttons are the only ones at the foot. */
-  .draftbar[inert] { visibility: hidden; }
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
   .wizbar .fixlink { color: inherit; text-decoration: underline; }
   .wizbar[data-bare] .draft-text { opacity: .8; }
@@ -3243,27 +3248,26 @@ const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm"
 function targetsDialog(z) {
   return `<div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Targets: ${esc(z.name)}</h2>
     <div class="review-scroll">${targetsSet(z) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
-    <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
+    <div class="dlgbar"><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
 }
 /* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold. */
 function activityDialog(z) {
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Activity: ${esc(z.name)}</h2>${activityChips()}
     <div class="review-scroll"><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</div>
-    <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-aclose>Close</button></div></div>`;
+    <div class="dlgbar"><button class="draft-discard" data-aclose>Close</button></div></div>`;
 }
 function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><div class="review-scroll"><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}</div><div class="dlgbar"><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
   const failed = errors.length ? `<div class="notice critical" role="alert"><strong>Some changes were not applied.</strong>${errors.map((e) => `<span>${esc(e)}</span>`).join("")}<span>Anything that went through is saved. What's left is still here to try again.</span></div>` : "";
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">Review changes</h2>
-    <p class="muted small" id="dlg-text">${esc(d.affects || `These changes affect ${d.zone} only.`)} Confirm each value before applying.</p>
-    <div class="review-scroll">${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
-    <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="draft-review" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
+    <div class="review-scroll"><p class="muted small" id="dlg-text">${esc(d.affects || `These changes affect ${d.zone} only.`)} Confirm each value before applying.</p>${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
+    <div class="dlgbar"><button class="draft-discard" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="draft-review" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
 }
 let modalOpener = null;
 function renderModal() {
@@ -3723,6 +3727,9 @@ document.addEventListener("input", (e) => {
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
 window.addEventListener("resize", vReveal);
+/* A keyboard that shortens the window leaves a dialog's box where it was, perhaps below the fold of the dialog's
+   middle, and scrolling the page can't reach a dialog fixed to the window, so the box is brought into view here. */
+window.addEventListener("resize", () => { const a = document.activeElement; if (a && a.matches("input") && a.closest("#modal")) a.scrollIntoView({ block: "nearest" }); });
 if (window.visualViewport) window.visualViewport.addEventListener("resize", vReveal);
 
 /* Setup is saved by the panel's backend, never assumed. A change runs against a copy of what's stored, the copy goes to the
