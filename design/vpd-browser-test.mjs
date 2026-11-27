@@ -665,6 +665,8 @@ check("Link: linking one another zone already switches doesn't ask again", alrea
 await evp(`saveConfig(()=>{zoneById("garden").automations=zoneById("garden").automations.filter(a=>a.id!=="a99")})`);
 const notAuto = await evp(`saveConfig(()=>{zoneById("garden").automations.push({id:"a98",entity:"switch.reservoir_pump",group:"control"})}).then(r=>[r.ok,r.error])`);
 check("Link: anything that isn't an automation is refused without asking", notAuto[0] === false && notAuto[1].includes("isn't an automation") && (await hostDialog()).open === false, notAuto);
+const strayKey = await onHA(`fakeHA.command({type:"environment_control/config/save",revision:fakeHA.config.revision,config:{zones:fakeHA.config.zones,devices:fakeHA.config.devices,scripts:["script.x"]}}).then(()=>"saved",e=>e.message)`);
+check("Link: the backend refuses a setup holding anything but zones, devices and room settings", strayKey.includes("something other than zones, devices and room settings"), strayKey);
 check("Remove: a zone's dialog says its automations are unlinked and keep running", (await ev(`removeRows(zoneById("veg")).find(r=>r[0]==="Automations")[1]`)) === "10 unlinked. They keep running in Home Assistant");
 
 // ---------- Alert repeat: one helper for every alert, linked on Setup, changed through a review like any other value

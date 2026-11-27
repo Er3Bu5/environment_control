@@ -137,6 +137,8 @@ class FakeHA {
     const spotOk = (p, L) => !!L && Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -1 && p[0] <= L.rows && p[1] >= -1 && p[1] <= L.cols;
     const ok = c && Array.isArray(c.zones) && Array.isArray(c.devices) && c.zones.length <= 20 && c.devices.length <= 200;
     if (!ok) this.fail("Config isn't zones and devices");
+    /* A setup read back from storage carries its revision, which a save sets itself. Nothing else is a setup's to hold. */
+    if (Object.keys(c).some((k) => !["zones", "devices", "room", "revision"].includes(k))) this.fail("Config holds something other than zones, devices and room settings");
     /* Settings for the whole room rather than one zone: so far only the helper every alert's repeat rate comes from. */
     if (c.room !== undefined) {
       const room = c.room, keys = room && typeof room === "object" && !Array.isArray(room) ? Object.keys(room) : null;
