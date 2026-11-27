@@ -18,13 +18,10 @@ SEVERITY = {"info": 0, "low": 1, "moderate": 2, "high": 3, "critical": 4}
 FAIL_FROM = SEVERITY["moderate"]
 
 
-IGNORED = {
-    # Added 2026-11-18. A crafted glob pattern can make picomatch take a very long time to match (ReDoS). It comes in
-    # only through vitest, vite, tinyglobby and fdir, which run on a developer's machine and in CI, never in the panel.
-    # The only patterns it matches are this repo's own test and build config, so nothing outside can supply one. No
-    # fixed version existed when it was added: every picomatch up to 4.0.7, the newest, is affected.
-    "GHSA-fc5q-39xc-vjpf": {"package": "picomatch", "review_by": "2027-02-18"},
-}
+# Each entry is "GHSA-xxxx-xxxx-xxxx": {"package": name, "review_by": "YYYY-MM-DD"}, under a comment saying when it was
+# added and why it can't reach anything that ships. Empty since 2026-11-27: the one entry so far, a picomatch ReDoS
+# (GHSA-fc5q-39xc-vjpf), was withdrawn by its publisher on the day it was added.
+IGNORED: dict[str, dict[str, str]] = {}
 
 
 def advisories(report: dict) -> dict[str, dict]:
