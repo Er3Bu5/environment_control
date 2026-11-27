@@ -267,8 +267,6 @@ import {
   repeatStuck,
   repeatValue,
   setLinkGroup,
-  shareQuestion,
-  sharedWith,
   toggleLink,
 } from "./automations";
 import { alertsCard, automationsPage, failsafeNoticeView, linkPage } from "./automations-view";
@@ -1827,7 +1825,7 @@ export class EcApp extends LitElement {
   }
 
   private tapAuto(z: Zone, a: AutomationLink): void {
-    const st = this.states[a.entity], ask = offQuestion(z, this.zones, a, st);
+    const st = this.states[a.entity], ask = offQuestion(a, st);
     if (ask) this.modal = { kind: "guard", ...ask, action: () => void this.sendAuto(z, a, false) };
     else void this.sendAuto(z, a, autoState(st) !== "on");
   }
@@ -1911,14 +1909,8 @@ export class EcApp extends LitElement {
     if (d && z) this.linkw = { ...openLinks(z, d.from), q: d.q };
   };
 
-  /* Ticking one another zone links asks first, and Add only ticks it here: the review and the host's own question
-     about anything newly switchable still follow. */
   private tickLink(r: LinkRow): void {
-    const d = this.linkw;
-    if (!d) return;
-    const ask = shareQuestion(this.zones, d, r.entity, r.name);
-    if (ask) this.askShare(ask, () => this.setLink((x) => x.pick[r.entity] === undefined && toggleLink(x, r.entity)));
-    else this.setLink((x) => toggleLink(x, r.entity));
+    this.setLink((x) => toggleLink(x, r.entity));
   }
 
   private linkReview = (): void => {
@@ -1929,7 +1921,7 @@ export class EcApp extends LitElement {
     this.modal = {
       kind: "review",
       changes,
-      note: linkNote(d, this.zones),
+      note: linkNote(d),
       busy: false,
       error: "",
       apply: () => this.save((c) => applyLinks(c, d.zoneId, d.pick)),
@@ -2780,13 +2772,12 @@ export class EcApp extends LitElement {
   private autosScreen() {
     const a = this.autos, z = a && this.zoneById(a.zoneId);
     if (!a || !z) return nothing;
-    const zones = this.zones;
     return automationsPage({
       zone: z,
       chip: a.chip,
       chips: chipViews(z, this.states),
       groups: groupViews(z, a.chip, this.states),
-      row: (l) => autoRow(l, this.states[l.entity], sharedWith(zones, z.id, l.entity), this.autoCtl[l.entity], this.now),
+      row: (l) => autoRow(l, this.states[l.entity], this.autoCtl[l.entity], this.now),
       repeat: repeatCard(this.room, this.states, a.repeat),
       icon,
       onChip: (c) => this.pickChip(c),

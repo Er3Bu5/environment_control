@@ -1,6 +1,6 @@
 /* The Automations pages: a zone's Home Assistant automations, switched from its own page and linked on Link
    automations, and the one alert repeat helper on Setup. Against the sample room: Garden links 16 alerts, 3 failsafes
-   and 4 control automations; Veg and Nursery share the tent's failsafes and light schedule. */
+   and 4 control automations, and an automation belongs to one zone. */
 import { type Frame, type Page, expect, test } from "@playwright/test";
 import { PAGE, app, dialogFoot, goTo, hostButton, hostDialogOpen, hostDialogText, leaveAsks, moreButton, panelFrame, zoneMenu } from "./helpers";
 
@@ -153,14 +153,20 @@ test.describe("a zone's Automations page", () => {
     await expect(sw(frame, "Garden Lights On")).toBeEnabled();
   });
 
-  test("switching a failsafe off asks first, naming every zone that shares it; Keep it on, Escape and Back leave it on", async ({ page }) => {
-    const frame = await openAutos(page, "Veg");
+  test("switching a failsafe off asks first; Keep it on, Escape and Back leave it on, and switching it on doesn't ask", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    /* A setup stored before an automation could belong to only one zone links Garden's failsafe in Veg too. Neither the
+       row nor the question speaks of sharing it any more. */
+    await restartWith(page, `c.zones.find((z) => z.id === "veg").automations.push({ id: "a99", entity: "automation.failsafe_dehumidifier_mains_auto_on", group: "failsafe" })`);
+    await goTo(frame, "Veg");
+    await zoneMenu(frame, "View automations");
     await chip(frame, "Failsafes").click();
-    const name = "Failsafe Tent Lights Recovery";
-    await expect(row(frame, name)).toContainText("Shared with Nursery.");
+    const name = "Failsafe Dehumidifier Mains Auto On";
+    await expect(row(frame, name).locator(".dev-sub")).toHaveText(/^On\. Last triggered [^.]+\.$/);
     await sw(frame, name).click();
     await expect(guard(frame).getByRole("heading", { name: `Switch off ${name}?`, exact: true })).toBeFocused();
-    await expect(guard(frame)).toContainText("It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that in Veg or Nursery. You can switch it on again here.");
+    await expect(guard(frame).locator("#dlg-text")).toHaveText("It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.");
     await dialogFoot(guard(frame), ["Keep it on", "Switch off"]);
     await expect(guard(frame).getByRole("button", { name: "Switch off" })).toHaveClass(/danger/);
     await guard(frame).getByRole("button", { name: "Keep it on" }).click();
@@ -177,8 +183,7 @@ test.describe("a zone's Automations page", () => {
     await sw(frame, name).click();
     await guard(frame).getByRole("button", { name: "Switch off" }).click();
     await expect(sw(frame, name)).toHaveAttribute("aria-checked", "false");
-    expect((await calls(page)).map((c) => [c.service, c.data])).toEqual([["turn_off", { entity_id: "automation.failsafe_tent_lights_recovery" }]]);
-    /* Switching it back on doesn't ask. */
+    expect((await calls(page)).map((c) => [c.service, c.data])).toEqual([["turn_off", { entity_id: "automation.failsafe_dehumidifier_mains_auto_on" }]]);
     await sw(frame, name).click();
     await expect(guard(frame)).toHaveCount(0);
     await expect(sw(frame, name)).toHaveAttribute("aria-checked", "true");
@@ -250,11 +255,11 @@ test.describe("the alert repeat", () => {
     await expect(draftBar(frame)).toContainText("Garden · Alert repeat");
     await expect(draftBar(frame).getByRole("button")).toHaveText(["Back", "Discard", "Review and apply"]);
     await expect(draftBar(frame).getByRole("button", { name: "Review and apply" })).toBeEnabled();
-    expect(await leaveAsks(page)).toBe(true);
+    await expect.poll(() => leaveAsks(page)).toBe(true);
     await draftBar(frame).getByRole("button", { name: "Discard" }).click();
     await expect(repeatBox(frame)).toHaveValue("15");
     await expect(pageBar(frame)).toBeVisible();
-    expect(await leaveAsks(page)).toBe(false);
+    await expect.poll(() => leaveAsks(page)).toBe(false);
   });
 
   test("its review says it changes every alert, and applying waits for the helper to report the value", async ({ page }) => {
@@ -335,30 +340,30 @@ test.describe("Link automations", () => {
       "Critical Nursery Temperature High Day",
       "Critical Nursery Temperature Low Night",
       "Critical Nursery VPD High Day",
-      "Failsafe Tent Lights Recovery",
-      "Failsafe Veg Fans Auto On",
-      "Tent Lights Off",
-      "Tent Lights On",
+      "Failsafe Nursery Dome Fan Auto On",
+      "Failsafe Nursery Heat Mat Auto Off",
+      "Nursery Heat Mat Off",
+      "Nursery Heat Mat On",
     ]);
     await expect(rows.locator(".pickrow[aria-pressed='true']")).toHaveCount(7);
     await expect(pick(frame, "Critical Nursery VPD High Day").locator(".pickrow")).toHaveAttribute("aria-pressed", "false");
-    await expect(pick(frame, "Tent Lights On")).toContainText("automation.tent_lights_on, Veg area, linked in Veg");
-    await expect(app(frame).locator("#link-more")).toHaveText("32 more in Home Assistant. Search to find them.");
+    await expect(pick(frame, "Failsafe Nursery Dome Fan Auto On").locator(".dev-sub")).toHaveText("automation.failsafe_nursery_dome_fan_auto_on, Nursery area");
+    await expect(app(frame).locator("#link-more")).toHaveText("36 more in Home Assistant. Search to find them.");
     await expect(pageBar(frame).getByRole("button")).toHaveText(["Back"]);
   });
 
   test("searches every automation by name or entity id, and shows the first ten of many, counting the rest", async ({ page }) => {
-    const frame = await openLinks(page);
+    const frame = await openLinks(page, "Garden");
     const search = app(frame).getByRole("searchbox", { name: "Search Home Assistant" });
     await search.fill("porch");
     await expect(app(frame).locator("#link-list .pick-text strong")).toHaveText(["Porch Light On"]);
     await expect(app(frame).locator("#link-more")).toHaveCount(0);
     await search.fill("reservoir_refill");
     await expect(app(frame).locator("#link-list .pick-text strong")).toHaveText(["Reservoir Refill Reminder"]);
-    /* Every entity id holds an a, so one letter matches all 40. */
+    /* Every entity id holds an a, so one letter matches all 44. */
     await search.fill("a");
     await expect(app(frame).locator("#link-list .pickwrap")).toHaveCount(10);
-    await expect(app(frame).locator("#link-more")).toHaveText("30 more match. Type more of the name to narrow them down.");
+    await expect(app(frame).locator("#link-more")).toHaveText("34 more match. Type more of the name to narrow them down.");
     await search.fill("nothing like this");
     await expect(app(frame).locator("#link-list")).toContainText("No automation matches.");
   });
@@ -374,16 +379,17 @@ test.describe("Link automations", () => {
     await expect(vpd.getByRole("radio", { name: "Day alerts" })).toBeChecked();
     await vpd.getByText("Device alerts", { exact: true }).click();
     await expect(vpd.getByRole("radio", { name: "Device alerts" })).toBeChecked();
-    await pick(frame, "Tent Lights Off").locator(".pickrow").click();
-    await pick(frame, "Tent Lights On").getByText("Failsafes", { exact: true }).click();
+    await pick(frame, "Nursery Heat Mat Off").locator(".pickrow").click();
+    await pick(frame, "Nursery Heat Mat On").getByText("Failsafes", { exact: true }).click();
     await expect(draftBar(frame)).toContainText("3 unsaved changes");
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
-    await expect(review(frame).locator(".review-row")).toHaveText(["Tent Lights OnControl → Failsafes", "Tent Lights OffControl → Not linked", "Critical Nursery VPD High DayNot linked → Device alerts"]);
+    await expect(review(frame).locator(".review-row")).toHaveText(["Nursery Heat Mat OnControl → Failsafes", "Nursery Heat Mat OffControl → Not linked", "Critical Nursery VPD High DayNot linked → Device alerts"]);
     await expect(review(frame)).toContainText(
       "Only Environment Control changes, and Home Assistant keeps running every automation as it is. Home Assistant asks you before a newly linked one can be switched from here.",
     );
     const before = await stored(page);
     await review(frame).getByRole("button", { name: "Apply 3 changes" }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
     expect(await hostDialogText(page)).toContain("automation.critical_nursery_vpd_high_day");
     await allow(page);
     await expect(toast(frame)).toHaveText("Nursery's automations saved.");
@@ -392,9 +398,9 @@ test.describe("Link automations", () => {
     await expect(chip(frame, "Failsafes")).toHaveAttribute("aria-pressed", "true");
     const was = before.zones.find((z) => z.id === "nursery")!.automations!, now = (await stored(page)).zones.find((z) => z.id === "nursery")!.automations!;
     const id = (entity: string, list: Link[]) => list.find((a) => a.entity === entity)?.id;
-    for (const e of ["automation.critical_nursery_temperature_high_day", "automation.failsafe_tent_lights_recovery", "automation.tent_lights_on"]) expect(id(e, now)).toBe(id(e, was));
-    expect(now.find((a) => a.entity === "automation.tent_lights_on")?.group).toBe("failsafe");
-    expect(now.find((a) => a.entity === "automation.tent_lights_off")).toBeUndefined();
+    for (const e of ["automation.critical_nursery_temperature_high_day", "automation.failsafe_nursery_heat_mat_auto_off", "automation.nursery_heat_mat_on"]) expect(id(e, now)).toBe(id(e, was));
+    expect(now.find((a) => a.entity === "automation.nursery_heat_mat_on")?.group).toBe("failsafe");
+    expect(now.find((a) => a.entity === "automation.nursery_heat_mat_off")).toBeUndefined();
     expect(now.find((a) => a.entity === "automation.critical_nursery_vpd_high_day")).toEqual({ id: "a8", entity: "automation.critical_nursery_vpd_high_day", group: "alert_device" });
     await expect(card(frame, "Failsafes").locator(".card-head")).toContainText("3 of 3 on");
   });
@@ -418,46 +424,24 @@ test.describe("Link automations", () => {
     await expect(draftBar(frame)).toContainText("Nursery · Porch Light On");
   });
 
-  test("linking one another zone already links asks first; only Add ticks it, and nothing asks for one this zone had", async ({ page }) => {
+  test("an automation another zone has says so, and saving it here too is refused with the reason", async ({ page }) => {
     const frame = await openLinks(page, "Garden");
-    const search = app(frame).getByRole("searchbox", { name: "Search Home Assistant" });
-    await search.fill("tent lights on");
-    const tent = pick(frame, "Tent Lights On").locator(".pickrow");
-    await tent.click();
-    await expect(guard(frame).getByRole("heading", { name: "Add Tent Lights On to Garden as well?", exact: true })).toBeFocused();
-    await expect(guard(frame)).toContainText("It's already linked in Veg and Nursery. It's one automation, so switching it off here switches it off there too.");
-    await dialogFoot(guard(frame), ["Leave it out", "Add to Garden"]);
-    await expect(guard(frame).getByRole("button", { name: "Add to Garden" })).not.toHaveClass(/danger/);
-    await guard(frame).getByRole("button", { name: "Leave it out" }).click();
-    await expect(tent).toHaveAttribute("aria-pressed", "false");
-    await tent.click();
-    await page.keyboard.press("Escape");
-    await expect(guard(frame)).toHaveCount(0);
-    await expect(tent).toHaveAttribute("aria-pressed", "false");
-    await tent.click();
-    await back(page);
-    await expect(guard(frame)).toHaveCount(0);
-    await expect(tent).toHaveAttribute("aria-pressed", "false");
-    await expect(heading(frame, "Link automations: Garden")).toBeVisible();
-    await tent.click();
-    await guard(frame).getByRole("button", { name: "Add to Garden" }).click();
-    await expect(tent).toHaveAttribute("aria-pressed", "true");
-    await expect(pick(frame, "Tent Lights On").getByRole("radio", { name: "Control" })).toBeChecked();
-    /* Unticking never asks. */
-    await tent.click();
-    await expect(guard(frame)).toHaveCount(0);
-    await expect(tent).toHaveAttribute("aria-pressed", "false");
-    /* Veg had it saved, so taking it out and putting it back is no new sharing. */
-    await pageBar(frame).getByRole("button", { name: "Back" }).click();
-    await pageBar(frame).getByRole("button", { name: "Back" }).click();
-    await goTo(frame, "Veg");
-    await zoneMenu(frame, "View automations");
-    await app(frame).getByRole("button", { name: "Link automations", exact: true }).click();
-    const vegTent = pick(frame, "Tent Lights On").locator(".pickrow");
-    await vegTent.click();
-    await vegTent.click();
-    await expect(guard(frame)).toHaveCount(0);
-    await expect(vegTent).toHaveAttribute("aria-pressed", "true");
+    await app(frame).getByRole("searchbox", { name: "Search Home Assistant" }).fill("tent lights on");
+    const tent = pick(frame, "Tent Lights On");
+    await expect(tent.locator(".dev-sub")).toHaveText("automation.tent_lights_on, Veg area, linked in Veg");
+    await tent.locator(".pickrow").click();
+    /* No question here: an automation can't be shared, so it's the save that says no. */
+    await expect(app(frame).getByRole("alertdialog")).toHaveCount(0);
+    await expect(tent.locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
+    await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
+    await expect(review(frame).locator(".review-row")).toHaveText(["Tent Lights OnNot linked → Control"]);
+    const before = await stored(page);
+    await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    /* Home Assistant's own question comes first, for anything newly linked; the backend's refusal after it. */
+    await allow(page);
+    await expect(review(frame).getByRole("alert")).toContainText("An automation can only be linked to one zone.");
+    expect((await stored(page)).revision).toBe(before.revision);
+    expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.tent_lights_on");
   });
 
   test("a linked automation Home Assistant no longer lists keeps its row, so it can still be unlinked", async ({ page }) => {
@@ -507,6 +491,7 @@ test.describe("Setup's Alerts card", () => {
     const search = box.getByRole("combobox", { name: "Alert repeat helper" });
     await search.fill("repeat");
     await box.getByRole("option", { name: /Alert repeat rate/ }).click();
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
     expect(await hostDialogText(page)).toContain("Every alert's repeat rate comes from it.");
     await allow(page);
     await expect(toast(frame)).toHaveText("Alert repeat linked.");

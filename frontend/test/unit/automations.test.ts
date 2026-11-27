@@ -42,7 +42,6 @@ import {
   repeatRefused,
   repeatStuck,
   setLinkGroup,
-  shareQuestion,
   sharedWith,
   suggestGroup,
   toggleLink,
@@ -55,7 +54,7 @@ const st = (state: string, attributes: Record<string, unknown> = {}): HaState =>
 const auto = (state: string, name: string, last: string | null = null) => st(state, { friendly_name: name, last_triggered: last });
 const link = (id: string, object: string, group: string) => ({ id, entity: `automation.${object}`, group });
 
-/* Garden links its own; Veg and Nursery share their tent's failsafe and schedule, as the sample room does. */
+/* Each zone links its own, since an automation belongs to one zone. Veg has one named for Nursery. */
 const zones = readZones([
   {
     id: "garden",
@@ -68,8 +67,12 @@ const zones = readZones([
       link("a5", "failsafe_dehumidifier_mains_auto_on", "failsafe"),
     ],
   },
-  { id: "veg", name: "Veg", automations: [link("a1", "failsafe_tent_lights_recovery", "failsafe"), link("a2", "tent_lights_on", "control")] },
-  { id: "nursery", name: "Nursery", automations: [link("a1", "failsafe_tent_lights_recovery", "failsafe"), link("a7", "tent_lights_on", "control")] },
+  { id: "veg", name: "Veg", automations: [link("a1", "failsafe_tent_lights_recovery", "failsafe"), link("a2", "tent_lights_on", "control"), link("a3", "nursery_door_alert", "alert_device")] },
+  {
+    id: "nursery",
+    name: "Nursery",
+    automations: [link("a1", "critical_nursery_temperature_high_day", "alert_day"), link("a2", "failsafe_nursery_fans_auto_on", "failsafe"), link("a3", "nursery_lights_on", "control")],
+  },
 ]);
 const [garden, veg] = zones;
 const states: Record<string, HaState> = {
@@ -80,6 +83,9 @@ const states: Record<string, HaState> = {
   "automation.failsafe_dehumidifier_mains_auto_on": auto("on", "Failsafe Dehumidifier Mains Auto On"),
   "automation.failsafe_tent_lights_recovery": auto("on", "Failsafe Tent Lights Recovery"),
   "automation.tent_lights_on": auto("on", "Tent Lights On"),
+  "automation.critical_nursery_temperature_high_day": auto("on", "Critical Nursery Temperature High Day"),
+  "automation.failsafe_nursery_fans_auto_on": auto("on", "Failsafe Nursery Fans Auto On"),
+  "automation.nursery_lights_on": auto("on", "Nursery Lights On"),
 };
 
 describe("groups and chips", () => {
@@ -161,36 +167,36 @@ describe("an automation's row", () => {
     expect(autoName("automation.x", undefined)).toBe("automation.x");
   });
 
-  it("says what HA reports, when it last ran and who shares it", () => {
-    const r = autoRow(veg.automations[0], auto("on", "Failsafe Tent Lights Recovery", at(1)), ["Nursery"], undefined, now);
+  it("says what HA reports and when it last ran, and no other zone, since an automation has only one", () => {
+    const r = autoRow(veg.automations[0], auto("on", "Failsafe Tent Lights Recovery", at(1)), undefined, now);
     expect(r).toMatchObject({ name: "Failsafe Tent Lights Recovery", state: "on", on: true, locked: false, line: null });
-    expect(r.sub).toMatch(/^On\. Last triggered (today|yesterday) at \d\d:\d\d\. Shared with Nursery\.$/);
-    expect(autoRow(veg.automations[1], auto("off", "Tent Lights On"), ["Nursery", "Flower"], undefined, now).sub).toBe("Off. Never triggered. Shared with Nursery and Flower.");
+    expect(r.sub).toMatch(/^On\. Last triggered (today|yesterday) at \d\d:\d\d\.$/);
+    expect(autoRow(veg.automations[1], auto("off", "Tent Lights On"), undefined, now).sub).toBe("Off. Never triggered.");
   });
 
   it("can't be switched while unavailable or gone, and says which", () => {
-    const down = autoRow(garden.automations[2], st("unavailable", { friendly_name: "Low Night" }), [], undefined, now);
+    const down = autoRow(garden.automations[2], st("unavailable", { friendly_name: "Low Night" }), undefined, now);
     expect([down.sub, down.locked, down.on]).toEqual(["Unavailable in Home Assistant.", true, false]);
-    const gone = autoRow(garden.automations[2], undefined, [], undefined, now);
+    const gone = autoRow(garden.automations[2], undefined, undefined, now);
     expect([gone.name, gone.sub, gone.locked]).toEqual(["automation.critical_garden_temperature_low_night", "Home Assistant doesn't have it any more.", true]);
   });
 
   it("doesn't claim one never ran unless HA says so", () => {
-    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On", last_triggered: 5 }), [], undefined, now).sub).toBe("On.");
-    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On" }), [], undefined, now).sub).toBe("On.");
+    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On", last_triggered: 5 }), undefined, now).sub).toBe("On.");
+    expect(autoRow(veg.automations[1], st("on", { friendly_name: "Tent Lights On" }), undefined, now).sub).toBe("On.");
   });
 
   it("is held while a tap waits for its report, and free again once it gives up or is refused", () => {
-    const row = (c: Parameters<typeof autoRow>[3]) => autoRow(veg.automations[1], auto("off", "Tent Lights On"), [], c, now);
+    const row = (c: Parameters<typeof autoRow>[2]) => autoRow(veg.automations[1], auto("off", "Tent Lights On"), c, now);
     expect(row(autoSend(true)).locked).toBe(true);
     expect(row({ status: "stuck", want: "on" }).locked).toBe(false);
     expect(row({ status: "error", error: "No." }).locked).toBe(false);
   });
 
-  it("names the other zones that link the same automation", () => {
-    expect(sharedWith(zones, "veg", "automation.failsafe_tent_lights_recovery")).toEqual(["Nursery"]);
-    expect(sharedWith(zones, "garden", "automation.tent_lights_on")).toEqual(["Veg", "Nursery"]);
-    expect(sharedWith(zones, "garden", "automation.failsafe_garden_lights_recovery")).toEqual([]);
+  it("names the other zone that has an automation saved, which Link automations shows", () => {
+    expect(sharedWith(zones, "garden", "automation.tent_lights_on")).toEqual(["Veg"]);
+    expect(sharedWith(zones, "veg", "automation.tent_lights_on")).toEqual([]);
+    expect(sharedWith(zones, "veg", "automation.porch_light_on")).toEqual([]);
   });
 });
 
@@ -240,22 +246,19 @@ describe("a switch after a tap", () => {
 });
 
 describe("switching a failsafe off", () => {
-  it("asks first, naming every zone it stops working in", () => {
-    expect(offQuestion(veg, zones, veg.automations[0], states["automation.failsafe_tent_lights_recovery"])).toEqual({
+  it("asks first, saying nothing will put the hardware back", () => {
+    expect(offQuestion(veg.automations[0], states["automation.failsafe_tent_lights_recovery"])).toEqual({
       title: "Switch off Failsafe Tent Lights Recovery?",
-      text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that in Veg or Nursery. You can switch it on again here.",
+      text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.",
       keep: "Keep it on",
       go: "Switch off",
     });
-    expect(offQuestion(garden, zones, garden.automations[4], states["automation.failsafe_dehumidifier_mains_auto_on"])?.text).toBe(
-      "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.",
-    );
   });
 
   it("doesn't ask to switch one on, or anything that isn't a failsafe", () => {
-    expect(offQuestion(garden, zones, garden.automations[3], states["automation.failsafe_garden_lights_recovery"])).toBeNull();
-    expect(offQuestion(garden, zones, garden.automations[0], states["automation.critical_garden_temperature_high_day"])).toBeNull();
-    expect(offQuestion(veg, zones, veg.automations[1], states["automation.tent_lights_on"])).toBeNull();
+    expect(offQuestion(garden.automations[3], states["automation.failsafe_garden_lights_recovery"])).toBeNull();
+    expect(offQuestion(garden.automations[0], states["automation.critical_garden_temperature_high_day"])).toBeNull();
+    expect(offQuestion(veg.automations[1], states["automation.tent_lights_on"])).toBeNull();
   });
 });
 
@@ -384,18 +387,23 @@ describe("Link automations", () => {
   const catalog = [
     ha("tent_lights_on", "Tent Lights On", "Veg"),
     ha("failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery", "Veg"),
-    ha("critical_nursery_vpd_high_day", "Critical Nursery VPD High Day", null),
+    ha("nursery_door_alert", "Nursery Door Alert", "Veg"),
+    ha("critical_nursery_temperature_high_day", "Critical Nursery Temperature High Day", "Nursery"),
+    ha("failsafe_nursery_fans_auto_on", "Failsafe Nursery Fans Auto On", "Nursery"),
+    ha("nursery_lights_on", "Nursery Lights On"),
+    ha("critical_nursery_vpd_high_day", "Critical Nursery VPD High Day"),
     ha("nursery_fan_kick", "Fan kick", "Garden", "off"),
     ha("day_humidity_upper_limit", "Day Humidity Upper Limit", "Garden", "off"),
     ha("porch_light_on", "Porch Light On"),
-    ha("nurseryman_reminder", "Reminder", null),
+    ha("nurseryman_reminder", "Reminder"),
     ha("veg_heat_alarm", "Heat alarm", " nursery "),
   ];
   const nursery = zones[2];
+  const saved = { "automation.critical_nursery_temperature_high_day": "alert_day", "automation.failsafe_nursery_fans_auto_on": "failsafe", "automation.nursery_lights_on": "control" };
 
   it("opens on what the zone links as saved, and ticks a new automation in the group its name suggests", () => {
     const d = openLinks(nursery, "failsafe");
-    expect([d.was, d.pick, d.q, d.from]).toEqual([{ "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, { "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control" }, "", "failsafe"]);
+    expect([d.was, d.pick, d.q, d.from]).toEqual([saved, saved, "", "failsafe"]);
     toggleLink(d, "automation.critical_nursery_vpd_high_day");
     expect(d.pick["automation.critical_nursery_vpd_high_day"]).toBe("alert_day");
     d.pick.x = "control";
@@ -404,34 +412,33 @@ describe("Link automations", () => {
 
   it("puts one the zone had saved back in its own group when it's unticked and ticked again", () => {
     const d = openLinks(nursery, null);
-    setLinkGroup(d, "automation.tent_lights_on", "alert_device");
-    toggleLink(d, "automation.tent_lights_on");
-    expect(d.pick).not.toHaveProperty("automation.tent_lights_on");
-    setLinkGroup(d, "automation.tent_lights_on", "failsafe");
-    expect(d.pick).not.toHaveProperty("automation.tent_lights_on");
-    toggleLink(d, "automation.tent_lights_on");
-    expect(d.pick["automation.tent_lights_on"]).toBe("control");
+    setLinkGroup(d, "automation.nursery_lights_on", "alert_device");
+    toggleLink(d, "automation.nursery_lights_on");
+    expect(d.pick).not.toHaveProperty("automation.nursery_lights_on");
+    setLinkGroup(d, "automation.nursery_lights_on", "failsafe");
+    expect(d.pick).not.toHaveProperty("automation.nursery_lights_on");
+    toggleLink(d, "automation.nursery_lights_on");
+    expect(d.pick["automation.nursery_lights_on"]).toBe("control");
   });
 
   it("with nothing typed lists what the zone links, its area's automations and those named for it, and counts the rest", () => {
-    const d = openLinks(nursery, null);
-    const { rows, more } = linkList(d, zones, catalog, states);
-    expect(rows.map((r) => r.entity)).toEqual([
-      "automation.critical_nursery_vpd_high_day",
-      "automation.failsafe_tent_lights_recovery",
-      "automation.nursery_fan_kick",
-      "automation.veg_heat_alarm",
-      "automation.tent_lights_on",
-    ]);
-    expect(more).toBe(3);
+    const { rows, more } = linkList(openLinks(nursery, null), zones, catalog, states);
+    expect(rows.map((r) => r.name)).toEqual(["Critical Nursery Temperature High Day", "Critical Nursery VPD High Day", "Failsafe Nursery Fans Auto On", "Fan kick", "Heat alarm", "Nursery Door Alert", "Nursery Lights On"]);
+    expect(more).toBe(5);
   });
 
-  it("says where each one is, who links it already, whether it's on, and the group of one that's ticked", () => {
+  it("names the zone that has one already, and lets it be ticked: saving it here too is the backend's to refuse", () => {
     const d = openLinks(nursery, null);
-    const rows = Object.fromEntries(linkList(d, zones, catalog, states).rows.map((r) => [r.entity, r]));
-    expect(rows["automation.tent_lights_on"]).toEqual({ entity: "automation.tent_lights_on", name: "Tent Lights On", sub: "automation.tent_lights_on, Veg area, linked in Veg", pill: "On", group: "control" });
+    const door = linkList(d, zones, catalog, states).rows.find((r) => r.name === "Nursery Door Alert");
+    expect(door).toEqual({ entity: "automation.nursery_door_alert", name: "Nursery Door Alert", sub: "automation.nursery_door_alert, Veg area, linked in Veg", pill: "On", group: null });
+    toggleLink(d, "automation.nursery_door_alert");
+    expect(d.pick["automation.nursery_door_alert"]).toBe("control");
+  });
+
+  it("says where each one is, whether it's on, and the group of one that's ticked", () => {
+    const rows = Object.fromEntries(linkList(openLinks(nursery, null), zones, catalog, states).rows.map((r) => [r.entity, r]));
+    expect(rows["automation.nursery_lights_on"]).toEqual({ entity: "automation.nursery_lights_on", name: "Nursery Lights On", sub: "automation.nursery_lights_on", pill: "On", group: "control" });
     expect(rows["automation.nursery_fan_kick"]).toMatchObject({ sub: "automation.nursery_fan_kick, Garden area", pill: "Off", group: null });
-    expect(rows["automation.critical_nursery_vpd_high_day"].sub).toBe("automation.critical_nursery_vpd_high_day");
   });
 
   it("searches every automation by each word typed, in its name or entity id, and counts none as more", () => {
@@ -440,10 +447,10 @@ describe("Link automations", () => {
     expect(linkList(d, zones, catalog, states)).toEqual({ rows: [expect.objectContaining({ entity: "automation.porch_light_on" })], more: 0 });
     d.q = "day upper";
     expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Day Humidity Upper Limit"]);
-    d.q = "lights tent";
-    expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Failsafe Tent Lights Recovery", "Tent Lights On"]);
+    d.q = "lights nursery";
+    expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Nursery Lights On"]);
     d.q = "nothing like it";
-    expect(linkList(d, zones, catalog, states)).toEqual({ rows: [], more: 0 });
+    expect(linkList(d, zones, catalog, states).rows).toEqual([]);
   });
 
   it("shows a search's first few matches by name and counts the rest, so one letter can't draw every automation", () => {
@@ -452,8 +459,8 @@ describe("Link automations", () => {
     d.q = "p";
     const { rows, more } = linkList(d, zones, [...catalog, ...many], states);
     expect(rows).toHaveLength(LINK_FOUND_MAX);
-    expect(more).toBe(10);
-    expect(rows[0].name).toBe("Critical Nursery VPD High Day");
+    expect(more).toBe(11);
+    expect(rows[0].name).toBe("Critical Nursery Temperature High Day");
     d.q = "porch_1";
     expect(linkList(d, zones, [...catalog, ...many], states).rows.map((r) => r.name)).toEqual(["Porch 10", "Porch 11", "Porch 12", "Porch 13", "Porch 14", "Porch 15", "Porch 16"]);
   });
@@ -482,44 +489,16 @@ describe("Link automations", () => {
     expect(linkChanges(gone, [], {})).toEqual([{ label: "automation.critical_garden_temperature_low_night", before: "Night alerts", after: "Not linked" }]);
   });
 
-  it("says Home Assistant asks first only when something no zone links yet is being linked", () => {
+  it("says Home Assistant asks first whenever something is newly linked", () => {
     const d = openLinks(nursery, null);
-    expect(linkNote(d, zones)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
-    toggleLink(d, "automation.failsafe_garden_lights_recovery");
-    expect(linkNote(d, zones)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
+    expect(linkNote(d)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
+    toggleLink(d, "automation.nursery_lights_on");
+    toggleLink(d, "automation.nursery_lights_on");
+    expect(linkNote(d)).toBe("Only Environment Control changes, and Home Assistant keeps running every automation as it is.");
     toggleLink(d, "automation.porch_light_on");
-    expect(linkNote(d, zones)).toBe(
+    expect(linkNote(d)).toBe(
       "Only Environment Control changes, and Home Assistant keeps running every automation as it is. Home Assistant asks you before a newly linked one can be switched from here.",
     );
-  });
-});
-
-describe("asking before an automation joins a second zone", () => {
-  it("asks when ticking one another zone links, naming every zone that does", () => {
-    const d = openLinks(zones[0], "control");
-    expect(shareQuestion(zones, d, "automation.tent_lights_on", "Tent Lights On")).toEqual({
-      title: "Add Tent Lights On to Garden as well?",
-      text: "It's already linked in Veg and Nursery. It's one automation, so switching it off here switches it off there too.",
-      keep: "Leave it out",
-      go: "Add to Garden",
-    });
-  });
-
-  it("never asks on unticking, for one no other zone has saved, or for one this zone had saved, even ticked again", () => {
-    const d = openLinks(veg, null);
-    expect(shareQuestion(zones, d, "automation.failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery")).toBeNull();
-    toggleLink(d, "automation.failsafe_tent_lights_recovery");
-    expect(shareQuestion(zones, d, "automation.failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery")).toBeNull();
-    expect(shareQuestion(zones, d, "automation.porch_light_on", "Porch Light On")).toBeNull();
-    const g = openLinks(zones[0], null);
-    toggleLink(g, "automation.porch_light_on");
-    expect(shareQuestion(zones, g, "automation.porch_light_on", "Porch Light On")).toBeNull();
-  });
-
-  it("goes by the saved setup, not by another zone's unsaved draft", () => {
-    const other = openLinks(veg, null);
-    toggleLink(other, "automation.porch_light_on");
-    expect(shareQuestion(zones, openLinks(zones[0], null), "automation.porch_light_on", "Porch Light On")).toBeNull();
   });
 });
 

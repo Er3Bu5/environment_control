@@ -188,9 +188,6 @@ describe("adding something another zone has", () => {
       keep: "Leave it out",
       go: "Add to Garden",
     });
-    expect(shareAsk("automation", "Veg high humidity", "Nursery", ["Veg"]).text).toBe(
-      "It's already linked in Veg. It's one automation, so switching it off here switches it off there too.",
-    );
     expect(shareAsk("sensor", "Soil 1", "Veg", ["Garden"]).text).toBe("It's already in Garden. It's one sensor, so its readings count there and here.");
   });
 });

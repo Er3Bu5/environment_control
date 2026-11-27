@@ -217,12 +217,11 @@ export interface ShareAsk {
   keep: string;
   go: string;
 }
-export function shareAsk(kind: "device" | "sensor" | "automation", name: string, zone: string, others: string[]): ShareAsk {
+export function shareAsk(kind: "device" | "sensor", name: string, zone: string, others: string[]): ShareAsk {
   const where = others.join(" and ");
   const text = {
     device: `It's already in ${where}. It's one device, so switching it here switches it there too.`,
     sensor: `It's already in ${where}. It's one sensor, so its readings count there and here.`,
-    automation: `It's already linked in ${where}. It's one automation, so switching it off here switches it off there too.`,
   }[kind];
   return { title: `Add ${name} to ${zone} as well?`, text, keep: "Leave it out", go: `Add to ${zone}` };
 }

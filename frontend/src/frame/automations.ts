@@ -6,7 +6,7 @@
    what's saved, and the helper's value counts only once HA reports it. This only decides what to draw and what a report
    means; the host is what sends, and it checks every request against the setup it fetched itself. */
 import type { Catalog, CatalogAutomation, Room } from "./messages";
-import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type ShareAsk, type Zone, readLinks, shareAsk } from "./model";
+import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type Zone, readLinks } from "./model";
 import { type HaState, numberOf } from "./readings";
 
 /* The Automations page's three chips, and the groups each one holds. */
@@ -52,7 +52,12 @@ export interface AutoChange {
   after: string;
 }
 /* A question the panel's own guard dialog puts before going on. */
-export type Question = ShareAsk;
+export interface Question {
+  title: string;
+  text: string;
+  keep: string;
+  go: string;
+}
 
 /* Zone names joined as the panel joins them everywhere else. */
 export const andList = (names: string[]) => names.join(" and ");
@@ -96,7 +101,8 @@ export function autoName(entity: string, st: HaState | undefined): string {
 }
 const STATE_WORDS: Record<AutoState, string> = { on: "On.", off: "Off.", unavailable: "Unavailable in Home Assistant.", gone: "Home Assistant doesn't have it any more." };
 
-/* Other zones that link the same automation, by name. Switching it in one switches it in all of them. */
+/* Other zones that link the same automation, by name. An automation belongs to one zone, so Link automations names
+   the one that has it, and saving it here too is refused. */
 export function sharedWith(zones: Zone[], zoneId: string, entity: string): string[] {
   return zones.filter((o) => o.id !== zoneId && o.automations.some((a) => a.entity === entity)).map((o) => o.name);
 }
@@ -157,23 +163,22 @@ export interface AutoRow {
   sub: string;
   line: AutoLine | null;
 }
-export function autoRow(link: AutomationLink, st: HaState | undefined, shared: string[], ctl: AutoCtl | undefined, now: number): AutoRow {
+export function autoRow(link: AutomationLink, st: HaState | undefined, ctl: AutoCtl | undefined, now: number): AutoRow {
   const state = autoState(st), last = st?.attributes.last_triggered;
   const ran = typeof last === "string" ? ranWords(last, now) : "";
   /* HA says null for one that never ran. Anything else that isn't a time says nothing, rather than claiming that. */
   const when = ran ? `Last triggered ${ran}.` : last === null ? "Never triggered." : "";
-  const sub = [STATE_WORDS[state], when, shared.length ? `Shared with ${andList(shared)}.` : ""].filter(Boolean).join(" ");
+  const sub = [STATE_WORDS[state], when].filter(Boolean).join(" ");
   return { link, name: autoName(link.entity, st), state, on: state === "on", locked: (state !== "on" && state !== "off") || ctl?.status === "sending", sub, line: autoLine(ctl, st) };
 }
 
 /* Switching a failsafe off is a safety decision, so it asks first. Switching one on, and alerts and control either way,
    don't. Asked only while HA reports it on, since that's the only time the tap switches it off. */
-export function offQuestion(z: Zone, zones: Zone[], link: AutomationLink, st: HaState | undefined): Question | null {
+export function offQuestion(link: AutomationLink, st: HaState | undefined): Question | null {
   if (link.group !== "failsafe" || autoState(st) !== "on") return null;
-  const shared = sharedWith(zones, z.id, link.entity), where = shared.length ? ` in ${[z.name, ...shared].join(" or ")}` : "";
   return {
     title: `Switch off ${autoName(link.entity, st)}?`,
-    text: `It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that${where}. You can switch it on again here.`,
+    text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.",
     keep: "Keep it on",
     go: "Switch off",
   };
@@ -326,14 +331,6 @@ export function setLinkGroup(d: LinkDraft, entity: string, group: AutomationGrou
   if (d.pick[entity] !== undefined) d.pick[entity] = group;
 }
 
-/* Sharing stays allowed, but never with one unnoticed tap: ticking an automation another zone links asks first. Only
-   what's saved counts. Unticking never asks, and nor does one this zone had saved, since that sharing was agreed to. */
-export function shareQuestion(zones: Zone[], d: LinkDraft, entity: string, name: string): Question | null {
-  if (d.pick[entity] !== undefined || d.was[entity] !== undefined) return null;
-  const z = zones.find((x) => x.id === d.zoneId), others = sharedWith(zones, d.zoneId, entity);
-  return z && others.length ? shareAsk("automation", name, z.name, others) : null;
-}
-
 export interface LinkRow {
   entity: string;
   name: string;
@@ -389,9 +386,9 @@ export function linkChanges(d: LinkDraft, automations: CatalogAutomation[], stat
   return out;
 }
 
-/* The host asks before an automation no zone links yet can be switched; one linked anywhere already can be. */
-export function linkNote(d: LinkDraft, zones: Zone[]): string {
-  const fresh = Object.keys(d.pick).some((e) => !zones.some((z) => z.automations.some((a) => a.entity === e)));
+/* The host asks before a newly linked automation can be switched. */
+export function linkNote(d: LinkDraft): string {
+  const fresh = Object.keys(d.pick).some((e) => d.was[e] === undefined);
   return `Only Environment Control changes, and Home Assistant keeps running every automation as it is.${fresh ? " Home Assistant asks you before a newly linked one can be switched from here." : ""}`;
 }
 
