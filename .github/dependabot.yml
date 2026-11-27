@@ -1,8 +1,11 @@
 version: 2
 updates:
   # A release has to be two weeks old before it's proposed, so a hijacked one has time to be caught first.
+  # Version updates go into beta like every other change. Security updates ignore target-branch and always go to the
+  # default branch, main, so those wait for the owner.
   - package-ecosystem: npm
     directory: /frontend
+    target-branch: "beta"
     schedule:
       interval: weekly
     cooldown:
@@ -12,12 +15,14 @@ updates:
         dependency-type: development
   - package-ecosystem: pip
     directory: /
+    target-branch: "beta"
     schedule:
       interval: weekly
     cooldown:
       default-days: 14
   - package-ecosystem: github-actions
     directory: /
+    target-branch: "beta"
     schedule:
       interval: weekly
     cooldown:
