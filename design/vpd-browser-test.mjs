@@ -478,6 +478,26 @@ check("History: Setup's Appearance card shows what each zone opens on", (await e
 await ev(`document.querySelector('[data-opens="garden"][data-ometric="temperature"]').click()`); await sleep(40); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(200);
 check("History: going back to Temperature, 24h stores nothing, since that's the default", (await onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="garden").history ?? null`)) === null);
 
+// ---------- The History divider: a line between the graph chips and the range chips, shown only while they share a line
+/* The line is the range chips' ::before, in the gap, and the row clips it once the range chips start a line of their
+   own. Where it falls is worked out from its computed place, since a pseudo-element has no box to ask for. */
+const sepAt = `const r=b.querySelector(".row.segs"),g=r?r.querySelectorAll(".seg"):[],a=g[0].getBoundingClientRect(),c=g[1].getBoundingClientRect(),p=getComputedStyle(g[1],"::before"),rr=r.getBoundingClientRect(),x=c.left+parseFloat(p.left),lw=parseFloat(p.width),one=Math.abs(a.top-c.top)<1,shown=!!r&&p.content!=="none"&&getComputedStyle(r).overflowX==="clip"&&x>=rr.left&&x+lw<=rr.right`;
+const sepNow = (box) => ev(`(()=>{const b=${box};${sepAt};return {shown,oneLine:one,between:shown&&x>=a.right&&x+lw<=c.left,centred:Math.abs((x-a.right)-(c.left-x-lw))<1.5,ringRoom:parseFloat(getComputedStyle(r).paddingLeft)>=2}})()`);
+const sepSweep = (box) => ev(`(()=>{const b=${box},out=[];let s=0,wr=0;for(let w=240;w<=600;w+=0.5){b.style.width=w+"px";${sepAt};if(shown)s++;if(!one)wr++;if(shown!==one)out.push([w,shown,one])}b.style.width="";return {wrong:out.slice(0,6),shown:s,wrapped:wr}})()`);
+const HIST_BOX = `document.querySelector("#chart").closest(".card").querySelector(".card-head")`, OPENS_BOX = `document.querySelector('.opens-row [data-opens="garden"]').closest(".opens-row")`;
+for (const [box, name] of [[HIST_BOX, "History card"], [OPENS_BOX, "Setup's History opens on"]]) {
+  await reset(); await goTab(name === "History card" ? "Garden" : "Setup"); await sleep(60);
+  for (const [w, h, size] of [[1280, 900, "desktop"], [390, 844, "phone"]]) {
+    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+    await sleep(60); const now = await sepNow(box);
+    check(`Divider, ${name} ${size}: ${size === "desktop" ? "on one line, with a line centred between the groups, room left for a chip's focus ring" : "wrapped, with no line"}`, size === "desktop" ? now.shown && now.oneLine && now.between && now.centred && now.ringRoom : !now.shown && !now.oneLine, now);
+    await ev(`${box}.scrollIntoView({block:"center"})`); await shot(`divider-${name === "History card" ? "history" : "setup"}-${size}`);
+  }
+  const sw = await sepSweep(box);
+  check(`Divider, ${name}: across widths, measured where the groups really wrap, the line shows exactly while both sit on one line`, sw.wrong.length === 0 && sw.shown > 0 && sw.wrapped > 0, sw);
+}
+await phone(390, 844);
+
 // ---------- Confirmation: a device becomes controllable only once a person says yes, in a dialog the frame can't reach
 /* Page scripts can't see into the host's closed shadow root, but the test can, through DevTools, and clicks it as a person would. */
 await rawSend("DOM.enable");

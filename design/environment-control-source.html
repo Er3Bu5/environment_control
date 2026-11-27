@@ -312,6 +312,13 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .seg button { border: 1px solid var(--line); background: none; padding: 3px 10px; min-height: 32px; border-radius: 16px; font-size: 13px; color: var(--muted); }
   .seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 18%, transparent); border-color: var(--primary); color: var(--fg); }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  /* A line between a graph's chips and a range's, so two picked chips side by side don't read as one group. It sits in
+     the gap, so once the groups are on lines of their own it falls outside the box at the start of the second line and
+     is clipped, with nothing left dangling. The padding keeps a chip's focus ring inside the clip and the margin gives
+     that room back. The panel's own rule since #72. */
+  .segs { gap: 8px 16px; overflow: clip; padding: 4px; margin: -4px; }
+  .segs > .seg + .seg { position: relative; }
+  .segs > .seg + .seg::before { content: ""; position: absolute; left: -8.5px; top: 4px; bottom: 4px; width: 1px; background: var(--line); }
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong, .lrow strong, .lbasis strong { font-weight: 500; }
   .lrows { display: flex; flex-direction: column; gap: 8px; }
@@ -1223,7 +1230,7 @@ function renderZone() {
   return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
     ${unfinished}${autosNotice(z)}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
-    <section class="card"><div class="card-head"><h2>History</h2><div class="row">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
+    <section class="card"><div class="card-head"><h2>History</h2><div class="row segs">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
     <div class="split">
       <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
@@ -2822,7 +2829,7 @@ function appearanceCard() {
     ${zones.length ? `<div class="opens"><div><h3>History opens on</h3><p class="small muted">The graph and range each zone's History starts on. Kept with the zone, so it's the same on every device.</p></div>${zones.map((z) => {
       const at = z.history || HISTORY_DEFAULT;
       const seg = (label, items, cur, attr) => `<div class="seg" role="group" aria-label="${esc(z.name)}: ${label}">${items.map(([v, l]) => `<button data-opens="${z.id}" ${attr}="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join("")}</div>`;
-      return `<div class="opens-row"><strong>${esc(z.name)}</strong><div class="row">${seg("graph", Object.keys(M).map((k) => [k, M[k].short]), at.metric, "data-ometric")}${seg("range", RANGES, at.hours, "data-ohours")}</div></div>`;
+      return `<div class="opens-row"><strong>${esc(z.name)}</strong><div class="row segs">${seg("graph", Object.keys(M).map((k) => [k, M[k].short]), at.metric, "data-ometric")}${seg("range", RANGES, at.hours, "data-ohours")}</div></div>`;
     }).join("")}</div>` : ""}</section>`;
 }
 
