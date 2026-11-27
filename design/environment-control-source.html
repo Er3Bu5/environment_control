@@ -1302,12 +1302,18 @@ function chartStats(line) {
   return { min, max };
 }
 const LINE = ["var(--primary)", "var(--temp)", "var(--under)"];
-let chartNow = null;
+let chartNow = null, chartPen = null;
+function textWidth(text, el) {
+  chartPen = chartPen || document.createElement("canvas").getContext("2d");
+  chartPen.font = `11px ${getComputedStyle(el).fontFamily}`;
+  return chartPen.measureText(text).width;
+}
 function drawChart() {
   const el = $("#chart"); chartNow = null; if (!el) return;
   const z = zoneById(ui.zone), k = ui.metric, W = Math.max(300, el.clientWidth), H = W < 520 ? 210 : 260;
   if (!envOf(z).length) { el.innerHTML = `<p class="small muted">No environment sensors in ${esc(z.name)} yet.</p>`; $("#chart-key").innerHTML = ""; $("#chart-stats").innerHTML = ""; $("#chart-note").textContent = ""; return; }
-  const L = 46, R = 8, T = 8, B = 22, PW = W - L - R, PH = H - T - B;
+  /* The same small inset on both sides, wide enough that a hover dot at either end isn't cut off. */
+  const EDGE = 4, R = EDGE, T = 8, B = 22, PH = H - T - B;
   const envs = envOf(z), lines = envs.map((_, i) => series(z, k, ui.range, i)), pts = lines[0], n = pts.length - 1;
   const counted = lines.filter((_, c) => envs[c].avg !== false), method = methodOf(z, k);
   const merged = envs.length < 2 ? null : pts.map((p, ix) => {
@@ -1317,8 +1323,10 @@ function drawChart() {
   const vals = lines.flat().map((p) => p.v).filter((v) => v !== null), hasBand = k !== "light" && targetsSet(z);
   if (hasBand) for (const p of ["day", "night"]) vals.push(z.bands[p][k][0], z.bands[p][k][4]);
   let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo = Math.max(0, lo - pad); hi += pad;
-  const X = (i) => L + (i / n) * PW, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * PH;
   const axis = (v) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString("en-NZ") : `${Math.round(v / 1000)}k`) : v.toFixed(k === "vpd" ? 2 : 0));
+  /* The gutter is only as wide as this metric's numbers, so a narrow axis doesn't leave the left looking empty. */
+  const L = EDGE + Math.ceil(Math.max(...[0, 1, 2, 3, 4].map((t) => textWidth(axis(lo + ((hi - lo) * t) / 4), el)))) + 6, PW = W - L - R;
+  const X = (i) => L + (i / n) * PW, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * PH;
   let s = "", i = 0;
   while (i < n) {
     let j = i; const d = isDay(z, pts[i].t);
