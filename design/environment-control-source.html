@@ -1226,14 +1226,15 @@ function renderZone() {
   const z = zoneById(ui.zone);
   const left = setupLeft(z);
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Not set up yet. Still to confirm: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
-  /* Since #33: History, then Device placement and Controls. The targets and Activity moved behind the menu in the heading. */
+  /* Since #33: History, then the map and Controls. The targets and Activity moved behind the menu in the heading. The map's
+     card is Zone map here and Device placement only in Setup, where it's the step that puts things on it. */
   return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
     ${unfinished}${autosNotice(z)}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row segs">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
     <div class="split">
-      <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
+      <section class="card"><div class="card-head"><h2>Zone map</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
       ${controlsCard(z)}
     </div>
     </div>`;
