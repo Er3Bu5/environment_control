@@ -1,9 +1,9 @@
 name: Validate
 
-# Runs on each pull request, whatever its base (work into beta, and beta into main), daily on main, and by hand. Not on
+# Runs on each pull request, whatever its base (work into dev, and dev into main), daily on main, and by hand. Not on
 # a merge: the pull request's run already tested the merged content, and the last job records that content by its git
 # tree hash, so Beta and Release can confirm exactly what they build passed here without running the suites a second
-# time. For main, that record comes from the pull request that moves beta to main.
+# time. For main, that record comes from the pull request that moves dev to main.
 on:
   pull_request:
   schedule:
