@@ -1,10 +1,9 @@
 """Whether a merge is still the newest on main once merges have stopped arriving.
 
-Run by the Beta workflow before it numbers a beta. Several pull requests merged one after another would otherwise each
-make a beta of their own, each waiting for approval, when the last one holds everything. So a merge waits here until
-main has been quiet for a while. If a newer merge lands in that time this one makes no beta, because the newer merge's
-beta includes it. Prints one GitHub Actions output, newest (true or false). Usage: python3 scripts/quiet_main.py
-<commit>
+Run by the Beta workflow's hourly run before it numbers a beta, so a beta isn't cut in the middle of a batch of merges.
+A merge waits here until main has been quiet for a while. If a newer merge lands in that time this run makes no beta,
+and the next hour's run takes them all. A run started by hand skips this and builds main as it is. Prints one GitHub
+Actions output, newest (true or false). Usage: python3 scripts/quiet_main.py <commit>
 """
 
 from __future__ import annotations
