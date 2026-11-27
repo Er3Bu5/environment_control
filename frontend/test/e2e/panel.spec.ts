@@ -232,7 +232,7 @@ test.describe("talking to HA", () => {
     expect(Math.abs(t!.x + t!.width - (w!.x + w!.width))).toBeLessThan(2);
     /* The zone's cards each take the page's full width, one under the other. */
     const card = (name: string) => app(frame).locator("section.card", { has: frame.getByRole("heading", { name, exact: true }) });
-    const [place, controls] = [await card("Device placement").boundingBox(), await card("Controls").boundingBox()];
+    const [place, controls] = [await card("Zone map").boundingBox(), await card("Controls").boundingBox()];
     expect([Math.round(place!.width), Math.round(controls!.width)]).toEqual([Math.round(w!.width), Math.round(w!.width)]);
     expect(controls!.y).toBeGreaterThan(place!.y + place!.height);
     /* A dehumidifier's modes sit under its name, so on a wide page its row is no taller than its dial. */
@@ -807,8 +807,8 @@ test.describe("targets, day and night", () => {
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "22.5", "24", "25", "27", "28"]);
     await dialog(frame).getByRole("button", { name: "Close" }).click();
     await expect(dialog(frame)).toHaveCount(0);
-    /* History leads the page, then Device placement, then Controls. */
-    expect(await app(frame).locator("main h2").allTextContents()).toEqual(["History", "Device placement", "Controls"]);
+    /* History leads the page, then the zone's map, then Controls. */
+    expect(await app(frame).locator("main h2").allTextContents()).toEqual(["History", "Zone map", "Controls"]);
     await app(frame).getByRole("button", { name: "View targets" }).click();
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
@@ -1740,10 +1740,16 @@ test.describe("zone layout and placement", () => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Garden");
-    const card = app(frame).locator("section.card", { has: frame.getByRole("heading", { name: "Device placement", exact: true }) });
+    /* On the zone's page it's the zone's map; putting things on it is the setup step, which keeps its name. */
+    await expect(app(frame).getByRole("heading", { name: "Device placement", exact: true })).toHaveCount(0);
+    const card = app(frame).locator("section.card", { has: frame.getByRole("heading", { level: 2, name: "Zone map", exact: true }) });
     await expect(card.locator(".map")).toBeVisible();
     await expect(card.getByRole("radio")).toHaveCount(0);
     await expect(card).not.toContainText("Above canopy In canopy");
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Set up Garden" }).click();
+    await app(frame).getByRole("menuitem", { name: "Device placement", exact: true }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device placement: Garden", exact: true })).toBeVisible();
   });
 
   test("a unit can be given a label, which the map shows in place of its number", async ({ page }) => {
