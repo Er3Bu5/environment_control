@@ -383,11 +383,12 @@
         if (!this._hass.states[d.entity]) return `Home Assistant has no ${d.entity}.`;
         out.push({ entity: d.entity, zones: d.zones });
       }
-      /* An automation linked to any zone can already be switched, so linking it to another zone adds nothing to ask about. */
-      const switched = new Set(this.config.zones.flatMap((z) => automationLinks(z).map((a) => a.entity)));
+      /* Only a zone's own stored link spares it the question. One another zone links is asked about too: the backend
+         refuses it, since an automation belongs to one zone. */
+      const switched = new Set(this.config.zones.flatMap((z) => automationLinks(z).map((a) => `${z.id} ${a.entity}`)));
       for (const z of config.zones) for (const a of z && typeof z === "object" && Array.isArray(z.automations) ? z.automations : []) {
         if (!a || typeof a.entity !== "string") return "That isn't an automation this panel can switch.";
-        if (switched.has(a.entity)) continue;
+        if (switched.has(`${z.id} ${a.entity}`)) continue;
         if (!AUTOMATION.test(a.entity)) return "That isn't an automation this panel can switch.";
         if (!this._hass.states[a.entity]) return `Home Assistant has no ${a.entity}.`;
         const had = out.find((x) => x.entity === a.entity);

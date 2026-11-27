@@ -21,6 +21,10 @@ const PATHS = {
   tank: "M12 2C7.6 2 4 3.3 4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5c0-1.7-3.6-3-8-3Zm0 2c3.6 0 6 .9 6 1s-2.4 1-6 1-6-.9-6-1 2.4-1 6-1Zm6 14.9c-.3.4-2.6 1.1-6 1.1s-5.7-.7-6-1.1V13c1.5.7 3.6 1 6 1s4.5-.3 6-1v5.9Z",
   /* A turn-back arrow, for putting a box back to what was last saved. */
   reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
+  /* The Automations page's three chips: alerts, failsafes, and the automations that switch hardware on a schedule. */
+  bell: "M21 19v1H3v-1l2-2v-6c0-3.1 2-5.8 5-6.7V4a2 2 0 0 1 4 0v.3c3 .9 5 3.6 5 6.7v6l2 2Zm-7 2a2 2 0 0 1-4 0",
+  shield: "M10 17 6 13l1.4-1.4 2.6 2.6 6.6-6.6L18 9l-8 8ZM12 1 3 5v6c0 5.6 3.8 10.7 9 12 5.2-1.3 9-6.4 9-12V5l-9-4Z",
+  clock: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-18a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm.5 5v5.2l4.5 2.7-.8 1.2-5.2-3.1V7h1.5Z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

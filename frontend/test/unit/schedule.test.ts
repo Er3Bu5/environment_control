@@ -31,6 +31,7 @@ const catalog: Catalog = {
     helper("input_number.daylight", "input_number", "10", { min: 0, max: 59, step: 1, unit: "min" }),
     helper("input_number.evening", "input_number", "5", { min: 0, max: 59, step: 1, unit: "min" }),
   ],
+  automations: [],
 };
 const garden = () => ({
   id: "garden",

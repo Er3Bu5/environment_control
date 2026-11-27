@@ -36,6 +36,7 @@ const catalog: Catalog = {
     { id: "zig", name: "Zigbee sensor", area: null, manufacturer: null, model: null, integration: "zha", family: "ZHA", link: "zigbee", path: "local", hub: null, entities: [] },
   ],
   entities: [],
+  automations: [],
 };
 const zone = (over: Record<string, unknown> = {}) => ({
   id: "garden",

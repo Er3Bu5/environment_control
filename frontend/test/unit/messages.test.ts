@@ -20,6 +20,32 @@ describe("messages from the host", () => {
     expect(readHostMessage({ v: 1, type: "callService", domain: "switch" })).toBeNull();
   });
 
+  it("carries the room's settings with the stored setup, on init, config and a save's answer, and none when none was sent", () => {
+    const room = { alertRepeat: "input_number.alert_repeat_rate" };
+    expect(readHostMessage({ v: 1, type: "init", ...stored, room, states: {}, theme })).toMatchObject({ type: "init", room });
+    expect(readHostMessage({ v: 1, type: "config", ...stored, room: {} })).toEqual({ type: "config", ...stored, room: {} });
+    const saved = readHostMessage({ v: 1, type: "result", req: 4, ok: true, ...stored, room });
+    expect(saved?.type === "result" && saved.stored).toEqual({ ...stored, room });
+    /* No room at all stays no room, so a save sends none and the host keeps what's stored instead of unlinking it. */
+    const m = readHostMessage({ v: 1, type: "config", ...stored });
+    expect(m && "room" in m).toBe(false);
+  });
+
+  it("reads each room setting on its own, leaving out one that isn't a number helper and any it doesn't know", () => {
+    for (const alertRepeat of ["switch.alert_repeat", "input_number.Alert", "input_number.", 15, null])
+      expect(readHostMessage({ v: 1, type: "config", ...stored, room: { alertRepeat } })).toMatchObject({ room: {} });
+    expect(readHostMessage({ v: 1, type: "config", ...stored, room: { alertRepeat: "input_number.repeat", colour: "red" } })).toMatchObject({ room: { alertRepeat: "input_number.repeat" } });
+  });
+
+  it("drops a stored setup whose room isn't an object, as it does zones that aren't a list", () => {
+    for (const room of [null, "input_number.repeat", ["input_number.repeat"], 1]) {
+      expect(readHostMessage({ v: 1, type: "init", ...stored, room, states: {}, theme })).toBeNull();
+      expect(readHostMessage({ v: 1, type: "config", ...stored, room })).toBeNull();
+      const saved = readHostMessage({ v: 1, type: "result", req: 4, ok: true, ...stored, room });
+      expect(saved?.type === "result" && saved.stored).toBeFalsy();
+    }
+  });
+
   it("drops a half-formed message rather than using part of it", () => {
     expect(readHostMessage({ v: 1, type: "init", revision: "2", zones: [], devices: [], states: {}, theme })).toBeNull();
     expect(readHostMessage({ v: 1, type: "config", revision: 1, zones: {}, devices: [] })).toBeNull();
@@ -77,6 +103,29 @@ describe("readCatalog", () => {
   it("drops an entity whose id isn't an entity id", () => {
     const c = readCatalog({ devices: [{ ...device, entities: [entity, { ...entity, entity_id: "not an id" }] }], entities: [] });
     expect(c?.devices[0].entities).toHaveLength(1);
+  });
+
+  it("lists Home Assistant's automations, each with only its name, area, state and when it last ran", () => {
+    const ran = "2026-11-17T00:05:00+00:00";
+    const c = readCatalog({ devices: [], entities: [], automations: [{ entity_id: "automation.garden_lights_on", name: "Garden Lights On", state: "on", area: "Garden", last_triggered: ran, trigger: "time" }] });
+    expect(c?.automations).toEqual([{ entity_id: "automation.garden_lights_on", name: "Garden Lights On", state: "on", area: "Garden", last_triggered: ran }]);
+  });
+
+  it("leaves out an automation that isn't one, without hiding the rest, and reads what it can't use as nothing", () => {
+    const ok = { entity_id: "automation.ok", name: "OK", state: "off", area: null, last_triggered: null };
+    const c = readCatalog({
+      devices: [],
+      entities: [],
+      automations: [ok, { ...ok, entity_id: "script.ok" }, { ...ok, entity_id: "automation.Bad" }, { ...ok, entity_id: `automation.${"x".repeat(201)}` }, "automation.ok", null, { ...ok, entity_id: "automation.odd", name: 5, state: 1, area: [], last_triggered: "yesterday" }],
+    });
+    expect(c?.automations).toEqual([ok, { entity_id: "automation.odd", name: "automation.odd", state: null, area: null, last_triggered: null }]);
+  });
+
+  it("keeps the devices and helpers when the automations aren't a list", () => {
+    for (const automations of [undefined, "lots", { a: 1 }]) {
+      const c = readCatalog({ devices: [device], entities: [], automations });
+      expect([c?.devices.length, c?.automations]).toEqual([1, []]);
+    }
   });
 
   it("refuses something that isn't a catalog at all", () => {

@@ -142,3 +142,51 @@ async def test_a_link_to_anything_but_an_automation_is_refused_and_nothing_is_st
     assert "isn't an automation" in r["error"]["message"]
     assert DOMAIN not in hass_storage
     assert (await _send(client, type=f"{DOMAIN}/config"))["result"]["revision"] == 0
+
+
+async def test_an_automation_linked_by_a_second_zone_is_refused_and_nothing_is_stored(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    zones[1]["automations"] = [dict(link)]
+    zones[2]["automations"] = [dict(link)]
+    client = await hass_ws_client(hass)
+    r = await _send(
+        client, type=f"{DOMAIN}/config/save", revision=0, config={"zones": zones, "devices": sample_unlinked["devices"]}
+    )
+    assert not r["success"] and r["error"]["code"] == "invalid_config"
+    assert r["error"]["message"] == "An automation can only be linked to one zone."
+    await hass.async_block_till_done()
+    assert DOMAIN not in hass_storage
+
+
+async def test_an_automation_moves_zone_in_two_saves(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    """Unlinked where it is in one save, then linked in the new zone in the next."""
+    link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    zones[1]["automations"] = [dict(link)]
+    zones[2]["automations"] = []
+    devices = sample_unlinked["devices"]
+    client = await hass_ws_client(hass)
+    assert (await _send(client, type=f"{DOMAIN}/config/save", revision=0, config={"zones": zones, "devices": devices}))[
+        "success"
+    ]
+    zones[2]["automations"] = [dict(link)]
+    r = await _send(client, type=f"{DOMAIN}/config/save", revision=1, config={"zones": zones, "devices": devices})
+    assert not r["success"] and r["error"]["message"] == "An automation can only be linked to one zone."
+    zones[1]["automations"] = []
+    zones[2]["automations"] = []
+    assert (await _send(client, type=f"{DOMAIN}/config/save", revision=1, config={"zones": zones, "devices": devices}))[
+        "success"
+    ]
+    zones[2]["automations"] = [dict(link)]
+    assert (await _send(client, type=f"{DOMAIN}/config/save", revision=2, config={"zones": zones, "devices": devices}))[
+        "success"
+    ]
+    await hass.async_block_till_done()
+    stored = hass_storage[DOMAIN]["data"]
+    assert stored["revision"] == 3
+    assert [z.get("automations") for z in stored["zones"][1:]] == [[], [link]]
