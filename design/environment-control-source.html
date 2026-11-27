@@ -137,7 +137,12 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
   .review-row b { font-weight: 500; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
+  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus. */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; animation: toast-in .2s ease-out; }
+  .toast.leaving { animation: toast-out .2s ease-in forwards; }
+  @keyframes toast-in { from { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @keyframes toast-out { to { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @media (prefers-reduced-motion: reduce) { .toast, .toast.leaving { animation: none; } }
 
   .combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
   .inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
@@ -364,9 +369,6 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   body.drafting:not(.vtyping) main { padding-bottom: 96px; }
   /* Back rides in the same place on a page, so a page's last card isn't left under it. */
   main:has(#pagebar:not([hidden])) { padding-bottom: 96px; }
-  /* Saving Link automations comes back to a page with Back in that bar, and the toast saying so mustn't lie over it. */
-  body:has(#pagebar:not([hidden])) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
-  body.drafting:not(.vtyping) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   body.vtyping .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
   .draft-text { flex: 1; min-width: 0; font-size: 14px; }
@@ -393,7 +395,6 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     body.drafting:not(.vtyping) main { padding-bottom: 136px; }
-    body.drafting:not(.vtyping) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* History, as the mock draws it. The chart scrolls the page vertically under a finger and reads a point sideways. */
@@ -542,9 +543,8 @@ body.vtyping { padding-bottom: 70vh; }
 @media (max-height: 500px) { body.vtyping .topbar { position: static; } }
 .draftbar[hidden] { display: none; }
 body.drafting:not(.vtyping) { padding-bottom: 96px; }
-body.drafting .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 #draft-why { opacity: .8; }
-@media (max-width: 640px) { .draftbar:not([data-blocked]) #draft-why { display: none; } body.drafting:not(.vtyping) { padding-bottom: 136px; } body.drafting .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); } }
+@media (max-width: 640px) { .draftbar:not([data-blocked]) #draft-why { display: none; } body.drafting:not(.vtyping) { padding-bottom: 136px; } }
 .modal[hidden] { display: none; }
 .dialog .row { justify-content: flex-end; }
 .review-list.preview .review-row { color: var(--muted); }
@@ -3326,8 +3326,13 @@ function jumpTo(id) {
 }
 let toastTimer;
 function toast(msg) {
-  const t = $("#toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+  const t = $("#toast"); t.textContent = msg; t.classList.remove("leaving"); t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    t.classList.add("leaving");
+    // With reduced motion there is no slide to wait for.
+    toastTimer = setTimeout(() => { t.hidden = true; t.classList.remove("leaving"); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200);
+  }, 2800);
 }
 /* A menu opens and closes without a render, so focus can move into it and back to its button as a menu's should. */
 function closeMenus(refocus) {
