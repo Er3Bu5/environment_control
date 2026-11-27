@@ -333,6 +333,8 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
   .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
   body.drafting:not(.vtyping) main { padding-bottom: 96px; }
+  /* Back rides in the same place on a page, so a page's last button, such as Link automations, isn't left under it. */
+  main:has(#pagebar:not([hidden])) { padding-bottom: 96px; }
   body.drafting:not(.vtyping) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   body.vtyping .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
@@ -484,7 +486,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .ctl-status.stuck, .ctl-status.error { color: var(--crit); }
 .ctl-status.back { color: var(--warn); }
 .crit-text { color: var(--crit); }
-[data-agroup] .devs, #z-autos .pickrow + .pickrow { margin-top: 0; }
+[data-agroup] .devs { margin-top: 0; }
+/* A chip's count of what's on, muted beside its name so the name still reads first. */
+.seg .segn { margin-left: 6px; font-size: 12px; color: var(--muted); }
 .lrow { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--tile); min-width: 0; }
 .lrow strong { font-weight: 500; }
 .lid { overflow-wrap: anywhere; }
@@ -1225,7 +1229,7 @@ function renderZone() {
       <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
       ${controlsCard(z)}
     </div>
-    ${autosCard(z)}</div>`;
+    </div>`;
 }
 
 /* Seeded so a redraw keeps the same line. */
@@ -1412,8 +1416,16 @@ function ranWords(iso) {
 }
 const autoCtl = {};
 function autoCount(key) {
-  const [zid, g] = key.split(":"), z = zoneById(zid), list = z ? autosOf(z).filter((a) => a.group === g || (g in AUTO_PAGES && pageOf(a) === g)) : [];
+  const [zid, g] = key.split(":"), z = zoneById(zid), list = z ? autosOf(z).filter((a) => a.group === g) : [];
   return list.length ? `${list.filter(autoOn).length} of ${list.length} on` : "None linked";
+}
+/* A page's chip: its count as a fraction to the eye, and in words to a screen reader. */
+function chipWords(key) {
+  const [zid, page] = key.split(":"), z = zoneById(zid), list = z ? autosOf(z, page) : [], on = list.filter(autoOn).length, title = AUTO_PAGES[page].title;
+  return { count: `${on}/${list.length}`, label: list.length ? `${title}, ${on} of ${list.length} on` : `${title}, none linked` };
+}
+function autoChips(z, cur) {
+  return `<div class="seg" role="group" aria-label="Automations">${Object.entries(AUTO_PAGES).map(([k, p]) => { const w = chipWords(`${z.id}:${k}`); return `<button data-autopage="${k}" data-autochip="${z.id}:${k}" aria-pressed="${k === cur}" aria-label="${esc(w.label)}">${p.title}<span class="segn">${w.count}</span></button>`; }).join("")}</div>`;
 }
 function autoRow(a, z) {
   const st = autoSt(a), c = autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a), shared = sharedAuto(z, a.entity);
@@ -1434,6 +1446,7 @@ function redrawAuto(entity) {
     if (focused) { const again = document.querySelector(`[data-autorow="${CSS.escape(entity)}"][data-zone="${z.id}"] [data-auto]`); if (again && !again.disabled) again.focus(); }
   }
   for (const el of document.querySelectorAll("[data-autocount]")) el.textContent = autoCount(el.dataset.autocount);
+  for (const el of document.querySelectorAll("[data-autochip]")) { const w = chipWords(el.dataset.autochip); el.querySelector(".segn").textContent = w.count; el.setAttribute("aria-label", w.label); }
 }
 async function sendAuto(z, a, on) {
   const want = on ? "on" : "off", c = { status: "sending", text: `Sent. Waiting for Home Assistant to report it ${want}.`, want };
@@ -1466,10 +1479,8 @@ function autosNotice(z) {
   if (!off.length) return "";
   return `<button class="notice fix" data-autos="failsafe" data-zone="${z.id}"><span>${off.length === 1 ? `A failsafe is off: ${esc(autoName(off[0]))}.` : `${off.length} failsafes are off.`} While ${off.length === 1 ? "it's" : "they're"} off, nothing puts that hardware back.</span><span class="fixgo">Failsafes &rsaquo;</span></button>`;
 }
-function autosCard(z) {
-  const rows = Object.entries(AUTO_PAGES).map(([k, p]) => `<button class="pickrow" data-autos="${k}" data-zone="${z.id}">${ic(p.icon, "var(--primary)")}<span class="pick-text"><strong>${p.title}</strong><span class="dev-sub" data-autocount="${z.id}:${k}">${autoCount(`${z.id}:${k}`)}</span></span><span class="fixgo">&rsaquo;</span></button>`).join("");
-  return `<section class="card" id="z-autos"><div class="card-head"><h2>Automations</h2><button class="btn" data-linkautos="${z.id}">Link automations</button></div><p class="small muted">Home Assistant runs these. Here you switch them on and off.</p><div>${rows}</div></section>`;
-}
+/* One page per zone, its Alerts, Failsafes and Control behind chips as the panel has them since 2026-11-27, in place of a
+   card on the zone page leading to three pages. */
 function renderAutos() {
   if (ui.linkw) return renderLinkAutos();
   const { zone, page } = ui.autos, z = zoneById(zone), p = AUTO_PAGES[page], list = autosOf(z, page);
@@ -1479,7 +1490,8 @@ function renderAutos() {
   }).join("");
   const empty = `<div class="notice calm"><strong>No ${p.title.toLowerCase()} linked to ${esc(z.name)} yet</strong><button class="fixlink" data-linkautos="${z.id}">Link automations &rsaquo;</button></div>`;
   /* Back rides in the bar at the foot, as on every page since #54; the draft bar takes over while the repeat rate differs. */
-  return `<div class="wrap"><div><h1>${p.title}: ${esc(z.name)}</h1><p class="muted small">${p.about}</p></div>
+  return `<div class="wrap"><div><h1>Automations: ${esc(z.name)}</h1><p class="muted small">Home Assistant runs these. Here you switch them on and off.</p></div>
+    ${autoChips(z, page)}<p class="muted small" id="autos-about">${p.about}</p>
     ${page === "alert" ? repeatCard() : ""}${sections || empty}${sections ? `<div class="row"><button class="btn" data-linkautos="${z.id}">Link automations</button></div>` : ""}
     <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-go="zone" data-zone="${z.id}">Back</button></div></div>`;
 }
@@ -1614,7 +1626,7 @@ function repeatList() {
 }
 function alertsCard() {
   const e = room.alertRepeat, st = e && haStates[e], unit = st && st.attributes && st.attributes.unit_of_measurement ? ` ${st.attributes.unit_of_measurement}` : "";
-  const linked = e ? `<div class="task"><div><strong>Alert repeat</strong><p class="small muted">${st ? `${esc(st.state)}${esc(unit)}.` : "Home Assistant doesn't have it right now."} On your helper, ${esc(e)}. Change it on any zone's Alerts page.</p></div><div class="row"><button class="btn" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link another</button><button class="btn" data-repeatunlink>Unlink</button></div></div>`
+  const linked = e ? `<div class="task"><div><strong>Alert repeat</strong><p class="small muted">${st ? `${esc(st.state)}${esc(unit)}.` : "Home Assistant doesn't have it right now."} On your helper, ${esc(e)}. Change it on any zone's Automations page, under Alerts.</p></div><div class="row"><button class="btn" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link another</button><button class="btn" data-repeatunlink>Unlink</button></div></div>`
     : `<div class="row"><button class="btn primary" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link a helper</button></div>`;
   return `<section class="card" id="room-alerts"><div><h2>Alerts</h2><p class="small muted">How often an alert may buzz your phone comes from one number helper shared by every alert in Home Assistant, so it's linked here, for the whole room, rather than per zone.</p></div>${linked}${ui.repeatPick ? `<div class="picklist" id="repeat-list">${repeatList()}</div>` : ""}</section>`;
 }
@@ -3344,6 +3356,12 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-mapvirt]"))) { ui.picked = el.dataset.mapvirt; render(); return; }
   if ((el = q("[data-auto]"))) { const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.id === el.dataset.auto); if (a) tapAuto(z, a); return; }
   if ((el = q("[data-autos]"))) { const zone = el.dataset.zone, page = el.dataset.autos; guarded(() => { Object.assign(ui, { screen: "autos", zone, autos: { zone, page }, linkw: null }); render(); window.scrollTo(0, 0); }); return; }
+  /* Another chip drops an alert repeat draft, so it asks first, and focus stays on the chips. */
+  if ((el = q("[data-autopage]"))) {
+    const page = el.dataset.autopage;
+    if (page !== ui.autos.page) guarded(() => { ui.autos = { zone: ui.autos.zone, page }; render(); const again = document.querySelector(`[data-autopage="${page}"]`); if (again) again.focus({ preventScroll: true }); });
+    return;
+  }
   if ((el = q("[data-linkautos]"))) { const id = el.dataset.linkautos; guarded(() => { openLinkAutos(id); render(); window.scrollTo(0, 0); }); return; }
   if (q("[data-linkback]")) { guarded(closeLinkAutos); return; }
   if ((el = q("[data-lpick]"))) {
