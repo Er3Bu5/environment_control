@@ -25,17 +25,25 @@ hardware or reach the network.
   reviewed is what runs.
 - **Dependencies:** runtime dependencies are Lit only for now. Pin exact versions, at least two weeks old. Install with
   `npm ci --ignore-scripts`. GitHub Actions are pinned to commit SHAs.
-- **Changes reach `main` only through pull requests.** Never push to `main`; a ruleset enforces it. Each change goes
-  on its own branch (`feat/`, `fix/`, `ci/`, `docs/`, `deps/`), with one commit per concern, each made once all tests
-  pass. The pull request says what changed, why and how it was checked. All five CI checks must pass, and the owner
-  merges. Dependabot's pull requests are reviewed and merged the same way, never re-applied by hand.
+- **Work lands in `beta`; only the owner moves `beta` to `main`** (the owner's call, 2026-11-27). `beta` is a
+  long-lived branch made from `main`. Each change goes on its own branch from `beta` (`feat/`, `fix/`, `ci/`,
+  `docs/`, `deps/`), with one commit per concern, each made once all tests pass, and a pull request whose base is
+  `beta`. The pull request says what changed, why and how it was checked. Once all five CI checks pass on its latest
+  commit, the agent that wrote it merges it into `beta` with a merge commit and deletes the branch. A conflict is
+  resolved on the branch by merging `beta` in, never by a rebase or force push. Dependabot targets `beta` too, and
+  its pull requests are reviewed and merged the same way, never re-applied by hand.
+- **`main` is what gets published, and only the owner changes it,** by merging a pull request from `beta` into
+  `main`. Never push to `main`; a ruleset enforces it. An agent never merges anything into `main`, and opens the
+  `beta` to `main` pull request only when asked to. The names invite a mix-up: the branch `beta` is where work is
+  gathered and checked, and is NOT what the Beta workflow builds. The Beta workflow builds `main`.
 - **Releases are the owner's.** An agent may run the Release workflow as a dry run only, and never starts the Beta
   workflow by hand: starting it publishes. A full release waits for the owner's approval on the `release`
-  environment. A beta doesn't (the owner's call, 2026-11-27): merging to `main` is its approval. The Beta workflow
-  runs every hour, and when the owner starts it by hand, builds what's on `main` and publishes it through the `beta`
+  environment. A beta doesn't: merging `beta` into `main` is its approval. The Beta workflow runs every hour, and
+  when the owner starts it by hand, builds what's on `main` and publishes it as a pre-release through the `beta`
   environment, which has no reviewer, when something that ships has changed since the newest release. Both
   environments accept `main` only, `publish.yml` refuses anything but a beta version outside `release`, and
   `scripts/check_workflows.py` holds all of that in place. The hourly run leaves a merge alone until `main` has been
-  quiet for five minutes. Validate runs on pull requests, not on merges: its last job records the git tree it passed
-  on, and Beta and Release build only a commit whose tree passed (Beta runs Validate itself when `main` moved after
-  the pull request's last run).
+  quiet for five minutes. Validate runs on every pull request, into `beta` or `main`, not on merges: its last job
+  records the git tree it passed on, and Beta and Release build only a commit whose tree passed. For `main` that
+  record comes from the `beta` to `main` pull request (Beta runs Validate itself when `main` moved after that pull
+  request's last run).
