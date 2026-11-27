@@ -1,31 +1,37 @@
 name: Beta
 
-# After each merge to main: the next beta, built from exactly that commit and published only once you approve it in
-# the release environment, as every release is. The number follows the newest release tag (b8, then b9), and a merge
-# that changes nothing that ships makes no beta.
+# Every hour, and whenever it's started by hand from the Actions tab: the next beta, built from what's on main and
+# published with no approval. Merging to main is a beta's approval: main only changes through a pull request you
+# merge, with Validate passed. Full releases stay with Release, behind your approval in the release environment.
 #
-# Several merges one after another make one beta, not one each. A merge waits until main has been quiet for five
-# minutes, and if a newer merge lands in that time it makes no beta, because the newer merge's beta includes it. So a
-# single merge's beta asks for approval about five minutes after the merge, and a burst's about five minutes after its
-# last. A beta already waiting for approval when the next merge lands isn't withdrawn: turn it down and the newer one
-# follows.
+# A run makes a beta only when something that ships has changed since the newest release, so most hourly runs do
+# nothing and finish in seconds. The number follows the newest release tag (b8, then b9).
 #
-# The suites aren't run again. The merge's pull request ran Validate on GitHub's test merge with main, and its last
-# job recorded that content by its git tree hash. When the merge's tree matches one recorded by a passing run from
-# this repository, that content has been tested byte for byte. When it doesn't (main moved after the pull request's
-# last run, so the merge combines changes never tested together), Validate runs here first, so nothing untested is
-# ever built. Full releases stay with Release.
+# The hourly run leaves a merge alone until main has been quiet for five minutes, so it doesn't cut a beta in the middle
+# of a batch of merges: if a newer merge lands while it waits, it makes no beta and the next hour's run takes them
+# all. A run started by hand doesn't wait. It builds main as it is, and only main: started on another branch, it stops.
+#
+# The suites aren't run again. A merge's pull request ran Validate on GitHub's test merge with main, and its last job
+# recorded that content by its git tree hash. When main's tree matches one recorded by a passing run from this
+# repository, that content has been tested byte for byte. When it doesn't (main moved after the pull request's last
+# run, so the merge combines changes never tested together), Validate runs here first, so nothing untested is ever
+# built.
+#
+# GitHub may start a scheduled run late when it's busy, and stops scheduling them after 60 days with no activity in
+# the repository, which a commit or starting one by hand sets going again.
 on:
-  push:
-    branches: [main]
+  schedule:
+    # On the hour, the owner's call. GitHub is busiest then, so a run can start some minutes late, and now and then one
+    # is dropped altogether, in which case the next hour's run takes its place.
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 permissions: {}
 
-# One beta at a time, each numbered once the one before it is published or turned down, so two never take one number.
-# Merges made while one is under way wait their turn, oldest first: queue: max keeps every waiting run, where the
-# default keeps only the newest and cancels the ones between. A run whose merge a newer release already holds (one
-# started again by hand, say) makes no beta, so older code never goes out under a newer number. A run waiting out its
-# five minutes holds the queue, and gives way within seconds of a newer merge.
+# One beta at a time, each numbered once the one before it is published, so two never take one number. A run started
+# while one is under way waits its turn, oldest first: queue: max keeps every waiting run, where the default keeps
+# only the newest and cancels the ones between. A run whose commit a newer release already holds makes no beta, so
+# older code never goes out under a newer number.
 concurrency:
   group: beta
   cancel-in-progress: false
@@ -34,6 +40,8 @@ concurrency:
 jobs:
   plan:
     name: Next beta
+    # Only main is ever built. A scheduled run is always main's; one started by hand can be pointed at any branch.
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -51,24 +59,26 @@ jobs:
           persist-credentials: false
       - name: Wait for merges to stop arriving
         id: quiet
+        # Started by hand, it builds main as it is, now.
+        if: ${{ github.event_name != 'workflow_dispatch' }}
         run: |
           python3 scripts/quiet_main.py "$GITHUB_SHA" > "$RUNNER_TEMP/quiet"
           cat "$RUNNER_TEMP/quiet" >> "$GITHUB_OUTPUT"
           if grep -qx "newest=false" "$RUNNER_TEMP/quiet"; then
-            echo "A newer merge is on main, and its beta includes this one, so no beta." >> "$GITHUB_STEP_SUMMARY"
+            echo "A newer merge landed on main while this waited, so no beta. The next run takes both." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Work out the version
         id: next
-        if: ${{ steps.quiet.outputs.newest == 'true' }}
+        if: ${{ steps.quiet.outputs.newest == 'true' || github.event_name == 'workflow_dispatch' }}
         run: |
           python3 scripts/next_beta.py "$GITHUB_SHA" > "$RUNNER_TEMP/next"
           cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
           get() { sed -n "s/^$1=//p" "$RUNNER_TEMP/next"; }
           ship=$(get ship) version=$(get version) since=$(get since) included=$(get included)
           if [ "$ship" = true ]; then
-            echo "Beta $version, waiting for approval in the release environment." >> "$GITHUB_STEP_SUMMARY"
+            echo "Beta $version, built from main and published with no approval." >> "$GITHUB_STEP_SUMMARY"
           elif [ "$included" = true ]; then
-            echo "$since already includes this merge, so no beta." >> "$GITHUB_STEP_SUMMARY"
+            echo "$since already includes what's on main, so no beta." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Nothing that ships changed since $since, so no beta." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -122,3 +132,5 @@ jobs:
       title: ${{ needs.plan.outputs.title }}
       ref: ${{ github.sha }}
       publish: true
+      # No reviewer, betas only, main only: publish.yml refuses anything else that asks for it.
+      environment: beta
