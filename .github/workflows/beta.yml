@@ -1,15 +1,15 @@
 name: Beta
 
-# Every hour, and whenever it's started by hand from the Actions tab: the next beta, built from what's on main and
+# Four times a day, and whenever it's started by hand from the Actions tab: the next beta, built from what's on main and
 # published with no approval. Not from dev, where work gathers before it reaches main.
 # Merging dev into main is a beta's approval: main only changes through a pull request you merge, with Validate
 # passed. Full releases stay with Release, behind your approval in the release environment.
 #
-# A run makes a beta only when something that ships has changed since the newest release, so most hourly runs do
+# A run makes a beta only when something that ships has changed since the newest release, so most scheduled runs do
 # nothing and finish in seconds. The number follows the newest release tag (b8, then b9).
 #
-# The hourly run leaves a merge alone until main has been quiet for five minutes, so it doesn't cut a beta in the middle
-# of a batch of merges: if a newer merge lands while it waits, it makes no beta and the next hour's run takes them
+# The scheduled run leaves a merge alone until main has been quiet for five minutes, so it doesn't cut a beta in the middle
+# of a batch of merges: if a newer merge lands while it waits, it makes no beta and the next scheduled run takes them
 # all. A run started by hand doesn't wait. It builds main as it is, and only main: started on another branch, it stops.
 #
 # The suites aren't run again. A merge's pull request ran Validate on GitHub's test merge with main, and its last job
@@ -22,9 +22,10 @@ name: Beta
 # the repository, which a commit or starting one by hand sets going again.
 on:
   schedule:
-    # 17 past, the owner's call (2026-11-28): GitHub started only 1 of the first 15 on-the-hour runs, as the start of
-    # the hour is where it delays and drops scheduled runs. A dropped run is taken up by the next one.
-    - cron: "17 * * * *"
+    # Four times a day at 17 past, the owner's call (2026-11-28): 00:17, 06:17, 12:17 and 18:17 UTC. Not on the hour,
+    # because GitHub started only 1 of the first 15 on-the-hour runs: the start of the hour is where it delays and drops
+    # scheduled runs. A dropped run is taken up by the next one.
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions: {}
