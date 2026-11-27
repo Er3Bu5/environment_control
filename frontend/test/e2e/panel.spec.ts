@@ -3166,16 +3166,69 @@ test.describe("the automation switch", () => {
     await expect.poll(() => state(page, PORCH)).toBe("off");
   });
 
-  test("linking one that another zone already switches, or changing only a group, doesn't ask again", async ({ page }) => {
+  test("changing only a group doesn't ask again", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     const before = await stored(page);
-    const zones = before.zones.map((z) =>
-      z.id === "garden" ? { ...z, automations: [...(z.automations ?? []).map((a) => (a.id === "a1" ? { ...a, group: "alert_device" } : a)), { id: "a99", entity: "automation.tent_lights_on", group: "control" }] } : z,
-    );
+    const zones = before.zones.map((z) => (z.id === "garden" ? { ...z, automations: (z.automations ?? []).map((a) => (a.id === "a1" ? { ...a, group: "alert_device" } : a)) } : z));
     expect((await save(frame, { zones, devices: before.devices }, before.revision)).ok).toBe(true);
     expect(await hostDialogOpen(page)).toBe(false);
     expect((await stored(page)).revision).toBe(before.revision + 1);
+  });
+
+  /* An automation belongs to one zone. The host still asks, as for any automation new to a zone, and the backend's
+     refusal comes back as the answer. */
+  const TENT_ON = "automation.tent_lights_on";
+  test("linking one that another zone already links is refused, and nothing is stored", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const before = await stored(page);
+    expect(before.zones.find((z) => z.id === "veg")?.automations?.some((a) => a.entity === TENT_ON)).toBe(true);
+    const zones = before.zones.map((z) => (z.id === "garden" ? { ...z, automations: [...(z.automations ?? []), { id: "a99", entity: TENT_ON, group: "control" }] } : z));
+    const answer = save(frame, { zones, devices: before.devices }, before.revision);
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    const text = await hostDialogText(page);
+    expect(text).toContain(TENT_ON);
+    expect(text).toContain("for the Garden zone");
+    await allow(page);
+    expect(await answer).toEqual(expect.objectContaining({ ok: false, error: "An automation can only be linked to one zone." }));
+    expect(await stored(page)).toEqual(before);
+    expect((await automation(frame, { zone: "garden", link: "a99", on: false })).error).toContain("doesn't link that automation");
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("one automation linked in two zones in one save is refused, and nothing is stored", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const before = await stored(page);
+    const add = (group: string) => ({ id: "a99", entity: PORCH, group });
+    const zones = before.zones.map((z) => (z.id === "garden" ? { ...z, automations: [...(z.automations ?? []), add("control")] } : z.id === "nursery" ? { ...z, automations: [...(z.automations ?? []), add("failsafe")] } : z));
+    const answer = save(frame, { zones, devices: before.devices }, before.revision);
+    await allow(page);
+    expect(await answer).toEqual(expect.objectContaining({ ok: false, error: "An automation can only be linked to one zone." }));
+    expect(await stored(page)).toEqual(before);
+    expect(await serviceCalls(page)).toBe(0);
+  });
+
+  test("an automation moves zone in two saves: unlinked where it is, then linked, asked about, in the new one", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    const before = await stored(page);
+    const tent = { id: "a99", entity: TENT_ON, group: "control" };
+    const both = before.zones.map((z) => (z.id === "nursery" ? { ...z, automations: [...(z.automations ?? []), tent] } : z));
+    const inOne = save(frame, { zones: both, devices: before.devices }, before.revision);
+    await allow(page);
+    expect((await inOne).error).toBe("An automation can only be linked to one zone.");
+    const unlinked = before.zones.map((z) => (z.id === "veg" ? { ...z, automations: (z.automations ?? []).filter((a) => a.entity !== TENT_ON) } : z));
+    expect((await save(frame, { zones: unlinked, devices: before.devices }, before.revision)).ok).toBe(true);
+    expect(await hostDialogOpen(page)).toBe(false);
+    const moved = unlinked.map((z) => (z.id === "nursery" ? { ...z, automations: [...(z.automations ?? []), tent] } : z));
+    const answer = save(frame, { zones: moved, devices: before.devices }, before.revision + 1);
+    await allow(page);
+    expect((await answer).ok).toBe(true);
+    const after = await stored(page);
+    expect(after.zones.filter((z) => z.automations?.some((a) => a.entity === TENT_ON)).map((z) => z.id)).toEqual(["nursery"]);
+    expect((await automation(frame, { zone: "nursery", link: "a99", on: true })).ok).toBe(true);
   });
 
   test("a link to anything but an automation is refused without asking", async ({ page }) => {

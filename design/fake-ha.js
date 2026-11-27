@@ -145,8 +145,10 @@ class FakeHA {
       if (!keys || keys.some((k) => k !== "alertRepeat")) this.fail("Room settings hold only the alert repeat rate");
       if (room.alertRepeat !== undefined && !(typeof room.alertRepeat === "string" && /^input_number\.[a-z0-9_]+$/.test(room.alertRepeat))) this.fail("The alert repeat rate links to something that isn't a number helper");
     }
-    /* Automations a zone switches: an automation entity, a group, and an id the frame names it by. Nothing else. */
+    /* Automations a zone switches: an automation entity, a group, and an id the frame names it by. Nothing else. One
+       automation belongs to one zone, as the real backend has it. */
     const GROUPS = ["alert_day", "alert_night", "alert_device", "failsafe", "control"];
+    const linked = new Set();
     for (const z of c.zones) {
       if (z.automations === undefined) continue;
       if (!Array.isArray(z.automations) || z.automations.length > 200) this.fail(`${z.id} links automations that aren't a short list`);
@@ -157,8 +159,10 @@ class FakeHA {
         if (typeof a.id !== "string" || !/^[a-z0-9_-]{1,64}$/.test(a.id) || aids.has(a.id)) this.fail(`${z.id} has automation links without unique ids`);
         if (typeof a.entity !== "string" || !/^automation\.[a-z0-9_]+$/.test(a.entity) || ents.has(a.entity)) this.fail(`${z.id} links something that isn't an automation, or one twice`);
         if (!GROUPS.includes(a.group)) this.fail(`${z.id} puts an automation in a group this panel doesn't know`);
+        if (linked.has(a.entity)) this.fail("An automation can only be linked to one zone.");
         aids.add(a.id); ents.add(a.entity);
       }
+      for (const e of ents) linked.add(e);
     }
     const ids = new Set(c.zones.map((z) => z.id));
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
