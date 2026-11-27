@@ -2182,7 +2182,7 @@ export class EcApp extends LitElement {
     const shown = [...items.sensors, ...items.devs.filter((x) => x.pos), ...items.virt];
     const left = items.devs.filter((x) => !x.pos);
     return html`<section class="card">
-      <div class="card-head"><h2>Device placement</h2></div>
+      <div class="card-head"><h2>Zone map</h2></div>
       ${mapView(L, { items: shown, picked: this.picked, onPick: (id) => (this.picked = this.picked === id ? null : id), label: `Units, sensors and devices in ${z.name}` })}
       ${keyView}
       ${left.length
