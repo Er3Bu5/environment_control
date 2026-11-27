@@ -1,6 +1,6 @@
 // Drives the mock in headless Chromium over CDP with real taps and keystrokes. Touches nothing outside the scratchpad.
 import { spawn, execFileSync } from "node:child_process";
-import { writeFileSync, readFileSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 
 const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
 process.on("uncaughtException", (e) => { console.log("Error", e.message); browser.kill(); process.exit(2); });
@@ -150,6 +150,9 @@ if (process.env.SMOKE) {
     check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
   }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
+  /* The automations snapshot brings the alert repeat helper, which the states snapshot may predate. */
+  const autoSnap = existsSync(`${dir}/ha-snap/automations.json`) ? JSON.parse(readFileSync(`${dir}/ha-snap/automations.json`, "utf8")) : null;
+  if (autoSnap && autoSnap.repeat && !snapIds.includes(autoSnap.repeat.entity)) snapIds.push(autoSnap.repeat.entity);
   for (const id of ["garden", "veg", "nursery"]) {
     await go(`ui.screen="setup";openTd("${id}");render()`); await sleep(150); await clean(`${id} Targets, day and night helpers`);
     const r = await ev(`({issues:tdIssues().map(i=>i.text),changes:tdDraft(ui.td).items.length,numbers:helperCatalog.filter(h=>h.entity.startsWith("input_number.")).length})`);
@@ -157,6 +160,13 @@ if (process.env.SMOKE) {
     check(`${id} Targets, day and night: opening it changes nothing`, r.changes === 0, r.changes);
     check(`${id} Targets, day and night: every number helper HA reported is offered`, r.numbers === snapIds.filter((e) => e.startsWith("input_number.")).length, r.numbers);
     if (id === "garden") { await go(`ui.vpdw.period="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
+  }
+  /* The real room's automations, grouped as its dashboards group them. */
+  if (autoSnap) for (const id of ["garden", "veg", "nursery"]) for (const page of ["alert", "failsafe", "control"]) {
+    await go(`ui.screen="autos";ui.zone="${id}";ui.autos={zone:"${id}",page:"${page}"};ui.linkw=null;render()`);
+    const rows = await ev(`document.querySelectorAll("[data-autorow]").length`), want = autoSnap.links[id].filter((x) => (page === "alert" ? x.group.startsWith("alert_") : x.group === page)).length;
+    check(`${id}: the ${page} page lists every one on its dashboard`, rows === want && want > 0, [rows, want]);
+    if (id === "garden" && page === "alert") await shot("real-alerts");
   }
   await go(`ui.td=null;ui.sched=null;ui.vpdw=null;ui.screen="setup";render()`);
   await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
@@ -562,6 +572,132 @@ await ev(`document.querySelector("#main .notice.fix").click()`); await sleep(80)
 await plugRole("Heater"); await goTab("Garden");
 check("Controls: a plug marked Heater joins Temperature", (await ev(`document.querySelector('[data-cgroup="Temperature"]').textContent`)).includes("Plug 7"));
 await ev(`devices.find(d=>d.id==="plug").type=null;render()`);
+
+// ---------- Automation switches: Home Assistant runs them, and the panel switches them through the host, never assumed
+await ev(`ui.review=null;ui.guard=null;renderModal();ui.screen="zone";ui.zone="garden";ui.autos=null;ui.linkw=null;render()`); await sleep(40);
+const autoRowOf = (entity, zone = "garden") => ev(`(()=>{const r=document.querySelector('[data-autorow="${entity}"][data-zone="${zone}"]');if(!r)return null;const s=r.querySelector(".sw"),t=r.querySelector(".ctl-status");return {on:s.getAttribute("aria-checked")==="true",disabled:s.disabled,status:t?t.textContent:"",cls:t?t.className:"",text:r.textContent}})()`);
+const diskZone = (id) => onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${id}")`);
+const VPD_NIGHT = "automation.critical_garden_vpd_low_night", RED_FS = "automation.failsafe_garden_red_lights_recovery";
+check("Automations: the zone page counts what's on in each group", same(await ev(`[...document.querySelectorAll("#z-autos [data-autocount]")].map(e=>e.textContent)`), ["15 of 16 on", "3 of 3 on", "4 of 4 on"]), await ev(`[...document.querySelectorAll("#z-autos [data-autocount]")].map(e=>e.textContent)`));
+check("Automations: with every failsafe on, the zone page has no failsafe warning", (await ev(`[...document.querySelectorAll("#main .notice.fix")].some(n=>n.dataset.autos)`)) === false);
+await tap('#z-autos [data-autos="alert"]');
+check("Automations: Alerts groups them as the dashboards do, day, night and device", same(await ev(`[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent)`), ["Day alerts", "Night alerts", "Device alerts"]), await ev(`[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent)`));
+check("Automations: an alert named for the day stays where it was put, with the device alerts", (await ev(`document.querySelector('[data-agroup="alert_device"]').textContent`)).includes("Light Controller Overhead Off Day"));
+check("Automations: Garden stays current in the page menu on its Alerts page", (await ev(`document.querySelector("#zmenu-nav [aria-current]").textContent`)) === "Garden");
+check("Automations: an alert that's off shows off", (await autoRowOf(VPD_NIGHT)).on === false && (await autoRowOf(VPD_NIGHT)).text.includes("Off."), await autoRowOf(VPD_NIGHT));
+check("Automations: a row says when it last triggered, or that it never has", (await autoRowOf("automation.critical_garden_humidity_high_day")).text.includes("Last triggered ") && (await autoRowOf("automation.critical_garden_temperature_low_day")).text.includes("Never triggered."));
+await shot("autos-alerts-phone");
+let nA = (await haCalls()).length;
+await tap(`[data-autorow="${VPD_NIGHT}"] .sw`);
+let ar = await autoRowOf(VPD_NIGHT);
+check("Automations: a tap is one automation.turn_on on the linked automation, shown as sent", same((await haCalls()).slice(nA), [["automation.turn_on", VPD_NIGHT, null]]) && ar.status.startsWith("Sent") && ar.on === false && ar.disabled, [ar, (await haCalls()).slice(nA)]);
+await sleep(REPORT); ar = await autoRowOf(VPD_NIGHT);
+check("Automations: it moves once HA reports it on, and the count follows", ar.on && ar.status === "" && (await ev(`document.querySelector('[data-agroup="alert_night"] [data-autocount]').textContent`)) === "5 of 5 on", ar);
+await tap(`[data-autorow="${VPD_NIGHT}"] .sw`);
+check("Automations: switching an alert off doesn't ask", (await ev(`!!ui.guard`)) === false && (await haCalls()).at(-1)[0] === "automation.turn_off");
+await sleep(REPORT);
+await onHA(`fakeHA.knobs.dropNext=true`); await tap(`[data-autorow="${VPD_NIGHT}"] .sw`); await sleep(GIVE_UP_CTL); ar = await autoRowOf(VPD_NIGHT);
+check("Automations: a switch HA never reports is never shown as done", ar.on === false && ar.cls.includes("stuck") && ar.status.startsWith("Not confirmed. Home Assistant still reports it off."), ar);
+await tap(`[data-autorow="${VPD_NIGHT}"] .sw`); await sleep(REPORT); ar = await autoRowOf(VPD_NIGHT);
+check("Automations: trying again works and clears the warning", ar.on && ar.status === "", ar);
+await tap(`[data-autorow="${VPD_NIGHT}"] .sw`); await sleep(REPORT);
+await ev(`document.querySelector('#main [data-go="zone"]').click()`); await sleep(60);
+await tap('#z-autos [data-autos="failsafe"]');
+nA = (await haCalls()).length;
+await tap(`[data-autorow="${RED_FS}"] .sw`);
+check("Automations: switching a failsafe off asks first, and sends nothing yet", (await ev(`ui.guard && ui.guard.title`)) === "Switch off Failsafe Garden Red Lights Recovery?" && (await haCalls()).length === nA, await ev(`ui.guard && ui.guard.title`));
+await shot("autos-failsafe-ask-phone");
+await tap("[data-gkeep]");
+check("Automations: Keep it on sends nothing", (await haCalls()).length === nA && (await autoRowOf(RED_FS)).on);
+await tap(`[data-autorow="${RED_FS}"] .sw`); await tap("[data-gdiscard]"); await sleep(REPORT);
+check("Automations: Switch off sends automation.turn_off, and it shows off once reported", same((await haCalls()).slice(nA), [["automation.turn_off", RED_FS, null]]) && (await autoRowOf(RED_FS)).on === false, (await haCalls()).slice(nA));
+await ev(`document.querySelector('#main [data-go="zone"]').click()`); await sleep(60);
+check("Automations: the zone page then warns that a failsafe is off", (await ev(`document.querySelector('#main .notice.fix[data-autos="failsafe"]').textContent`)).includes("A failsafe is off: Failsafe Garden Red Lights Recovery."));
+await tap('#main .notice.fix[data-autos="failsafe"]');
+check("Automations: and the warning opens Failsafes", (await ev(`ui.screen==="autos" && ui.autos.page==="failsafe" && !!document.querySelector('[data-autorow="${RED_FS}"]')`)) === true);
+await tap(`[data-autorow="${RED_FS}"] .sw`);
+check("Automations: switching a failsafe back on doesn't ask", (await ev(`!!ui.guard`)) === false);
+await sleep(REPORT);
+check("Automations: and it's on again", (await autoRowOf(RED_FS)).on === true);
+await ev(`ui.zone="nursery";ui.autos={zone:"nursery",page:"failsafe"};render()`); await sleep(30);
+check("Automations: a shared failsafe names the zone it's shared with", (await autoRowOf("automation.failsafe_veg_fans_auto_on", "nursery")).text.includes("Shared with Veg."), await autoRowOf("automation.failsafe_veg_fans_auto_on", "nursery"));
+await tap('[data-autorow="automation.failsafe_veg_fans_auto_on"][data-zone="nursery"] .sw');
+check("Automations: and switching it off says it stops in both zones", (await ev(`ui.guard.text`)).includes("in Nursery or Veg"), await ev(`ui.guard.text`));
+await tap("[data-gkeep]");
+/* What a compromised UI could try. The host looks the automation up in its own config, so none of these reach HA. */
+nA = (await haCalls()).length;
+const autoRefused = await evp(`Promise.all([ask("automation",{zone:"garden",link:"nope",on:false}),ask("automation",{zone:"veg",link:"a1",on:"off"}),ask("automation",{zone:"nowhere",link:"a1",on:false}),ask("automation",{zone:"garden",on:false})]).then(rs=>rs.map(r=>r.ok))`);
+check("Automations: the host refuses a link the zone doesn't have, an on that isn't true or false, and an unknown zone", same(autoRefused, [false, false, false, false]) && (await haCalls()).length === nA, autoRefused);
+await evp(`ask("automation",{zone:"garden",link:"a1",on:false,entity_id:"automation.porch_light_on",service:"turn_on"})`);
+await onHA(`fakeHA.setState("automation.critical_garden_temperature_high_day","off",{mode:"single",id:"1699"})`); await sleep(80);
+check("Automations: only an automation's name and last run reach the frame, never its id or run mode", same(Object.keys(await ev(`haStates["automation.critical_garden_temperature_high_day"].attributes`)).sort(), ["friendly_name", "last_triggered"]), await ev(`haStates["automation.critical_garden_temperature_high_day"].attributes`));
+await onHA(`fakeHA.setState("automation.critical_garden_temperature_high_day","on",{})`); await sleep(80);
+check("Automations: an entity or service named by the frame is ignored", same((await haCalls()).at(-1), ["automation.turn_off", "automation.critical_garden_temperature_high_day", null]) && (await onHA(`fakeHA.states["automation.porch_light_on"].state`)) === "on", (await haCalls()).at(-1));
+await sleep(REPORT); await evp(`ask("automation",{zone:"garden",link:"a1",on:true})`); await sleep(REPORT);
+
+// ---------- Linking automations: only Environment Control's record changes, and a new one is allowed in HA's own dialog
+await ev(`ui.screen="zone";ui.zone="nursery";ui.autos=null;render()`); await sleep(30);
+await tap('#z-autos [data-linkautos="nursery"]'); await sleep(300);
+const linkListed = await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`);
+check("Link: suggests what Nursery links and what's named for it, and none of the house's", linkListed.includes("automation.critical_nursery_vpd_high_day") && linkListed.includes("automation.failsafe_veg_fans_auto_on") && !linkListed.includes("automation.porch_light_on") && !linkListed.includes("automation.reservoir_refill_reminder"), linkListed);
+check("Link: the rest are a search away", (await ev(`document.querySelector("#link-more").textContent`)).includes("more in Home Assistant"));
+await tap('[data-lpick="automation.critical_nursery_vpd_high_day"]');
+check("Link: picking one suggests its group from the name", (await ev(`document.querySelector('[data-lgroup="automation.critical_nursery_vpd_high_day"]').value`)) === "alert_day");
+check("Link: and the bar counts it, saving nothing yet", (await ev(`document.querySelector("#draft-count").textContent`)) === "1" && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day"));
+await shot("autos-link-phone");
+await ev(`(()=>{const i=document.querySelector("#link-q");i.value="porch";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(30);
+check("Link: search reaches the rest of Home Assistant's automations", same(await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`), ["automation.porch_light_on"]), await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`));
+await ev(`(()=>{const i=document.querySelector("#link-q");i.value="";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(30);
+await ev(`(()=>{const s=document.querySelector('[data-lgroup="automation.critical_nursery_vpd_high_day"]');s.value="alert_device";s.dispatchEvent(new Event("change",{bubbles:true}))})()`); await sleep(20);
+await tap("[data-dreview]");
+const autoLinkReview = await ev(`document.querySelector("#review-items").textContent`);
+check("Link: the review names it, from not linked to the group picked", autoLinkReview.includes("Critical Nursery VPD High Day") && autoLinkReview.includes("Not linked") && autoLinkReview.includes("Device alerts"), autoLinkReview);
+await tap("[data-rapply]"); await sleep(300);
+dlg = await hostDialog();
+check("Link: a newly linked automation is asked about in HA's own dialog, before anything is saved", dlg.open && dlg.text.includes("automation.critical_nursery_vpd_high_day") && dlg.text.includes("Allow 1 automation") && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day"), dlg.text);
+await sleep(1100); await hostClick("allow"); await sleep(300);
+check("Link: once allowed it's saved in its group, and the page goes back to the zone", (await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day" && a.group === "alert_device") && (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !ui.linkw`)) === true);
+check("Link: and the zone page counts it", (await ev(`document.querySelector('[data-autocount="nursery:alert"]').textContent`)) === "4 of 4 on");
+const sneakyAuto = evp(`saveConfig(()=>{zoneById("nursery").automations.push({id:"a99",entity:"automation.porch_light_on",group:"failsafe"})}).then(r=>r.ok)`);
+await sleep(300); dlg = await hostDialog();
+check("Link: the dialog names the real automation, and flags a failsafe as one", dlg.text.includes("Porch Light On") && dlg.text.includes("Linked as a failsafe. Once allowed, the panel can switch it off."), dlg.text);
+await key("Escape", 27); await sleep(150);
+check("Link: Escape is a no", (await sneakyAuto) === false && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.porch_light_on"));
+const already = await evp(`saveConfig(()=>{zoneById("garden").automations.push({id:"a99",entity:"automation.tent_lights_on",group:"control"})}).then(r=>r.ok)`); await sleep(100);
+check("Link: linking one another zone already switches doesn't ask again", already === true && (await hostDialog()).open === false);
+await evp(`saveConfig(()=>{zoneById("garden").automations=zoneById("garden").automations.filter(a=>a.id!=="a99")})`);
+const notAuto = await evp(`saveConfig(()=>{zoneById("garden").automations.push({id:"a98",entity:"switch.reservoir_pump",group:"control"})}).then(r=>[r.ok,r.error])`);
+check("Link: anything that isn't an automation is refused without asking", notAuto[0] === false && notAuto[1].includes("isn't an automation") && (await hostDialog()).open === false, notAuto);
+const strayKey = await onHA(`fakeHA.command({type:"environment_control/config/save",revision:fakeHA.config.revision,config:{zones:fakeHA.config.zones,devices:fakeHA.config.devices,scripts:["script.x"]}}).then(()=>"saved",e=>e.message)`);
+check("Link: the backend refuses a setup holding anything but zones, devices and room settings", strayKey.includes("something other than zones, devices and room settings"), strayKey);
+check("Remove: a zone's dialog says its automations are unlinked and keep running", (await ev(`removeRows(zoneById("veg")).find(r=>r[0]==="Automations")[1]`)) === "10 unlinked. They keep running in Home Assistant");
+
+// ---------- Alert repeat: one helper for every alert, linked on Setup, changed through a review like any other value
+await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await sleep(30);
+check("Repeat: the Alerts page shows the room's repeat rate from its helper", (await ev(`document.querySelector("#repeat-in").value`)) === "15");
+await ev(`(()=>{const i=document.querySelector("#repeat-in");i.focus();i.value="200";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(20);
+check("Repeat: a value outside the helper's limits is a problem and stops review", (await ev(`document.querySelector("#repeat-bad").textContent`)).includes("between 0 and 120") && (await saveOff()) === true);
+await ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="30";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`); await sleep(20);
+await tap("[data-dreview]");
+check("Repeat: the review says it changes every alert, not only this zone's", (await ev(`document.querySelector("#dlg-text").textContent`)).includes("every alert in Home Assistant") && (await ev(`document.querySelector("#review-items").textContent`)).includes("15 min") && (await ev(`document.querySelector("#review-items").textContent`)).includes("30 min"), await ev(`document.querySelector("#dlg-text").textContent`));
+nA = (await haCalls()).length;
+await tap("[data-rapply]"); await sleep(REPORT + 300);
+check("Repeat: applied through the host to the helper, and counted once HA reports it", same((await haCalls()).slice(nA).map((c) => c.slice(0, 2)), [["input_number.set_value", "input_number.alert_repeat_rate"]]) && (await onHA(`fakeHA.states["input_number.alert_repeat_rate"].state`)) === "30" && (await ev(`ui.review`)) === null && (await ev(`document.querySelector("#repeat-in").value`)) === "30", (await haCalls()).slice(nA));
+const repeatRefused = await evp(`Promise.all([ask("setting",{name:"alertRepeat",value:500}),ask("setting",{zone:"garden",name:"alertRepeat",value:5}),ask("setting",{name:"alertRepeat",value:2.5})]).then(rs=>rs.map(r=>r.ok))`);
+check("Repeat: the host refuses a value outside the helper's limits or step, and the repeat rate as a zone setting", same(repeatRefused, [false, false, false]), repeatRefused);
+await goTab("Setup");
+check("Setup: the Alerts card shows the linked repeat helper", (await ev(`document.querySelector("#room-alerts").textContent`)).includes("input_number.alert_repeat_rate"));
+await tap("[data-repeatunlink]"); await sleep(250);
+check("Setup: unlinking saves without asking, and the helper stays in HA", (await onHA(`(JSON.parse(fakeHA.disk).room||{}).alertRepeat ?? null`)) === null && (await onHA(`!!fakeHA.states["input_number.alert_repeat_rate"]`)) && (await hostDialog()).open === false);
+await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render()`); await sleep(30);
+check("Repeat: with nothing linked, the Alerts page says where to link it", (await ev(`document.querySelector("#alert-repeat").textContent`)).includes("Link it on Setup"));
+await goTab("Setup"); await tap("[data-repeatpick]"); await sleep(300);
+check("Setup: the picker offers number helpers, the repeat one first", (await ev(`document.querySelector("[data-repeatlink]").dataset.repeatlink`)) === "input_number.alert_repeat_rate");
+await tap('[data-repeatlink="input_number.alert_repeat_rate"]'); await sleep(300); dlg = await hostDialog();
+check("Setup: linking it asks in HA's own dialog, saying every alert follows it", dlg.open && dlg.text.includes("Every alert's repeat rate comes from it."), dlg.text);
+await sleep(1100); await hostClick("allow"); await sleep(300);
+check("Setup: and once allowed it's linked for the room", (await onHA(`JSON.parse(fakeHA.disk).room.alertRepeat`)) === "input_number.alert_repeat_rate");
+await ev(`ui.screen="zone";ui.zone="garden";ui.autos=null;render()`); await sleep(30);
 for (const [w, h] of [[390, 844], [320, 640]]) {
   await phone(w, h); await reset(); await goTab("Garden"); await sleep(60);
   check(`Controls ${w}px: no sideways scroll`, await ev(`document.documentElement.scrollWidth<=innerWidth`), await ev(`document.documentElement.scrollWidth`));
@@ -706,8 +842,8 @@ const setupNow = async () => { await ev(`ui.review=null;ui.guard=null;renderModa
 const setupButtons = (zone) => ev(`[...document.querySelectorAll('#zmenu-${zone} button')].map(b=>b.textContent)`);
 const calibrate = async (zone = "garden") => { await setupNow(); await ev(`document.querySelector('[data-calw="${zone}"]').click()`); await sleep(50); };
 await setupNow();
-check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("garden"));
-check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons("veg"));
+check("Order: Sensor Calibration comes before Targets", same(await setupButtons("garden"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Automations", "Remove zone"]), await setupButtons("garden"));
+check("Order: and it's there in every zone", same(await setupButtons("veg"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Automations", "Remove zone"]) && same(await setupButtons("nursery"), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Automations", "Remove zone"]), await setupButtons("veg"));
 // The zone's setup steps sit behind a menu button, and Add zone is the bigger button with a plus
 await setupNow();
 const rowButtons = (zone) => ev(`[...document.querySelector('[data-zmenu="${zone}"]').closest(".zacts").children].filter(x=>x.matches("button")).map(b=>b.textContent)`);
@@ -1083,7 +1219,7 @@ for (const [e, name] of [[`ui.mapw=null;ui.screen="overview";render()`, "overvie
 }
 check("Zone: a zone with no sensors shows no NaN anywhere", newScreens.length === 0, newScreens);
 check("Zone: a name can't run as code", (await ev(`window.pwned === undefined && !document.querySelector("#main img")`)) === true);
-check("Zone: Continue setup stays on the row, and the menu follows the setup order, Sensor Calibration included, as the panel always lists it", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Continue setup stays on the row, and the menu follows the setup order, Sensor Calibration included, as the panel always lists it", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Automations", "Remove zone"]), await setupButtons(newId));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 check("Zone: no leaf link with no sensors to set", (await ev(`document.querySelectorAll("#main .tile [data-calw]").length`)) === 0);
 await ev(`ui.screen="overview";render()`); await sleep(40);
@@ -1129,7 +1265,7 @@ await ev(`ui.screen="overview";render()`); await sleep(40);
 check("Zone: and isn't reported as critical on Overview", !(await ev(`[...document.querySelectorAll("#main .notice")].map(n=>n.textContent).join()`)).includes("Flower"), await ev(`[...document.querySelectorAll("#main .notice")].map(n=>n.textContent).join()`));
 await ev(`ui.screen="zone";ui.zone="${newId}";render()`); await sleep(40);
 await ev(`ui.wiz=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
-check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Remove zone"]), await setupButtons(newId));
+check("Zone: Sensor Calibration appears once it has sensors, in its place", same(await rowButtons(newId), ["Continue setup"]) && same(await setupButtons(newId), ["Zone details", "Device identification", "Zone layout", "Device placement", "Sensor Calibration", "Targets, day and night", "Automations", "Remove zone"]), await setupButtons(newId));
 check("Zone: its Setup row says it isn't set up", (await ev(`document.querySelector('[data-zmenu="${newId}"]').closest(".task").querySelector("strong + .pill")?.textContent`)) === "Not set up");
 await ev(`document.querySelector('[data-guide="${newId}"]').click()`); await sleep(50);
 await cClick("#g-calibrate [data-calw]"); await sleep(40);
