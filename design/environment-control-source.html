@@ -39,7 +39,7 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
   .pagehead > .zmenu, .pagehead > .pageact { grid-column: 3; grid-row: 1; justify-self: end; }
-  /* Overview's Arrange sits where a zone's More button does, as tall as it. */
+  /* Overview's Sort sits where a zone's More button does, as tall as it. */
   .pagehead > .headbtn { grid-column: 3; grid-row: 1; justify-self: end; height: 34px; }
   /* A page's own action is wider than a menu button, so on a phone it would squeeze the title to a few words: there
      it and the menu button make a row of their own at the top, and the title takes the full width beneath. */
@@ -57,11 +57,60 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
-  /* While arranging, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
+  /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
      card that was moved, as it is scrolled into view. */
-  .zone-card.arranging:hover { border-color: var(--line); }
-  .zone-card.arranging { scroll-margin-block: 12px 150px; }
+  .zone-card.sorting:hover { border-color: var(--line); }
+  .zone-card.sorting { scroll-margin-block: 12px 150px; }
   .arrows { display: flex; gap: 8px; margin-left: auto; }
+  /* A family is one joined card: its cards touch, sharing one border as the seam, with the link tab on it. It never
+     wraps apart: side by side where the row has room for all of it, else stacked, the seam running across. */
+  .cards { container-type: inline-size; }
+  .fam { display: flex; flex-direction: column; min-width: 0; grid-row: span var(--n); }
+  .famcards { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .famcards > .zone-card { position: relative; border-radius: 0; }
+  .famcards > .zone-card + .zone-card { margin-top: -1px; }
+  .famcards > .zone-card:first-child { border-radius: 12px 12px 0 0; }
+  .famcards > .zone-card:last-child { border-radius: 0 0 12px 12px; }
+  /* A card's own border shows whole on that card, over the neighbour it shares the seam with. */
+  .famcards > .zone-card:hover, .famcards > .zone-card:focus-visible { z-index: 1; }
+  .linktab { position: absolute; z-index: 2; left: 50%; width: 26px; height: 26px; border-radius: 13px; display: flex; align-items: center; justify-content: center; background: var(--card); border: 1px solid var(--line); }
+  .linktab svg { width: 16px; height: 16px; fill: var(--fg); rotate: 90deg; }
+  .linktab.after { bottom: 0; transform: translate(-50%, 50%); }
+  .linktab.before { top: 0; transform: translate(-50%, -50%); }
+  /* Beside the name, not pushed to the far side with the rest of the heading. */
+  .parentbadge { color: var(--fg); margin-right: auto; }
+  /* While sorting, the family's own arrows sit on a strip joined to the top of its cards. */
+  .fambar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--tile); border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; }
+  .fambar .ic { flex: none; }
+  .fam.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; border-top-right-radius: 0; }
+  @container (min-width: 612px) {
+    .fam.n2 { grid-column: span 2; grid-row: auto; }
+    .fam.n2 .famcards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fam.n2 .famcards > .zone-card + .zone-card { margin: 0 0 0 -1px; }
+    .fam.n2 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n2 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n2.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n2.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n2 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n2 .linktab.after { right: 0; transform: translate(50%, -50%); }
+    .fam.n2 .linktab.before { left: 0; transform: translate(-50%, -50%); }
+    .fam.n2 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n2 .linktab svg { rotate: 0deg; }
+  }
+  @container (min-width: 924px) {
+    .fam.n3 { grid-column: span 3; grid-row: auto; }
+    .fam.n3 .famcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .fam.n3 .famcards > .zone-card + .zone-card { margin: 0 0 0 -1px; }
+    .fam.n3 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n3 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n3.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n3.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n3 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n3 .linktab.after { right: 0; transform: translate(50%, -50%); }
+    .fam.n3 .linktab.before { left: 0; transform: translate(-50%, -50%); }
+    .fam.n3 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n3 .linktab svg { rotate: 0deg; }
+  }
   .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
   .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
@@ -619,6 +668,7 @@ const ICON = {
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
   chip: "M9 2v3H7a2 2 0 0 0-2 2v2H2v2h3v2H2v2h3v2a2 2 0 0 0 2 2h2v3h2v-3h2v3h2v-3h2a2 2 0 0 0 2-2v-2h3v-2h-3v-2h3V9h-3V7a2 2 0 0 0-2-2h-2V2h-2v3h-2V2H9ZM7 7h10v10H7V7Zm2 2v6h6V9H9Z",
   reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
+  link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z",
   up: "M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z",
   down: "M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z",
   bell: "M21 19v1H3v-1l2-2v-6c0-3.1 2-5.8 5-6.7V4a2 2 0 0 1 4 0v.3c3 .9 5 3.6 5 6.7v6l2 2Zm-7 2a2 2 0 0 1-4 0",
@@ -683,6 +733,36 @@ const scheduleOf = (z) => (sharesLights(z) ? parentOf(z) : z);
 /* A sensor in two zones shows one zone's readings in another, which only the parent link may do, so every zone a sensor
    is in has to be one family: a parent and the zones linked to it. By the saved setup, as the sharing question goes. */
 const familyRoot = (z) => z.parent || z.id;
+/* A family sits together in the zone order, so it's together on Overview, in the menu, on Setup and in every list of
+   zones, in any order inside it. The panel never saves a family split, but an order that splits one can still arrive
+   (older setups, the sample), so on reading it each stray is pulled to just after its parent's family. */
+const rootIn = (list, z) => (z.parent && list.some((o) => o.id === z.parent) ? z.parent : z.id);
+function familyOrder(list) {
+  let out = [...list];
+  for (const p of list.filter((z) => list.some((o) => o !== z && rootIn(list, o) === z.id))) {
+    const fam = (z) => rootIn(list, z) === p.id, at = out.indexOf(p);
+    let s = at, e = at;
+    while (s > 0 && fam(out[s - 1])) s--;
+    while (e < out.length - 1 && fam(out[e + 1])) e++;
+    const run = out.slice(s, e + 1), strays = out.filter((z, i) => (i < s || i > e) && fam(z)), rest = out.filter((z) => !run.includes(z) && !strays.includes(z));
+    const before = out.slice(0, s).filter((z) => !strays.includes(z)).length;
+    out = [...rest.slice(0, before), ...run, ...strays, ...rest.slice(before)];
+  }
+  return out;
+}
+/* Linking a zone moves it to the end of its parent's family, wherever it was. */
+function linkedOrder(list, z, parent) {
+  const out = list.filter((o) => o !== z), last = out.reduce((n, o, i) => (o.id === parent || o.parent === parent ? i : n), out.length - 1);
+  out.splice(last + 1, 0, z);
+  return out;
+}
+/* The runs of one family each, in order: a zone on its own is a run of one. */
+function familyRuns(list) {
+  const runs = [];
+  for (const z of list) { const r = rootIn(list, z), at = runs[runs.length - 1]; if (at && at.root === r) at.zones.push(z); else runs.push({ root: r, zones: [z] }); }
+  return runs;
+}
+const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 function sensorRefusal(z, holders) {
   if (!holders.length || new Set([z, ...holders].map(familyRoot)).size === 1) return "";
   const target = holders.length === 1 ? holders[0] : zoneById(familyRoot(holders[0])) || holders[0], where = `${holders.length > 1 ? "Zones" : "Zone"}: ${holders.map((o) => o.name).join(", ")}`;
@@ -826,59 +906,93 @@ function renderOverview() {
   const group = (list, title, cls) => (list.length ? `<div class="notice ${cls}"><strong>${title}</strong>${list.map(link).join("")}</div>` : "");
   const judgedAny = zones.some((z) => targetsSet(targetsOf(z)) && envOf(z).length);
   const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : judgedAny ? `<div class="notice calm"><strong>All zones ideal</strong></div>` : "";
-  const a = ui.arrange, shown = arrangedZones();
-  /* While arranging, a card is no button, so a tap on it can't open its zone and lose the order. */
-  const arrows = (z, i) => `<div class="arrows"><button class="btn move" data-move="${z.id}" data-by="-1" aria-label="Move ${esc(z.name)} up"${i === 0 ? " disabled" : ""}>${icon("up")}</button><button class="btn move" data-move="${z.id}" data-by="1" aria-label="Move ${esc(z.name)} down"${i === shown.length - 1 ? " disabled" : ""}>${icon("down")}</button></div>`;
-  const card = (z, i) => {
+  const a = ui.sort, shown = sortedZones();
+  /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. A family moves as one
+     block, by its own arrows, and a card in it moves only inside it, so a family is never split. */
+  const runs = familyRuns(shown);
+  const arrows = (attr, id, label, first, last, inner = false) => `<div class="arrows">${[[-1, "up", "earlier", first], [1, "down", "later", last]].map(([by, ico, word, off]) => `<button class="btn move${inner ? " inner" : ""}" ${attr}="${id}" data-by="${by}" aria-label="Move ${esc(label)} ${word}${inner ? " in its group" : ""}"${off ? " disabled" : ""}>${icon(ico)}</button>`).join("")}</div>`;
+  const runOf = (z) => runs.findIndex((r) => r.zones.includes(z));
+  const cardArrows = (z) => {
+    const r = runs[runOf(z)], j = r.zones.indexOf(z);
+    if (r.zones.length === 1) return arrows("data-moveblock", r.root, z.name, runOf(z) === 0, runOf(z) === runs.length - 1);
+    return arrows("data-move", z.id, z.name, j === 0, j === r.zones.length - 1, true);
+  };
+  /* The link tab sits on the seam between a linked zone and its neighbour on the parent's side, so each seam has one. */
+  const tab = (z) => {
+    const r = runs[runOf(z)], p = parentOf(z);
+    if (!p || r.zones.length < 2 || !r.zones.includes(p)) return "";
+    const said = `Zone: ${z.name} is linked to Zone: ${p.name}`;
+    return `<span class="linktab ${r.zones.indexOf(z) < r.zones.indexOf(p) ? "after" : "before"}" role="img" aria-label="${esc(said)}" title="${esc(said)}">${icon("link")}</span>`;
+  };
+  const parentBadge = (z) => (runs[runOf(z)].zones.length > 1 && !parentOf(z) ? '<span class="pill plain parentbadge">Parent</span>' : "");
+  const card = (z) => {
     const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id)), on = ds.filter((d) => d.on).length;
-    return `${a ? `<div class="card zone-card arranging" data-arrangecard="${z.id}">` : `<button class="card zone-card" data-go="zone" data-zone="${z.id}">`}<div class="card-head"><h2>${esc(z.name)}</h2>${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}${a ? arrows(z, i) : ""}</div>${z.description ? `<p class="small muted">${esc(z.description)}</p>` : ""}${linkLine(z)}
+    return `${a ? `<div class="card zone-card sorting" data-sortcard="${z.id}">` : `<button class="card zone-card" data-go="zone" data-zone="${z.id}">`}${tab(z)}<div class="card-head"><h2>${esc(z.name)}</h2>${parentBadge(z)}${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}${a ? cardArrows(z) : ""}</div>${z.description ? `<p class="small muted">${esc(z.description)}</p>` : ""}${linkLine(z)}
       ${periodBlock(z, false)}
       <div class="rows">${["temperature", "humidity", "vpd"].map((k) => `<div class="mrow">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="t1">${M[k].label}</div><div class="t2">${fmt(k, z.now[k])}<span>${M[k].unit}</span></div></div>${track(z, k)}<div class="pillcell">${statePill(bandState(z, k))}</div></div>`).join("")}
         <div class="mrow">${ic(M.light.icon, `var(${M.light.c})`)}<div><div class="t1">${M.light.label}</div><div class="t2">${fmt("light", z.now.light)}<span>${M.light.unit}</span></div></div>${lightSpark(z)}</div></div>
       ${combinedNote(z)}<p class="small muted">${plural(ds.length, "device")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p>${a ? "</div>" : "</button>"}`;
   };
-  const head = `<div class="pagehead"><div><h1>Overview</h1>${a ? '<p class="muted small" id="arrange-note" tabindex="-1">Arranging the cards: move them with the arrows.</p>' : ""}</div>${zones.length >= 2 && !a ? '<button class="btn headbtn" data-arrange>Arrange</button>' : ""}</div>`;
-  const bar = a ? `<div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-arrangeback>Back</button></div>` : "";
-  return `<div class="wrap">${head}${a ? "" : banner}<div class="cards">${shown.map(card).join("")}</div>${bar}</div>`;
+  /* A family is drawn as one joined card. Stacked, it takes a row per card, so the zones beside it fill in round it. */
+  const family = (r, i) => {
+    if (r.zones.length === 1) return card(r.zones[0]);
+    const names = andList(r.zones.map((z) => z.name));
+    const bar = a ? `<div class="fambar">${ic("link", "var(--muted)")}<span class="small">${esc(names)}</span>${arrows("data-moveblock", r.root, names, i === 0, i === runs.length - 1)}</div>` : "";
+    return `<div class="fam n${Math.min(r.zones.length, 4)}${a ? " sorting" : ""}" role="group" aria-label="${esc(names)}, linked" data-family="${r.root}" style="--n:${r.zones.length}">${bar}<div class="famcards">${r.zones.map(card).join("")}</div></div>`;
+  };
+  const head = `<div class="pagehead"><div><h1>Overview</h1>${a ? '<p class="muted small" id="sort-note" tabindex="-1">Sorting the cards: move them with the arrows.</p>' : ""}</div>${zones.length >= 2 && !a ? '<button class="btn headbtn" data-sort>Sort</button>' : ""}</div>`;
+  const bar = a ? `<div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-sortback>Back</button></div>` : "";
+  return `<div class="wrap">${head}${a ? "" : banner}<div class="cards">${runs.map(family).join("")}</div>${bar}</div>`;
 }
 
-/* Arranging Overview's cards changes the order zones are stored in, which is the order they're shown in everywhere and on
+/* Sorting Overview's cards changes the order zones are stored in, which is the order they're shown in everywhere and on
    every device. It's a draft until it's applied, as every other edit is. Arrows only for now: a drag would move a card
    the same way, to another place in the same list. */
-const ARRANGE_NOTE = "This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.";
-/* A zone added or removed elsewhere while arranging is taken in rather than lost or kept: a removed one drops out, and a
+const SORT_NOTE = "This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.";
+/* A zone added or removed elsewhere while sorting is taken in rather than lost or kept: a removed one drops out, and a
    new one joins at the end. */
-function arrangedZones() {
-  const a = ui.arrange;
+function sortedZones() {
+  const a = ui.sort;
   if (!a) return zones;
-  return [...a.order.map((id) => zoneById(id)).filter(Boolean), ...zones.filter((z) => !a.order.includes(z.id))];
+  return familyOrder([...a.order.map((id) => zoneById(id)).filter(Boolean), ...zones.filter((z) => !a.order.includes(z.id))]);
+}
+/* A zone on its own or a whole family steps past the next zone or family; a card in a family steps only inside it. */
+function moveRun(root, by) {
+  const runs = familyRuns(sortedZones()), at = runs.findIndex((r) => r.root === root), to = at + by;
+  if (at < 0 || to < 0 || to >= runs.length) return;
+  runs.splice(to, 0, ...runs.splice(at, 1));
+  movedTo(runs.flatMap((r) => r.zones), `[data-moveblock="${CSS.escape(root)}"]`, by);
 }
 function moveCard(id, by) {
-  const order = arrangedZones().map((z) => z.id), at = order.indexOf(id), to = at + by;
-  if (at < 0 || to < 0 || to >= order.length) return;
-  order.splice(to, 0, ...order.splice(at, 1));
-  ui.arrange.order = order;
+  const order = sortedZones(), z = zoneById(id), r = familyRuns(order).find((x) => x.zones.includes(z)), at = r ? r.zones.indexOf(z) : -1, to = at + by;
+  if (at < 0 || to < 0 || to >= r.zones.length) return;
+  const start = order.indexOf(r.zones[0]);
+  order.splice(start + to, 0, ...order.splice(start + at, 1));
+  movedTo(order, `[data-move="${CSS.escape(id)}"]`, by);
+}
+function movedTo(order, sel, by) {
+  ui.sort.order = order.map((z) => z.id);
   render();
   /* Focus stays on the arrow used, so it can be pressed again, or on the other one once this card has reached the end. */
-  const card = document.querySelector(`[data-arrangecard="${id}"]`), used = card.querySelector(`[data-by="${by}"]`);
-  (used.disabled ? card.querySelector(`[data-by="${-by}"]`) : used).focus({ preventScroll: true });
-  card.scrollIntoView({ block: "nearest" });
+  const used = document.querySelector(`${sel}[data-by="${by}"]`);
+  (used.disabled ? document.querySelector(`${sel}[data-by="${-by}"]`) : used).focus({ preventScroll: true });
+  used.closest(".fam, .zone-card").scrollIntoView({ block: "nearest" });
 }
-function arrangeDraft() {
-  const a = ui.arrange;
+function sortDraft() {
+  const a = ui.sort;
   if (!a || ui.screen !== "overview") return null;
   const [items, add] = changeList(), names = (list) => list.map((z) => z.name).join(", ");
-  add("Zone order", names(zones), names(arrangedZones()));
-  return { zone: "Overview", affects: "This changes only the order zones are listed in.", items, skipped: [], bar: true, busy: !!a.sending, blocked: "", note: ARRANGE_NOTE,
-    apply: (done) => saveArrange(a, done), discard: () => { a.order = zones.map((z) => z.id); render(); }, back: () => guarded(leaveArrange) };
+  add("Zone order", names(zones), names(sortedZones()));
+  return { zone: "Overview", affects: "This changes only the order zones are listed in.", items, skipped: [], bar: true, busy: !!a.sending, blocked: "", note: SORT_NOTE,
+    apply: (done) => saveSort(a, done), discard: () => { a.order = zones.map((z) => z.id); render(); }, back: () => guarded(leaveSort) };
 }
-function leaveArrange() {
-  ui.arrange = null;
+function leaveSort() {
+  ui.sort = null;
   render();
-  refocusSel("[data-arrange]");
+  refocusSel("[data-sort]");
 }
-async function saveArrange(a, done) {
-  const order = arrangedZones().map((z) => z.id), rank = (z) => (order.includes(z.id) ? order.indexOf(z.id) : order.length);
+async function saveSort(a, done) {
+  const order = sortedZones().map((z) => z.id), rank = (z) => (order.includes(z.id) ? order.indexOf(z.id) : order.length);
   a.sending = true;
   draftSync();
   const r = await saveConfig(() => { zones.sort((p, q) => rank(p) - rank(q)); });
@@ -886,7 +1000,7 @@ async function saveArrange(a, done) {
   if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
   toast("Zone order saved.");
   done([]);
-  leaveArrange();
+  leaveSort();
 }
 
 function tile(z, k) {
@@ -3346,16 +3460,25 @@ function wizDraft(w) {
   }
   for (const v of z ? virtualOf(z) : []) if (!w.virt.some((x) => x.id === v.id)) add(`${v.name}, virtual`, posText(v.pos, z.layout), "Removed");
   const left = devsOff(w);
-  const note = !z ? `It starts at ${size(L)} with ${L.units} units until you set its layout.` : left.length ? `Not on the map: ${left.map((d) => d.name).join(", ")}. Placing a device is optional.` : "";
+  const note = [!z ? `It starts at ${size(L)} with ${L.units} units until you set its layout.` : left.length ? `Not on the map: ${left.map((d) => d.name).join(", ")}. Placing a device is optional.` : "", moveWords(w, z)].filter(Boolean).join(" ");
   const said = { 0: "Zone details saved.", 1: "Zone layout saved.", 3: "Placement saved." }[w.flow[0]];
   return { zone: w.name.trim() || "this zone", items, skipped: [], bar: false, busy: false, blocked: "", note, apply: (done) => { saveWizard(w, said).then(done); } };
+}
+/* Linking can change where the zone sits in the order, which shows on every page, so the review says so. */
+function moveWords(w, z) {
+  const p = w.flow[0] === 0 && w.parent && w.parent !== (z && z.parent) ? zoneById(w.parent) : null;
+  if (!p) return "";
+  const me = z || { id: "", parent: w.parent }, before = z ? zones : [...zones, me], after = linkedOrder(before, me, p.id);
+  if (before.every((o, i) => o === after[i])) return "";
+  const others = linkedZones(p).filter((o) => o !== z).length;
+  return `${w.name.trim() || "This zone"} moves next to ${p.name}${others ? ` and the zones linked to it` : ""} on Overview, in the menu and on Setup.`;
 }
 async function saveWizard(w, said) {
   const r = await saveConfig(() => {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
     if (w.desc.trim()) z.description = w.desc.trim(); else delete z.description;
-    if (w.flow[0] === 0) { if (w.parent) z.parent = w.parent; else delete z.parent; }
+    if (w.flow[0] === 0) { if (w.parent && w.parent !== z.parent) zones.splice(0, zones.length, ...linkedOrder(zones, z, w.parent)); if (w.parent) z.parent = w.parent; else delete z.parent; }
     /* A virtual device keeps its type, and one added in Device identification may wait for a spot (#36). */
     const virt = w.virt.map((v) => ({ id: v.id, name: v.name, type: v.type || "Other", ...(fits(v, L) ? { pos: [...v.pos] } : {}) }));
     if (virt.length) z.virtual = virt; else delete z.virtual;
@@ -3377,8 +3500,8 @@ async function saveWizard(w, said) {
   return [];
 }
 const autoDrafts = () => (ui.screen !== "autos" ? null : ui.linkw ? linkDraft(ui.linkw) : repeatDraft(ui.autos));
-const openDrafts = () => [arrangeDraft(), autoDrafts(), ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
-const topDraft = () => (arrangeDraft() || autoDrafts() || (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null));
+const openDrafts = () => [sortDraft(), autoDrafts(), ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
+const topDraft = () => (sortDraft() || autoDrafts() || (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null));
 const draftCount = (d) => d.items.length + d.skipped.length;
 /* This frame can't raise the browser's leave prompt, so it tells the host whether leaving now would lose anything, and only
    when that changes. */
@@ -3495,7 +3618,7 @@ function focusMenuButton(item) {
 
 function render() {
   helpersRedraw = false;
-  if (ui.arrange && (ui.screen !== "overview" || zones.length < 2)) ui.arrange = null;
+  if (ui.sort && (ui.screen !== "overview" || zones.length < 2)) ui.sort = null;
   refreshReadings();
   renderChrome();
   document.body.classList.remove("vtyping");
@@ -3618,12 +3741,13 @@ document.addEventListener("click", (e) => {
   if (q("[data-repeatpick]")) { ui.repeatPick = !ui.repeatPick; render(); if (ui.repeatPick) jumpTo("room-alerts"); return; }
   if ((el = q("[data-repeatlink]"))) { const ent = el.dataset.repeatlink; saveConfig(() => { room.alertRepeat = ent; }).then((r) => { if (r.ok) ui.repeatPick = false; toast(r.ok ? "Alert repeat linked." : `Not saved. ${r.error}`); render(); }); return; }
   if (q("[data-repeatunlink]")) { saveConfig(() => { delete room.alertRepeat; }).then((r) => { toast(r.ok ? "Alert repeat unlinked. Your helper stays as it is." : `Not saved. ${r.error}`); render(); }); return; }
-  if (q("[data-arrange]")) { ui.arrange = { order: zones.map((z) => z.id) }; render(); refocus("arrange-note"); return; }
+  if (q("[data-sort]")) { ui.sort = { order: zones.map((z) => z.id) }; render(); refocus("sort-note"); return; }
   if ((el = q("[data-move]"))) { moveCard(el.dataset.move, Number(el.dataset.by)); return; }
-  if (q("[data-arrangeback]")) { arrangeDraft().back(); return; }
+  if ((el = q("[data-moveblock]"))) { moveRun(el.dataset.moveblock, Number(el.dataset.by)); return; }
+  if (q("[data-sortback]")) { sortDraft().back(); return; }
   if ((el = q("[data-go]"))) {
     const { go, zone, gometric, gotarget } = el.dataset;
-    guarded(() => { ui.guide = null; if (go === "zone" && (ui.screen !== "zone" || ui.zone !== zone)) { const h = (zoneById(zone) || {}).history || HISTORY_DEFAULT; ui.metric = h.metric; ui.range = h.hours; } ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.autos = null; ui.linkw = null; ui.arrange = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
+    guarded(() => { ui.guide = null; if (go === "zone" && (ui.screen !== "zone" || ui.zone !== zone)) { const h = (zoneById(zone) || {}).history || HISTORY_DEFAULT; ui.metric = h.metric; ui.range = h.hours; } ui.screen = go; if (zone) ui.zone = zone; if (gometric) ui.metric = gometric; ui.wiz = null; ui.vpdw = null; ui.mapw = null; ui.leafw = null; ui.sched = null; ui.td = null; ui.autos = null; ui.linkw = null; ui.sort = null; ui.picked = null; ui.level = "all"; render(); window.scrollTo(0, 0); if (gotarget) jumpTo(gotarget); });
     return;
   }
   if ((el = q("[data-guide]"))) { const id = el.dataset.guide; guarded(() => { Object.assign(ui, { guide: { id }, screen: "setup", wiz: null, mapw: null, vpdw: null, leafw: null, sched: null, td: null }); render(); window.scrollTo(0, 0); }); return; }
@@ -3968,7 +4092,7 @@ function configOf() {
   return { zones: clone(zones), devices: devices.map((d) => { const out = clone(d); if (d.entity) for (const k of DERIVED) delete out[k]; return out; }), room: clone(room) };
 }
 function adoptConfig(c) {
-  zones = clone(c.zones);
+  zones = familyOrder(clone(c.zones));
   devices = clone(c.devices);
   room = clone(c.room || {});
   configRevision = c.revision;
@@ -3983,6 +4107,7 @@ function withConfig(c, change) {
 }
 async function saveConfig(change) {
   const next = configOf(), value = withConfig(next, change);
+  next.zones = familyOrder(next.zones);
   const r = await ask("save", { base: configRevision, config: next });
   if (r.ok) adoptConfig(r);
   return { ...r, value };
@@ -4033,8 +4158,8 @@ window.addEventListener("message", (e) => {
   } else if (m.type === "config") { if (m.revision !== configRevision) { adoptConfig(m); render(); } }
   else if (m.type === "states") statesChanged(m.states);
   /* The back gesture reaches Home Assistant's page, not this frame, so the panel's host passes it on as this message. It
-     takes one step back: a dialog closes, or else a menu does, or else arranging stops, asking first about an order not applied. */
-  else if (m.type === "back") { if (ui.guard || ui.review || ui.tview || ui.aview) closeModal(); else if (arrangeDraft() && !document.querySelector(".menu:not([hidden])")) arrangeDraft().back(); else closeMenus(true); }
+     takes one step back: a dialog closes, or else a menu does, or else sorting stops, asking first about an order not applied. */
+  else if (m.type === "back") { if (ui.guard || ui.review || ui.tview || ui.aview) closeModal(); else if (sortDraft() && !document.querySelector(".menu:not([hidden])")) sortDraft().back(); else closeMenus(true); }
   else if (m.type === "theme") { setTheme(m.theme); if (ui.screen === "setup" && $("#appearance") && !ui.guard && !ui.review) render(); else drawChart(); }
   else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
 });
