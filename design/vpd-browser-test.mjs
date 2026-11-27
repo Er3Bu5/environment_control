@@ -1279,15 +1279,17 @@ check("Ident: applied, the name, extra mode, modes and virtual device are saved,
 await ev(`(()=>{const h=devices.find(d=>d.id==="heater");h.name="Heater";delete h.haName;const d=devices.find(d=>d.id==="dehu");delete d.nudgeMode;delete d.hiddenModes;delete zones[0].virtual;devices.find(d=>d.id==="plug").type=null;ui.mapw=null;render()})()`); await sleep(20);
 
 // ---------- Sharing asks first: something another zone has joins this one only once a person says so
-const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgbar button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
+const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,more:d.querySelector("#dlg-more")?.textContent ?? null,described:d.getAttribute("aria-describedby"),buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgbar button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
 const noAsk = async () => (await shareAsk()) === null && (await ev(`!ui.guard`)) === true;
-const DEHU_ASK = { role: "alertdialog", title: "Add Dehumidifier to Nursery as well?", text: "It's already in Garden. It's one device, so switching it here switches it there too.", buttons: ["Leave it out", "Add to Nursery"], red: false, primary: "draft-review", focus: "dlg-title" };
+const DEHU_ASK = { role: "alertdialog", title: "Dehumidifier", text: "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in both zones. Automations from Zone: Garden may affect the device state.", described: "dlg-text dlg-more", buttons: ["Cancel", "Add"], red: false, primary: "draft-review", focus: "dlg-title" };
+/* The automation question keeps its own wording: one paragraph, and buttons that name the zone. */
+const AUTO_ASK = { ...DEHU_ASK, more: null, described: "dlg-text" };
 await phone(390, 844); await reset(); await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="dehu"]');
-check("Share: ticking a device another zone has asks first, in the panel's own dialog, with its primary button and not the red one", same(await shareAsk(), DEHU_ASK) && (await ev(`!ui.mapw.pickD.dehu`)) === true && (await hostDialog()).open === false, await shareAsk());
+check("Share: ticking a device another zone has asks first, under its name, in two paragraphs, in the panel's own dialog, with its primary button and not the red one", same(await shareAsk(), DEHU_ASK) && (await ev(`!ui.mapw.pickD.dehu`)) === true && (await hostDialog()).open === false, await shareAsk());
 await shot("share-ask-device-phone");
 await tap("[data-gkeep]");
-check("Share: Leave it out leaves the device unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="false" && document.activeElement.dataset.mdevice==="dehu"`)) === true);
+check("Share: Cancel leaves the device unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="false" && document.activeElement.dataset.mdevice==="dehu"`)) === true);
 /* Each way out is taken only once the question is showing, so a row ticked without asking can't pass for one left out. */
 let asked;
 await tap('[data-mdevice="dehu"]'); asked = await shareAsk(); await key("Escape", 27);
@@ -1319,14 +1321,15 @@ await tap('[data-mdevice="dehu"]'); await ev(`ui.mapw.step=3;render()`); await e
 check("Share: and taking it out again leaves it in Garden only", (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="dehu").zones.join()`)) === "garden");
 await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="fans"]');
-check("Share: several zones are named as the panel joins them", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Add Oscillating fans to Garden as well?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "It's already in Veg and Nursery. It's one device, so switching it here switches it there too." && same((await shareAsk()).buttons, ["Leave it out", "Add to Garden"]), await shareAsk());
+check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Zones: Veg, Nursery may affect the device state." }), await shareAsk());
 await tap("[data-gkeep]");
 /* The panel lets one sensor be mapped into two zones, so a sensor asks too. */
 await ev(`ui.mapw.step=1;render()`); await sleep(30);
 await tap('[data-msensor="v-env"]');
-check("Share: ticking a sensor another zone has asks too", same(await shareAsk(), { ...DEHU_ASK, title: "Add Veg environment to Garden as well?", text: "It's already in Veg. It's one sensor, so it reads the same here as there.", buttons: ["Leave it out", "Add to Garden"] }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
+check("Share: ticking a sensor another zone has asks too, as a sensor", same(await shareAsk(), { ...DEHU_ASK, title: "Veg environment", text: "This sensor is already associated to Zone: Veg. Are you sure you want to duplicate it here?", more: "This means that data is in sync in both zones." }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
+await shot("share-ask-sensor-phone");
 await tap("[data-gkeep]");
-check("Share: Leave it out leaves the sensor unticked", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+check("Share: Cancel leaves the sensor unticked", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
 await tap('[data-msensor="v-env"]'); await tap("[data-gdiscard]");
 check("Share: Add ticks the sensor in the draft", (await noAsk()) && (await ev(`ui.mapw.pickS["v-env"]===true && document.querySelector('[data-msensor="v-env"]').getAttribute("aria-pressed")==="true"`)) === true);
 await tap('[data-msensor="v-env"]');
@@ -1342,7 +1345,7 @@ const AUX_FULL = "automation.warning_veg_auxiliary_dehumidifier_full";
 await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
 await tap('#main .row [data-linkautos="nursery"]'); await sleep(300); await linkSearch("auxiliary");
 await tap(`[data-lpick="${AUX_FULL}"]`);
-check("Share: ticking an automation another zone links asks first", same(await shareAsk(), { ...DEHU_ASK, title: "Add Warning Veg Auxiliary Dehumidifier Full to Nursery as well?", text: "It's already linked in Veg. It's one automation, so switching it off here switches it off there too." }) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined, await shareAsk());
+check("Share: ticking an automation another zone links asks first, in its own words", same(await shareAsk(), { ...AUTO_ASK, buttons: ["Leave it out", "Add to Nursery"], title: "Add Warning Veg Auxiliary Dehumidifier Full to Nursery as well?", text: "It's already linked in Veg. It's one automation, so switching it off here switches it off there too." }) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined, await shareAsk());
 await shot("share-ask-automation-phone");
 await tap("[data-gkeep]");
 check("Share: Leave it out leaves the automation unticked, focus back on its row", (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]===undefined && document.activeElement.dataset.lpick==="${AUX_FULL}"`)) === true);
@@ -1376,6 +1379,22 @@ await tap('#main .row [data-linkautos="garden"]'); await sleep(300); await linkS
 await tap('[data-lpick="automation.failsafe_veg_fans_auto_on"]');
 check("Share: an automation in several zones names them as the panel joins them", (await ev(`document.querySelector("#dlg-text").textContent`)) === "It's already linked in Veg and Nursery. It's one automation, so switching it off here switches it off there too." && (await ev(`document.querySelector("#dlg-title").textContent`)) === "Add Failsafe Veg Fans Auto On to Garden as well?", await shareAsk());
 await tap("[data-gkeep]"); await tap("[data-linkback]");
+/* The auxiliary dehumidifier is in all three sample zones, so a fourth zone is made to ask about it, then removed. */
+await ev(`ui.screen="setup";ui.linkw=null;ui.mapw=null;ui.wiz=null;render()`); await sleep(40);
+await ev(`document.querySelector("[data-addzone]").click()`); await sleep(90); await ev(`ui.wiz.name="Flower tent";render()`); await sleep(40);
+await ev(`document.querySelector('[data-wiz="next"]').click()`); await sleep(90); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(400);
+await mOpen("flower_tent"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
+await tap('[data-mdevice="aux"]');
+check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Zones: Garden, Veg, Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
+await shot("share-ask-three-zones-phone");
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
+await shot("share-ask-three-zones-desktop");
+await phone(390, 844);
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
+await ev(`document.querySelector('[data-rmzone="flower_tent"]').click()`); await sleep(60);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})();document.querySelector("[data-gdiscard]").click()`); await sleep(400);
+check("Share: the zone made for that question is gone again", (await ev(`!zoneById("flower_tent")`)) === true && !(await diskZone("flower_tent")));
 await reset();
 
 // ---------- Tiles: tracks in one row line up
