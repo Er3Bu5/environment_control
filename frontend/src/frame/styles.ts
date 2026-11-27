@@ -107,9 +107,17 @@ export const styles = css`
   .field input[aria-invalid="true"] { border-color: var(--crit); }
   .task[aria-current="step"] strong { color: var(--primary); }
 
-  /* A dialog leaves the foot of the window to its buttons, which ride in the bar there. */
-  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px)); background: #00000080; }
-  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
+  /* Only the middle gives up height, so a dialog taller than the window keeps its title and its buttons in view while
+     the middle scrolls. Should even those not fit, the dialog scrolls and its buttons hold to its foot. */
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .dialog > * { flex: none; }
+  .dialog > .review-scroll { flex: 0 1 auto; }
+  .dlgfoot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; background: var(--card); }
+  /* On a touch screen with the keyboard up, the dialog moves to the top and stops above the keyboard, a little tighter,
+     and the box typed in keeps clear of the buttons when the dialog scrolls to it. */
+  :host(.dlgkeys) .modal { align-items: flex-start; padding-top: 8px; }
+  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 52px; }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
@@ -353,12 +361,7 @@ export const styles = css`
   .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
   .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
-  .draft-review.danger { background: var(--crit); color: #FFFFFF; }
   .draft-discard:disabled { opacity: .5; cursor: not-allowed; }
-  /* A dialog's buttons in the bar. The dialog stops short of the bar, so it never lies over a box being typed in. */
-  :host(.typing) .dlgbar { display: flex; }
-  /* The page's own bar steps aside while a dialog is open, so the dialog's buttons are the only ones at the foot. */
-  .draftbar[inert] { visibility: hidden; }
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
   .wizbar .fixlink { color: inherit; text-decoration: underline; }
   .wizbar[data-bare] .draft-text { opacity: .8; }

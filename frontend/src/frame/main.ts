@@ -573,6 +573,17 @@ export class EcApp extends LitElement {
     const search = this.typing && el instanceof HTMLInputElement && el.dataset.pick !== undefined;
     this.classList.toggle("revealing", box || search);
     if (box) setTimeout(() => this.reveal(el as HTMLInputElement), 300);
+    /* A box typed in inside a dialog keeps the whole dialog above the keyboard, so its buttons stay in reach. It stays
+       there until the dialog closes: moving back as the box loses focus would move the button being tapped from under
+       the finger. */
+    if (this.typing && el instanceof Element && el.closest(".dialog")) {
+      this.classList.add("dlgkeys");
+      this.style.setProperty("--keys-at", `${this.keysAt()}px`);
+      setTimeout(() => {
+        this.style.setProperty("--keys-at", `${this.keysAt()}px`);
+        if (this.shadowRoot?.activeElement === el) (el.closest(".field") ?? el).scrollIntoView({ block: "nearest" });
+      }, 300);
+    }
     /* A helper search box goes to the top instead, so its matches have room below it, above the keyboard. */
     if (search)
       setTimeout(() => {
@@ -596,13 +607,16 @@ export class EcApp extends LitElement {
 
   /* When the app resizes the window for the keyboard, that edge is measured. When it lays the keyboard over the page
      nothing can be measured, so the keyboard's largest usual share of the screen is assumed. */
-  private reveal(input: HTMLInputElement): void {
-    if (this.shadowRoot?.activeElement !== input) return;
+  private keysAt(): number {
     const vv = window.visualViewport, h = vv ? Math.min(vv.height, window.innerHeight) : window.innerHeight;
     if (window.innerWidth !== this.fullView.w || h > this.fullView.h) this.fullView = { w: window.innerWidth, h };
-    const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect();
     const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
-    const edge = h < this.fullView.h * 0.8 ? h : assumed;
+    return h < this.fullView.h * 0.8 ? h : assumed;
+  }
+
+  private reveal(input: HTMLInputElement): void {
+    if (this.shadowRoot?.activeElement !== input) return;
+    const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect(), edge = this.keysAt();
     window.scrollBy(0, row.top - Math.max(8, edge - row.height - 8));
   }
 
@@ -699,6 +713,7 @@ export class EcApp extends LitElement {
       } else if (!this.modal && before && this.modalOpener instanceof HTMLElement && this.modalOpener.isConnected) {
         this.modalOpener.focus({ preventScroll: true });
       }
+      if (!this.modal) this.classList.remove("dlgkeys");
     }
   }
 
@@ -3964,8 +3979,8 @@ export class EcApp extends LitElement {
       </section>`;
   }
 
-  /* A dialog's buttons ride in the same bar at the foot of the window as a page's, so leaving and going on are always
-     found in one place. The bar stays inside the dialog, which is what keeps it usable while the page behind is inert. */
+  /* A dialog's buttons are its own foot, leaving first and going on second. The bar at the foot of the window is for
+     pages, where many edits are made before going on. */
   private modalView() {
     const m = this.modal;
     if (!m) return nothing;
@@ -3974,13 +3989,13 @@ export class EcApp extends LitElement {
       return html`<div class="modal">
         <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
           <h2 id="dlg-title" tabindex="-1">${m.title}</h2>
-          <p class="muted" id="dlg-text">${m.text}</p>
-          ${m.rows?.length
-            ? html`<div class="review-scroll">
-                <div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
-                ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}
-              </div>`
-            : nothing}
+          <div class="review-scroll">
+            <p class="muted" id="dlg-text">${m.text}</p>
+            ${m.rows?.length
+              ? html`<div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
+                  ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}`
+              : nothing}
+          </div>
           ${m.confirm
             ? html`<label class="field" for="dlg-confirm"
                 >Type ${m.confirm} to confirm<input
@@ -3994,9 +4009,9 @@ export class EcApp extends LitElement {
                   @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.guardGo()}
               /></label>`
             : nothing}
-          <div class="draftbar wizbar dlgbar" data-bare>
-            <button class="draft-discard" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="draft-review ${m.safe ? "" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
+            <button class="btn ${m.safe ? "primary" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
           </div>
         </div>
       </div>`;
@@ -4010,9 +4025,9 @@ export class EcApp extends LitElement {
           <div class="review-scroll">
             ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
           </div>
-          <div class="draftbar wizbar dlgbar" data-bare>
-            <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
-            <button class="draft-review" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>Close</button>
+            <button class="btn primary" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
           </div>
         </div>
       </div>`;
@@ -4024,8 +4039,8 @@ export class EcApp extends LitElement {
         <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
           <h2 id="dlg-title" tabindex="-1">Activity: ${z.name}</h2>
           <p class="muted" id="dlg-text">Activity arrives in a release that follows.</p>
-          <div class="draftbar wizbar dlgbar" data-bare>
-            <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;
@@ -4049,9 +4064,9 @@ export class EcApp extends LitElement {
               </div>`
             : nothing}
         </div>
-        <div class="draftbar wizbar dlgbar" data-bare>
-          <button class="draft-discard" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
-          <button class="draft-review" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
+        <div class="dlgfoot">
+          <button class="btn" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
+          <button class="btn primary" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
         </div>
       </div>
     </div>`;
