@@ -2,6 +2,7 @@
   "domain": "environment_control",
   "name": "Environment Control",
   "after_dependencies": [
+    "logbook",
     "recorder"
   ],
   "codeowners": [

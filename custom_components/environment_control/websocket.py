@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import probatio
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import dt as dt_util
 
+from .activity import MAX_PAGE_HOURS, ActivityTimeout, async_activity, zone_entities
 from .catalog import async_build_catalog
-from .const import DOMAIN
+from .const import DOMAIN, MAX_LOOKBACK_HOURS
 from .history import HOURS, MAX_BUCKETS, MAX_ENTITIES, MIN_BUCKETS, async_history, mapped_readings
 from .store import ConfigStore, RevisionConflict
 from .validation import InvalidConfig
@@ -24,6 +27,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_config_save)
     websocket_api.async_register_command(hass, ws_catalog)
     websocket_api.async_register_command(hass, ws_history)
+    websocket_api.async_register_command(hass, ws_activity)
 
 
 def _store(hass: HomeAssistant) -> ConfigStore | None:
@@ -109,3 +113,47 @@ async def ws_history(hass: HomeAssistant, connection: websocket_api.ActiveConnec
         )
         return
     connection.send_result(msg["id"], await async_history(hass, list(dict.fromkeys(entities)), hours, buckets))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): f"{DOMAIN}/activity",
+        probatio.Required("zone"): str,
+        probatio.Required("start"): probatio.Coerce(float),
+        probatio.Required("end"): probatio.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_activity(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """One page of a zone's Activity from the logbook: only the zone's devices and the automations it links."""
+    store = _store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_loaded", "Environment Control isn't set up.")
+        return
+    found = zone_entities(store.data, msg["zone"])
+    if found is None:
+        connection.send_error(msg["id"], "not_found", "That zone isn't in the setup.")
+        return
+    try:
+        start, end = dt_util.utc_from_timestamp(msg["start"]), dt_util.utc_from_timestamp(msg["end"])
+    except OverflowError, OSError, ValueError:
+        connection.send_error(msg["id"], "invalid_format", "That isn't a time.")
+        return
+    if not timedelta(0) < end - start <= timedelta(hours=MAX_PAGE_HOURS):
+        connection.send_error(msg["id"], "invalid_format", "A page of Activity covers at most a day.")
+        return
+    if start < dt_util.utcnow() - timedelta(hours=MAX_LOOKBACK_HOURS):
+        connection.send_error(msg["id"], "invalid_format", "Activity doesn't reach back that far.")
+        return
+    if "recorder" not in hass.config.components or "logbook" not in hass.config.components:
+        connection.send_error(
+            msg["id"], "no_logbook", "Home Assistant's logbook isn't running, so there's no Activity to show."
+        )
+        return
+    try:
+        result = await async_activity(hass, *found, start, end)
+    except ActivityTimeout:
+        connection.send_error(msg["id"], "timeout", "Home Assistant's logbook took too long to answer. Try again.")
+        return
+    connection.send_result(msg["id"], {"zone": msg["zone"], **result})
