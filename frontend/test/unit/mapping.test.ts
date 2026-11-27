@@ -366,12 +366,15 @@ describe("already in another zone", () => {
     [
       { id: "d1", entity: "humidifier.dehu", type: "Dehumidifier", zones: ["veg", "nursery"] },
       { id: "d2", entity: "switch.heater_plug", type: "Heater", zones: ["garden"] },
+      { id: "d3", entity: "humidifier.aux", type: "Dehumidifier", zones: ["nursery", "garden", "veg"] },
     ],
   );
 
   it("names the other zones that have a device saved, in the zones' order", () => {
     expect(deviceElsewhere(c, "garden", "humidifier.dehu")).toEqual(["Veg", "Nursery"]);
     expect(deviceElsewhere(c, "veg", "switch.heater_plug")).toEqual(["Garden"]);
+    /* Overview's order, not the order the device lists them in and not alphabetical: the sharing question names them so. */
+    expect(deviceElsewhere(c, "flower", "humidifier.aux")).toEqual(["Garden", "Veg", "Nursery"]);
   });
 
   it("says nothing for a device no zone has, or one this zone has saved already", () => {

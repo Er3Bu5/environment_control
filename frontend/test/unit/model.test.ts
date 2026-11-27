@@ -123,16 +123,40 @@ describe("links HA can't tell", () => {
 });
 
 describe("adding something another zone has", () => {
-  it("asks in plain words, naming every zone that has it, with a button that says what it does", () => {
-    expect(shareAsk("device", "Dehumidifier", "Garden", ["Veg", "Nursery"])).toEqual({
-      title: "Add Dehumidifier to Garden as well?",
-      text: "It's already in Veg and Nursery. It's one device, so switching it here switches it there too.",
-      keep: "Leave it out",
-      go: "Add to Garden",
+  it("asks briefly, under the thing's own name, in two paragraphs, with Cancel and Add", () => {
+    expect(shareAsk("sensor", "Soil 1", "Veg", ["Garden"])).toEqual({
+      title: "Soil 1",
+      text: "This sensor is already associated to Zone: Garden. Are you sure you want to duplicate it here?",
+      more: "This means that data is in sync in both zones.",
+      keep: "Cancel",
+      go: "Add",
     });
-    expect(shareAsk("automation", "Veg high humidity", "Nursery", ["Veg"]).text).toBe(
-      "It's already linked in Veg. It's one automation, so switching it off here switches it off there too.",
-    );
-    expect(shareAsk("sensor", "Soil 1", "Veg", ["Garden"]).text).toBe("It's already in Garden. It's one sensor, so its readings count there and here.");
+    expect(shareAsk("device", "Dehumidifier", "Nursery", ["Garden"])).toEqual({
+      title: "Dehumidifier",
+      text: "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here?",
+      more: "This means that controls are in sync in both zones. Automations from Zone: Garden may affect the device state.",
+      keep: "Cancel",
+      go: "Add",
+    });
+  });
+
+  it("names every other zone as a plain list in the order given, and says all of these zones once there are three or more in all", () => {
+    expect(shareAsk("device", "Auxiliary dehumidifier", "Flower tent", ["Garden", "Veg", "Nursery"])).toMatchObject({
+      text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?",
+      more: "This means that controls are in sync in all of these zones. Automations from Zones: Garden, Veg, Nursery may affect the device state.",
+    });
+    expect(shareAsk("sensor", "Veg environment", "Garden", ["Veg", "Nursery"])).toMatchObject({
+      text: "This sensor is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?",
+      more: "This means that data is in sync in all of these zones.",
+    });
+  });
+
+  it("leaves the automation question as it was", () => {
+    expect(shareAsk("automation", "Veg high humidity", "Nursery", ["Veg"])).toEqual({
+      title: "Add Veg high humidity to Nursery as well?",
+      text: "It's already linked in Veg. It's one automation, so switching it off here switches it off there too.",
+      keep: "Leave it out",
+      go: "Add to Nursery",
+    });
   });
 });
