@@ -19,3 +19,5 @@ MAX_DEVICES = 200
 # install's answer to a size a phone can take.
 MAX_CATALOG_DEVICES = 1000
 MAX_CATALOG_ENTITIES = 5000
+# Automations a zone can link to switch on and off. A home that automates a lot has a few hundred.
+MAX_CATALOG_AUTOMATIONS = 2000
