@@ -190,3 +190,28 @@ async def test_an_automation_moves_zone_in_two_saves(
     stored = hass_storage[DOMAIN]["data"]
     assert stored["revision"] == 3
     assert [z.get("automations") for z in stored["zones"][1:]] == [[], [link]]
+
+
+async def test_a_setup_stored_before_the_one_zone_rule_loads_and_cannot_be_saved_as_it_is(
+    hass, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    """Pins today's behaviour: no screen ever stored one automation in two zones, so there is no migration."""
+    link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    zones[1]["automations"] = [dict(link)]
+    zones[2]["automations"] = [dict(link)]
+    stored = {"revision": 4, "zones": zones, "devices": sample_unlinked["devices"]}
+    hass_storage[DOMAIN] = {"version": 1, "minor_version": 1, "key": DOMAIN, "data": copy.deepcopy(stored)}
+    entry = MockConfigEntry(domain=DOMAIN, title="Environment Control")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = await hass_ws_client(hass)
+    r = await _send(client, type=f"{DOMAIN}/config")
+    assert r["success"] and r["result"] == stored
+    config = {"zones": zones, "devices": sample_unlinked["devices"]}
+    r = await _send(client, type=f"{DOMAIN}/config/save", revision=4, config=config)
+    assert not r["success"] and r["error"]["code"] == "invalid_config"
+    assert r["error"]["message"] == "An automation can only be linked to one zone."
+    await hass.async_block_till_done()
+    assert hass_storage[DOMAIN]["data"] == stored
