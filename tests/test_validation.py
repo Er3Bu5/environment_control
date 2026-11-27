@@ -397,10 +397,24 @@ def test_a_zone_can_link_automations_in_every_group(sample_config) -> None:
     validate_config(c)
 
 
-def test_two_zones_can_share_an_automation(sample_config) -> None:
+def test_two_zones_cannot_link_one_automation(sample_config) -> None:
+    """Even in different groups and under different ids: switched off for one zone it would stop in the other."""
+    c = _bad(sample_config, lambda c: [z.update(automations=[]) for z in c["zones"]])
+    c["zones"][0]["automations"] = [{"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}]
+    c["zones"][2]["automations"] = [
+        {"id": "a1", "entity": "automation.tent_lights_on", "group": "control"},
+        {"id": "a2", "entity": "automation.failsafe_veg_fans_auto_on", "group": "alert_device"},
+    ]
+    with pytest.raises(InvalidConfig, match=r"^An automation can only be linked to one zone\.$"):
+        validate_config(c)
+
+
+def test_an_automation_can_be_linked_by_one_zone(sample_config) -> None:
     link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
-    c = _bad(sample_config, lambda c: [z.update(automations=[dict(link)]) for z in c["zones"][:2]])
-    validate_config(c)
+    for zone in range(3):
+        c = _bad(sample_config, lambda c: [z.update(automations=[]) for z in c["zones"]])
+        c["zones"][zone]["automations"] = [dict(link)]
+        validate_config(c)
 
 
 def test_a_zone_can_link_no_automations(sample_config) -> None:

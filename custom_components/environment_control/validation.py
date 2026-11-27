@@ -214,11 +214,12 @@ def _check_sensor(zid: str, x: Any) -> None:
         _fail(f"{sid} has a height this panel doesn't know")
 
 
-def _check_automations(zid: str, links: Any) -> None:
+def _check_automations(zid: str, links: Any, elsewhere: set[str]) -> None:
     """A zone's automation links: each exactly an id, an automation entity and a group, with no id or automation twice.
 
-    Nothing else may ride along, so a link can never name a service or anything but an automation. The same automation
-    may be linked in several zones, as a failsafe on shared hardware is.
+    Nothing else may ride along, so a link can never name a service or anything but an automation. An automation belongs
+    to one zone: switched off for one zone it would stop in another without that zone saying so. `elsewhere` is what the
+    zones before this one link, and gains this zone's.
     """
     if not isinstance(links, list) or len(links) > MAX_AUTOMATIONS_PER_ZONE:
         _fail(f"{zid} links automations that aren't a short list")
@@ -234,8 +235,11 @@ def _check_automations(zid: str, links: Any) -> None:
             _fail(f"{zid} links something that isn't an automation, or one twice")
         if a["group"] not in AUTOMATION_GROUPS:
             _fail(f"{zid} puts an automation in a group this panel doesn't know")
+        if entity in elsewhere:
+            _fail("An automation can only be linked to one zone.")
         ids.add(aid)
         entities.add(entity)
+    elsewhere |= entities
 
 
 def _check_room(room: Any) -> None:
@@ -266,6 +270,7 @@ def validate_config(c: Any) -> None:
     if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.match(i) for i in ids):
         _fail("Zone ids must be unique slugs")
     by_id = {z["id"]: z for z in zones}
+    linked: set[str] = set()
 
     for z in zones:
         zid, h = z["id"], z.get("helpers")
@@ -309,7 +314,7 @@ def validate_config(c: Any) -> None:
             _fail(f"{zid} has a description that isn't short text")
         _check_limits(zid, z)
         if "automations" in z:
-            _check_automations(zid, z["automations"])
+            _check_automations(zid, z["automations"], linked)
         opens = z.get("history")
         if opens is not None and not (
             isinstance(opens, dict)
