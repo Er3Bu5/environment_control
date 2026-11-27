@@ -117,7 +117,7 @@ if (process.env.SMOKE) {
     check(`${id} Day and night: the page holds HA's times, and no light limits`, v.day === want2.day && v.night === want2.night && v.dayMin === undefined && v.nightMax === undefined, v);
     await shot(`real-sched-${id}`);
     await go(`document.querySelector("[data-tdexit]").click()`);
-    await go(`ui.screen="zone";ui.zone="${id}";render();document.querySelector('[data-viewtargets="${id}"]').click()`);
+    await go(`ui.screen="zone";ui.zone="${id}";render();document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="${id}"]').click()`);
     const rows = await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[...t.querySelectorAll("tr")].pop().textContent)`);
     check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
     await go(`document.querySelector('[data-tset="${id}"]').click();ui.vpdw.period="day";render()`); await clean(`${id} Targets`);
@@ -374,7 +374,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 /* The pages are in the page menu since #37, so going to one is picking it there. */
 const menuItems = () => ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].map(b=>b.textContent)`);
 const goTab = async (name) => { await ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
-const reset = () => ev(`ui.review=null;ui.guard=null;ui.tview=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
+const reset = () => ev(`ui.review=null;ui.guard=null;ui.tview=null;ui.aview=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
 const groupNames = () => ev(`[...document.querySelectorAll("[data-cgroup] .dev-name")].map(e=>e.textContent)`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 await phone(390, 844); await reset(); await goTab("Garden");
@@ -572,6 +572,74 @@ await ev(`document.querySelector("#main .notice.fix").click()`); await sleep(80)
 await plugRole("Heater"); await goTab("Garden");
 check("Controls: a plug marked Heater joins Temperature", (await ev(`document.querySelector('[data-cgroup="Temperature"]').textContent`)).includes("Plug 7"));
 await ev(`devices.find(d=>d.id==="plug").type=null;render()`);
+
+// ---------- The zone page's menu: View targets, View activity and View automations, behind one button in the heading
+await phone(390, 844); await reset(); await goTab("Garden");
+const MORE = '[data-zmenu="-more"]';
+const moreOpen = () => ev(`!document.querySelector("#zmenu--more").hidden && document.querySelector('${MORE}').getAttribute("aria-expanded")==="true"`);
+const moreFocused = () => ev(`document.activeElement.dataset.zmenu==="-more"`);
+const moreClosed = () => ev(`(()=>{const m=document.querySelector("#zmenu--more"),b=document.querySelector('${MORE}');return !!m&&!!b&&m.hidden&&b.getAttribute("aria-expanded")==="false"})()`);
+const tellBack = () => onHA(`document.querySelector("environment-control-panel").post({type:"back"})`).then(() => sleep(60));
+const moreBtn = await ev(`(()=>{const b=document.querySelector('${MORE}'),n=document.querySelector(".navmenu .burger"),r=b.getBoundingClientRect(),q=n.getBoundingClientRect();return {label:b.getAttribute("aria-label"),pop:b.getAttribute("aria-haspopup"),exp:b.getAttribute("aria-expanded"),dots:b.querySelector("svg path").getAttribute("d")===ICON.dots,cls:b.className===n.className,w:r.width,h:r.height,nw:q.width,nh:q.height,inHead:!!b.closest(".pagehead"),right:r.right,wrapRight:document.querySelector("#main .wrap").getBoundingClientRect().right}})()`);
+check("Zone menu: the heading's button is More, a menu button showing three dots", moreBtn.label === "More" && moreBtn.pop === "menu" && moreBtn.exp === "false" && moreBtn.dots && moreBtn.inHead, moreBtn);
+check("Zone menu: it's the page menu's button in size and look, at the right of the heading", moreBtn.cls && moreBtn.w === moreBtn.nw && moreBtn.h === moreBtn.nh && Math.abs(moreBtn.right - moreBtn.wrapRight) < 1, moreBtn);
+check("Zone menu: View targets is no longer a button of its own", (await ev(`[...document.querySelectorAll("#main [data-viewtargets]")].every(b=>b.closest(".menu"))`)) === true);
+check("Zone menu: it's closed until asked", (await moreOpen()) === false && (await ev(`document.querySelector("#zmenu--more").hidden`)) === true);
+await tap(MORE);
+check("Zone menu: a tap opens it, with focus on its first item", (await moreOpen()) && (await ev(`document.activeElement.textContent`)) === "View targets", await ev(`document.activeElement.outerHTML.slice(0,80)`));
+check("Zone menu: View targets, View activity and View automations, in that order, each a menu item", same(await ev(`[...document.querySelectorAll("#zmenu--more > *")].map(b=>b.getAttribute("role")+":"+b.textContent)`), ["menuitem:View targets", "menuitem:View activity", "menuitem:View automations"]), await ev(`[...document.querySelectorAll("#zmenu--more > *")].map(b=>b.textContent)`));
+for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small phone"], [1280, 900, "desktop"]]) {
+  if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+  await ev(`window.scrollTo(0,0)`); await sleep(60);
+  if (!(await moreOpen())) await tap(MORE);
+  const box = await ev(`(()=>{const m=document.querySelector("#zmenu--more").getBoundingClientRect(),b=document.querySelector('${MORE}').getBoundingClientRect();return {l:m.left,r:m.right,t:m.top,b:m.bottom,br:b.right,bb:b.bottom,w:innerWidth,h:innerHeight}})()`);
+  check(`Zone menu ${name}: it opens downward from the button's right edge, on screen`, box.t >= box.bb && Math.abs(box.r - box.br) < 1 && box.l >= 0 && box.r <= box.w && box.b <= box.h, box);
+  await shot(`zone-menu-${name.replace(" ", "-")}`);
+}
+await phone(390, 844); await ev(`window.scrollTo(0,0)`); await sleep(60);
+if (!(await moreOpen())) await tap(MORE);
+await key("ArrowDown", 40);
+check("Zone menu: the arrow keys move along it", (await ev(`document.activeElement.textContent`)) === "View activity");
+await key("Escape", 27);
+check("Zone menu: Escape closes it and hands focus back to its button", !(await moreOpen()) && (await moreFocused()));
+await tap(MORE); await tap(MORE);
+check("Zone menu: tapping the button again closes it", await moreClosed());
+await tap(MORE); await tap("#main h1");
+check("Zone menu: a tap anywhere else closes it", await moreClosed());
+await tap(MORE); await tellBack();
+check("Zone menu: Back closes it, focus back on its button, and stays on the zone", !(await moreOpen()) && (await moreFocused()) && (await ev(`ui.screen==="zone" && ui.zone==="garden"`)) === true);
+await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]');
+check("Zone menu: View targets opens the Targets dialog, and the menu closes", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Targets: Garden" && !(await moreOpen()) && same(await ev(`[...document.querySelectorAll("#modal .dlgbar button")].map(b=>b.textContent)`), ["Close", "Set targets"]));
+await tap("[data-tclose]");
+check("Zone menu: closing Targets hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
+
+// The Activity design moved off the zone page into the dialog View activity opens
+check("Activity: the zone page has no Activity card", (await ev(`[...document.querySelectorAll("#main h2")].some(h=>h.textContent==="Activity") || !!document.querySelector("#main .act, #main [data-activity]")`)) === false);
+await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]');
+const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),note:d.textContent.includes("The panel doesn't have Activity yet: it says it arrives in a release that follows."),rows:[...d.querySelectorAll(".act-row")].length,bar:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent)}})()`);
+let ad = await actDlg();
+check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]) && (await ev(`document.activeElement.id`)) === "dlg-title", ad);
+check("Activity: it holds the design, its chips, its note and its list", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Climate", "Sensors"]) && ad.note && ad.rows === (await ev(`ACTIVITY.garden.length`)) && ad.rows > 0, ad);
+check("Activity: the page behind it can't be reached", (await ev(`document.querySelector("#main").inert`)) === true);
+await shot("activity-dialog-phone");
+await tap('#modal [data-activity="lights"]'); ad = await actDlg();
+check("Activity: a chip filters the list in the dialog, and keeps focus", ad.chips.includes("Lights*") && ad.rows === (await ev(`ACTIVITY.garden.filter(a=>a[1]==="lights").length`)) && (await ev(`document.activeElement.dataset.activity`)) === "lights" && (await ev(`ui.screen==="zone"`)) === true, ad);
+await tap('#modal [data-activity="all"]');
+await tap("[data-aclose]");
+check("Activity: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.aview`)) === true && (await moreFocused()));
+await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await key("Escape", 27);
+check("Activity: Escape shuts it", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
+const actShown = () => ev(`!!ui.aview && !document.querySelector("#modal").hidden && document.querySelector("#dlg-title").textContent==="Activity: Garden"`);
+await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); let actWas = await actShown(); await tellBack();
+check("Activity: Back shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true && (await ev(`ui.screen==="zone"`)) === true && (await moreFocused()));
+await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); actWas = await actShown();
+await ev(`document.querySelector("#modal").click()`); await sleep(40);
+check("Activity: a tap outside the dialog shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true);
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await ev(`window.scrollTo(0,0)`);
+await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await shot("activity-dialog-desktop"); await tap("[data-aclose]");
+await phone(390, 844); await reset(); await goTab("Garden");
+await tap(MORE); await tap('#zmenu--more [data-autos="alert"]');
+check("Zone menu: View automations opens Garden's automations on Alerts", (await ev(`ui.screen==="autos" && ui.zone==="garden" && ui.autos.page==="alert"`)) === true);
 
 // ---------- Automation switches: Home Assistant runs them, and the panel switches them through the host, never assumed
 await ev(`ui.review=null;ui.guard=null;renderModal();ui.screen="zone";ui.zone="garden";ui.autos=null;ui.linkw=null;render()`); await sleep(40);
@@ -1680,9 +1748,9 @@ const typeLimit = async (v) => { await ev(`(()=>{const e=document.querySelector(
 const noChart = () => ev(`ui.vpdw.edit`);
 const lightNote = () => ev(`(()=>{const n=document.querySelector("#vnote-light"),b=document.querySelector("#vin-light-0"),r=n.getBoundingClientRect(),c=b.getBoundingClientRect(),row=n.closest(".vrow").getBoundingClientRect();return {text:n.textContent,same:r.top<c.bottom&&r.bottom>c.top,right:r.left>=c.right,left:r.right<=c.left,inside:r.left>=row.left&&r.right<=row.right&&r.bottom<=row.bottom,described:b.getAttribute("aria-describedby")==="vnote-light"}})()`);
 await reset(); await goTab("Garden");
-/* Since #33 the zone's targets are behind View targets in its heading, and Set targets there opens the page. */
-const viaTargets = async (id = "garden") => { await ev(`document.querySelector('[data-viewtargets="${id}"]').click()`); await sleep(40); await ev(`document.querySelector('[data-tset="${id}"]').click()`); await sleep(50); };
-await ev(`document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
+/* Since #33 the zone's targets are behind View targets, on the menu in its heading, and Set targets there opens the page. */
+const viaTargets = async (id = "garden") => { await ev(`document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="${id}"]').click()`); await sleep(40); await ev(`document.querySelector('[data-tset="${id}"]').click()`); await sleep(50); };
+await ev(`document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
 check("Limits: View targets lists them with the other thresholds", same(await limitTables(), ["Lightlx2,000", "Lightlx200"]), await limitTables());
 await ev(`document.querySelector("[data-tclose]").click()`); await sleep(30);
 await viaTargets(); await period2("day");
@@ -1720,7 +1788,7 @@ check("Limits: a zone not on helpers lists both for review", (await ev(`vpdDraft
 await clickIt("[data-rapply]"); await sleep(60);
 check("Limits: and saves them, without touching the schedule", same(await ev(`[zoneById("garden").lightLimits.dayMin,zoneById("garden").lightLimits.nightMax,zoneById("garden").dayAt,schedSends.length]`), [2500, 150, 7 * 60, await schedSent()]), await ev(`zoneById("garden").lightLimits`));
 check("Limits: no working field leaks into the saved bands", (await ev(`zoneById("garden").bands.day.light===undefined && zoneById("garden").bands.night.light===undefined`)) === true);
-await ev(`ui.screen="zone";ui.zone="garden";ui.td=null;ui.sched=null;ui.vpdw=null;render();document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
+await ev(`ui.screen="zone";ui.zone="garden";ui.td=null;ui.sched=null;ui.vpdw=null;render();document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40);
 check("Limits: View targets follows", same(await limitTables(), ["Lightlx2,500", "Lightlx150"]), await limitTables());
 await ev(`document.querySelector("[data-tclose]").click()`); await sleep(30);
 await ev(`Object.assign(zoneById("garden"),{linked:true,lightLimits:{dayMin:2000,nightMax:200}});render()`);
@@ -1735,7 +1803,7 @@ for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390
   await key("Escape", 27); await sleep(40);
   check(`Limits ${name}: no sideways scroll`, await ev(`document.documentElement.scrollWidth<=innerWidth`));
   if (w >= 500) { const e = await ev(`(()=>{const i=document.querySelector("#vin-light-0");i.value="10000";const r=[i.scrollWidth,i.clientWidth];i.value=2000;return r})()`); check(`Limits ${name}: the widest value fits one column`, e[0] <= e[1], e); }
-  if (w === 800) { await ev(`document.querySelector('[data-vrow="light"]').scrollIntoView({block:"center"})`); await shot("limits-targets-foldable"); await reset(); await goTab("Garden"); await ev(`document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40); await ev(`document.querySelector(".tbl-wrap").scrollIntoView({block:"center"})`); await sleep(40); await shot("limits-table-foldable"); check("Limits foldable: every table fits its card", await ev(`[...document.querySelectorAll(".tbl-wrap")].every((t)=>t.scrollWidth<=t.clientWidth)`), await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[t.scrollWidth,t.clientWidth])`)); }
+  if (w === 800) { await ev(`document.querySelector('[data-vrow="light"]').scrollIntoView({block:"center"})`); await shot("limits-targets-foldable"); await reset(); await goTab("Garden"); await ev(`document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="garden"]').click()`); await sleep(40); await ev(`document.querySelector(".tbl-wrap").scrollIntoView({block:"center"})`); await sleep(40); await shot("limits-table-foldable"); check("Limits foldable: every table fits its card", await ev(`[...document.querySelectorAll(".tbl-wrap")].every((t)=>t.scrollWidth<=t.clientWidth)`), await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[t.scrollWidth,t.clientWidth])`)); }
 }
 for (const [w, h, name, kb] of [[800, 1000, "foldable", KEYBOARD.portrait], [390, 844, "phone", KEYBOARD.portrait], [320, 640, "small phone", KEYBOARD.portrait], [844, 390, "landscape", KEYBOARD.landscape]]) {
   await phone(w, h); await schedOpen("garden"); await sleep(60);

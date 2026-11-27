@@ -34,11 +34,11 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
   /* A zone's heading row: the menu button over the left-hand column, the name and its details in the middle, and
-     View targets at the right, the two buttons level with the foot of the details. */
+     the zone's own menu at the right, the two buttons level with the foot of the details. */
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -559,6 +559,7 @@ const ICON = {
   fan: "M12 11a3.5 3.5 0 0 0-1-7c-3 0-3.5 3-1 5l2 2Zm1 1a3.5 3.5 0 0 0 7 1c0-3-3-3.5-5-1l-2 0Zm-1 1a3.5 3.5 0 0 0 1 7c3 0 3.5-3 1-5l-2-2Zm-1-1a3.5 3.5 0 0 0-7-1c0 3 3 3.5 5 1l2 0Z",
   plug: "M9 2v5H7v5a5 5 0 0 0 4 4.9V22h2v-5.1A5 5 0 0 0 17 12V7h-2V2h-2v5h-2V2H9Z",
   menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
+  dots: "M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   home: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
@@ -1201,22 +1202,29 @@ function alwaysOpen(z) {
   const opens = z.history || HISTORY_DEFAULT;
   return opens.metric === ui.metric && opens.hours === ui.range ? "" : `<div class="row"><button class="fixlink" data-histdefault="${z.id}">Always open on ${esc(historyWords({ metric: ui.metric, hours: ui.range }))} &rsaquo;</button></div>`;
 }
+const segChips = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
+const activityChips = () => segChips("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type");
+/* The zone page's own menu. Its id can't be a zone's, since a zone's id has no hyphen in it. */
+const MORE = "-more";
+/* What's looked up now and then about a zone, behind one button so the heading stays a heading, as the panel has it. */
+function zoneMore(z) {
+  return `<div class="zmenu"><button class="btn burger" data-zmenu="${MORE}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${MORE}" aria-label="More">${icon("dots")}</button>
+    <div class="menu" id="zmenu-${MORE}" role="menu" hidden><button role="menuitem" data-viewtargets="${z.id}">View targets</button><button role="menuitem" data-viewactivity="${z.id}">View activity</button><button role="menuitem" data-autos="alert" data-zone="${z.id}">View automations</button></div></div>`;
+}
 function renderZone() {
   const z = zoneById(ui.zone);
-  const seg = (attr, cur, items, label) => `<div class="seg" role="group" aria-label="${label}">${items.map(([k, l]) => `<button ${attr}="${k}" aria-pressed="${String(cur) === String(k)}">${l}</button>`).join("")}</div>`;
   const left = setupLeft(z);
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Not set up yet. Still to confirm: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
-  /* Since #33: History, then Device placement and Controls. The targets moved behind View targets in the heading. */
-  return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div><button class="btn" data-viewtargets="${z.id}">View targets</button></div>
+  /* Since #33: History, then Device placement and Controls. The targets and Activity moved behind the menu in the heading. */
+  return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
     ${unfinished}${autosNotice(z)}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
-    <section class="card"><div class="card-head"><h2>History</h2><div class="row">${seg("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${seg("data-range", ui.range, RANGES, "Range")}</div></div>
+    <section class="card"><div class="card-head"><h2>History</h2><div class="row">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
     <div class="split">
       <section class="card"><div class="card-head"><h2>Device placement</h2></div>${mapHtml(z)}${keyHtml}${unplacedNote(z)}${sensorDetail(z)}</section>
       ${controlsCard(z)}
     </div>
-    <section class="card"><div class="card-head"><h2>Activity</h2>${seg("data-activity", ui.activity, [["all", "All"], ...Object.entries(ACT_KIND).map(([k, v]) => [k, v[2]])], "Activity type")}</div><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</section>
     ${autosCard(z)}</div>`;
 }
 
@@ -3205,8 +3213,15 @@ function targetsDialog(z) {
     <div class="review-scroll">${targetsSet(z) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
     <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
 }
+/* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold. */
+function activityDialog(z) {
+  return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Activity: ${esc(z.name)}</h2>${activityChips()}
+    <div class="review-scroll"><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</div>
+    <div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-aclose>Close</button></div></div>`;
+}
 function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
+  if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
   if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review danger" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
@@ -3220,7 +3235,7 @@ function modalHtml() {
 }
 let modalOpener = null;
 function renderModal() {
-  const box = $("#modal"), open = !!(ui.guard || ui.review || ui.tview), wasOpen = !box.hidden;
+  const box = $("#modal"), open = !!(ui.guard || ui.review || ui.tview || ui.aview), wasOpen = !box.hidden;
   if (open && !wasOpen) modalOpener = document.activeElement;
   box.hidden = !open;
   box.innerHTML = open ? modalHtml() : "";
@@ -3230,8 +3245,14 @@ function renderModal() {
 }
 function closeModal() {
   if (ui.review && ui.review.busy) return;
-  ui.guard = null; ui.review = null; ui.tview = null;
+  ui.guard = null; ui.review = null; ui.tview = null; ui.aview = null;
   renderModal();
+}
+/* Focus goes to a menu's button before a dialog opens from the menu, so closing the dialog hands focus back there and not
+   to a hidden item. */
+function focusMenuButton(item) {
+  const m = item.closest(".menu"), b = m && document.querySelector(`[aria-controls="${m.id}"]`);
+  if (b) b.focus({ preventScroll: true });
 }
 
 function render() {
@@ -3290,9 +3311,15 @@ document.addEventListener("click", (e) => {
     if (q("[data-tclose]") || !q(".dialog")) closeModal();
     return;
   }
+  if (ui.aview) {
+    if ((el = q("[data-activity]"))) { const k = el.dataset.activity; ui.activity = k; renderModal(); const again = document.querySelector(`#modal [data-activity="${k}"]`); if (again) again.focus({ preventScroll: true }); return; }
+    if (q("[data-aclose]") || !q(".dialog")) closeModal();
+    return;
+  }
   if ((el = q("[data-histdefault]"))) { historyDefault(zoneById(el.dataset.histdefault), { metric: ui.metric, hours: ui.range }); return; }
   if ((el = q("[data-opens]"))) { const z = zoneById(el.dataset.opens), at = z.history || HISTORY_DEFAULT, view = el.dataset.ometric ? { metric: el.dataset.ometric, hours: at.hours } : { metric: at.metric, hours: Number(el.dataset.ohours) }; if (view.metric !== at.metric || view.hours !== at.hours) historyDefault(z, view); return; }
-  if ((el = q("[data-viewtargets]"))) { ui.tview = el.dataset.viewtargets; renderModal(); return; }
+  if ((el = q("[data-viewtargets]"))) { focusMenuButton(el); ui.tview = el.dataset.viewtargets; renderModal(); return; }
+  if ((el = q("[data-viewactivity]"))) { focusMenuButton(el); ui.aview = el.dataset.viewactivity; renderModal(); return; }
   if (ui.guard || ui.review) {
     if (q("[data-gdiscard]")) { if (!guardConfirmed()) return; const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
     if (q("[data-rapply]")) { applyReview(); return; }
@@ -3343,7 +3370,6 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-range]"))) { ui.range = Number(el.dataset.range); render(); return; }
   if ((el = q("[data-level]"))) { ui.level = el.dataset.level; render(); return; }
   if ((el = q("[data-link]"))) { ui.linkFilter = el.dataset.link; render(); return; }
-  if ((el = q("[data-activity]"))) { ui.activity = el.dataset.activity; render(); return; }
   if ((el = q("[data-answer]"))) { const id = el.dataset.answer, val = el.dataset.val; saveConfig(() => { const d = devices.find((x) => x.id === id); d.link = val; d.source = "confirmed"; return d.name; }).then((r) => { toast(r.ok ? `Saved ${r.value} as ${LINK[val]}.` : `Not saved. ${r.error}`); render(); }); return; }
   if ((el = q("[data-role]"))) { const id = el.dataset.role, val = el.dataset.val; saveConfig(() => { const d = devices.find((x) => x.id === id); d.type = val; return d.name; }).then((r) => { toast(r.ok ? `Saved ${r.value} as ${val}.` : `Not saved. ${r.error}`); render(); }); return; }
   if ((el = q("[data-wizard]"))) {
@@ -3456,6 +3482,10 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
+  if (ui.aview) {
+    if (e.key === "Escape") closeModal();
+    return;
+  }
   if (ui.guard || ui.review) {
     if (e.key === "Escape") closeModal();
     if (e.key === "Enter" && e.target.id === "dlg-confirm" && guardConfirmed()) { e.preventDefault(); $("[data-gdiscard]").click(); }
@@ -3714,6 +3744,9 @@ window.addEventListener("message", (e) => {
     render();
   } else if (m.type === "config") { if (m.revision !== configRevision) { adoptConfig(m); render(); } }
   else if (m.type === "states") statesChanged(m.states);
+  /* The back gesture reaches Home Assistant's page, not this frame, so the panel's host passes it on as this message. It
+     takes one step back: a dialog closes, or else a menu does. */
+  else if (m.type === "back") { if (ui.guard || ui.review || ui.tview || ui.aview) closeModal(); else closeMenus(true); }
   else if (m.type === "theme") { setTheme(m.theme); if (ui.screen === "setup" && $("#appearance") && !ui.guard && !ui.review) render(); else drawChart(); }
   else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
 });
