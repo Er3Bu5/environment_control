@@ -218,6 +218,43 @@ CASES = {
         ),
         "or one twice",
     ),
+    "automation with a trailing newline": (
+        lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x\n", "group": "control"}]),
+        "isn't an automation",
+    ),
+    "one automation linked twice in a zone, once with a trailing newline": (
+        lambda c: c["zones"][0].update(
+            automations=[
+                {"id": "a1", "entity": "automation.x", "group": "alert_day"},
+                {"id": "a2", "entity": "automation.x\n", "group": "failsafe"},
+            ]
+        ),
+        "isn't an automation",
+    ),
+    "one automation in two zones, once with a trailing newline": (
+        lambda c: (
+            c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x", "group": "control"}]),
+            c["zones"][1].update(automations=[{"id": "a1", "entity": "automation.x\n", "group": "control"}]),
+        ),
+        "isn't an automation",
+    ),
+    "device entity with a trailing newline": (
+        lambda c: c["devices"].append({"id": "x", "zones": [], "entity": "switch.x\n"}),
+        "can't control",
+    ),
+    "sensor reading with a trailing newline": (
+        lambda c: c["zones"][0]["sensors"][0].update(entities={"temperature": "sensor.x\n"}),
+        "isn't a sensor entity",
+    ),
+    "helper with a trailing newline": (
+        lambda c: c["zones"][0].update(helpers={"day": "input_datetime.x\n"}),
+        "isn't a helper",
+    ),
+    "alert repeat with a trailing newline": (
+        lambda c: c.update(room={"alertRepeat": "input_number.x\n"}),
+        "isn't a number helper",
+    ),
+    "zone id with a trailing newline": (lambda c: c["zones"][0].update(id=c["zones"][0]["id"] + "\n"), "unique slugs"),
     "automation in a group the panel doesn't know": (
         lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x", "group": "other"}]),
         "group this panel doesn't know",
