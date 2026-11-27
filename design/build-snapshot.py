@@ -256,8 +256,12 @@ if os.path.exists(f"{root}/ha-snap/automations.json"):
         REGISTRY["entities"][e] = {"entity_id": e, "platform": "automation", "area_id": area_id(name)}
         if name:
             REGISTRY["areas"].setdefault(area_id(name), {"area_id": area_id(name), "name": name})
+    # An automation belongs to one zone and the fake refuses every save otherwise, so the first zone to list it keeps it.
+    taken = set()
     for z in zones:
-        z["automations"] = [{"id": f"a{i + 1}", **x} for i, x in enumerate(A["links"].get(z["id"], []))]
+        mine = [x for x in A["links"].get(z["id"], []) if x["entity"] not in taken]
+        taken.update(x["entity"] for x in mine)
+        z["automations"] = [{"id": f"a{i + 1}", **x} for i, x in enumerate(mine)]
     if A.get("repeat"):
         STATES[A["repeat"]["entity"]] = {"state": A["repeat"]["state"], "attributes": A["repeat"]["attributes"]}
         ROOM = {"alertRepeat": A["repeat"]["entity"]}
