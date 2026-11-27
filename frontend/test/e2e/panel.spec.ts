@@ -72,6 +72,25 @@ async function hostDialogText(page: Page): Promise<string> {
   await cdp.detach();
   return out.join(" ");
 }
+/* A dialog's buttons, leaving first and going on second, sit in a row at the foot of the dialog's own box, at its right,
+   and in the window. */
+async function dialogFoot(box: Locator, names: (string | RegExp)[]): Promise<void> {
+  const foot = box.locator(".dlgfoot"), buttons = foot.getByRole("button");
+  await expect(buttons).toHaveText(names);
+  const d = (await box.boundingBox())!, f = (await foot.boundingBox())!;
+  for (const b of await buttons.all()) {
+    const r = (await b.boundingBox())!;
+    expect(r.x).toBeGreaterThanOrEqual(d.x);
+    expect(r.x + r.width).toBeLessThanOrEqual(d.x + d.width);
+    expect(r.y).toBeGreaterThanOrEqual(d.y);
+    expect(r.y + r.height).toBeLessThanOrEqual(d.y + d.height);
+    await expect(b).toBeInViewport({ ratio: 1 });
+  }
+  /* At the dialog's bottom edge, inside its padding, and right-aligned. */
+  expect(d.y + d.height - (f.y + f.height)).toBeLessThanOrEqual(24);
+  const last = (await buttons.last().boundingBox())!;
+  expect(d.x + d.width - (last.x + last.width)).toBeLessThanOrEqual(24);
+}
 /* A graph's chips and a range's, in the box that holds both: whether they share a line, and whether the line between
    them is drawn, and drawn in the gap between them. The line is clipped to the box, so one outside it isn't seen. */
 const segDivider = (row: Locator) =>
@@ -277,7 +296,7 @@ test.describe("talking to HA", () => {
     const dialog = app(frame).getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Activity: Garden", exact: true })).toBeVisible();
     await expect(dialog).toContainText("Activity arrives in a release that follows.");
-    await expect(dialog.locator(".dlgbar").getByRole("button")).toHaveText(["Close"]);
+    await expect(dialog.locator(".dlgfoot").getByRole("button")).toHaveText(["Close"]);
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(dialog).toHaveCount(0);
     await expect(more).toBeFocused();
@@ -1196,46 +1215,91 @@ test.describe("zones", () => {
     expect((await stored(page)).zones.map((z) => z.id)).not.toContain("seedlings");
   });
 
-  test("a dialog's buttons ride in the bar at the foot of the window, in place of the page's own", async ({ page }) => {
+  test("a dialog's buttons are its own foot, leaving first, and the page's bar stays pinned to the window", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    /* Leaving on the left and going on on the right, at the foot, clear of the dialog, and the only bar showing. */
-    const atFoot = async (box: Locator, names: string[]) => {
-      const bar = box.locator(".draftbar");
-      await expect(bar.getByRole("button")).toHaveText(names);
-      const gap = await bar.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
-      expect(gap).toBeGreaterThanOrEqual(8);
-      expect(gap).toBeLessThanOrEqual(40);
-      expect(await box.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(await bar.evaluate((el) => el.getBoundingClientRect().top));
-      await expect(app(frame).locator(".draftbar:visible")).toHaveCount(1);
-    };
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByLabel("Zone name").fill("Veg tent");
     await app(frame).getByLabel("Zone name").press("Enter");
+    /* A page with a draft keeps its bar at the foot of the window. */
+    const unsaved = app(frame).getByRole("region", { name: "Page buttons", exact: true });
+    const pinned = async () => {
+      const gap = await unsaved.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(40);
+    };
+    await pinned();
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
-    await atFoot(dialog(frame), ["Back to editing", "Apply 1 change"]);
+    await dialogFoot(dialog(frame), ["Back to editing", "Apply 1 change"]);
     await dialog(frame).getByRole("button", { name: "Back to editing" }).click();
-    /* With the dialog gone the page's own bar is back. */
-    await expect(app(frame).getByRole("button", { name: "Review and apply" })).toBeVisible();
+    await pinned();
     await goTo(frame, "Overview");
-    await atFoot(alert(frame), ["Keep editing", "Discard and continue"]);
+    await dialogFoot(alert(frame), ["Keep editing", "Discard and continue"]);
     await alert(frame).getByRole("button", { name: "Discard and continue" }).click();
     await goTo(frame, "Garden");
     await zoneMenu(frame, "View targets");
-    await atFoot(dialog(frame), ["Close", "Set targets"]);
+    await dialogFoot(dialog(frame), ["Close", "Set targets"]);
     await dialog(frame).getByRole("button", { name: "Close" }).click();
     await expect(dialog(frame)).toHaveCount(0);
-    /* A box being typed in inside a dialog doesn't take its buttons away: the dialog stops short of the bar. */
+    await zoneMenu(frame, "View activity");
+    await dialogFoot(dialog(frame), ["Close"]);
+    await dialog(frame).getByRole("button", { name: "Close" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
     await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
     await alert(frame).getByLabel("Type Nursery to confirm").fill("Nursery");
     await expect(alert(frame).getByLabel("Type Nursery to confirm")).toBeFocused();
-    await atFoot(alert(frame), ["Keep zone", "Remove zone"]);
+    await dialogFoot(alert(frame), ["Keep zone", "Remove zone"]);
     await alert(frame).getByRole("button", { name: "Keep zone" }).click();
     expect((await stored(page)).zones.map((z) => z.id)).toEqual(["garden", "veg", "nursery"]);
+  });
+
+  test("a dialog taller than the window scrolls its middle, and its title and buttons stay in view", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    for (const size of [{ width: 360, height: 480 }, { width: 740, height: 360 }]) {
+      await page.setViewportSize(size);
+      await zoneMenu(frame, "View targets");
+      const box = dialog(frame);
+      expect(await box.locator(".review-scroll").evaluate((el) => el.scrollHeight > el.clientHeight + 20)).toBe(true);
+      await expect(box.getByRole("heading", { name: "Targets: Garden" })).toBeInViewport({ ratio: 1 });
+      await dialogFoot(box, ["Close", "Set targets"]);
+      await box.getByRole("button", { name: "Close" }).click();
+    }
+  });
+
+  test("on a phone with the keyboard up, the box in Remove zone and the dialog's buttons are both above it", async ({ page }, info) => {
+    test.skip(info.project.name !== "phone", "Touch screens only: a mouse has no on-screen keyboard.");
+    for (const size of [null, { width: 839, height: 412 }]) {
+      if (size) await page.setViewportSize(size);
+      await page.goto(PAGE);
+      const frame = await panelFrame(page);
+      await goTo(frame, "Setup");
+      await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
+      await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
+      const field = alert(frame).getByLabel("Type Nursery to confirm");
+      await field.fill("Nursery");
+      await expect(field).toBeFocused();
+      /* With nothing to measure, the keyboard is taken to cover the lower half of the screen, more of it lying down. */
+      const keysAt = await frame.evaluate(() => innerHeight * (innerHeight > innerWidth ? 0.5 : 0.38));
+      const at = () =>
+        frame.evaluate(() => {
+          const root = document.querySelector("ec-app")!.shadowRoot!, r = (sel: string) => root.querySelector(sel)!.getBoundingClientRect().toJSON() as DOMRect;
+          return { dialog: r(".dialog"), field: r("#dlg-confirm"), foot: r(".dlgfoot") };
+        });
+      await expect.poll(async () => (await at()).dialog.bottom).toBeLessThanOrEqual(keysAt);
+      /* The dialog scrolls the box clear of its buttons, where it can't show everything at once. */
+      await expect.poll(async () => { const x = await at(); return x.foot.top - x.field.bottom; }).toBeGreaterThanOrEqual(0);
+      const { field: f, foot: b } = await at();
+      expect(f.top).toBeGreaterThanOrEqual(0);
+      expect(f.bottom).toBeLessThanOrEqual(b.top);
+      expect(b.bottom).toBeLessThanOrEqual(keysAt);
+      await alert(frame).getByRole("button", { name: "Keep zone" }).click();
+    }
   });
 
   test("the setup guide's bar goes on to the next step still to do", async ({ page }) => {
@@ -1403,6 +1467,17 @@ test.describe("map devices", () => {
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
   });
 
+  test("a long review keeps its title and buttons in the window, and its list scrolls between them", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await pickAll(frame);
+    await page.setViewportSize({ width: 740, height: 360 });
+    await next(frame).click();
+    const box = dialog(frame);
+    expect(await box.locator(".review-scroll").evaluate((el) => el.scrollHeight > el.clientHeight + 40)).toBe(true);
+    await expect(box.getByRole("heading", { name: "Review changes" })).toBeInViewport({ ratio: 1 });
+    await dialogFoot(box, ["Back to editing", /^Apply \d+ changes$/]);
+  });
+
   test("ticking a device another zone has asks first, and only Add ticks it; the review and Home Assistant's question follow as before", async ({ page }) => {
     const frame = await newZoneMap(page);
     await row(frame, "Environment board").getByRole("button").first().click();
@@ -1411,7 +1486,7 @@ test.describe("map devices", () => {
     await dehu.click();
     await expect(ask.getByRole("heading", { name: "Add Garden Dehumidifier to Flower tent as well?", exact: true })).toBeFocused();
     await expect(ask).toContainText("It's already in Garden. It's one device, so switching it here switches it there too.");
-    await expect(ask.locator(".dlgbar").getByRole("button")).toHaveText(["Leave it out", "Add to Flower tent"]);
+    await dialogFoot(ask, ["Leave it out", "Add to Flower tent"]);
     /* Adding loses nothing, so it's the usual button, not the red one. */
     await expect(ask.getByRole("button", { name: "Add to Flower tent" })).not.toHaveClass(/danger/);
     await expect(dehu).toHaveAttribute("aria-pressed", "false");
