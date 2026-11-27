@@ -3228,6 +3228,16 @@ function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes
   ui.guard = { action, title, text: text || `You have ${n} unsaved ${n === 1 ? "change" : "changes"} in ${held[0].zone}. Leaving will discard ${n === 1 ? "it" : "them"}.` };
   renderModal();
 }
+/* Sharing stays allowed, since some hardware and automations really serve several zones, but it never happens with one
+   unnoticed tap. Only what other zones have saved counts, and only on adding: what this zone has saved was agreed to
+   already. Adding isn't destructive, so the dialog shows its usual primary button, not the red one. */
+function askShare(kind, name, z, others, add) {
+  if (!others.length) { add(); return; }
+  const where = others.join(" and ");
+  const text = { device: `It's already in ${where}. It's one device, so switching it here switches it there too.`, sensor: `It's already in ${where}. It's one sensor, so it reads the same here as there.`, automation: `It's already linked in ${where}. It's one automation, so switching it off here switches it off there too.` }[kind];
+  ui.guard = { action: add, primary: true, title: `Add ${name} to ${z.name} as well?`, text, keep: "Leave it out", go: `Add to ${z.name}` };
+  renderModal();
+}
 /* Removing a zone can't be undone, so its name has to be typed first, exactly, as GitHub asks before deleting a repository. */
 const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm") || {}).value === ui.guard.confirm;
 function targetsDialog(z) {
@@ -3245,7 +3255,7 @@ function modalHtml() {
   if (ui.tview && zoneById(ui.tview)) return targetsDialog(zoneById(ui.tview));
   if (ui.aview && zoneById(ui.aview)) return activityDialog(zoneById(ui.aview));
   const g = ui.guard;
-  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review danger" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
+  if (g) return `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text"><h2 id="dlg-title" tabindex="-1">${esc(g.title)}</h2><p class="muted" id="dlg-text">${esc(g.text)}</p>${g.rows ? `<div class="review-scroll"><div class="review-list" id="review-items">${g.rows.map(([label, text]) => `<div class="review-row"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`).join("")}</div><p class="small muted">${esc(g.note)}</p></div>` : ""}${g.confirm ? `<label class="field" for="dlg-confirm">Type ${esc(g.confirm)} to confirm<input id="dlg-confirm" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>` : ""}<div class="draftbar wizbar dlgbar" data-bare><button class="draft-discard" data-gkeep>${esc(g.keep || "Keep editing")}</button><button class="draft-review${g.primary ? "" : " danger"}" data-gdiscard${g.confirm ? " disabled" : ""}>${esc(g.go || "Discard and continue")}</button></div></div>`;
   const { d, busy, errors } = ui.review, n = d.items.length;
   const rows = (list) => list.map((i) => `<div class="review-row"><strong>${esc(i.label)}</strong><span>${esc(i.before)} <span aria-hidden="true">&rarr;</span> <b>${esc(i.after)}</b></span></div>`).join("");
   const preview = d.skipped.length ? `<p class="small muted">Linked to your helpers, so these stay a preview and won't be applied:</p><div class="review-list preview">${rows(d.skipped)}</div>` : "";
@@ -3291,6 +3301,7 @@ function render() {
 }
 /* Every warning lands on the thing that fixes it. */
 const refocus = (id) => { const t = document.getElementById(id); if (t) t.focus({ preventScroll: true }); };
+const refocusSel = (sel) => { const t = document.querySelector(sel); if (t) t.focus({ preventScroll: true }); };
 function jumpTo(id) {
   const t = id && document.querySelector(`#${id}`);
   if (t && t.scrollIntoView) { t.scrollIntoView({ block: "center" }); if (t.focus) t.focus({ preventScroll: true }); }
@@ -3375,11 +3386,11 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-linkautos]"))) { const id = el.dataset.linkautos; guarded(() => { openLinkAutos(id); render(); window.scrollTo(0, 0); }); return; }
   if (q("[data-linkback]")) { guarded(closeLinkAutos); return; }
   if ((el = q("[data-lpick]"))) {
-    const lw = ui.linkw, ent = el.dataset.lpick;
-    if (lw.pick[ent] !== undefined) delete lw.pick[ent]; else lw.pick[ent] = lw.was[ent] || suggestGroup(ent);
-    $("#link-list").innerHTML = linkList(lw, zoneById(lw.id));
-    const again = document.querySelector(`[data-lpick="${CSS.escape(ent)}"]`); if (again) again.focus({ preventScroll: true });
-    draftSync();
+    const lw = ui.linkw, ent = el.dataset.lpick, z = zoneById(lw.id);
+    const redraw = () => { $("#link-list").innerHTML = linkList(lw, z); refocusSel(`[data-lpick="${CSS.escape(ent)}"]`); draftSync(); };
+    if (lw.pick[ent] !== undefined) { delete lw.pick[ent]; redraw(); return; }
+    const it = (autoCatalog || []).find((x) => x.entity === ent);
+    askShare("automation", it ? autoTitle(it) : ent, z, lw.was[ent] !== undefined ? [] : sharedAuto(z, ent), () => { lw.pick[ent] = lw.was[ent] || suggestGroup(ent); redraw(); });
     return;
   }
   if (q("[data-repeatpick]")) { ui.repeatPick = !ui.repeatPick; render(); if (ui.repeatPick) jumpTo("room-alerts"); return; }
@@ -3438,8 +3449,18 @@ document.addEventListener("click", (e) => {
   }
   const m = ui.mapw;
   if (m) {
-    if ((el = q("[data-msensor]"))) { toggleSensor(m, catalog().find((s) => s.id === el.dataset.msensor)); render(); return; }
-    if ((el = q("[data-mdevice]"))) { const id = el.dataset.mdevice; if (m.pickD[id]) delete m.pickD[id]; else m.pickD[id] = true; render(); return; }
+    if ((el = q("[data-msensor]"))) {
+      const s = catalog().find((x) => x.id === el.dataset.msensor), z = zoneById(m.id), tick = () => { toggleSensor(m, s); render(); refocusSel(`[data-msensor="${s.id}"]`); };
+      if (m.pickS[s.id] || z.sensors.some((x) => x.id === s.id)) tick();
+      else askShare("sensor", s.name, z, zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name), tick);
+      return;
+    }
+    if ((el = q("[data-mdevice]"))) {
+      const d = devices.find((x) => x.id === el.dataset.mdevice), z = zoneById(m.id);
+      if (m.pickD[d.id]) { delete m.pickD[d.id]; render(); return; }
+      askShare("device", d.name, z, d.zones.includes(z.id) ? [] : zones.filter((o) => o.id !== z.id && d.zones.includes(o.id)).map((o) => o.name), () => { m.pickD[d.id] = true; render(); refocusSel(`[data-mdevice="${d.id}"]`); });
+      return;
+    }
     if ((el = q("[data-mfix]"))) { m.step = Number(el.dataset.mfix); m.q = ""; render(); jumpTo(el.dataset.target); return; }
     if ((el = q("[data-mgo]"))) { m.step = Number(el.dataset.mgo) + 1; m.q = ""; render(); window.scrollTo(0, 0); return; }
     if ((el = q("[data-mmore]"))) { m.more[el.dataset.mmore] = !m.more[el.dataset.mmore]; render(); return; }
