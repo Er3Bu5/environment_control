@@ -275,8 +275,15 @@ interface TargetsView {
   zoneId: string;
 }
 
+interface ActivityView {
+  kind: "activity";
+  zoneId: string;
+}
+
 /* The page menu's own id among the menus. A zone's id is letters, digits and underscores, so it can't be one. */
 const NAV = "-nav";
+/* The zone page's own menu, for the same reason. */
+const MORE = "-more";
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
 const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate", "targets"]);
@@ -394,7 +401,7 @@ export class EcApp extends LitElement {
   private mapFromGuide = false;
   private mapToPlace: { back: { screen: Screen; zoneId: string | null }; fromGuide: boolean; draft: LayoutDraft } | null = null;
   declare private guide: string | null;
-  declare private modal: Guard | Review | TargetsView | null;
+  declare private modal: Guard | Review | TargetsView | ActivityView | null;
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
@@ -2454,7 +2461,7 @@ export class EcApp extends LitElement {
           ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
           <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
         </div>
-        <button class="btn" @click=${() => this.viewTargets(z.id)}>View targets</button>
+        ${this.zoneMore(z)}
       </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
@@ -2464,8 +2471,24 @@ export class EcApp extends LitElement {
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
       ${this.historyCard(z)}
-      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>
-      <p class="small muted">Activity arrives in a release that follows.</p>`;
+      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>`;
+  }
+
+  /* What's looked up now and then about a zone, behind one button so the heading stays a heading. */
+  private zoneMore(z: Zone) {
+    const open = this.menu === MORE;
+    /* Focus moves to the button first, so a dialog opened from the menu hands it back there and not to a hidden item. */
+    const item = (label: string, act: () => void) =>
+      html`<button role="menuitem" @click=${() => { this.menu = null; (this.shadowRoot?.querySelector(`[data-zmenu="${MORE}"]`) as HTMLElement | null)?.focus(); act(); }}>${label}</button>`;
+    return html`<div class="zmenu">
+      <button class="btn burger" data-zmenu=${MORE} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${MORE}" aria-label="More" @click=${() => this.toggleMenu(MORE)}>
+        ${icon("dots")}
+      </button>
+      <div class="menu" id="zmenu-${MORE}" role="menu" ?hidden=${!open}>
+        ${item("View targets", () => this.viewTargets(z.id))}
+        ${item("View activity", () => (this.modal = { kind: "activity", zoneId: z.id }))}
+      </div>
+    </div>`;
   }
 
   private entityRow(e: CatalogEntity) {
@@ -3969,6 +3992,19 @@ export class EcApp extends LitElement {
           <div class="draftbar wizbar dlgbar" data-bare>
             <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
             <button class="draft-review" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (m.kind === "activity") {
+      const z = this.zoneById(m.zoneId);
+      if (!z) return nothing;
+      return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && this.closeModal()}>
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+          <h2 id="dlg-title" tabindex="-1">Activity: ${z.name}</h2>
+          <p class="muted" id="dlg-text">Activity arrives in a release that follows.</p>
+          <div class="draftbar wizbar dlgbar" data-bare>
+            <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;
