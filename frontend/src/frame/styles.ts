@@ -37,11 +37,11 @@ export const styles = css`
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
   /* A zone's heading row: the menu button over the left-hand column, the name and its details in the middle, and
-     View targets at the right, the two buttons level with the foot of the details. */
+     the zone's own menu at the right, the two buttons level with the foot of the details. */
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -315,6 +315,13 @@ export const styles = css`
   .seg button { border: 1px solid var(--line); background: none; padding: 3px 10px; min-height: 32px; border-radius: 16px; font-size: 13px; color: var(--muted); }
   .seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 18%, transparent); border-color: var(--primary); color: var(--fg); }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  /* A line between a graph's chips and a range's, so two picked chips side by side don't read as one group. It sits in
+     the gap, so once the groups are on lines of their own it falls outside the box at the start of the second line and
+     is clipped, with nothing left dangling. The padding keeps a chip's focus ring inside the clip and the margin gives
+     that room back. */
+  .segs { gap: 8px 16px; overflow: clip; padding: 4px; margin: -4px; }
+  .segs > .seg + .seg { position: relative; }
+  .segs > .seg + .seg::before { content: ""; position: absolute; left: -8.5px; top: 4px; bottom: 4px; width: 1px; background: var(--line); }
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong, .lrow strong, .lbasis strong { font-weight: 500; }
   .lrows { display: flex; flex-direction: column; gap: 8px; }

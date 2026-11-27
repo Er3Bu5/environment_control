@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setAlertRepeat, setDetails, setHistory, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
+import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setAlertRepeat, setDetails, setHistory, shareAsk, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
 
 const base = () =>
   copyConfig(
@@ -177,5 +177,20 @@ describe("the room's settings", () => {
     const fresh = copyConfig([], []);
     setAlertRepeat(fresh, null);
     expect(fresh.room).toEqual({});
+  });
+});
+
+describe("adding something another zone has", () => {
+  it("asks in plain words, naming every zone that has it, with a button that says what it does", () => {
+    expect(shareAsk("device", "Dehumidifier", "Garden", ["Veg", "Nursery"])).toEqual({
+      title: "Add Dehumidifier to Garden as well?",
+      text: "It's already in Veg and Nursery. It's one device, so switching it here switches it there too.",
+      keep: "Leave it out",
+      go: "Add to Garden",
+    });
+    expect(shareAsk("automation", "Veg high humidity", "Nursery", ["Veg"]).text).toBe(
+      "It's already linked in Veg. It's one automation, so switching it off here switches it off there too.",
+    );
+    expect(shareAsk("sensor", "Soil 1", "Veg", ["Garden"]).text).toBe("It's already in Garden. It's one sensor, so its readings count there and here.");
   });
 });
