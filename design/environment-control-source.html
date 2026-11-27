@@ -166,6 +166,12 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
   .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
   .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. */
+  .sw[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; opacity: .55; }
+  .chip:has(input[data-roctl]) { cursor: not-allowed; opacity: .6; }
+  .chip input[data-roctl] { cursor: not-allowed; }
+  .dial:has([data-roctl]) { opacity: .7; }
+  .zlinked { margin: 2px 0 0; }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
   .review { display: flex; flex-direction: column; gap: 10px; }
@@ -636,6 +642,36 @@ const ui = { screen: "overview", zone: "garden", metric: "vpd", range: 24, level
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const zoneById = (id) => zones.find((z) => z.id === id);
+/* A linked zone shows what its parent runs, read only: it's changed in the parent, and nothing in the linked zone ever
+   takes you there, it only says where to go. */
+const parentOf = (z) => (z && z.parent ? zoneById(z.parent) || null : null);
+const linkedZones = (z) => zones.filter((o) => o.parent === z.id);
+const editIn = (p) => `Edit in Zone: ${p.name}`;
+const zoneList = (list) => list.map((o) => `Zone: ${o.name}`).join(", ");
+/* The one rule: a linked zone that shares hardware with its parent is the same space for what that hardware measures or
+   does, so the parent's settings for it apply. Any environment sensor brings the targets, any light the day and night.
+   A zone sees another's settings only through this link. */
+const sharesSensor = (z) => { const p = parentOf(z); return !!p && envOf(z).some((s) => envOf(p).some((x) => x.id === s.id)); };
+const sharesLights = (z) => { const p = parentOf(z); return !!p && devices.some((d) => d.type === "Light" && d.zones.includes(z.id) && d.zones.includes(p.id)); };
+const targetsOf = (z) => (sharesSensor(z) ? parentOf(z) : z);
+const scheduleOf = (z) => (sharesLights(z) ? parentOf(z) : z);
+/* A sensor in two zones shows one zone's readings in another, which only the parent link may do, so every zone a sensor
+   is in has to be one family: a parent and the zones linked to it. By the saved setup, as the sharing question goes. */
+const familyRoot = (z) => z.parent || z.id;
+function sensorRefusal(z, holders) {
+  if (!holders.length || new Set([z, ...holders].map(familyRoot)).size === 1) return "";
+  const target = holders.length === 1 ? holders[0] : zoneById(familyRoot(holders[0])) || holders[0], where = `${holders.length > 1 ? "Zones" : "Zone"}: ${holders.map((o) => o.name).join(", ")}`;
+  const said = `This sensor is already associated to ${where}.`, kids = linkedZones(z), p = parentOf(z), tp = parentOf(target);
+  if (kids.length) return `${said} ${zoneList(kids)} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.`;
+  if (p) return `${said} This zone is already linked to Zone: ${p.name}, and a zone is linked to one other zone only.`;
+  if (tp) return `${said} Zone: ${target.name} is itself linked to Zone: ${tp.name}, so it can't be this zone's parent.`;
+  return `${said} If you really want it here, make Zone: ${target.name} this zone's parent in Zone details.`;
+}
+function linkLine(z, cls = "small muted") {
+  const p = parentOf(z), kids = linkedZones(z);
+  if (p) return `<p class="${cls} zlinked">Linked to Zone: ${esc(p.name)}</p>`;
+  return kids.length ? `<p class="${cls} zlinked">${esc(zoneList(kids))} ${kids.length === 1 ? "is" : "are"} linked to this zone</p>` : "";
+}
 const inAZone = (d) => d.zones.length > 0;
 const hhmm = (m) => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
 const fmt = (k, v) => v === null || v === undefined ? "--" : k === "light" ? Math.round(v).toLocaleString("en-NZ") : Number(v).toFixed(M[k].dp);
@@ -708,7 +744,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const span = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 
 /* Wrap-safe: the veg runs 16:00 to 10:00, across midnight. */
-function isDay(z, t) {
+function isDay(zone, t) {
+  const z = scheduleOf(zone);
   t = ((t % 1440) + 1440) % 1440;
   return z.dayAt < z.nightAt ? t >= z.dayAt && t < z.nightAt : t >= z.dayAt || t < z.nightAt;
 }
@@ -717,18 +754,20 @@ const period = (z) => isDay(z, NOW) ? "day" : "night";
 const targetsSet = (z) => !z.setup || z.setup.targets === "done";
 function bandState(z, k) {
   if (k === "light") return "none";
-  if (!targetsSet(z)) return "unset";
-  const [mn, lo, , hi, mx] = z.bands[period(z)][k], v = z.now[k];
+  if (!targetsSet(targetsOf(z))) return "unset";
+  const [mn, lo, , hi, mx] = targetsOf(z).bands[period(z)][k], v = z.now[k];
   if (v === null || v === undefined) return "dead";
   return v < mn ? "critlow" : v > mx ? "crithigh" : v < lo ? "low" : v > hi ? "high" : "ok";
 }
 const STATE = { ok: "Ideal", low: "Low", high: "High", critlow: "Critical", crithigh: "Critical", dead: "No data", unset: "No targets yet" };
 const ISSUE = { low: "low", high: "high", critlow: "critical low", crithigh: "critical high", dead: "no data" };
 const statePill = (s) => s === "none" ? "" : `<span class="pill ${s === "unset" ? "plain" : s}">${STATE[s]}</span>`;
-const edge = (z) => (((isDay(z, NOW) ? z.nightAt : z.dayAt) - NOW) % 1440 + 1440) % 1440;
+const edge = (z) => (((isDay(z, NOW) ? scheduleOf(z).nightAt : scheduleOf(z).dayAt) - NOW) % 1440 + 1440) % 1440;
 
 /* An Overview card is a button itself, so it can't hold the link. */
-function periodBlock(z, link = true) {
+function periodBlock(zone, link = true) {
+  /* Times come from whichever zone's schedule applies; the light reading is always this zone's own. */
+  const z = { ...scheduleOf(zone), now: zone.now };
   if (!targetsSet(z)) return `<div class="period"><div class="period-top"><span><strong>Day and night not set up</strong></span><span class="muted">Set with Targets, day and night</span></div></div>`;
   /* Following switches has no times and no countdown: it's day when they say so. */
   if (z.periodMode === "detected") return `<div class="period"><div class="period-top"><span><strong>${isDay(z, NOW) ? "Lights on" : "Lights off"}</strong>${z.now.light === null || z.now.light === undefined ? "" : `<span class="lux">${fmt("light", z.now.light)} lx</span>`}</span><span class="muted">Following its light switches</span></div></div>`;
@@ -739,8 +778,8 @@ function periodBlock(z, link = true) {
     <div class="strip" role="img" aria-label="Lights on ${hhmm(z.dayAt)} to ${hhmm(z.nightAt)}, time now ${hhmm(NOW)}">${lit}<b style="left:${NOW / 14.4}%"></b></div></div>`;
 }
 function track(z, k) {
-  if (!targetsSet(z)) return `<div class="track unset" aria-hidden="true"><span class="bandc"></span></div>`;
-  const [mn, lo, tg, hi, mx] = z.bands[period(z)][k], v = z.now[k], pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad;
+  if (!targetsSet(targetsOf(z))) return `<div class="track unset" aria-hidden="true"><span class="bandc"></span></div>`;
+  const [mn, lo, tg, hi, mx] = targetsOf(z).bands[period(z)][k], v = z.now[k], pad = (mx - mn) * 0.35, a = mn - pad, b = mx + pad;
   const x = (n) => Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
   /* Green is the ideal zone, grey either side is where devices ramp up, and red beyond the grey is critical. */
   return `<div class="track" aria-hidden="true"><span class="bandc"></span><span class="bandr" style="left:${x(mn)}%;width:${x(mx) - x(mn)}%"></span><span class="bandi" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span>${tg === null ? "" : `<span class="tick" style="left:${x(tg)}%"></span>`}${v === null ? "" : `<span class="dot ${bandState(z, k)}" style="left:${x(v)}%"></span>`}</div>`;
@@ -760,11 +799,11 @@ function renderOverview() {
   const states = zones.filter((z) => envOf(z).length).flatMap((z) => ["temperature", "humidity", "vpd"].filter((k) => !["ok", "unset"].includes(bandState(z, k))).map((k) => [`${z.name} ${M[k].short} ${ISSUE[bandState(z, k)]}`, bandState(z, k).startsWith("crit"), z.id, k]));
   const link = ([text, , id, k]) => `<button class="fixlink" data-go="zone" data-zone="${id}" data-gometric="${k}">${esc(text)} &rsaquo;</button>`;
   const group = (list, title, cls) => (list.length ? `<div class="notice ${cls}"><strong>${title}</strong>${list.map(link).join("")}</div>` : "");
-  const judgedAny = zones.some((z) => targetsSet(z) && envOf(z).length);
+  const judgedAny = zones.some((z) => targetsSet(targetsOf(z)) && envOf(z).length);
   const banner = states.length ? group(states.filter((s) => s[1]), "Critical", "critical") + group(states.filter((s) => !s[1]), "Outside ideal zone", "") : judgedAny ? `<div class="notice calm"><strong>All zones ideal</strong></div>` : "";
   const card = (z) => {
     const ds = devices.filter((d) => d.ctl && d.zones.includes(z.id)), on = ds.filter((d) => d.on).length;
-    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2>${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}</div>${z.description ? `<p class="small muted">${esc(z.description)}</p>` : ""}
+    return `<button class="card zone-card" data-go="zone" data-zone="${z.id}"><div class="card-head"><h2>${esc(z.name)}</h2>${setupLeft(z).length ? '<span class="pill warn">Not set up</span>' : ""}</div>${z.description ? `<p class="small muted">${esc(z.description)}</p>` : ""}${linkLine(z)}
       ${periodBlock(z, false)}
       <div class="rows">${["temperature", "humidity", "vpd"].map((k) => `<div class="mrow">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="t1">${M[k].label}</div><div class="t2">${fmt(k, z.now[k])}<span>${M[k].unit}</span></div></div>${track(z, k)}<div class="pillcell">${statePill(bandState(z, k))}</div></div>`).join("")}
         <div class="mrow">${ic(M.light.icon, `var(${M.light.c})`)}<div><div class="t1">${M.light.label}</div><div class="t2">${fmt("light", z.now.light)}<span>${M.light.unit}</span></div></div>${lightSpark(z)}</div></div>
@@ -774,9 +813,9 @@ function renderOverview() {
 }
 
 function tile(z, k) {
-  const b = k === "light" ? null : z.bands[period(z)][k];
+  const b = k === "light" ? null : targetsOf(z).bands[period(z)][k];
   return `<div class="tile"><div class="tile-top">${ic(M[k].icon, `var(${M[k].c})`)}<div><div class="name">${M[k].label}</div><div class="val">${fmt(k, z.now[k])} <small>${M[k].unit}</small></div></div></div>
-    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<div class="tavg">${esc(leafLine(z))} <button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div>` : ""}</div>${b && !targetsSet(z) ? `${track(z, k)}<div><button class="fixlink small" data-vpd="${z.id}">Targets not set up yet &rsaquo;</button></div><div></div>` : b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i] === null ? "-" : b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
+    <div class="tnotes">${avgNote(z, k)}${k === "vpd" && envOf(z).length ? `<div class="tavg">${esc(leafLine(z))} <button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div>` : ""}</div>${b && !targetsSet(targetsOf(z)) ? `${track(z, k)}<div><button class="fixlink small" data-vpd="${z.id}">Targets not set up yet &rsaquo;</button></div><div></div>` : b ? `${track(z, k)}<div class="range">${["Min", "Low", "Target", "High", "Max"].map((l, i) => `<span><b>${b[i] === null ? "-" : b[i]}</b>${l}</span>`).join("")}</div><div>${statePill(bandState(z, k))}</div>` : `<div class="small muted">${isDay(z, NOW) ? "Lights on" : "Lights off, 0 expected"}</div>`}</div>`;
 }
 
 /* Light as the HA dashboard shows it: name, value, then a 4 hour line running black to yellow between 1210 and 2120 lx. */
@@ -1095,10 +1134,15 @@ function redrawDial(key) {
   }
 }
 const controlGroupOf = (d) => (CONTROL_GROUPS.find((g) => g.types.includes(d.type)) || {}).cls;
+/* Every device a linked zone shares with its parent runs on the parent's automations, so it's switched only there. */
+const deviceOwner = (d, z) => { const p = parentOf(z); return p && d.zones.includes(p.id) ? p : null; };
+/* A read only control keeps its look but answers a tap with where to change it, so it carries no action of its own. */
+const readOnly = (html, p) => html.replace(/ data-(dev|act|dialin|dialstep|dial|dir)="[^"]*"/g, "").replace(/ disabled(?=[ >])/g, "")
+  .replace(/<(button|input)\b/g, `<$1 data-roctl="${esc(editIn(p))}" aria-disabled="true" title="${esc(editIn(p))}"`).replace(/<input data-roctl([^>]*)type="range"/g, "<input disabled data-roctl$1type=\"range\"");
 function deviceRow(d, z) {
-  const v = deviceView(d), c = ctlState[d.id], busy = v.down || (c && c.status === "sending"), lk = CLASS_LOOK[controlGroupOf(d)] || { icon: "plug", c: "var(--muted)" }, line = ctlLine(c, d, v);
+  const owner = deviceOwner(d, z), v = deviceView(d), c = owner ? undefined : ctlState[d.id], busy = v.down || (c && c.status === "sending"), lk = CLASS_LOOK[controlGroupOf(d)] || { icon: "plug", c: "var(--muted)" }, line = ctlLine(c, d, v);
   const others = d.zones.filter((id) => id !== z.id).map((id) => (zoneById(id) || {}).name || id);
-  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", others.length ? `Shared with ${others.join(" and ")}.` : ""].filter(Boolean).join(" ");
+  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", owner ? `Runs on Zone: ${owner.name}'s automations. ${editIn(owner)}.` : others.length ? `Shared with ${others.join(" and ")}.` : ""].filter(Boolean).join(" ");
   let controls = "", modes = "";
   if (!v.down && v.kind === "dimmer") controls = dialHtml(d, "brightness", lk.c, busy);
   else if (!v.down && v.kind === "humidifier") {
@@ -1106,11 +1150,13 @@ function deviceRow(d, z) {
     modes = offered.length ? `<fieldset class="chips ctl-modes"><legend class="sr">${esc(d.name)} mode</legend><div class="chiprow">${offered.map((m) => `<label class="chip"><input type="radio" name="mode-${d.id}-${z.id}" data-dev="${d.id}" data-act="mode" value="${esc(m)}"${v.mode === m ? " checked" : ""}${busy ? " disabled" : ""}>${esc(cap(m))}</label>`).join("")}</div></fieldset>` : "";
     controls = humidityChoices(v).length > 1 && v.setpoint !== null ? dialHtml(d, "humidity", lk.c, busy) : "";
   }
-  const addMode = v.offList && v.mode && v.mode !== extraOf(d) ? `<button class="fixlink" data-addmode="${d.id}" data-zone="${z.id}">Add ${esc(cap(v.mode))} as a mode &rsaquo;</button>` : "";
+  const addMode = !owner && v.offList && v.mode && v.mode !== extraOf(d) ? `<button class="fixlink" data-addmode="${d.id}" data-zone="${z.id}">Add ${esc(cap(v.mode))} as a mode &rsaquo;</button>` : "";
+  let sw = `<button class="sw ${v.on ? "on" : ""}" data-dev="${d.id}" data-act="${v.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${v.on}" aria-label="${esc(d.name)}"${busy ? " disabled" : ""}><i></i></button>`;
+  if (owner) [controls, modes, sw] = [controls, modes, sw].map((h) => readOnly(h, owner));
   return `<div class="dev" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
     <div class="dev-text"><div class="dev-name">${esc(d.name)}</div><div class="dev-sub">${v.down ? `<span class="pill dead">${esc(v.text)}</span>` : `${esc(v.text)}.`} ${esc(extra)}</div><div class="dev-sub">${esc([d.family, LINK[d.link]].filter(Boolean).join(", "))}</div>${addMode}</div>
     ${modes ? `<div class="dev-modes">${modes}</div>` : ""}
-    <div class="dev-ctl">${controls}<button class="sw ${v.on ? "on" : ""}" data-dev="${d.id}" data-act="${v.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${v.on}" aria-label="${esc(d.name)}"${busy ? " disabled" : ""}><i></i></button></div>
+    <div class="dev-ctl">${controls}${sw}</div>
     ${line ? `<div class="ctl-status ${line.tone}" role="status">${esc(line.text)}</div>` : ""}</div>`;
 }
 /* Redraws the rows for one device and puts focus back where it was, so a state arriving mid-tap doesn't lose your place. */
@@ -1209,10 +1255,13 @@ function statesChanged(states) {
     redrawAuto(e);
   }
 }
-function targetsTable(z) {
+function targetsTable(zone) {
+  const z = targetsOf(zone), p0 = z === zone ? null : z;
   const row = (p, name, k) => `<tr><td>${name}<span class="sub">${M[k].unit}</span></td>${z.bands[p][k].map((v) => `<td>${v === null ? "-" : v}</td>`).join("")}</tr>`;
   const light = (p) => { const [key, slot, at] = LIGHT_LIMIT[p], v = fmt("light", z.lightLimits[key]); return `<tr><td>Light<span class="sub">lx</span></td>${SLOT_NAME.map((_, i) => `<td>${i === at ? v : ""}</td>`).join("")}</tr>`; };
   const table = (p, title) => `<div class="tbl-wrap"><table><thead><tr><th>${title}</th><th>Min</th><th>Low</th><th>Target</th><th>High</th><th>Max</th></tr></thead><tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody></table></div>`;
+  if (p0) return `${table("day", "Day")}${table("night", "Night")}
+  <p class="small" id="t-shared">This zone shares a sensor with Zone: ${esc(p0.name)}, so its targets are ${esc(p0.name)}'s. ${esc(editIn(p0))}.</p>`;
   return `${table("day", "Day")}${table("night", "Night")}
   <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Values on your helpers are read from them, so your alerts read the same numbers. Low and High, and anything without a helper, are stored here." : "All stored here. Link them to helpers in Map devices."}</p>`;
 }
@@ -1242,8 +1291,8 @@ function renderZone() {
   const unfinished = left.length ? `<button class="notice fix" data-guide="${z.id}"><span>Not set up yet. Still to confirm: ${esc(left.map(([, title]) => title).join(", "))}.</span><span class="fixgo">Continue setup &rsaquo;</span></button>` : "";
   /* Since #33: History, then the map and Controls. The targets and Activity moved behind the menu in the heading. The map's
      card is Zone map here and Device placement only in Setup, where it's the step that puts things on it. */
-  return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
-    ${unfinished}${autosNotice(z)}${periodBlock(z)}
+  return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}${linkLine(z)}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
+    ${unfinished}${autosNotice(z)}${parentFailsafeNotice(z)}${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row segs">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
@@ -1314,8 +1363,8 @@ function drawChart() {
     const live = counted.map((l) => l[ix]).filter((x) => x.v !== null), pick = (f) => combine(method, live.map(f));
     return { t: p.t, v: pick((x) => x.v), lo: pick((x) => x.lo), hi: pick((x) => x.hi) };
   });
-  const vals = lines.flat().map((p) => p.v).filter((v) => v !== null), hasBand = k !== "light" && targetsSet(z);
-  if (hasBand) for (const p of ["day", "night"]) vals.push(z.bands[p][k][0], z.bands[p][k][4]);
+  const vals = lines.flat().map((p) => p.v).filter((v) => v !== null), hasBand = k !== "light" && targetsSet(targetsOf(z)), tz = targetsOf(z);
+  if (hasBand) for (const p of ["day", "night"]) vals.push(tz.bands[p][k][0], tz.bands[p][k][4]);
   let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo = Math.max(0, lo - pad); hi += pad;
   const X = (i) => L + (i / n) * PW, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * PH;
   const axis = (v) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString("en-NZ") : `${Math.round(v / 1000)}k`) : v.toFixed(k === "vpd" ? 2 : 0));
@@ -1325,7 +1374,7 @@ function drawChart() {
     while (j < n && isDay(z, pts[j].t) === d) j++;
     const x = X(i), w = X(j) - x;
     if (!d) s += `<rect x="${x}" y="${T}" width="${w}" height="${PH}" fill="var(--shade)"/>`;
-    if (hasBand) { const [mn, lo2, tg, hi2, mx] = z.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/>${tg === null ? "" : `<line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`}`; }
+    if (hasBand) { const [mn, lo2, tg, hi2, mx] = tz.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/>${tg === null ? "" : `<line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`}`; }
     i = j;
   }
   for (let t = 0; t <= 4; t++) { const v = lo + ((hi - lo) * t) / 4, y = Y(v); s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${axis(v)}</text>`; }
@@ -1395,7 +1444,7 @@ function controlsCard(z) {
   /* What can have a dial comes first in a group, so on a screen wide enough for two columns the tall rows pair up. */
   const dialFirst = (list) => [...list.filter((d) => DIAL_DOMAINS.test(d.entity)), ...list.filter((d) => !DIAL_DOMAINS.test(d.entity))];
   const unknown = ds.filter((d) => !d.type).map((d) => `<button class="notice fix" data-fixrole="${d.id}" data-zone="${z.id}"><span>${esc(d.name)} isn't shown until you say what it is.</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
-  const reading = (k) => `<span class="ctl-reading">${fmt(k, z.now[k])} ${M[k].unit}${k !== "light" && targetsSet(z) ? statePill(bandState(z, k)) : ""}</span>`;
+  const reading = (k) => `<span class="ctl-reading">${fmt(k, z.now[k])} ${M[k].unit}${k !== "light" && targetsSet(targetsOf(z)) ? statePill(bandState(z, k)) : ""}</span>`;
   const groups = CONTROL_GROUPS.map((g) => {
     const list = dialFirst(ds.filter((d) => g.types.includes(d.type)));
     return list.length ? `<div class="cgroup" data-cgroup="${g.title}"><div class="card-head"><h3>${g.title}</h3>${g.metric && sensed ? reading(g.metric) : ""}</div><div class="devs">${list.map((d) => deviceRow(d, z)).join("")}</div></div>` : "";
@@ -1450,23 +1499,25 @@ function chipWords(key) {
 function autoChips(z, cur) {
   return `<div class="seg" role="group" aria-label="Automations">${Object.entries(AUTO_PAGES).map(([k, p]) => { const w = chipWords(`${z.id}:${k}`); return `<button data-autopage="${k}" data-autochip="${z.id}:${k}" aria-pressed="${k === cur}" aria-label="${esc(w.label)}">${p.title}<span class="segn">${w.count}</span></button>`; }).join("")}</div>`;
 }
-function autoRow(a, z) {
-  const st = autoSt(a), c = autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a);
+/* owner is set for a parent's automation shown in its linked zone: drawn as it is, and switched only in the parent. */
+function autoRow(a, z, owner) {
+  const st = autoSt(a), c = owner ? {} : autoCtl[a.entity] || {}, on = autoOn(a), down = autoDown(a);
   const last = st && st.attributes && st.attributes.last_triggered;
   const now = !st ? "Home Assistant doesn't have it any more." : down ? "Unavailable in Home Assistant." : on ? "On." : "Off.";
   const sub = [now, st ? (last ? `Last triggered ${ranWords(last)}.` : "Never triggered.") : ""].filter(Boolean).join(" ");
-  const sw = `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
+  const sw = owner ? `<button class="ctl sw ${on ? "on" : ""}" data-roctl="${esc(editIn(owner))}" role="switch" aria-checked="${on}" aria-disabled="true" aria-label="${esc(autoName(a))}" title="${esc(editIn(owner))}"><i></i></button>`
+    : `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
   const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
-  return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}">${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
+  return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
 }
 /* Redraws an automation's row, and puts focus back on the switch. */
 function redrawAuto(entity) {
   for (const el of document.querySelectorAll(`[data-autorow="${CSS.escape(entity)}"]`)) {
-    const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.entity === entity);
+    const z = zoneById(el.dataset.zone), owner = el.dataset.from ? zoneById(el.dataset.from) : null, a = (owner || z) && autosOf(owner || z).find((x) => x.entity === entity);
     if (!a) continue;
     const focused = el.contains(document.activeElement);
-    el.outerHTML = autoRow(a, z);
-    if (focused) { const again = document.querySelector(`[data-autorow="${CSS.escape(entity)}"][data-zone="${z.id}"] [data-auto]`); if (again && !again.disabled) again.focus(); }
+    el.outerHTML = autoRow(a, z, owner);
+    if (focused) { const again = document.querySelector(`[data-autorow="${CSS.escape(entity)}"][data-zone="${z.id}"] .sw`); if (again && !again.disabled) again.focus(); }
   }
   for (const el of document.querySelectorAll("[data-autocount]")) el.textContent = autoCount(el.dataset.autocount);
   for (const el of document.querySelectorAll("[data-autochip]")) { const w = chipWords(el.dataset.autochip); el.querySelector(".segn").textContent = w.count; el.setAttribute("aria-label", w.label); }
@@ -1496,10 +1547,23 @@ function tapAuto(z, a) {
   }
   sendAuto(z, a, !on);
 }
+/* Plain text, not a button: nothing in a linked zone takes you to its parent. */
+function parentFailsafeNotice(z) {
+  const p = parentOf(z), off = p ? autosOf(p, "failsafe").filter((a) => !autoDown(a) && !autoOn(a)) : [];
+  if (!off.length) return "";
+  const what = off.length === 1 ? `A failsafe in Zone: ${p.name} is off: ${autoName(off[0])}. While it's off,` : `${off.length} failsafes in Zone: ${p.name} are off. While they're off,`;
+  return `<div class="notice" id="parent-failsafe" role="status"><span>${esc(what)} nothing puts that hardware back. ${esc(editIn(p))}.</span></div>`;
+}
 function autosNotice(z) {
   const off = autosOf(z, "failsafe").filter((a) => !autoDown(a) && !autoOn(a));
   if (!off.length) return "";
   return `<button class="notice fix" data-autos="failsafe" data-zone="${z.id}"><span>${off.length === 1 ? `A failsafe is off: ${esc(autoName(off[0]))}.` : `${off.length} failsafes are off.`} While ${off.length === 1 ? "it's" : "they're"} off, nothing puts that hardware back.</span><span class="fixgo">Failsafes &rsaquo;</span></button>`;
+}
+/* A linked zone's page lists its parent's automations for the chip after its own, read only, all groups in one card. */
+function fromParent(z, page) {
+  const p = parentOf(z), list = p ? autosOf(p, page) : [];
+  if (!list.length) return "";
+  return `<section class="card" data-fromzone="${p.id}"><div><h2>From Zone: ${esc(p.name)}</h2><p class="small muted">These belong to Zone: ${esc(p.name)} and run devices this zone shares. ${esc(editIn(p))}.</p></div><div class="devs">${list.map((a) => autoRow(a, z, p)).join("")}</div></section>`;
 }
 /* One page per zone, its Alerts, Failsafes and Control behind chips as the panel has them since 2026-11-27, in place of a
    card on the zone page leading to three pages. */
@@ -1514,7 +1578,7 @@ function renderAutos() {
   /* Back rides in the bar at the foot, as on every page since #54; the draft bar takes over while the repeat rate differs. */
   return `<div class="wrap"><div><h1>Automations: ${esc(z.name)}</h1><p class="muted small">Home Assistant runs these. Here you switch them on and off.</p></div>
     ${autoChips(z, page)}<p class="muted small" id="autos-about">${p.about}</p>
-    ${page === "alert" ? repeatCard() : ""}${sections || empty}${sections ? `<div class="row"><button class="btn" data-linkautos="${z.id}">Link automations</button></div>` : ""}
+    ${page === "alert" ? repeatCard() : ""}${sections || empty}${sections ? `<div class="row"><button class="btn" data-linkautos="${z.id}">Link automations</button></div>` : ""}${fromParent(z, page)}
     <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-go="zone" data-zone="${z.id}">Back</button></div></div>`;
 }
 
@@ -1708,7 +1772,7 @@ function periodSummary(mode, z, on, off, lights, rule) {
   if (mode === "detected") { const n = lights.length; return n ? `Detected from ${n} light switch${n > 1 ? "es" : ""}${n > 1 ? (rule === "all" ? ", when all are on" : ", when any is on") : ""}` : "Detected, no switch picked"; }
   return `${mode === "fixed" ? "Set here" : "From a helper"}, ${on} - ${off}`;
 }
-const zonePeriod = (z) => periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule);
+const zonePeriod = (zone) => { const z = scheduleOf(zone); return periodSummary(z.periodMode || "helper", z, hhmm(z.dayAt), hhmm(z.nightAt), z.lights || [], z.rule); };
 /* Device identification, as the panel has it since #36 (frontend mapWizard, sensorRow, controlRow, virtualRow). Sensors
    and devices are picked and named here, a device's type is said here, a device can move to another entity, and virtual
    devices are added, named, typed and removed here. Calibration values are Sensor Calibration's, not this page's. */
@@ -2192,6 +2256,8 @@ function vChartInner(v, b) {
   return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${flags}</svg>`;
 }
 function vReadout(v, b) {
+  const z = zoneById(v.id), tp = z && sharesSensor(z) ? parentOf(z) : null;
+  if (tp) return v.edit === "target" ? `Target ${b.temperature[2]}°, ${b.humidity[2]}%, ${b.vpd[2]} kPa, Zone: ${tp.name}'s.` : `${VNAME[v.edit]} ${b[v.edit].filter((x) => x !== null).join(", ")}${VUNIT[v.edit]}, Zone: ${tp.name}'s.`;
   if (v.edit === "target") return `Target ${b.temperature[2]}°, ${b.humidity[2]}%, ${b.vpd[2]} kPa. Drag the circle to where you want to aim.`;
   if (v.sel !== null) return `${VNAME[v.edit]} ${SLOT_NAME[v.sel]} ${b[v.edit][v.sel]}${VUNIT[v.edit]}`;
   return `Drag a ${VNAME[v.edit].toLowerCase()} line, or tap near one to move it there.`;
@@ -2296,11 +2362,12 @@ function vCommitActive() {
   if (a && a.dataset && a.dataset.vin) { vCommit(a); a.blur(); }
 }
 function renderVpd() {
-  const v = ui.vpdw, z = baseZone(v.id), b = v.bands[v.period], issues = vIssues(v, b);
-  const aim = hasTarget(v.bands), tabs = [...(aim ? [["target", "Target"]] : []), ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
-  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => x === null ? `<span class="vcell vt vnone"><span class="vdash" role="img" aria-label="${VNAME[k]} Target, none">-</span>${SLOT_NAME[i]}</span>` : `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}">${SLOT_NAME[i]}</label>`).join("")}</div>`;
+  /* Sharing a sensor with its parent, a linked zone's targets are the parent's: drawn, never edited here. */
+  const v = ui.vpdw, z = baseZone(v.id), tp = sharesSensor(z) ? parentOf(z) : null, all = tp ? vDraftBands(tp) : v.bands, b = all[v.period], issues = tp ? [] : vIssues(v, b), ro = tp ? roAttrs(tp) : "";
+  const aim = hasTarget(all), tabs = [...(aim ? [["target", "Target"]] : []), ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
+  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => x === null ? `<span class="vcell vt vnone"><span class="vdash" role="img" aria-label="${VNAME[k]} Target, none">-</span>${SLOT_NAME[i]}</span>` : `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}"${ro}>${SLOT_NAME[i]}</label>`).join("")}</div>`;
   const [, lightSlot, lightColumn] = LIGHT_LIMIT[v.period];
-  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}">${lightSlot}</label></div>`;
+  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}"${ro}>${lightSlot}</label></div>`;
   const counted = countedEnv(z), mixed = new Set(counted.map(leafOf)).size > 1, picked = counted.find((s) => s.id === z.leafBasis);
   const leafText = `${leafWords(v.leaf)}${!mixed ? "" : picked ? `, from ${picked.name}` : `, the average of ${counted.length} sensors`}`;
   const nudge = `<span class="stepper" id="vnudge"${vCanNudge(v) ? "" : " hidden"}><button data-vnudge="-1" aria-label="Lower">-</button><button data-vnudge="1" aria-label="Higher">+</button></span>`;
@@ -2308,23 +2375,24 @@ function renderVpd() {
   const pickers = m.band !== "helpers" ? "" : `<div class="tdlinks">${Object.keys(VNAME).map((k) => `<div><p class="small">${VNAME[k]}, ${v.period}</p><div class="fields links">${aimLinks.map((sl) => linkSelect(m, `bands.${v.period}.${k}.${sl}`, SLOT_WORD[sl], { none: "Set here", aria: linkLabel(`bands.${v.period}.${k}.${sl}`) })).join("")}</div></div>`).join("")}
       <div><p class="small">Light, ${v.period}</p><div class="fields links">${linkSelect(m, `light.${LIGHT_LIMIT[v.period][0]}`, LIGHT_LIMIT[v.period][1], { none: "Set here", aria: linkLabel(`light.${LIGHT_LIMIT[v.period][0]}`) })}</div></div>
       <p class="small muted">Helpers in the right unit are listed first. A box linked to a helper shows what it holds, and changing it writes there. Anything on Set here is stored in Environment Control, as Low and High always are.</p></div>`;
-  return `<section class="card" id="td-targets"><div><h2>Targets</h2><p class="muted small">Pick ${esc(z.name)}'s limits on the VPD chart, or type them.</p></div>
-    <div>${chips(`Where do ${z.name}'s limits come from?`, "limits-src", [["helpers", "My helpers"], ["here", "Set here"]], m.band, "data-mband")}</div>
+  const own = (html) => (tp ? "" : html);
+  return `<section class="card" id="td-targets"><div><h2>Targets</h2><p class="muted small">${tp ? `${esc(tp.name)}'s limits, which ${esc(z.name)}'s readings are judged against.` : `Pick ${esc(z.name)}'s limits on the VPD chart, or type them.`}</p></div>
+    ${tp ? `<p class="small" data-sharedline="targets">This zone shares a sensor with Zone: ${esc(tp.name)}, so its targets are ${esc(tp.name)}'s. ${esc(editIn(tp))}.</p>` : `<div>${chips(`Where do ${z.name}'s limits come from?`, "limits-src", [["helpers", "My helpers"], ["here", "Set here"]], m.band, "data-mband")}</div>`}
     <div class="card-head"><div class="seg" role="group" aria-label="Period">${[["day", "Day"], ["night", "Night"]].map(([k, l]) => `<button data-vperiod="${k}" aria-pressed="${v.period === k}">${l}</button>`).join("")}</div>
       <div class="row"><span class="small muted">${esc(leafText)}</span><button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div></div>
-    <div><p class="small muted">Does ${esc(z.name)} aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-vtarget="on" aria-pressed="${aim}">Aim for a target</button><button data-vtarget="off" aria-pressed="${!aim}">No target</button></div>${aim ? "" : `<p class="small muted">Only its limits are judged. Nothing aims for a point inside them.</p>`}</div>
+    ${own(`<div><p class="small muted">Does ${esc(z.name)} aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-vtarget="on" aria-pressed="${aim}">Aim for a target</button><button data-vtarget="off" aria-pressed="${!aim}">No target</button></div>${aim ? "" : `<p class="small muted">Only its limits are judged. Nothing aims for a point inside them.</p>`}</div>
     ${pickers}
-    <div><p class="small muted">Start from an Athena stage</p><div class="seg" role="group" aria-label="Athena stage">${Object.entries(STAGES).map(([k, s]) => `<button data-vstage="${k}" aria-pressed="${v.stage === k}">${s.label}</button>`).join("")}</div></div>
+    <div><p class="small muted">Start from an Athena stage</p><div class="seg" role="group" aria-label="Athena stage">${Object.entries(STAGES).map(([k, s]) => `<button data-vstage="${k}" aria-pressed="${v.stage === k}">${s.label}</button>`).join("")}</div></div>`)}
     <div class="vgrid"><div class="vmain">
       <div class="seg vtabs" role="group" aria-label="What to edit">${tabs.map(([k, l]) => `<button data-vedit="${k}" aria-pressed="${v.edit === k}">${l}</button>`).join("")}</div>
       <div class="now" id="v-now"><strong id="vread">${esc(vReadout(v, b))}</strong>${nudge}</div>
-      <div class="map vchart" id="vwrap" tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value.">${vChartInner(v, b)}</div>
+      <div class="map vchart" id="vwrap"${tp ? ` data-ro aria-label="Chart of ${esc(tp.name)}'s limits." title="${esc(editIn(tp))}"` : ` tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value."`}>${vChartInner(v, b)}</div>
       <div class="key">${VZONES.slice(1, 4).map(([c, l]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("")}<span><i style="background:var(--v0)"></i>Outside Athena's ranges</span></div>
     </div>
     <div class="vside">${summary("temperature", "Temperature °C")}${summary("humidity", "Humidity %")}${summary("vpd", "VPD kPa")}${lightRow}
-      <p class="small muted">Drag on the chart or type a number here. Bright cells are your ideal zone. Faded cells are outside it but not critical. Dark cells are past Min or Max. Light is what your sensors read, not the % set on the lights, so it isn't on the chart.</p></div></div>
-    <div class="vissues" id="v-issues" data-html="${esc(vIssueBox(v, issues))}">${vIssueBox(v, issues)}</div>
-    ${z.linked ? `<p class="small muted">${esc(z.name)}'s values on your helpers change there when you apply, and your alerts follow straight away. Low and High, and anything without a helper, are saved here.</p>` : ""}
+      <p class="small muted">${tp ? "" : "Drag on the chart or type a number here. "}Bright cells are your ideal zone. Faded cells are outside it but not critical. Dark cells are past Min or Max. Light is what your sensors read, not the % set on the lights, so it isn't on the chart.</p></div></div>
+    <div class="vissues" id="v-issues" data-html="${esc(tp ? "" : vIssueBox(v, issues))}">${tp ? "" : vIssueBox(v, issues)}</div>
+    ${z.linked && !tp ? `<p class="small muted">${esc(z.name)}'s values on your helpers change there when you apply, and your alerts follow straight away. Low and High, and anything without a helper, are saved here.</p>` : ""}
   </section>`;
 }
 function openVpd(id) { openTd(id); }
@@ -2615,7 +2683,7 @@ function schedDraft(s) {
   if (onHelpersNow) parts.push("These change on your helpers, and anything reading them, like your alerts, follows straight away.");
   /* Saving here moves live hardware: the light automations and their watchdogs read these helpers. */
   if (onHelpersNow && (moved || emersonMoved)) parts.push("Light automations that read them follow too, so lights can switch within minutes of applying.");
-  const blocked = sProblems(s, z).length ? "fix the problems before review" : "";
+  const blocked = !sharesLights(z) && sProblems(s, z).length ? "fix the problems before review" : "";
   return { zone: moved && others.length ? [z, ...others].map((o) => o.name).join(" and ") : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
 }
@@ -2751,6 +2819,18 @@ function leaveTd(id, applied) {
   if (!guideReturn(id, "targets", applied)) { ui.screen = applied ? "zone" : screen; ui.zone = applied ? id : zone; }
   render(); window.scrollTo(0, 0);
 }
+/* Sharing lights with its parent, a linked zone's day and night and red lights are the parent's: shown, with no source
+   to choose and nothing to type. The zone keeps whatever it had stored, unused while it shares the lights. */
+function sharedSchedule(z, p) {
+  const vals = schedValues(p), ro = roAttrs(p), em = emersonModeOf(p);
+  const line = (what) => `<p class="small" data-sharedline="${what}">This zone shares Zone: ${esc(p.name)}'s lights, so its ${what === "times" ? "day and night are" : "red lights are"} ${esc(p.name)}'s. ${esc(editIn(p))}.</p>`;
+  const field = (k, type) => `<label class="field" for="sro-${k}">${SCHED_NAME[k]}${type === "time" ? "" : ` (${SCHED_RANGE[k][3]})`}<input id="sro-${k}" type="${type}" value="${esc(vals[k])}"${ro}></label>`;
+  const when = p.periodMode === "detected" ? `<p class="small muted">${esc(zonePeriod(p))}.</p>` : `<div class="fields">${field("day", "time")}${field("night", "time")}</div><div class="sched-len"><span>${sLength(vals)}</span><span>${sStrip(vals)}</span></div><p class="small muted">${esc(PERIOD_MODES[p.periodMode || "helper"])}, in Zone: ${esc(p.name)}.</p>`;
+  const red = em === "none" ? `<p class="muted">Not used in Zone: ${esc(p.name)}.</p>` : em === "detected" ? `<p class="small muted">Followed as its red light switches turn on and off, in Zone: ${esc(p.name)}.</p>`
+    : `<div class="fields">${EMERSON_KEYS.map((k) => field(k, "text")).join("")}</div><div class="now"><strong>${esc(emersonLine(vals))}</strong></div><p class="small muted">${esc(EM_MODES[em])}, in Zone: ${esc(p.name)}.</p>`;
+  return [`<section class="card" id="s-times"><div><h2>Day and night</h2></div>${line("times")}${when}</section>`,
+    `<section class="card" id="s-emerson"><div><h2>Red lights</h2><p class="muted small">The Emerson effect: red lights either side of the white lights.</p></div>${line("emerson")}${red}</section>`];
+}
 function renderTd() {
   const m = ui.td.m, s = ui.sched, z = baseZone(m.id), v = s.vals, lock = s.sending ? " disabled" : "", issues = sProblems(s, z), others = sharesHelpers(z);
   const time = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]}<input id="sin-${k}" data-sin="${k}" type="time" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
@@ -2763,7 +2843,7 @@ function renderTd() {
     fixed: `<div class="fields">${time("day")}${time("night")}</div>${length}<p class="small muted">Stored in Environment Control.</p>`,
     detected: `<label class="field" for="map-lq">Search Home Assistant<input id="map-lq" type="search" value="${esc(m.lq)}" placeholder="Light controller, plug or switch"></label><div class="picklist" id="map-lights">${lightRows(m, z)}</div>${count > 1 ? `<div class="row"><span class="small muted">It's day when</span><div class="seg" role="group" aria-label="Day rule"><button data-mrule="any" aria-pressed="${m.rule === "any"}">Any light is on</button><button data-mrule="all" aria-pressed="${m.rule === "all"}">All lights are on</button></div></div>` : ""}<p class="small muted">${count ? `Lights are ${lit ? "on" : "off"} now, so the ${lit ? "day" : "night"} band applies. ` : ""}Day and night follow the switch, so there are no times to set and no countdown to the next change.</p>`,
   };
-  const times = `<section class="card" id="s-times"><div><h2>Day and night</h2><p class="muted small">How ${esc(z.name)} knows when it's day, and when its lights come on and go off.</p></div>
+  let times = `<section class="card" id="s-times"><div><h2>Day and night</h2><p class="muted small">How ${esc(z.name)} knows when it's day, and when its lights come on and go off.</p></div>
     ${chips("Day and night source", "period-src", Object.entries(PERIOD_MODES), m.period, "data-mperiod")}${perBody[m.period]}</section>`;
   const allLinked = EMERSON_KEYS.every((k) => m.links[k]), emValues = v.morning !== undefined ? `<div class="fields">${EMERSON_KEYS.map(box).join("")}</div><div class="now" id="s-em"><strong>${esc(emersonLine(v))}</strong></div>` : "";
   const emBody = {
@@ -2772,9 +2852,10 @@ function renderTd() {
     fixed: `${emValues}<p class="small muted">Stored in Environment Control. Your automations still switch the red lights.</p>`,
     detected: `<label class="field" for="map-rq">Search Home Assistant<input id="map-rq" type="search" value="${esc(m.rq)}" placeholder="Red light plug or switch"></label><div class="picklist" id="map-red">${redRows(m, z)}</div><p class="small muted">The red lights are followed as they switch, so there are no extensions to set. Your automations still switch them.</p>`,
   };
-  const emerson = `<section class="card" id="s-emerson"><div><h2>Red lights</h2><p class="muted small">The Emerson effect: red lights either side of the white lights.</p></div>
+  let emerson = `<section class="card" id="s-emerson"><div><h2>Red lights</h2><p class="muted small">The Emerson effect: red lights either side of the white lights.</p></div>
     <div id="map-em" tabindex="-1">${chips("Red lights source", "em-src", Object.entries(EM_MODES), m.em, "data-mem")}</div>${emBody[m.em]}</section>`;
-  const src = tdIssues();
+  const sp = sharesLights(z) ? parentOf(z) : null, src = tdIssues();
+  if (sp) { [times, emerson] = sharedSchedule(z, sp); issues.length = 0; }
   return `<div class="wrap"><div class="sched-title"><h1>Targets, day and night: ${esc(z.name)}</h1><p class="muted small">Where ${esc(z.name)}'s times and limits come from, and what they are. Nothing changes until you review and apply.</p></div>
     ${confirmNote(zoneById(m.id), "targets", "A new zone's times and limits all start at 0, so set them, then Confirm.")}${times}${emerson}
     <div class="vissues" id="s-issues" data-html="${esc(sIssueHtml(issues))}">${sIssueHtml(issues)}</div>
@@ -2841,7 +2922,7 @@ function renderSetup() {
   if (ui.guide && zoneById(ui.guide.id)) return renderGuide();
   /* Since #36 a device's type is said in Device identification, so Setup asks only what HA can't tell: how a board connects. */
   const tasks = devices.filter((d) => inAZone(d) && d.link === "unknown").map((d) => `<div class="task"><div><strong>${esc(d.name)}</strong><p class="small muted">Home Assistant doesn't say whether this ${d.ctl ? "device" : "board"} is wired or on WiFi. How is it connected?</p></div><div class="row"><button class="btn" data-answer="${d.id}" data-val="ethernet">Ethernet</button><button class="btn" data-answer="${d.id}" data-val="wifi">WiFi</button></div></div>`).join("");
-  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Device identification</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Device placement</button><button role="menuitem" data-calw="${z.id}">Sensor Calibration</button><button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><button role="menuitem" data-linkautos="${z.id}">Automations</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
+  const zoneRows = zones.map((z) => `<div class="task"><div><strong>${esc(z.name)}</strong>${setupLeft(z).length ? ' <span class="pill warn">Not set up</span>' : ""}${z.description ? `<p class="small">${esc(z.description)}</p>` : ""}${linkLine(z)}<p class="small muted">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ${z.sensors.filter((s) => s.pos).length} of ${plural(z.sensors.length, "sensor")} placed.</p></div><div class="row zacts">${setupLeft(z).length ? `<button class="btn primary" data-guide="${z.id}">Continue setup</button>` : ""}<div class="zmenu"><button class="btn burger" data-zmenu="${z.id}" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-${z.id}" aria-label="Set up ${esc(z.name)}">${icon("menu")}</button><div class="menu" id="zmenu-${z.id}" role="menu" hidden><button role="menuitem" data-details="${z.id}">Zone details</button><button role="menuitem" data-mapw="${z.id}">Device identification</button><button role="menuitem" data-layout="${z.id}">Zone layout</button><button role="menuitem" data-wizard="${z.id}">Device placement</button><button role="menuitem" data-calw="${z.id}">Sensor Calibration</button><button role="menuitem" data-vpd="${z.id}">Targets, day and night</button><button role="menuitem" data-linkautos="${z.id}">Automations</button><hr><button role="menuitem" class="remove" data-rmzone="${z.id}">Remove zone</button></div></div></div></div>`).join("");
   return `<div class="wrap"><div><h1>Setup</h1><p class="muted small">Admins only. Changes here are saved in Environment Control.</p></div>
     ${tasks ? `<section class="card"><h2>Questions for you</h2><div>${tasks}</div></section>` : ""}
     <section class="card"><div class="card-head"><h2>Zones</h2><button class="btn primary add" data-addzone>${icon("plus")}Add zone</button></div>${zoneRows ? `<div>${zoneRows}</div>` : '<p class="muted small">No zones yet.</p>'}</section>
@@ -2905,12 +2986,12 @@ const WIZ_KEY = { 0: "details", 1: "layout", 3: "place" };
 const wizFlow = (w) => (w.flow.includes(2) && w.id && (w.step === 3 || [...w.sensors, ...w.virt].some((s) => s.pos && !fits(s, w))) ? [...w.flow, 3] : w.flow);
 function openWizard(id, flow = [3]) {
   const z = zoneById(id);
-  ui.wiz = { id, flow, name: z.name, desc: z.description || "", step: flow[0], ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
+  ui.wiz = { id, flow, name: z.name, desc: z.description || "", parent: z.parent || "", linkTick: !!z.parent, step: flow[0], ...z.layout, sensors: z.sensors.map((s) => ({ ...s, pos: s.pos ? [...s.pos] : null })),
     devs: placeable(z).map((d) => ({ id: `d:${d.id}`, device: d.id, name: d.name, kind: "device", pos: placedAt(d, z) ? [...placedAt(d, z)] : null })),
     virt: virtualOf(z).map((v) => ({ ...v, kind: "virtual", pos: v.pos ? [...v.pos] : null })), labels: { ...(z.layout.labels || {}) }, vname: "", vissue: "", pick: null };
 }
 function openNewZone() {
-  ui.wiz = { id: null, flow: [0], name: "", desc: "", step: 0, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
+  ui.wiz = { id: null, flow: [0], name: "", desc: "", parent: "", linkTick: false, step: 0, w: 1.2, d: 1.2, units: 4, rows: 2, cols: 2, sensors: [], devs: [], virt: [], vname: "", vissue: "", pick: null };
 }
 function zoneNameIssue(w) {
   const name = w.name.trim();
@@ -2940,7 +3021,8 @@ function removeRows(z) {
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
     ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")],
-    ["Automations", autosOf(z).length ? `${autosOf(z).length} unlinked. They keep running in Home Assistant` : ""]].filter(([, text]) => text);
+    ["Automations", autosOf(z).length ? `${autosOf(z).length} unlinked. They keep running in Home Assistant` : ""],
+    ["Linked zones", linkedZones(z).length ? `${linkedZones(z).map((o) => o.name).join(", ")} ${linkedZones(z).length === 1 ? "is" : "are"} unlinked` : ""]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -2950,7 +3032,7 @@ function askRemoveZone(id) {
 }
 async function removeZone(id) {
   const name = zoneById(id).name, mapped = catalog().filter((s) => zoneById(id).sensors.some((x) => x.id === s.id));
-  const r = await saveConfig(() => { zones.splice(zones.indexOf(zoneById(id)), 1); for (const d of devices) { d.zones = d.zones.filter((x) => x !== id); forgetPlace(d, id); } });
+  const r = await saveConfig(() => { zones.splice(zones.indexOf(zoneById(id)), 1); for (const z of zones) if (z.parent === id) delete z.parent; for (const d of devices) { d.zones = d.zones.filter((x) => x !== id); forgetPlace(d, id); } });
   if (!r.ok) { toast(`${name} wasn't removed. ${r.error}`); return; }
   for (const s of mapped) if (!catalog().some((x) => x.id === s.id)) EXTRA_SENSORS.push({ ...s, pos: null, avg: true, leaf: undefined, leafUnused: false });
   delete ACTIVITY[id]; delete LIGHTS[id];
@@ -2959,6 +3041,18 @@ async function removeZone(id) {
   $("[data-addzone]").focus({ preventScroll: true });
   toast(`${name} removed.`);
 }
+/* One level only: a zone that's linked can't be a parent, and a zone with zones linked to it can't be given one. */
+const parentChoices = (w) => zones.filter((o) => o.id !== w.id && !o.parent);
+const parentWords = (id) => (id && zoneById(id) ? `Zone: ${zoneById(id).name}` : "Not linked");
+function linkedToBox(w) {
+  const kids = w.id ? linkedZones(zoneById(w.id)) : [];
+  if (kids.length) return `<p class="small" id="wiz-linked">${esc(zoneList(kids))} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.</p>`;
+  return `<div id="wiz-linked" tabindex="-1"><label class="inavg"><input type="checkbox" id="wiz-linkme" data-wlink${w.linkTick ? " checked" : ""}>This is a linked zone</label>
+    ${w.linkTick ? chips("Linked to", "wiz-parent", parentChoices(w).map((o) => [o.id, `Zone: ${o.name}`]), w.parent, "data-wparent") : ""}
+    <p class="small muted">A linked zone is part of the same space as its parent. What it shares with the parent is set in the parent.</p></div>`;
+}
+/* Ticked, a linked zone needs its parent before it can go on. */
+const parentIssue = (w) => (w.linkTick && !w.parent ? "Pick the zone it's linked to" : "");
 function renderWizard() {
   const w = ui.wiz, lost = stranded(w), lostS = lost.filter((s) => s.kind !== "virtual"), lostV = lost.filter((s) => s.kind === "virtual"), movedOff = w.devs.filter((d) => d.pos && !fits(d, w)), nameIssue = zoneNameIssue(w), called = w.name.trim();
   const flow = wizFlow(w), at = flow.indexOf(w.step), last = at === flow.length - 1;
@@ -2966,6 +3060,7 @@ function renderWizard() {
   let body = "";
   if (w.step === 0) body = `<div class="fields"><label class="field" for="wiz-name">Zone name<input id="wiz-name" data-wbox="name" type="text" maxlength="40" enterkeyhint="next" autocomplete="off" value="${esc(w.name)}" aria-invalid="${!!nameIssue && !!called}" aria-describedby="wiz-name-why"></label></div><div class="lstatus" id="wiz-name-why" role="status">${nameIssue && called ? esc(nameIssue) : ""}</div>
     <label class="field" for="wiz-desc">Description, optional<textarea id="wiz-desc" data-wbox="desc" rows="3" maxlength="200" enterkeyhint="done" placeholder="For example Flowering tent by the window">${esc(w.desc)}</textarea></label>
+    ${linkedToBox(w)}
     ${w.id ? "" : `<p class="small muted">Size and units come later, after its devices are mapped.</p>`}`;
   if (w.step === 1) body = `<p class="muted">Measure the inside of the zone.</p><div class="fields">
     <label class="field" for="wiz-w">Width in metres<input id="wiz-w" data-wbox="w" type="number" min="0.1" max="100" step="0.1" value="${w.w}"></label>
@@ -3016,10 +3111,10 @@ function renderWizard() {
   }
   /* An environment sensor needs a height to save, since its height decides where it reads (#36). */
   const heightless = w.step === 3 ? w.sensors.filter((x) => x.kind === "env" && fits(x, wizLayout(w)) && !x.level) : [];
-  const blocked = (w.step === 3 && (lost.length > 0 || heightless.length > 0)) || (w.step === 0 && !!nameIssue);
+  const blocked = (w.step === 3 && (lost.length > 0 || heightless.length > 0)) || (w.step === 0 && !!(nameIssue || parentIssue(w)));
   const changes = wizDraft(w).items.length;
   const saveLabel = changes ? "Review and apply" : w.flow[0] !== 3 || w.sensors.length || w.devs.length || w.virt.length ? "Finish" : "Device identification";
-  const fix = w.step === 0 ? (nameIssue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(nameIssue)} &rsaquo;</button>` : "") : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : heightless.length ? `<button class="fixlink" data-pick="${heightless[0].id}">Set ${esc(heightless[0].name)}'s height to save &rsaquo;</button>` : "";
+  const fix = w.step === 0 ? (nameIssue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(nameIssue)} &rsaquo;</button>` : parentIssue(w) ? `<button class="fixlink" id="wiz-parent-fix" data-wfixparent>${esc(parentIssue(w))} &rsaquo;</button>` : "") : w.step === 3 && lost.length ? `<button class="fixlink" data-pick="${lost[0].id}">Place ${esc(lost[0].name)} to save &rsaquo;</button>` : heightless.length ? `<button class="fixlink" data-pick="${heightless[0].id}">Set ${esc(heightless[0].name)}'s height to save &rsaquo;</button>` : "";
   const title = w.id ? (w.flow[0] === 0 ? "Zone details" : `${{ 1: "Zone layout", 3: "Device placement" }[w.flow[0]]}: ${esc(zoneById(w.id).name)}`) : "Add zone";
   return `<div class="wrap"><div><h1 id="wiz-title">${title}</h1></div><section class="card">${steps}${body}
     ${wizBar({ where: flow.length > 1 ? `Step ${at + 1} of ${flow.length}` : "", back: at === 0 ? "Cancel" : "Back", next: last ? saveLabel : "Next", blocked, changes, fix, attr: "data-wiz" })}</section></div>`;
@@ -3030,9 +3125,9 @@ function wizNameSync(input) {
   const w = ui.wiz, issue = zoneNameIssue(w), typed = !!w.name.trim();
   input.setAttribute("aria-invalid", String(!!issue && typed));
   $("#wiz-name-why").textContent = issue && typed ? issue : "";
-  const bar = $("#main .wizbar");
-  if (bar) { bar.querySelector(".draft-text").innerHTML = issue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(issue)} &rsaquo;</button>` : ""; bar.toggleAttribute("data-blocked", !!issue); bar.toggleAttribute("data-bare", !issue); }
-  $('[data-wiz="next"]').disabled = !!issue;
+  const bar = $("#main .wizbar"), pick = !issue && parentIssue(w);
+  if (bar) { bar.querySelector(".draft-text").innerHTML = issue ? `<button class="fixlink" id="wiz-name-fix" data-wfixname>${esc(issue)} &rsaquo;</button>` : pick ? `<button class="fixlink" id="wiz-parent-fix" data-wfixparent>${esc(pick)} &rsaquo;</button>` : ""; bar.toggleAttribute("data-blocked", !!(issue || pick)); bar.toggleAttribute("data-bare", !(issue || pick)); }
+  $('[data-wiz="next"]').disabled = !!(issue || pick);
 }
 
 /* Edits are a draft until reviewed and applied, as PHASE does it. Each draft lists what it would change, worked out against what's saved, so the review always shows exactly what will be sent and nothing else. */
@@ -3055,6 +3150,7 @@ const BAND_SLOT = { 0: "min", 2: "target", 4: "max" };
 const bandSetting = (p, k, i) => `bands.${p}.${k}.${BAND_SLOT[i]}`;
 const lightSetting = (p) => `light.${LIGHT_LIMIT[p][0]}`;
 const settingLink = (z, name) => (z.linked || !/^(bands|light)\./.test(name) ? linkAtName(z, name) : undefined);
+const roAttrs = (p) => ` disabled title="${esc(editIn(p))}"`;
 function vHelperIssues(v, p, b) {
   const z = baseZone(v.id), out = [];
   const check = (name, x, label, edit, slot) => {
@@ -3069,6 +3165,7 @@ function vHelperIssues(v, p, b) {
 }
 function vpdDraft(v) {
   const z = baseZone(v.id), items = [];
+  if (sharesSensor(z)) return { zone: z.name, items, skipped: [], bar: true, busy: false, blocked: "", note: "", apply: (done) => done([]), discard: () => {} };
   for (const [p, day] of PERIODS) for (const k of Object.keys(VNAME)) v.bands[p][k].forEach((x, i) => {
     const was = z.bands[p][k][i], helper = !!settingLink(z, bandSetting(p, k, i) || "");
     const said = (n) => (n === null ? "None" : `${round2(n)}${VUNIT[k]}`);
@@ -3151,6 +3248,7 @@ function wizDraft(w) {
   const size = (x) => `${x.w} x ${x.d} m`, units = (x) => String(x.units), grid = (x) => `${x.rows} rows, ${x.cols} columns`;
   add("Zone name", z ? z.name : "New zone", w.name.trim());
   add("Description", (z && z.description) || "None", w.desc.trim() || "None");
+  if (w.flow[0] === 0) add("Linked to", parentWords(z && z.parent), parentWords(w.parent));
   const labelWords = (x) => Object.entries((x && x.labels) || {}).map(([n, t]) => `${n}: ${t}`).join(", ") || "None";
   if (z) { add("Size", was(size), size(L)); add("Units", was(units), units(L)); add("Grid", was(grid), grid(L)); add("Unit labels", labelWords(z.layout), labelWords(L)); }
   for (const s of w.sensors) {
@@ -3176,6 +3274,7 @@ async function saveWizard(w, said) {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
     if (w.desc.trim()) z.description = w.desc.trim(); else delete z.description;
+    if (w.flow[0] === 0) { if (w.parent) z.parent = w.parent; else delete z.parent; }
     /* A virtual device keeps its type, and one added in Device identification may wait for a spot (#36). */
     const virt = w.virt.map((v) => ({ id: v.id, name: v.name, type: v.type || "Other", ...(fits(v, L) ? { pos: [...v.pos] } : {}) }));
     if (virt.length) z.virtual = virt; else delete z.virtual;
@@ -3269,8 +3368,8 @@ function askShare(kind, name, z, others, add) {
 const guardConfirmed = () => !ui.guard || !ui.guard.confirm || ($("#dlg-confirm") || {}).value === ui.guard.confirm;
 function targetsDialog(z) {
   return `<div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Targets: ${esc(z.name)}</h2>
-    <div class="review-scroll">${targetsSet(z) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
-    <div class="dlgbar"><button class="draft-discard" data-tclose>Close</button><button class="draft-review" data-tset="${z.id}">Set targets</button></div></div>`;
+    <div class="review-scroll">${targetsSet(targetsOf(z)) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
+    <div class="dlgbar"><button class="draft-discard" data-tclose>Close</button>${sharesSensor(z) ? `<span class="small muted" id="t-editin">${esc(editIn(parentOf(z)))}</span>` : `<button class="draft-review" data-tset="${z.id}">Set targets</button>`}</div></div>`;
 }
 /* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold. */
 function activityDialog(z) {
@@ -3359,6 +3458,7 @@ document.addEventListener("click", (e) => {
   let el;
   if ((el = q("[data-zmenu]"))) { if (el.getAttribute("aria-expanded") === "true") closeMenus(); else openMenu(el); return; }
   closeMenus();
+  if ((el = q("[data-roctl]")) && !ui.guard && !ui.review) { e.preventDefault(); toast(el.dataset.roctl); return; }
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();
   if (ui.sched && q("button")) sCommitActive();
@@ -3487,7 +3587,11 @@ document.addEventListener("click", (e) => {
     if ((el = q("[data-msensor]"))) {
       const s = catalog().find((x) => x.id === el.dataset.msensor), z = zoneById(m.id), tick = () => { toggleSensor(m, s); render(); refocusSel(`[data-msensor="${s.id}"]`); };
       if (m.pickS[s.id] || z.sensors.some((x) => x.id === s.id)) tick();
-      else askShare("sensor", s.name, z, zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)).map((o) => o.name), tick);
+      else {
+        const holders = zones.filter((o) => o.id !== z.id && o.sensors.some((x) => x.id === s.id)), why = sensorRefusal(z, holders);
+        if (why) { ui.guard = { title: s.name, text: why, ok: "OK" }; renderModal(); }
+        else askShare("sensor", s.name, z, holders.map((o) => o.name), tick);
+      }
       return;
     }
     if ((el = q("[data-mdevice]"))) {
@@ -3545,6 +3649,7 @@ document.addEventListener("click", (e) => {
   }
   const w = ui.wiz; if (!w) return;
   if (q("[data-wfixname]")) { jumpTo("wiz-name"); return; }
+  if (q("[data-wfixparent]")) { jumpTo("wiz-linked"); return; }
   if ((el = q("[data-grid]"))) { w[el.dataset.grid] = Math.min(20, Math.max(1, w[el.dataset.grid] + Number(el.dataset.d))); render(); return; }
   if (q("[data-suggest]")) { [w.rows, w.cols] = suggestGrid(w.units, w.w, w.d); render(); return; }
   /* The list can be long, so a pick brings the map into view for the tap that places it. */
@@ -3632,6 +3737,8 @@ document.addEventListener("focusout", (e) => {
 });
 document.addEventListener("change", (e) => {
   if (e.target.dataset && e.target.dataset.lgroup && ui.linkw) { ui.linkw.pick[e.target.dataset.lgroup] = e.target.value; draftSync(); return; }
+  if (e.target.dataset && e.target.dataset.wlink !== undefined && ui.wiz) { ui.wiz.linkTick = e.target.checked; if (!ui.wiz.linkTick) ui.wiz.parent = ""; render(); refocusSel("#wiz-linkme"); return; }
+  if (e.target.dataset && e.target.dataset.wparent !== undefined && ui.wiz) { ui.wiz.parent = e.target.value; render(); refocusSel(`[data-wparent="${CSS.escape(ui.wiz.parent)}"]`); return; }
   if (e.target.dataset && e.target.dataset.wizlevel && ui.wiz) { const s2 = ui.wiz.sensors.find((x) => x.id === ui.wiz.pick); if (s2) { s2.level = e.target.value; render(); } return; }
   if (e.target.name === "link-filter" && e.target.dataset.link) { ui.linkFilter = e.target.dataset.link; render(); return; }
   if (e.target.dataset.dev && e.target.dataset.act === "mode") {
@@ -3686,7 +3793,7 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("pointerdown", (e) => {
   const wrap = e.target.closest && e.target.closest("#vwrap");
-  if (!wrap || !ui.vpdw) return;
+  if (!wrap || !ui.vpdw || wrap.hasAttribute("data-ro")) return;
   vCommitActive();
   e.preventDefault(); wrap.setPointerCapture(e.pointerId); ui.vpdw.drag = true; vPointer(e, true);
 });

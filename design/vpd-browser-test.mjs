@@ -740,7 +740,7 @@ await ev(`ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render()`); awa
 await tap('[data-autopage="control"]'); ap = await autoPage();
 check("Automations: Control holds its about sentence, its group and Link automations", ap.about === (await ev(`AUTO_PAGES.control.about`)) && !ap.repeat && same(ap.groups, ["Control"]) && ap.rows === 4 && ap.link, ap);
 await ev(`window.keptAutos=zoneById("nursery").automations;zoneById("nursery").automations=keptAutos.filter(a=>a.group!=="control");ui.zone="nursery";ui.autos={zone:"nursery",page:"control"};render()`); await sleep(30);
-const emptyChip = await ev(`(()=>{const n=document.querySelector("#main .notice.calm");return {chip:[...document.querySelectorAll("[data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.querySelector("strong").textContent,link:!!(n&&n.querySelector('[data-linkautos="nursery"]')),rows:document.querySelectorAll("[data-autorow]").length,linkRow:!!document.querySelector('#main .row [data-linkautos]')}})()`);
+const emptyChip = await ev(`(()=>{const n=document.querySelector("#main .notice.calm");return {chip:[...document.querySelectorAll("[data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.querySelector("strong").textContent,link:!!(n&&n.querySelector('[data-linkautos="nursery"]')),rows:document.querySelectorAll("[data-autorow]:not([data-from])").length,linkRow:!!document.querySelector('#main .row [data-linkautos]')}})()`);
 check("Automations: a chip with nothing linked says so, in words too, and offers Link automations", same(emptyChip.chip, ["Alerts, 3 of 3 on|3/3", "Failsafes, 2 of 2 on|2/2", "Control, none linked|0/0"]) && emptyChip.notice === "No control linked to Nursery yet" && emptyChip.link && emptyChip.rows === 0 && !emptyChip.linkRow, emptyChip);
 await ev(`zoneById("nursery").automations=keptAutos;render()`);
 for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small-phone"], [1280, 900, "desktop"]]) {
@@ -1327,10 +1327,36 @@ await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="fans"]');
 check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Zones: Veg, Nursery may affect the device state." }), await shareAsk());
 await tap("[data-gkeep]");
-/* The panel lets one sensor be mapped into two zones, so a sensor asks too. */
+/* A sensor may be in two zones only inside one family, a parent and the zones linked to it: one zone's readings show in
+   another only through that link. Garden isn't linked to Veg, so Veg's sensor can't be ticked here. */
+const sensorNo = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id} : null})()`);
+const themeShots = async (name) => {
+  for (const look of ["light", "dark"]) {
+    await send("Emulation.setEmulatedMedia", { features: look === "dark" ? [{ name: "prefers-color-scheme", value: "dark" }] : [] }); await sleep(150);
+    await shot(`${name}-phone-${look}`); await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); await shot(`${name}-desktop-${look}`); await phone(390, 844); await sleep(80);
+  }
+  await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(100);
+};
 await ev(`ui.mapw.step=1;render()`); await sleep(30);
 await tap('[data-msensor="v-env"]');
-check("Share: ticking a sensor another zone has asks too, as a sensor", same(await shareAsk(), { ...DEHU_ASK, title: "Veg environment", text: "This sensor is already associated to Zone: Veg. Are you sure you want to duplicate it here?", more: "This means that data is in sync in both zones." }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
+check("Share: a sensor outside this zone's family can't be ticked, and the panel's dialog says how it could be", same(await sensorNo(), { role: "alertdialog", title: "Veg environment", text: "This sensor is already associated to Zone: Veg. If you really want it here, make Zone: Veg this zone's parent in Zone details.", buttons: ["OK|draft-review"], focus: "dlg-title" }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await sensorNo());
+await themeShots("sensor-refused");
+await tap("[data-gkeep]");
+check("Share: OK closes it with the sensor still unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"] && document.activeElement.dataset.msensor==="v-env"`)) === true);
+await tap('[data-msensor="v-env"]'); await key("Escape", 27);
+check("Share: so does Escape", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+await tap('[data-msensor="n-env"]');
+check("Share: a sensor of a linked zone says that zone can't be this one's parent", (await sensorNo())?.text === "This sensor is already associated to Zone: Nursery. Zone: Nursery is itself linked to Zone: Veg, so it can't be this zone's parent.", await sensorNo());
+await tap("[data-gkeep]");
+await tap('[data-msensor="g-right"]'); await tap('[data-msensor="g-right"]');
+check("Share: a sensor this zone has saved never asks, unticked and ticked again", (await noAsk()) && (await ev(`ui.mapw.pickS["g-right"]===true`)) === true);
+await tap('[data-msensor="x-pulse"]');
+check("Share: a sensor no zone has never asks", (await noAsk()) && (await ev(`ui.mapw.pickS["x-pulse"]===true`)) === true);
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+/* Nursery is linked to Veg, so Veg's sensor asks the sharing question as before. */
+await mOpen("nursery"); await ev(`ui.mapw.step=1;render()`); await sleep(30);
+await tap('[data-msensor="v-env"]');
+check("Share: in the same family, a sensor another zone has asks, as a sensor", same(await shareAsk(), { ...DEHU_ASK, title: "Veg environment", text: "This sensor is already associated to Zone: Veg. Are you sure you want to duplicate it here?", more: "This means that data is in sync in both zones." }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
 await shot("share-ask-sensor-phone");
 await tap("[data-gkeep]");
 check("Share: Cancel leaves the sensor unticked", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
@@ -1338,10 +1364,17 @@ await tap('[data-msensor="v-env"]'); await tap("[data-gdiscard]");
 check("Share: Add ticks the sensor in the draft", (await noAsk()) && (await ev(`ui.mapw.pickS["v-env"]===true && document.querySelector('[data-msensor="v-env"]').getAttribute("aria-pressed")==="true"`)) === true);
 await tap('[data-msensor="v-env"]');
 check("Share: unticking it never asks", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
-await tap('[data-msensor="g-right"]'); await tap('[data-msensor="g-right"]');
-check("Share: a sensor this zone has saved never asks, unticked and ticked again", (await noAsk()) && (await ev(`ui.mapw.pickS["g-right"]===true`)) === true);
-await tap('[data-msensor="x-pulse"]');
-check("Share: a sensor no zone has never asks", (await noAsk()) && (await ev(`ui.mapw.pickS["x-pulse"]===true`)) === true);
+await tap('[data-msensor="g-left"]');
+check("Share: a zone that already has a parent says so rather than sending you to Zone details", (await sensorNo())?.text === "This sensor is already associated to Zone: Garden. This zone is already linked to Zone: Veg, and a zone is linked to one other zone only.", await sensorNo());
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+await mOpen("veg"); await ev(`ui.mapw.step=1;render()`); await sleep(30);
+await tap('[data-msensor="g-left"]');
+check("Share: a zone other zones are linked to says it can't be linked to another", (await sensorNo())?.text === "This sensor is already associated to Zone: Garden. Zone: Nursery is linked to this zone, so it can't be linked to another.", await sensorNo());
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+const crossSensor = await evp(`saveConfig(()=>{zoneById("veg").sensors.push({...zoneById("garden").sensors[0],pos:null})}).then(r=>[r.ok,r.error||""])`);
+check("Share: the backend refuses a sensor shared outside a family", same(crossSensor, [false, "A sensor can only be shared between a zone and the zones linked to it."]) && !(await diskZone("veg")).sensors.some((x) => x.id === "g-left"), crossSensor);
 await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
 // ---------- One zone per automation: another zone's are hidden in Link automations, and can't be ticked when shown
 const linkSearch = async (text) => { await ev(`(()=>{const i=document.querySelector("#link-q");i.value=${JSON.stringify(text)};i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(40); };
@@ -2518,6 +2551,183 @@ await ev(`ui.wiz.name="Fresh start";render()`); await sleep(30);
 await cClick('[data-wiz="next"]');
 await cClick("[data-rapply]"); await sleep(80); await ev(`ui.guide=null;render()`);
 check("Remove: and the first zone is back on Overview", (await see("overview")).includes("Fresh start"));
+
+// ---------- Linked zones: a zone linked to a parent shows what it shares with the parent read only, and never goes there
+{
+const both = async (name) => { await ev(`(()=>{const t=document.querySelector("#toast");if(t)t.hidden=true})()`); await shot(`${name}-phone`); await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60); await shot(`${name}-desktop`); await phone(390, 844); await sleep(60); };
+const toastNow = () => ev(`(()=>{const t=document.querySelector("#toast");return t && !t.hidden ? t.textContent : ""})()`);
+const clearToast = () => ev(`(()=>{const t=document.querySelector("#toast");if(t){t.hidden=true;t.textContent=""}})()`);
+await phone(390, 844); await reset(); await setupOnly();
+/* Who says what under a zone's name. */
+const linkLines = () => ev(`(()=>{const out={};for(const id of ["garden","veg","nursery"]){ui.screen="zone";ui.zone=id;render();out[id]=document.querySelector("#main .pagehead .zlinked")?.textContent||""}ui.screen="overview";render();out.overview=[...document.querySelectorAll("#main .zone-card")].map(c=>c.querySelector(".zlinked")?.textContent||"");ui.screen="setup";render();out.setup=[...document.querySelectorAll("#main .task")].filter(t=>t.querySelector("[data-zmenu]")).map(t=>t.querySelector(".zlinked")?.textContent||"");return out})()`);
+let ll = await linkLines();
+check("Linked: under the name, on its page, its Overview card and its Setup row, Nursery says it's linked to Veg, and Veg names Nursery", same(ll, { garden: "", veg: "Zone: Nursery is linked to this zone", nursery: "Linked to Zone: Veg", overview: ["", "Zone: Nursery is linked to this zone", "Linked to Zone: Veg"], setup: ["", "Zone: Nursery is linked to this zone", "Linked to Zone: Veg"] }), ll);
+await both("linked-overview");
+/* Zone details: a tick box, then the parent from radio chips, never a select. A linked zone isn't offered as a parent. */
+const detailsLinked = () => ev(`(()=>{const box=document.querySelector("#wiz-linked"),t=document.querySelector("#wiz-linkme"),f=box&&box.querySelector("fieldset.chips");return {tick:t?t.checked:null,tickLabel:t?t.closest("label").textContent:null,chips:f?[...f.querySelectorAll("label.chip")].map(l=>l.textContent+(l.querySelector("input").checked?"*":"")):null,legend:f?f.querySelector("legend").textContent:null,line:box?box.textContent.replace(/\\s+/g," ").trim():"",selects:document.querySelectorAll("select").length,next:document.querySelector('[data-wiz="next"]').disabled,fix:document.querySelector("#wiz-parent-fix")?.textContent||""}})()`);
+await ev(`openNewZone();render()`); await sleep(40); await tap("#wiz-name"); await type("Bench");
+let dl = await detailsLinked();
+check("Linked: Add zone's first step has the tick box, unticked, and no parent choice yet", dl.tick === false && dl.tickLabel === "This is a linked zone" && dl.chips === null && dl.next === false && dl.line.endsWith("A linked zone is part of the same space as its parent. What it shares with the parent is set in the parent."), dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: ticking it shows the parent as radio chips, every zone that isn't itself linked, in Overview's order, and Next waits for one", dl.tick === true && same(dl.chips, ["Zone: Garden", "Zone: Veg"]) && dl.legend === "Linked to" && dl.selects === 0 && dl.next === true && dl.fix === "Pick the zone it's linked to ›" && (await ev(`document.activeElement.id`)) === "wiz-linkme", dl);
+await both("linked-details-add");
+await tap("#wiz-parent-fix");
+check("Linked: the bar's prompt lands on the choice", (await ev(`document.activeElement.id`)) === "wiz-linked");
+await tap('[data-wparent="garden"]'); dl = await detailsLinked();
+check("Linked: picking one opens Next, focus staying on the chip", same(dl.chips, ["Zone: Garden*", "Zone: Veg"]) && dl.next === false && dl.fix === "" && (await ev(`document.activeElement.matches('[data-wparent="garden"]')`)) === true, dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: unticking clears the parent", dl.tick === false && dl.chips === null && (await ev(`ui.wiz.parent`)) === "" && dl.next === false, dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: ticked again, nothing is picked until you pick it", same(dl.chips, ["Zone: Garden", "Zone: Veg"]) && dl.next === true, dl);
+await tap('[data-wparent="garden"]');
+await cClick('[data-wiz="next"]');
+check("Linked: the review lists it like the rest of Zone details", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toNot linked → Zone: Garden"), await ev(`document.querySelector("#review-items")?.textContent`));
+const zonesBefore = await ev(`zones.length`);
+await cClick("[data-rapply]"); await sleep(300);
+const bench = await ev(`zones.at(-1).id`);
+check("Linked: it's created linked to Garden, and nothing else about setting it up changes", (await ev(`zones.length`)) === zonesBefore + 1 && (await diskZone(bench)).parent === "garden" && (await ev(`ui.screen==="setup" && !!ui.guide && ui.guide.id==="${bench}"`)) === true, await diskZone(bench));
+await ev(`ui.guide=null;openWizard("nursery",[0]);render()`); await sleep(40);
+dl = await detailsLinked();
+check("Linked: opened later, Zone details has the same controls, Nursery's ticked with Veg picked, and Bench, itself linked, not offered", dl.tick === true && same(dl.chips, ["Zone: Garden", "Zone: Veg*"]) && dl.next === false, dl);
+await both("linked-details-nursery");
+await ev(`openWizard("veg",[0]);render()`); await sleep(40); dl = await detailsLinked();
+check("Linked: a zone with zones linked to it says so in place of the tick box", dl.tick === null && dl.chips === null && dl.line === "Zone: Nursery is linked to this zone, so it can't be linked to another.", dl);
+await ev(`openWizard("garden",[0]);render()`); await sleep(40); dl = await detailsLinked();
+check("Linked: Garden, a parent itself now, says so too", dl.tick === null && dl.line === "Zone: Bench is linked to this zone, so it can't be linked to another.", dl);
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await cClick('[data-wiz="next"]');
+check("Linked: unticking an existing link is reviewed too", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toZone: Garden → Not linked"), await ev(`document.querySelector("#review-items")?.textContent`));
+await cClick("[data-rapply]"); await sleep(300);
+check("Linked: applied, the parent is gone", (await diskZone(bench)).parent === undefined && same((await linkLines()).garden, ""), await diskZone(bench));
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await tap('[data-wparent="garden"]'); await cClick('[data-wiz="next"]'); await cClick("[data-rapply]"); await sleep(300);
+check("Linked: and linked again", (await diskZone(bench)).parent === "garden");
+await setupOnly();
+/* The fake backend refuses what the panel never offers. */
+const linkSave = (change) => evp(`saveConfig(()=>{${change}}).then(r=>[r.ok,r.error||""])`);
+const refusedLinks = [
+  await linkSave(`zoneById("garden").parent="garden"`),
+  await linkSave(`zoneById("${bench}").parent="nursery"`),
+  await linkSave(`zoneById("veg").parent="garden"`),
+  await linkSave(`zoneById("${bench}").parent="attic"`),
+];
+check("Linked: the backend refuses a zone linked to itself, a second level, a parent for a zone that has linked zones, and a parent that doesn't exist", same(refusedLinks.map((r) => r[0]), [false, false, false, false]) && refusedLinks[0][1].includes("can't be linked to itself") && refusedLinks[1][1].includes("itself linked to another") && refusedLinks[2][1].includes("has zones linked to it") && refusedLinks[3][1].includes("doesn't exist") && (await diskZone("garden")).parent === undefined && (await diskZone("veg")).parent === undefined && (await diskZone(bench)).parent === "garden", refusedLinks);
+/* The parent's automations, read only, on each chip. */
+const fromCard = () => ev(`(()=>{const c=document.querySelector("#main [data-fromzone]");return c && {head:c.querySelector("h2").textContent,hint:c.querySelector("p").textContent,rows:[...c.querySelectorAll("[data-autorow]")].map(r=>r.dataset.autorow),sw:[...c.querySelectorAll(".sw")].map(b=>[b.getAttribute("aria-disabled"),b.title,b.disabled,b.tabIndex>=0,!!b.dataset.auto]),links:c.querySelectorAll("a,[data-go],[data-zone] button:not(.sw)").length,last:c===[...document.querySelectorAll("#main section.card")].at(-1)}})()`);
+for (const page of ["alert", "failsafe", "control"]) {
+  await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"${page}"};ui.linkw=null;render();window.scrollTo(0,0)`); await sleep(50);
+  const fc = await fromCard(), want = await ev(`autosOf(zoneById("veg"),"${page}").map(a=>a.entity)`);
+  check(`Linked: Nursery's ${page} chip ends with a From Zone: Veg card holding Veg's, in Veg's order, each switch read only`, !!fc && fc.head === "From Zone: Veg" && fc.hint === "These belong to Zone: Veg and run devices this zone shares. Edit in Zone: Veg." && same(fc.rows, want) && want.length > 0 && fc.sw.every((x) => same(x, ["true", "Edit in Zone: Veg", false, true, false])) && fc.links === 0 && fc.last, [fc, want]);
+  await both(`linked-autos-${page}`);
+}
+const own = await autoChipsNow();
+check("Linked: the chips count Nursery's own automations only", same(own.chips.map((c) => c.slice(0, 3)), [["Alerts", "3/3", "Alerts, 3 of 3 on"], ["Failsafes", "2/2", "Failsafes, 2 of 2 on"], ["Control", (await ev(`autosOf(zoneById("nursery"),"control").length`)) + "/" + (await ev(`autosOf(zoneById("nursery"),"control").length`)), own.chips[2][2]]]) && own.chips[2][2].startsWith("Control, "), own);
+await ev(`ui.autos={zone:"nursery",page:"failsafe"};render()`); await sleep(30); await clearToast();
+let nCalls = (await haCalls()).length;
+await tap('#main [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+check("Linked: tapping a read only switch switches nothing, and says where to change it", (await haCalls()).length === nCalls && (await toastNow()) === "Edit in Zone: Veg" && (await ev(`ui.screen==="autos" && ui.zone==="nursery" && !ui.guard`)) === true && (await onHA(`fakeHA.states["automation.failsafe_veg_fans_auto_on"].state`)) === "on", await toastNow());
+await tap('#main [data-fromzone] h2');
+check("Linked: nothing in the card takes you to Veg", (await ev(`ui.screen==="autos" && ui.zone==="nursery"`)) === true);
+/* The parent's failsafe off shows on the linked zone's page, as plain text. */
+await onHA(`fakeHA.setState("automation.failsafe_veg_fans_auto_on","off",{})`); await sleep(120);
+await ev(`ui.screen="zone";ui.zone="nursery";ui.autos=null;render();window.scrollTo(0,0)`); await sleep(40);
+const pfs = () => ev(`(()=>{const n=document.querySelector("#parent-failsafe");return n && {text:n.textContent,tag:n.tagName,acts:n.querySelectorAll("button,a").length+(n.matches("button,a,[data-autos]")?1:0)}})()`);
+let pf = await pfs();
+check("Linked: Veg's failsafe off shows on Nursery's page, as a plain notice", same(pf, { text: "A failsafe in Zone: Veg is off: Failsafe Veg Fans Auto On. While it's off, nothing puts that hardware back. Edit in Zone: Veg.", tag: "DIV", acts: 0 }), pf);
+await both("linked-zone-failsafe-off");
+await tap("#parent-failsafe");
+check("Linked: tapping it opens nothing", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !ui.autos`)) === true);
+await onHA(`fakeHA.setState("automation.failsafe_tent_lights_recovery","off",{})`); await sleep(120); await ev(`render()`); await sleep(30);
+check("Linked: several are counted", (await pfs()).text === "2 failsafes in Zone: Veg are off. While they're off, nothing puts that hardware back. Edit in Zone: Veg.", await pfs());
+check("Linked: Veg's own page keeps its own notice, which opens its Automations page", (await ev(`ui.zone="veg";render();!document.querySelector("#parent-failsafe") && !!document.querySelector('#main .notice.fix[data-autos="failsafe"]')`)) === true);
+for (const e of ["automation.failsafe_veg_fans_auto_on", "automation.failsafe_tent_lights_recovery"]) await onHA(`fakeHA.setState("${e}","on",{})`);
+await sleep(120);
+check("Linked: back on, the notice goes", (await ev(`ui.zone="nursery";render();!document.querySelector("#parent-failsafe")`)) === true);
+/* Controls: every device Veg also has is read only in Nursery, and switchable in Veg and in Garden, which isn't linked. */
+const devRow = (id, zone) => ev(`(()=>{const r=document.querySelector('[data-devrow="${id}"][data-zone="${zone}"]');return r && {sub:r.querySelector(".dev-sub").textContent,ro:[...r.querySelectorAll("button,input")].filter(x=>!x.matches(".fixlink")).map(x=>x.getAttribute("aria-disabled")==="true"||x.disabled),acts:r.querySelectorAll("[data-dev],[data-dialin],[data-dialstep],[data-dial]").length,title:r.querySelector(".sw").title}})()`);
+await ev(`ui.screen="zone";ui.zone="nursery";render()`); await sleep(40);
+const nDevs = await ev(`devices.filter(d=>d.ctl&&d.zones.includes("nursery")).map(d=>d.id)`);
+const roRows = [];
+for (const id of nDevs) roRows.push([id, await devRow(id, "nursery")]);
+check("Linked: every device Nursery shares with Veg says it runs on Veg's automations, and every control on it is read only", nDevs.length > 0 && roRows.every(([, r]) => !!r && r.sub.includes("Runs on Zone: Veg's automations. Edit in Zone: Veg.") && !r.sub.includes("Shared with") && r.ro.every(Boolean) && r.acts === 0 && r.title === "Edit in Zone: Veg"), roRows);
+await ev(`document.querySelector('[data-devrow="lp-tent"][data-zone="nursery"]').scrollIntoView({block:"center"})`); await both("linked-controls");
+nCalls = (await haCalls()).length; await clearToast();
+await tap('[data-devrow="lp-tent"][data-zone="nursery"] .sw');
+const t1 = await toastNow(); await clearToast();
+await tap('[data-devrow="lc-tent"][data-zone="nursery"] .dial-steps button:last-child');
+const t2 = await toastNow(); await clearToast();
+const modeWas = await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`);
+await tap('[data-devrow="aux"][data-zone="nursery"] label.chip:not(:has(input:checked))');
+const t3 = await toastNow();
+check("Linked: tapping a read only switch, dial step or mode chip sends nothing and says where to change it", (await haCalls()).length === nCalls && [t1, t2, t3].every((t) => t === "Edit in Zone: Veg") && (await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`)) === modeWas, [t1, t2, t3, (await haCalls()).slice(nCalls)]);
+await ev(`ui.zone="veg";render()`); await sleep(30);
+const vegTent = await devRow("lp-tent", "veg");
+check("Linked: in Veg the same device is switched as ever, and its line names Nursery", !!vegTent && vegTent.acts > 0 && vegTent.ro.every((x) => !x) && vegTent.sub.includes("Shared with Nursery"), vegTent);
+await ev(`ui.zone="garden";render()`); await sleep(30);
+const gardenAux = await devRow("aux", "garden");
+check("Linked: Garden isn't linked, so a device it shares with both stays switchable there", !!gardenAux && gardenAux.acts > 0 && gardenAux.ro.every((x) => !x) && !gardenAux.sub.includes("Runs on"), gardenAux);
+check("Linked: a zone that isn't linked to one shows none of it: only the line naming the zone linked to it, no parent notice, no From card", (await ev(`(()=>{ui.screen="zone";ui.zone="garden";render();const a=document.querySelector("#main .pagehead .zlinked")?.textContent==="Zone: Bench is linked to this zone"&&!document.querySelector("#parent-failsafe");ui.screen="autos";ui.autos={zone:"garden",page:"failsafe"};render();const b=!document.querySelector("[data-fromzone]");ui.autos=null;return a&&b})()`)) === true);
+/* Targets, day and night: Nursery shares Veg's lights, so its day and night and red lights are Veg's; its own sensor keeps its targets its own. */
+await ev(`openTd("nursery");render();window.scrollTo(0,0)`); await sleep(80);
+const tdNow = () => ev(`(()=>{const sec=(id)=>{const s=document.querySelector(id);return {line:s.querySelector("[data-sharedline]")?.textContent||"",chips:s.querySelectorAll("fieldset.chips").length,boxes:[...s.querySelectorAll("input:not([type=radio])")].map(i=>[i.disabled,i.title,!!i.dataset.sin])}};const t=document.querySelector("#td-targets");return {times:sec("#s-times"),red:sec("#s-emerson"),targets:{line:t.querySelector("[data-sharedline]")?.textContent||"",src:!!t.querySelector('[name="limits-src"]'),stages:t.querySelectorAll("[data-vstage]").length,boxes:[...t.querySelectorAll("[data-vin]")].map(i=>i.disabled),ro:t.querySelector("#vwrap").hasAttribute("data-ro")},bar:[...document.querySelectorAll("#pagebar button")].map(b=>b.textContent),draft:tdDraft(ui.td).items.length}})()`);
+let td = await tdNow();
+check("Linked: sharing Veg's lights, Nursery's day and night shows Veg's, read only, under one line, with no source to choose", td.times.line === "This zone shares Zone: Veg's lights, so its day and night are Veg's. Edit in Zone: Veg." && td.times.chips === 0 && td.times.boxes.length === 2 && td.times.boxes.every((b) => same(b, [true, "Edit in Zone: Veg", false])) && (await ev(`document.querySelector("#sro-day").value+"-"+document.querySelector("#sro-night").value`)) === (await ev(`hhmm(zoneById("veg").dayAt)+"-"+hhmm(zoneById("veg").nightAt)`)), td.times);
+check("Linked: and its red lights are Veg's too", td.red.line === "This zone shares Zone: Veg's lights, so its red lights are Veg's. Edit in Zone: Veg." && td.red.chips === 0 && td.red.boxes.every((b) => b[0]), td.red);
+check("Linked: Nursery's own sensor keeps its targets its own, editable as in any zone", td.targets.line === "" && td.targets.src && td.targets.stages === 4 && td.targets.boxes.every((d) => !d) && !td.targets.ro, td.targets);
+check("Linked: with nothing changed there's nothing to review, and nothing read only can be", td.draft === 0, td);
+await both("linked-targets-nursery");
+/* A linked zone that shares an environment sensor with its parent: Bench, made above, takes one of Garden's. */
+const gardenLeft = await ev(`JSON.stringify(zoneById("garden").sensors.find(s=>s.id==="g-left"))`);
+await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[{...JSON.parse(${JSON.stringify(gardenLeft)}),pos:null}]})`); await sleep(100);
+check("Linked: it shares Garden's left environment sensor", (await diskZone(bench)).sensors.some((s) => s.id === "g-left"));
+await ev(`ui.guide=null;ui.screen="zone";ui.zone="${bench}";ui.metric="temperature";ui.range=24;render();window.scrollTo(0,0)`); await sleep(80);
+const benchTile = await ev(`(()=>{const t=[...document.querySelectorAll("#main .tile")].find(x=>x.querySelector(".name").textContent==="Temperature");return {range:[...t.querySelectorAll(".range b")].map(b=>b.textContent),pill:t.querySelector(".pill")?.textContent||"",bands:document.querySelectorAll('#chart rect[fill="var(--band)"]').length}})()`);
+const gardenRange = await ev(`zoneById("garden").bands[period(zoneById("${bench}"))].temperature.map(v=>v===null?"-":String(v))`);
+check("Linked: its tiles judge its readings against Garden's targets, and its History draws Garden's bands", same(benchTile.range, gardenRange) && benchTile.pill !== "No targets yet" && benchTile.bands > 0, [benchTile, gardenRange]);
+await tap(MORE); await tap(`#zmenu--more [data-viewtargets="${bench}"]`); await sleep(60);
+const tv = await ev(`(()=>{const d=document.querySelector("#modal .dialog");return {line:d.querySelector("#t-shared")?.textContent||"",set:!!d.querySelector("[data-tset]"),editin:d.querySelector("#t-editin")?.textContent||"",editTag:d.querySelector("#t-editin")?.tagName||"",first:d.querySelector("tbody td:nth-child(2)").textContent}})()`);
+check("Linked: View targets shows Garden's, says why under the tables, and has plain text in place of Set targets", tv.line === "This zone shares a sensor with Zone: Garden, so its targets are Garden's. Edit in Zone: Garden." && !tv.set && tv.editin === "Edit in Zone: Garden" && tv.editTag === "SPAN" && tv.first === String(await ev(`zoneById("garden").bands.day.temperature[0]`)), tv);
+await both("linked-view-targets-bench");
+await tap("[data-tclose]");
+await ev(`openTd("${bench}");render();window.scrollTo(0,0)`); await sleep(80);
+td = await tdNow();
+check("Linked: on Targets, day and night the whole Targets card is Garden's, read only: no source choice, no Athena stages, boxes disabled, the chart not draggable", td.targets.line === "This zone shares a sensor with Zone: Garden, so its targets are Garden's. Edit in Zone: Garden." && !td.targets.src && td.targets.stages === 0 && td.targets.boxes.length > 0 && td.targets.boxes.every(Boolean) && td.targets.ro && (await ev(`[...document.querySelectorAll("#td-targets [data-vin]")].every(i=>i.title==="Edit in Zone: Garden")`)) === true, td.targets);
+check("Linked: it shares no lights, so its day and night are its own", td.times.line === "" && td.times.chips === 1, td.times);
+await ev(`document.querySelector("#td-targets").scrollIntoView()`); await both("linked-targets-bench");
+const benchBands = await ev(`JSON.stringify(ui.vpdw.bands)`);
+const chartAt = await ev(`(()=>{const r=document.querySelector("#vwrap svg").getBoundingClientRect();return {x:r.left+r.width*0.3,y:r.top+r.height*0.5}})()`);
+for (const type of ["mousePressed", "mouseMoved", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: chartAt.x + (type === "mouseMoved" ? 40 : 0), y: chartAt.y, button: "left", clickCount: 1 });
+await sleep(80);
+nCalls = (await haCalls()).length;
+check("Linked: dragging the chart moves nothing, so there's nothing to review or send", (await ev(`JSON.stringify(ui.vpdw.bands)`)) === benchBands && (await ev(`tdDraft(ui.td).items.length`)) === 0 && !(await ev(`ui.vpdw.drag`)), await ev(`tdDraft(ui.td).items`));
+await ev(`ui.td=null;ui.sched=null;ui.vpdw=null;render()`);
+check("Linked: and nothing read only was sent or saved", (await haCalls()).length === nCalls && same((await diskZone(bench)).bands, await ev(`zoneById("${bench}").bands`)));
+/* Bench shares Garden's sensor, so neither unlinking it nor removing Garden can leave that sensor in two families. */
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await cClick('[data-wiz="next"]'); await cClick("[data-rapply]"); await sleep(300);
+const unlinkNo = await ev(`document.querySelector("#modal .notice.critical")?.textContent||""`);
+check("Linked: unlinking a zone that shares its parent's sensor is refused, naming the sensor to take out first", unlinkNo.includes("Not saved. Environment left is in both Garden and Bench. Take it out of Bench before unlinking it.") && (await diskZone(bench)).parent === "garden", unlinkNo);
+await cClick("[data-rback]"); await ev(`ui.review=null;ui.wiz=null;renderModal();render()`);
+/* Removing a parent unlinks its zones, which stay. The Remove dialog says so first. */
+await ev(`askRemoveZone("garden")`); await sleep(40);
+const rmRow = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
+check("Linked: removing a parent lists its linked zones as unlinked", rmRow === "Linked zonesBench is unlinked", rmRow);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await cClick("[data-gdiscard]"); await sleep(300);
+check("Linked: but while Bench shares Garden's sensor, removing Garden is refused, naming the sensor", (await toastNow()).includes("Environment left is in both Garden and Bench. Take it out of Bench before removing Garden.") && !!(await diskZone("garden")) && (await ev(`!!zoneById("garden")`)) === true, await toastNow());
+await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[]})`); await sleep(100);
+await ev(`zoneById("garden").parent=undefined;zoneById("${bench}").parent="veg";askRemoveZone("veg")`); await sleep(40);
+const rmRows = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
+check("Linked: several are named together", rmRows === "Linked zonesNursery, Bench are unlinked", rmRows);
+await both("linked-remove");
+await key("Escape", 27); await ev(`zoneById("${bench}").parent="garden";delete zoneById("garden").parent;render()`);
+/* Removing Bench's parent for real would take Garden, so Bench becomes a parent here instead: Shelf, linked to it. */
+await evp(`saveConfig(()=>{zoneById("${bench}").parent=undefined;delete zoneById("${bench}").parent;zones.push({...JSON.parse(JSON.stringify(zoneById("${bench}"))),id:"shelf",name:"Shelf",sensors:[],parent:"${bench}"})})`); await sleep(100);
+check("Linked: Shelf is stored linked to Bench", (await diskZone("shelf")).parent === bench, await diskZone("shelf"));
+await ev(`askRemoveZone("${bench}")`); await sleep(40);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await cClick("[data-gdiscard]"); await sleep(300);
+check("Linked: removed, Bench is gone and Shelf stays, unlinked, and shows none of it: no line, no parent notice, no From card", !(await diskZone(bench)) && !!(await diskZone("shelf")) && (await diskZone("shelf")).parent === undefined && (await ev(`(()=>{ui.screen="zone";ui.zone="shelf";render();const a=!document.querySelector("#main .zlinked")&&!document.querySelector("#parent-failsafe");ui.screen="autos";ui.autos={zone:"shelf",page:"control"};render();const b=!document.querySelector("[data-fromzone]");ui.autos=null;ui.screen="zone";render();return a&&b})()`)) === true, await diskZone("shelf"));
+/* Straight against the fake, then put back: a save that drops Veg unlinks Nursery, which stays. */
+const lone = await onHA(`(()=>{const keep={config:fakeHA.config,disk:fakeHA.disk,saves:fakeHA.saves.length};try{const c=JSON.parse(fakeHA.disk);fakeHA.save({revision:fakeHA.config.revision,config:{zones:c.zones.filter(z=>z.id!=="veg"),devices:c.devices.map(d=>({...d,zones:d.zones.filter(z=>z!=="veg")})).map(d=>{if(d.place)delete d.place.veg;return d}),room:c.room}});const n=JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery");return [true,!!n&&n.parent===undefined]}catch(e){return [false,e.message]}finally{fakeHA.config=keep.config;fakeHA.disk=keep.disk;fakeHA.saves.length=keep.saves}})()`);
+check("Linked: the backend itself unlinks the zones of a parent removed in the same save", same(lone, [true, true]), lone);
+}
+await reset(); await setupOnly();
 
 // ---------- Storage: setup is written by the backend, and survives restarts, power cuts and updates
 /* Reopening the panel builds a new frame, so the tests follow it to its new context. */
