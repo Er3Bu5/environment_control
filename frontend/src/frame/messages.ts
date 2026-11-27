@@ -6,10 +6,17 @@ export interface Theme {
   mode: "light" | "dark";
   colors: Record<string, string>;
 }
+/* Settings for the whole room rather than one zone: so far only the number helper every alert's repeat rate comes from. */
+export interface Room {
+  alertRepeat?: string;
+}
+/* room is left out when the host sent none, and a save then sends none either, so the host keeps what's stored rather
+   than taking an empty room as an unlink. */
 export interface Stored {
   revision: number;
   zones: unknown[];
   devices: unknown[];
+  room?: Room;
 }
 export type LinkKind = "ethernet" | "wifi" | "zigbee" | "zwave" | "thread" | "bluetooth" | "derived" | "unknown";
 export type PathKind = "local" | "cloud" | "derived" | "unknown";
@@ -43,9 +50,18 @@ export interface CatalogDevice {
   hub: string | null;
   entities: CatalogEntity[];
 }
+/* An automation as Link automations lists it: only its name, area, whether it's on and when it last ran. */
+export interface CatalogAutomation {
+  entity_id: string;
+  name: string;
+  state: string | null;
+  area: string | null;
+  last_triggered: string | null;
+}
 export interface Catalog {
   devices: CatalogDevice[];
   entities: (CatalogEntity & { integration: string; family: string })[];
+  automations: CatalogAutomation[];
 }
 /* A chart's readings as the backend buckets them: per entity, each bucket's mean, low and high, or null where there
    was no live reading. */
@@ -83,6 +99,8 @@ const LINKS: readonly LinkKind[] = ["ethernet", "wifi", "zigbee", "zwave", "thre
 const PATHS: readonly PathKind[] = ["local", "cloud", "derived", "unknown"];
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const ENTITY_ID = /^[a-z_]+\.[a-z0-9_]+$/;
+export const AUTOMATION_ID = /^automation\.[a-z0-9_]{1,200}$/;
+export const NUMBER_HELPER_ID = /^input_number\.[a-z0-9_]{1,200}$/;
 
 function readEntity(e: unknown): CatalogEntity | null {
   if (!isObj(e) || typeof e.entity_id !== "string" || !ENTITY_ID.test(e.entity_id) || typeof e.domain !== "string") return null;
@@ -126,12 +144,28 @@ export function readCatalog(c: unknown): Catalog | null {
     const read = readEntity(e);
     if (read && isObj(e)) entities.push({ ...read, integration: str(e.integration) ?? "", family: str(e.family) ?? "" });
   }
-  return { devices, entities };
+  /* A list that isn't one leaves only Link automations empty: devices and helpers are still worth having. */
+  const automations: CatalogAutomation[] = [];
+  for (const a of Array.isArray(c.automations) ? c.automations : []) {
+    if (!isObj(a) || typeof a.entity_id !== "string" || !AUTOMATION_ID.test(a.entity_id)) continue;
+    const ran = str(a.last_triggered);
+    automations.push({ entity_id: a.entity_id, name: str(a.name) ?? a.entity_id, state: str(a.state), area: str(a.area), last_triggered: ran !== null && Number.isFinite(Date.parse(ran)) ? ran : null });
+  }
+  return { devices, entities, automations };
+}
+
+/* A room that isn't an object drops the whole message, as zones that aren't a list do. Inside it each setting is read on
+   its own, and one that isn't the right shape is left out. */
+function readRoom(r: unknown): Room | null {
+  if (!isObj(r)) return null;
+  return typeof r.alertRepeat === "string" && NUMBER_HELPER_ID.test(r.alertRepeat) ? { alertRepeat: r.alertRepeat } : {};
 }
 
 function readStored(m: Record<string, unknown>): Stored | null {
   if (!Number.isInteger(m.revision) || !Array.isArray(m.zones) || !Array.isArray(m.devices)) return null;
-  return { revision: m.revision as number, zones: m.zones, devices: m.devices };
+  if (!("room" in m)) return { revision: m.revision as number, zones: m.zones, devices: m.devices };
+  const room = readRoom(m.room);
+  return room ? { revision: m.revision as number, zones: m.zones, devices: m.devices, room } : null;
 }
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
