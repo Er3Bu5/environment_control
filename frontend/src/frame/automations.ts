@@ -117,7 +117,8 @@ export const autoSend = (on: boolean): AutoCtl => ({ status: "sending", want: on
 /* The host's answer. A yes means HA took the call, not that the automation changed, so it goes on waiting unless the
    report is already in. */
 export function autoAnswered(c: AutoCtl, r: { ok: boolean; error?: string }, st: HaState | undefined): AutoCtl | undefined {
-  if (c.status !== "sending") return c;
+  /* A refusal that comes after giving up still says why: the switch was never sent. */
+  if (c.status === "error") return c;
   if (!r.ok) return { status: "error", error: r.error ?? "Home Assistant didn't take it." };
   return st?.state === c.want ? undefined : c;
 }
