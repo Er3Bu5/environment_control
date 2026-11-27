@@ -278,7 +278,7 @@ test.describe("talking to HA", () => {
     expect(await frameText(frame)).not.toContain("Activity arrives in a release that follows.");
     await more.click();
     await expect(more).toHaveAttribute("aria-expanded", "true");
-    await expect(items).toHaveText(["View targets", "View activity"]);
+    await expect(items).toHaveText(["View targets", "View activity", "View automations"]);
     await expect(items.first()).toBeFocused();
     /* It opens on the screen, a phone's included. */
     const view = page.viewportSize()!, box = (await app(frame).locator(".pagehead .menu").boundingBox())!;
@@ -312,7 +312,7 @@ test.describe("talking to HA", () => {
     await goTo(frame, "Garden");
     const more = moreButton(frame), items = app(frame).locator(".pagehead").getByRole("menuitem");
     await more.click();
-    await expect(items).toHaveCount(2);
+    await expect(items).toHaveCount(3);
     await page.keyboard.press("Escape");
     await expect(items).toHaveCount(0);
     await expect(more).toBeFocused();
@@ -322,7 +322,7 @@ test.describe("talking to HA", () => {
     await page.mouse.click(20, view.height - 20);
     await expect(items).toHaveCount(0);
     await more.click();
-    await expect(items).toHaveCount(2);
+    await expect(items).toHaveCount(3);
     await page.evaluate(() => history.back());
     await expect(items).toHaveCount(0);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();

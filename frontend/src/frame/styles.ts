@@ -56,6 +56,7 @@ export const styles = css`
   .pill.dashed { color: var(--muted); border-color: var(--line); border-style: dashed; }
   .notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
   .notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+  .crit-text { color: var(--crit); }
 
   .task { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
   .task:first-child { border-top: 0; padding-top: 0; }
