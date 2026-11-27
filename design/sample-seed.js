@@ -75,6 +75,7 @@ const SEED = (() => {
     "switch.air_conditioner_exhaust_fan": "garden", "switch.veg_oscillating_fans": "veg", "light.garden_light_controller_overhead": "garden", "switch.garden_lights_1": "garden", "switch.garden_lights_2": "garden",
     "light.garden_light_controller_under_canopy": "garden", "switch.garden_lights_red": "garden", "light.tent_light_controller": "veg", "switch.tent_lights": "veg", "switch.reservoir_pump": "reservoir" };
   const entities = Object.fromEntries(Object.keys(states).map((e) => [e, { entity_id: e, platform: e.startsWith("light.") ? "esphome" : "tuya_local", area_id: area[e] || null }]));
+  const automationEntities = () => { for (const [id, , where] of AUTOMATIONS) entities[`automation.${id}`] = { entity_id: `automation.${id}`, platform: "automation", area_id: where }; };
   const areas = Object.fromEntries(["Garden", "Veg", "Nursery", "Reservoir"].map((n) => [n.toLowerCase(), { area_id: n.toLowerCase(), name: n }]));
   /* The helpers each zone links to, as the backend stores them, and what HA reports for each. Veg and Nursery share their
      schedule helpers. Nursery's limits are set in Environment Control, so it links no threshold helpers. */
@@ -111,6 +112,82 @@ const SEED = (() => {
   states["input_number.reservoir_target_ec"] = helper(1.8, [0, 5, 0.1, "mS/cm"], "Reservoir target EC");
   states["input_datetime.reservoir_refill_time"] = time(9 * 60, "Reservoir refill time");
   states["input_datetime.last_reservoir_refill"] = { state: "2026-11-03 09:12:00", attributes: { friendly_name: "Last reservoir refill", has_date: true, has_time: true } };
+  /* The automations behind each zone's alerts, failsafes and light schedule. Home Assistant runs them; the panel only
+     switches them on and off. Veg and Nursery share their light schedule, so they share its automations and failsafes.
+     Each is [object id, friendly name, area, on, last triggered in hours before the mock's time or null for never]. */
+  const AUTOMATIONS = [
+    ["critical_garden_temperature_high_day", "Critical Garden Temperature High Day", "garden", true, 30],
+    ["critical_garden_temperature_low_day", "Critical Garden Temperature Low Day", "garden", true, null],
+    ["critical_garden_humidity_high_day", "Critical Garden Humidity High Day", "garden", true, 3],
+    ["critical_garden_humidity_low_day", "Critical Garden Humidity Low Day", "garden", true, null],
+    ["critical_garden_vpd_high_day", "Critical Garden VPD High Day", "garden", true, 52],
+    ["critical_garden_vpd_low_day", "Critical Garden VPD Low Day", "garden", true, 3],
+    ["critical_garden_lights_low_day", "Critical Garden Lights Low Day", "garden", true, null],
+    ["critical_garden_temperature_high_night", "Critical Garden Temperature High Night", "garden", true, null],
+    ["critical_garden_temperature_low_night", "Critical Garden Temperature Low Night", "garden", true, 14],
+    ["critical_garden_humidity_high_night", "Critical Garden Humidity High Night", "garden", true, 15],
+    ["critical_garden_vpd_low_night", "Critical Garden VPD Low Night", "garden", false, 40],
+    ["critical_garden_lights_high_night", "Critical Garden Lights High Night", "garden", true, null],
+    ["critical_garden_environment_sensor_unavailable", "Critical Garden Environment Sensor Unavailable", "garden", true, 96],
+    ["critical_garden_climate_control_device_unavailable", "Critical Garden Climate Control Device Unavailable", "garden", true, 1],
+    ["critical_garden_dehumidifier_full", "Critical Garden Dehumidifier Full", "garden", true, 20],
+    ["critical_garden_light_controller_overhead_off_day", "Critical Garden Light Controller Overhead Off Day", "garden", true, null],
+    ["failsafe_garden_lights_recovery", "Failsafe Garden Lights Recovery", "garden", true, 0.1],
+    ["failsafe_garden_red_lights_recovery", "Failsafe Garden Red Lights Recovery", "garden", true, 26],
+    ["failsafe_dehumidifier_mains_auto_on", "Failsafe Dehumidifier Mains Auto On", "garden", true, 70],
+    ["garden_lights_on", "Garden Lights On", "garden", true, 7],
+    ["garden_lights_off", "Garden Lights Off", "garden", true, 19],
+    ["garden_red_lights_on", "Garden Red Lights On", "garden", true, 7.1],
+    ["garden_red_lights_off", "Garden Red Lights Off", "garden", true, 18.9],
+    ["critical_veg_temperature_high_day", "Critical Veg Temperature High Day", "veg", true, null],
+    ["critical_veg_temperature_low_day", "Critical Veg Temperature Low Day", "veg", true, 22],
+    ["critical_veg_temperature_high_night", "Critical Veg Temperature High Night", "veg", true, null],
+    ["critical_veg_temperature_low_night", "Critical Veg Temperature Low Night", "veg", true, 10],
+    ["critical_veg_environment_sensor_unavailable", "Critical Veg Environment Sensor Unavailable", "veg", true, null],
+    ["warning_veg_auxiliary_dehumidifier_full", "Warning Veg Auxiliary Dehumidifier Full", "veg", true, 33],
+    ["failsafe_veg_fans_auto_on", "Failsafe Veg Fans Auto On", "veg", true, 5],
+    ["failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery", "veg", true, 0.05],
+    ["tent_lights_on", "Tent Lights On", "veg", true, 4],
+    ["tent_lights_off", "Tent Lights Off", "veg", true, 10],
+    ["critical_nursery_temperature_high_day", "Critical Nursery Temperature High Day", "nursery", true, null],
+    ["critical_nursery_temperature_low_night", "Critical Nursery Temperature Low Night", "nursery", true, 9],
+    ["critical_nursery_environment_sensor_unavailable", "Critical Nursery Environment Sensor Unavailable", "nursery", true, null],
+    /* Not linked to any zone yet, for the picker: one the name suggests for Nursery, a climate limit, and two that belong
+       to the house and must never be suggested. */
+    ["critical_nursery_vpd_high_day", "Critical Nursery VPD High Day", "nursery", true, null],
+    ["day_humidity_upper_limit", "Day Humidity Upper Limit", "garden", false, 400],
+    ["porch_light_on", "Porch Light On", null, true, 8],
+    ["reservoir_refill_reminder", "Reservoir Refill Reminder", "reservoir", true, 50],
+  ];
+  /* The mock's own clock: 13:30 on a fixed day, so "last triggered" reads the same on every run. */
+  const MOCK_NOW = Date.parse("2026-11-17T13:30:00+13:00");
+  for (const [id, name, , on, ago] of AUTOMATIONS) states[`automation.${id}`] = { state: on ? "on" : "off", attributes: { friendly_name: name, last_triggered: ago === null ? null : new Date(MOCK_NOW - ago * 3600e3).toISOString() } };
+  const link = (ids, group) => ids.map((id) => ({ entity: `automation.${id}`, group }));
+  const numbered = (list) => list.map((a, i) => ({ id: `a${i + 1}`, ...a }));
+  zones[0].automations = numbered([
+    ...link(["critical_garden_temperature_high_day", "critical_garden_temperature_low_day", "critical_garden_humidity_high_day", "critical_garden_humidity_low_day", "critical_garden_vpd_high_day", "critical_garden_vpd_low_day", "critical_garden_lights_low_day"], "alert_day"),
+    ...link(["critical_garden_temperature_high_night", "critical_garden_temperature_low_night", "critical_garden_humidity_high_night", "critical_garden_vpd_low_night", "critical_garden_lights_high_night"], "alert_night"),
+    /* Named _day, but kept with the device alerts, as the garden dashboard has it: the name only suggests a group. */
+    ...link(["critical_garden_environment_sensor_unavailable", "critical_garden_climate_control_device_unavailable", "critical_garden_dehumidifier_full", "critical_garden_light_controller_overhead_off_day"], "alert_device"),
+    ...link(["failsafe_garden_lights_recovery", "failsafe_garden_red_lights_recovery", "failsafe_dehumidifier_mains_auto_on"], "failsafe"),
+    ...link(["garden_lights_on", "garden_lights_off", "garden_red_lights_on", "garden_red_lights_off"], "control"),
+  ]);
+  const tent = [...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"), ...link(["tent_lights_on", "tent_lights_off"], "control")];
+  zones[1].automations = numbered([
+    ...link(["critical_veg_temperature_high_day", "critical_veg_temperature_low_day"], "alert_day"),
+    ...link(["critical_veg_temperature_high_night", "critical_veg_temperature_low_night"], "alert_night"),
+    ...link(["critical_veg_environment_sensor_unavailable", "warning_veg_auxiliary_dehumidifier_full"], "alert_device"),
+    ...tent,
+  ]);
+  zones[2].automations = numbered([
+    ...link(["critical_nursery_temperature_high_day"], "alert_day"),
+    ...link(["critical_nursery_temperature_low_night"], "alert_night"),
+    ...link(["critical_nursery_environment_sensor_unavailable"], "alert_device"),
+    ...tent,
+  ]);
+  /* One helper sets how often every alert in Home Assistant may buzz a phone, so it's linked once, for the whole room. */
+  states["input_number.alert_repeat_rate"] = helper(15, [0, 120, 1, "min"], "Alert repeat rate");
+  const room = { alertRepeat: "input_number.alert_repeat_rate" };
   /* What each failsafe holds a device to at the mock's time: fans always on, and light plugs on their schedule. */
   const failsafes = {
     "switch.veg_oscillating_fans": { want: "on", kind: "failsafe", by: "Veg fans auto on" },
@@ -118,5 +195,6 @@ const SEED = (() => {
     "switch.garden_lights_2": { want: "on", kind: "watchdog", by: "Garden lights recovery" },
     "switch.tent_lights": { want: "off", kind: "watchdog", by: "Tent lights recovery" },
   };
-  return { config: { revision: 1, zones, devices }, states, failsafes, registry: { entities, areas } };
+  automationEntities();
+  return { config: { revision: 1, zones, devices, room }, states, failsafes, registry: { entities, areas } };
 })();
