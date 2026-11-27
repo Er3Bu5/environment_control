@@ -71,7 +71,8 @@ def test_an_npm_error_fails():
     assert "npm audit failed" in problem
 
 
-def test_the_real_entry_names_the_picomatch_advisory_with_a_review_date():
-    entry = check_npm_audit.IGNORED["GHSA-fc5q-39xc-vjpf"]
-    assert entry["package"] == "picomatch"
-    datetime.date.fromisoformat(entry["review_by"])
+def test_every_real_entry_names_a_package_and_a_review_date():
+    for ghsa, entry in check_npm_audit.IGNORED.items():
+        assert ghsa.startswith("GHSA-")
+        assert entry["package"]
+        datetime.date.fromisoformat(entry["review_by"])
