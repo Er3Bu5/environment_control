@@ -13,19 +13,21 @@ from typing import Any
 
 from .const import MAX_CONFIG_BYTES, MAX_DEVICES, MAX_ZONES
 
-ZONE_ID = re.compile(r"^[a-z0-9_]{1,40}$")
-VIRTUAL_ID = re.compile(r"^v-[a-z0-9_]{1,40}$")
-CONTROLLABLE = re.compile(r"^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$")
-HELPER = re.compile(r"^input_(number|datetime)\.[a-z0-9_]{1,200}$")
-ON_OFF = re.compile(r"^(switch|light|input_boolean)\.[a-z0-9_]{1,200}$")
-NUMBER_ENTITY = re.compile(r"^number\.[a-z0-9_]{1,200}$")
-SENSOR_ENTITY = re.compile(r"^sensor\.[a-z0-9_]{1,200}$")
-NUMBER_HELPER = re.compile(r"^input_number\.[a-z0-9_]{1,200}$")
+# Every pattern is used with fullmatch: `$` with match also passes a trailing newline, which would make
+# "automation.x\n" a valid automation distinct from "automation.x".
+ZONE_ID = re.compile(r"[a-z0-9_]{1,40}")
+VIRTUAL_ID = re.compile(r"v-[a-z0-9_]{1,40}")
+CONTROLLABLE = re.compile(r"(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}")
+HELPER = re.compile(r"input_(number|datetime)\.[a-z0-9_]{1,200}")
+ON_OFF = re.compile(r"(switch|light|input_boolean)\.[a-z0-9_]{1,200}")
+NUMBER_ENTITY = re.compile(r"number\.[a-z0-9_]{1,200}")
+SENSOR_ENTITY = re.compile(r"sensor\.[a-z0-9_]{1,200}")
+NUMBER_HELPER = re.compile(r"input_number\.[a-z0-9_]{1,200}")
 # Automations a zone links can be switched on and off by the panel's host, and nothing else: Home Assistant keeps
 # running them. A link is only which automation, under what id, in which group.
-AUTOMATION = re.compile(r"^automation\.[a-z0-9_]{1,200}$")
+AUTOMATION = re.compile(r"automation\.[a-z0-9_]{1,200}")
 AUTOMATION_GROUPS = ("alert_day", "alert_night", "alert_device", "failsafe", "control")
-LINK_ID = re.compile(r"^[a-z0-9_-]{1,64}$")
+LINK_ID = re.compile(r"[a-z0-9_-]{1,64}")
 MAX_AUTOMATIONS_PER_ZONE = 200
 # What a setup holds. Room settings are for the whole room rather than one zone: so far only the number helper every
 # alert's repeat rate comes from.
@@ -33,7 +35,7 @@ MAX_AUTOMATIONS_PER_ZONE = 200
 CONFIG_KEYS = frozenset({"zones", "devices", "room", "revision"})
 ROOM_KEYS = frozenset({"alertRepeat"})
 # A sensor is an HA device id, a device entry an id the panel makes; both stay short and safe in an id or a URL.
-ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+ITEM_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # Environment readings, then a soil probe's; which a sensor may use follows its class.
 READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light", "moisture", "ec"})
 SENSOR_CLASSES = ("env", "soil")
@@ -82,7 +84,7 @@ def _helpers_ok(v: Any) -> bool:
     if v is None:
         return True
     if isinstance(v, str):
-        return bool(HELPER.match(v))
+        return bool(HELPER.fullmatch(v))
     return isinstance(v, dict) and all(_helpers_ok(x) for x in v.values())
 
 
@@ -96,7 +98,7 @@ def _flat(v: Any) -> list[str]:
 
 def _on_off_ok(v: Any) -> bool:
     return v is None or (
-        isinstance(v, list) and len(v) <= 20 and all(isinstance(e, str) and ON_OFF.match(e) for e in v)
+        isinstance(v, list) and len(v) <= 20 and all(isinstance(e, str) and ON_OFF.fullmatch(e) for e in v)
     )
 
 
@@ -186,7 +188,7 @@ def _sensor_spot_ok(kind: Any, p: Any, layout: Any) -> bool:
 
 def _check_sensor(zid: str, x: Any) -> None:
     """A mapped sensor names only sensor entities for its readings and a number entity for its offset."""
-    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.match(x["id"]):
+    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.fullmatch(x["id"]):
         _fail(f"{zid} has a sensor with an id this panel can't use")
     sid = x["id"]
     if "kind" in x and x["kind"] not in SENSOR_CLASSES:
@@ -198,11 +200,11 @@ def _check_sensor(zid: str, x: Any) -> None:
     if entities is not None and (
         not isinstance(entities, dict)
         or not set(entities) <= READING_SLOTS
-        or not all(isinstance(e, str) and SENSOR_ENTITY.match(e) for e in entities.values())
+        or not all(isinstance(e, str) and SENSOR_ENTITY.fullmatch(e) for e in entities.values())
     ):
         _fail(f"{sid} reads from something that isn't a sensor entity")
     leaf = x.get("leafEntity")
-    if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.match(leaf)):
+    if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.fullmatch(leaf)):
         _fail(f"{sid} has a leaf temperature offset that isn't a number entity")
     kept = x.get("leaf")
     if kept is not None and not (_is_num(kept) and LEAF_RANGE[0] <= kept <= LEAF_RANGE[1]):
@@ -229,9 +231,9 @@ def _check_automations(zid: str, links: Any, elsewhere: set[str]) -> None:
         if not isinstance(a, dict) or set(a) != {"id", "entity", "group"}:
             _fail(f"{zid} links an automation with something other than an id, an entity and a group")
         aid, entity = a["id"], a["entity"]
-        if not isinstance(aid, str) or not LINK_ID.match(aid) or aid in ids:
+        if not isinstance(aid, str) or not LINK_ID.fullmatch(aid) or aid in ids:
             _fail(f"{zid} has automation links without unique ids")
-        if not isinstance(entity, str) or not AUTOMATION.match(entity) or entity in entities:
+        if not isinstance(entity, str) or not AUTOMATION.fullmatch(entity) or entity in entities:
             _fail(f"{zid} links something that isn't an automation, or one twice")
         if a["group"] not in AUTOMATION_GROUPS:
             _fail(f"{zid} puts an automation in a group this panel doesn't know")
@@ -247,7 +249,7 @@ def _check_room(room: Any) -> None:
     if not isinstance(room, dict) or not set(room) <= ROOM_KEYS:
         _fail("Room settings hold only the alert repeat rate")
     repeat = room.get("alertRepeat")
-    if "alertRepeat" in room and not (isinstance(repeat, str) and NUMBER_HELPER.match(repeat)):
+    if "alertRepeat" in room and not (isinstance(repeat, str) and NUMBER_HELPER.fullmatch(repeat)):
         _fail("The alert repeat rate links to something that isn't a number helper")
 
 
@@ -267,7 +269,7 @@ def validate_config(c: Any) -> None:
     if not all(isinstance(z, dict) for z in zones) or not all(isinstance(d, dict) for d in devices):
         _fail("Config isn't zones and devices")
     ids = [z.get("id") for z in zones]
-    if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.match(i) for i in ids):
+    if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.fullmatch(i) for i in ids):
         _fail("Zone ids must be unique slugs")
     by_id = {z["id"]: z for z in zones}
     linked: set[str] = set()
@@ -325,7 +327,7 @@ def validate_config(c: Any) -> None:
         ):
             _fail(f"{zid} opens its History on a graph or range this panel doesn't have")
         basis = z.get("leafBasis")
-        if basis is not None and not (isinstance(basis, str) and ITEM_ID.match(basis)):
+        if basis is not None and not (isinstance(basis, str) and ITEM_ID.fullmatch(basis)):
             _fail(f"{zid} draws its VPD chart at an offset this panel doesn't know")
         layout = z.get("layout")
         if layout is not None:
@@ -349,7 +351,7 @@ def validate_config(c: Any) -> None:
                 if (
                     not shape
                     or not isinstance(vid, str)
-                    or not VIRTUAL_ID.match(vid)
+                    or not VIRTUAL_ID.fullmatch(vid)
                     or vid in seen
                     or not isinstance(name, str)
                     or not name.strip()
@@ -365,7 +367,7 @@ def validate_config(c: Any) -> None:
 
     for d in devices:
         did, dz = d.get("id"), d.get("zones")
-        if not isinstance(did, str) or not ITEM_ID.match(did):
+        if not isinstance(did, str) or not ITEM_ID.fullmatch(did):
             _fail("A device has an id this panel can't use")
         name = d.get("name")
         if name is not None and (not isinstance(name, str) or len(name) > MAX_NAME):
@@ -373,7 +375,7 @@ def validate_config(c: Any) -> None:
         if not isinstance(dz, list) or any(zid not in by_id for zid in dz):
             _fail(f"{did} is in a zone that doesn't exist")
         entity = d.get("entity")
-        if entity is not None and not (isinstance(entity, str) and CONTROLLABLE.match(entity)):
+        if entity is not None and not (isinstance(entity, str) and CONTROLLABLE.fullmatch(entity)):
             _fail(f"{did} has an entity this panel can't control")
         # A mode the device has that Home Assistant doesn't list. Only its name: the panel reaches it by moving the
         # device's own target humidity, which it may already set.
