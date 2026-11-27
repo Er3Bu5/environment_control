@@ -25,6 +25,7 @@ import {
   MAX_ZONE_NAME,
   type RawConfig,
   SETUP_STEPS,
+  type ShareAsk,
   STEP_TEXT,
   STEP_TITLE,
   type SetupStep,
@@ -39,6 +40,7 @@ import {
   confirmLink,
   setDetails,
   setHistory,
+  shareAsk,
   stepsLeft,
   unknownLinks,
   zoneNameIssue,
@@ -64,6 +66,7 @@ import {
   controlCandidates,
   controlTarget,
   countedSensors,
+  deviceElsewhere,
   mapChanges,
   mapIssues,
   nameIt,
@@ -71,6 +74,7 @@ import {
   removeVirtual,
   seedSlots,
   sensorCandidates,
+  sensorElsewhere,
   sensorTarget,
   shownName,
   swapControl,
@@ -254,6 +258,8 @@ interface Guard {
   confirm?: string;
   keep: string;
   go: string;
+  /* Going on loses nothing, so its button is the usual one and not the red one. */
+  safe?: boolean;
   action: () => void;
 }
 interface Review {
@@ -275,8 +281,15 @@ interface TargetsView {
   zoneId: string;
 }
 
+interface ActivityView {
+  kind: "activity";
+  zoneId: string;
+}
+
 /* The page menu's own id among the menus. A zone's id is letters, digits and underscores, so it can't be one. */
 const NAV = "-nav";
+/* The zone page's own menu, for the same reason. */
+const MORE = "-more";
 
 /* Steps this release can open. The others say when they arrive rather than offering a button that does nothing. */
 const BUILT: ReadonlySet<SetupStep> = new Set(["details", "devices", "layout", "place", "calibrate", "targets"]);
@@ -394,7 +407,7 @@ export class EcApp extends LitElement {
   private mapFromGuide = false;
   private mapToPlace: { back: { screen: Screen; zoneId: string | null }; fromGuide: boolean; draft: LayoutDraft } | null = null;
   declare private guide: string | null;
-  declare private modal: Guard | Review | TargetsView | null;
+  declare private modal: Guard | Review | TargetsView | ActivityView | null;
   declare private menu: string | null;
   declare private toastText: string;
   declare private confirmText: string;
@@ -560,6 +573,17 @@ export class EcApp extends LitElement {
     const search = this.typing && el instanceof HTMLInputElement && el.dataset.pick !== undefined;
     this.classList.toggle("revealing", box || search);
     if (box) setTimeout(() => this.reveal(el as HTMLInputElement), 300);
+    /* A box typed in inside a dialog keeps the whole dialog above the keyboard, so its buttons stay in reach. It stays
+       there until the dialog closes: moving back as the box loses focus would move the button being tapped from under
+       the finger. */
+    if (this.typing && el instanceof Element && el.closest(".dialog")) {
+      this.classList.add("dlgkeys");
+      this.style.setProperty("--keys-at", `${this.keysAt()}px`);
+      setTimeout(() => {
+        this.style.setProperty("--keys-at", `${this.keysAt()}px`);
+        if (this.shadowRoot?.activeElement === el) (el.closest(".field") ?? el).scrollIntoView({ block: "nearest" });
+      }, 300);
+    }
     /* A helper search box goes to the top instead, so its matches have room below it, above the keyboard. */
     if (search)
       setTimeout(() => {
@@ -583,13 +607,16 @@ export class EcApp extends LitElement {
 
   /* When the app resizes the window for the keyboard, that edge is measured. When it lays the keyboard over the page
      nothing can be measured, so the keyboard's largest usual share of the screen is assumed. */
-  private reveal(input: HTMLInputElement): void {
-    if (this.shadowRoot?.activeElement !== input) return;
+  private keysAt(): number {
     const vv = window.visualViewport, h = vv ? Math.min(vv.height, window.innerHeight) : window.innerHeight;
     if (window.innerWidth !== this.fullView.w || h > this.fullView.h) this.fullView = { w: window.innerWidth, h };
-    const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect();
     const assumed = window.innerHeight * (window.innerHeight > window.innerWidth ? 0.5 : 0.38);
-    const edge = h < this.fullView.h * 0.8 ? h : assumed;
+    return h < this.fullView.h * 0.8 ? h : assumed;
+  }
+
+  private reveal(input: HTMLInputElement): void {
+    if (this.shadowRoot?.activeElement !== input) return;
+    const row = (input.closest(".vrow, .lfield, .field") ?? input).getBoundingClientRect(), edge = this.keysAt();
     window.scrollBy(0, row.top - Math.max(8, edge - row.height - 8));
   }
 
@@ -686,6 +713,7 @@ export class EcApp extends LitElement {
       } else if (!this.modal && before && this.modalOpener instanceof HTMLElement && this.modalOpener.isConnected) {
         this.modalOpener.focus({ preventScroll: true });
       }
+      if (!this.modal) this.classList.remove("dlgkeys");
     }
   }
 
@@ -937,22 +965,37 @@ export class EcApp extends LitElement {
   }
 
   private toggleSensor(s: SensorCandidate): void {
-    this.setMap((m) => {
-      if (s.id in m.sensors) {
-        delete m.sensors[s.id];
-        delete m.cls[s.id];
-      } else {
-        m.cls[s.id] = s.detected;
-        m.sensors[s.id] = seedSlots(s);
-      }
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (s.id in m.sensors)
+      return this.setMap((d) => {
+        delete d.sensors[s.id];
+        delete d.cls[s.id];
+      });
+    const add = () =>
+      this.setMap((d) => {
+        if (s.id in d.sensors) return;
+        d.cls[s.id] = s.detected;
+        d.sensors[s.id] = seedSlots(s);
+      });
+    const others = sensorElsewhere(this.config, z.id, s.id);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    else add();
   }
 
   private toggleControl(c: ControlCandidate): void {
-    this.setMap((m) => {
-      if (c.entity in m.controls) delete m.controls[c.entity];
-      else m.controls[c.entity] = c.detected;
-    });
+    const m = this.mapw, z = m && this.zoneById(m.zoneId);
+    if (!m || !z) return;
+    if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
+    const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
+    const others = deviceElsewhere(this.config, z.id, c.entity);
+    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    else add();
+  }
+
+  /* Only ticks it in the draft: the review, and the host's own question about anything newly controllable, still follow. */
+  private askShare(ask: ShareAsk, add: () => void): void {
+    this.modal = { kind: "guard", ...ask, safe: true, action: add };
   }
 
   private async jumpTo(issue: Issue): Promise<void> {
@@ -2454,7 +2497,7 @@ export class EcApp extends LitElement {
           ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
           <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
         </div>
-        <button class="btn" @click=${() => this.viewTargets(z.id)}>View targets</button>
+        ${this.zoneMore(z)}
       </div>
       ${left.length
         ? html`<button class="notice fix" @click=${() => this.openGuide(z.id)}>
@@ -2464,8 +2507,24 @@ export class EcApp extends LitElement {
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
       ${this.historyCard(z)}
-      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>
-      <p class="small muted">Activity arrives in a release that follows.</p>`;
+      <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>`;
+  }
+
+  /* What's looked up now and then about a zone, behind one button so the heading stays a heading. */
+  private zoneMore(z: Zone) {
+    const open = this.menu === MORE;
+    /* Focus moves to the button first, so a dialog opened from the menu hands it back there and not to a hidden item. */
+    const item = (label: string, act: () => void) =>
+      html`<button role="menuitem" @click=${() => { this.menu = null; (this.shadowRoot?.querySelector(`[data-zmenu="${MORE}"]`) as HTMLElement | null)?.focus(); act(); }}>${label}</button>`;
+    return html`<div class="zmenu">
+      <button class="btn burger" data-zmenu=${MORE} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${MORE}" aria-label="More" @click=${() => this.toggleMenu(MORE)}>
+        ${icon("dots")}
+      </button>
+      <div class="menu" id="zmenu-${MORE}" role="menu" ?hidden=${!open}>
+        ${item("View targets", () => this.viewTargets(z.id))}
+        ${item("View activity", () => (this.modal = { kind: "activity", zoneId: z.id }))}
+      </div>
+    </div>`;
   }
 
   private entityRow(e: CatalogEntity) {
@@ -3920,8 +3979,8 @@ export class EcApp extends LitElement {
       </section>`;
   }
 
-  /* A dialog's buttons ride in the same bar at the foot of the window as a page's, so leaving and going on are always
-     found in one place. The bar stays inside the dialog, which is what keeps it usable while the page behind is inert. */
+  /* A dialog's buttons are its own foot, leaving first and going on second. The bar at the foot of the window is for
+     pages, where many edits are made before going on. */
   private modalView() {
     const m = this.modal;
     if (!m) return nothing;
@@ -3930,13 +3989,13 @@ export class EcApp extends LitElement {
       return html`<div class="modal">
         <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
           <h2 id="dlg-title" tabindex="-1">${m.title}</h2>
-          <p class="muted" id="dlg-text">${m.text}</p>
-          ${m.rows?.length
-            ? html`<div class="review-scroll">
-                <div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
-                ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}
-              </div>`
-            : nothing}
+          <div class="review-scroll">
+            <p class="muted" id="dlg-text">${m.text}</p>
+            ${m.rows?.length
+              ? html`<div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
+                  ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}`
+              : nothing}
+          </div>
           ${m.confirm
             ? html`<label class="field" for="dlg-confirm"
                 >Type ${m.confirm} to confirm<input
@@ -3950,9 +4009,9 @@ export class EcApp extends LitElement {
                   @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.guardGo()}
               /></label>`
             : nothing}
-          <div class="draftbar wizbar dlgbar" data-bare>
-            <button class="draft-discard" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="draft-review danger" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
+            <button class="btn ${m.safe ? "primary" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
           </div>
         </div>
       </div>`;
@@ -3966,9 +4025,22 @@ export class EcApp extends LitElement {
           <div class="review-scroll">
             ${this.judged(z) ? this.targetsTable(z) : html`<p class="small muted">${z.name}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}
           </div>
-          <div class="draftbar wizbar dlgbar" data-bare>
-            <button class="draft-discard" @click=${() => this.closeModal()}>Close</button>
-            <button class="draft-review" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>Close</button>
+            <button class="btn primary" @click=${() => { this.closeModal(); this.openSchedule(z.id); }}>Set targets</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (m.kind === "activity") {
+      const z = this.zoneById(m.zoneId);
+      if (!z) return nothing;
+      return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && this.closeModal()}>
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+          <h2 id="dlg-title" tabindex="-1">Activity: ${z.name}</h2>
+          <p class="muted" id="dlg-text">Activity arrives in a release that follows.</p>
+          <div class="dlgfoot">
+            <button class="btn" @click=${() => this.closeModal()}>Close</button>
           </div>
         </div>
       </div>`;
@@ -3992,9 +4064,9 @@ export class EcApp extends LitElement {
               </div>`
             : nothing}
         </div>
-        <div class="draftbar wizbar dlgbar" data-bare>
-          <button class="draft-discard" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
-          <button class="draft-review" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
+        <div class="dlgfoot">
+          <button class="btn" ?disabled=${m.busy} @click=${() => this.closeModal()}>Back to editing</button>
+          <button class="btn primary" ?disabled=${m.busy} @click=${this.applyReview}>${m.busy ? (m.busyText ?? "Saving...") : `Apply ${plural(n, "change")}`}</button>
         </div>
       </div>
     </div>`;

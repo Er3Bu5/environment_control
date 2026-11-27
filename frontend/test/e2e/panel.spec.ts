@@ -22,6 +22,12 @@ async function goTo(frame: Frame, name: string): Promise<void> {
   await openNav(frame);
   await tab(frame, name).click();
 }
+/* A zone's targets and activity are in the menu at the right of its heading. */
+const moreButton = (frame: Frame) => app(frame).locator(".pagehead").getByRole("button", { name: "More", exact: true });
+async function zoneMenu(frame: Frame, item: string): Promise<void> {
+  await moreButton(frame).click();
+  await app(frame).getByRole("menuitem", { name: item, exact: true }).click();
+}
 const leaveAsks = (page: Page) =>
   page.evaluate(() => {
     const e = new Event("beforeunload", { cancelable: true });
@@ -65,6 +71,25 @@ async function hostDialogText(page: Page): Promise<string> {
   walk(root as N, false);
   await cdp.detach();
   return out.join(" ");
+}
+/* A dialog's buttons, leaving first and going on second, sit in a row at the foot of the dialog's own box, at its right,
+   and in the window. */
+async function dialogFoot(box: Locator, names: (string | RegExp)[]): Promise<void> {
+  const foot = box.locator(".dlgfoot"), buttons = foot.getByRole("button");
+  await expect(buttons).toHaveText(names);
+  const d = (await box.boundingBox())!, f = (await foot.boundingBox())!;
+  for (const b of await buttons.all()) {
+    const r = (await b.boundingBox())!;
+    expect(r.x).toBeGreaterThanOrEqual(d.x);
+    expect(r.x + r.width).toBeLessThanOrEqual(d.x + d.width);
+    expect(r.y).toBeGreaterThanOrEqual(d.y);
+    expect(r.y + r.height).toBeLessThanOrEqual(d.y + d.height);
+    await expect(b).toBeInViewport({ ratio: 1 });
+  }
+  /* At the dialog's bottom edge, inside its padding, and right-aligned. */
+  expect(d.y + d.height - (f.y + f.height)).toBeLessThanOrEqual(24);
+  const last = (await buttons.last().boundingBox())!;
+  expect(d.x + d.width - (last.x + last.width)).toBeLessThanOrEqual(24);
 }
 /* A graph's chips and a range's, in the box that holds both: whether they share a line, and whether the line between
    them is drawn, and drawn in the gap between them. The line is clipped to the box, so one outside it isn't seen. */
@@ -222,8 +247,8 @@ test.describe("talking to HA", () => {
     const head = app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true });
     const [h, w] = [await head.boundingBox(), await app(frame).locator(".wrap").boundingBox()];
     expect(Math.abs(h!.x + h!.width / 2 - (w!.x + w!.width / 2))).toBeLessThan(2);
-    /* The menu button at the left edge and View targets at the right, both level with the foot of the heading block. */
-    const [m, t, block] = [await button.boundingBox(), await app(frame).getByRole("button", { name: "View targets" }).boundingBox(), await app(frame).locator(".pagehead").boundingBox()];
+    /* The menu button at the left edge and the zone's own menu at the right, both level with the foot of the heading block. */
+    const [m, t, block] = [await button.boundingBox(), await moreButton(frame).boundingBox(), await app(frame).locator(".pagehead").boundingBox()];
     const foot = (b: { y: number; height: number }) => b.y + b.height;
     expect(Math.abs(foot(m!) - foot(block!))).toBeLessThan(2);
     expect(Math.abs(foot(t!) - foot(block!))).toBeLessThan(2);
@@ -237,6 +262,70 @@ test.describe("talking to HA", () => {
     expect(controls!.y).toBeGreaterThan(place!.y + place!.height);
     /* A dehumidifier's modes sit under its name, so on a wide page its row is no taller than its dial. */
     if (w!.width > 900) expect((await card("Controls").locator(".dev", { hasText: "Auxiliary dehumidifier" }).boundingBox())!.height).toBeLessThan(175);
+  });
+
+  test("a zone's targets and activity are in a menu at the right of its heading, in place of a View targets button", async ({ page }) => {
+    await page.goto(PAGE);
+    if (page.viewportSize()!.width < 600) await page.setViewportSize({ width: 390, height: 844 });
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    const more = moreButton(frame), items = app(frame).locator(".pagehead").getByRole("menuitem");
+    await expect(app(frame).getByRole("button", { name: "View targets" })).toHaveCount(0);
+    await expect(more).toHaveAttribute("aria-haspopup", "menu");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(items).toHaveCount(0);
+    /* Activity was a line at the foot of the page; it's in its own dialog now. */
+    expect(await frameText(frame)).not.toContain("Activity arrives in a release that follows.");
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    await expect(items).toHaveText(["View targets", "View activity"]);
+    await expect(items.first()).toBeFocused();
+    /* It opens on the screen, a phone's included. */
+    const view = page.viewportSize()!, box = (await app(frame).locator(".pagehead .menu").boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(view.width);
+    expect(box.y + box.height).toBeLessThanOrEqual(view.height);
+
+    await app(frame).getByRole("menuitem", { name: "View targets", exact: true }).click();
+    await expect(app(frame).getByRole("dialog").getByRole("heading", { name: "Targets: Garden" })).toBeVisible();
+    await app(frame).getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await expect(app(frame).getByRole("dialog")).toHaveCount(0);
+    await expect(more).toBeFocused();
+
+    await zoneMenu(frame, "View activity");
+    const dialog = app(frame).getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Activity: Garden", exact: true })).toBeVisible();
+    await expect(dialog).toContainText("Activity arrives in a release that follows.");
+    await expect(dialog.locator(".dlgfoot").getByRole("button")).toHaveText(["Close"]);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(more).toBeFocused();
+    /* A tap outside the dialog closes it too. */
+    await zoneMenu(frame, "View activity");
+    await app(frame).locator(".modal").click({ position: { x: 4, y: 4 } });
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test("the zone page's menu closes on Escape, on a tap elsewhere and on the back gesture", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    const more = moreButton(frame), items = app(frame).locator(".pagehead").getByRole("menuitem");
+    await more.click();
+    await expect(items).toHaveCount(2);
+    await page.keyboard.press("Escape");
+    await expect(items).toHaveCount(0);
+    await expect(more).toBeFocused();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click();
+    const view = page.viewportSize()!;
+    await page.mouse.click(20, view.height - 20);
+    await expect(items).toHaveCount(0);
+    await more.click();
+    await expect(items).toHaveCount(2);
+    await page.evaluate(() => history.back());
+    await expect(items).toHaveCount(0);
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
   });
 
   test("the back gesture goes back a step inside the panel, and leaves it only from where it started", async ({ page }) => {
@@ -788,7 +877,7 @@ test.describe("targets, day and night", () => {
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24.5", "25", "27", "29"]);
     /* A limit that doesn't exist reads as a dash, never as a gap. */
     await expect(dayRow(frame, "Light")).toHaveText([/^Light/, "2,500", "-", "-", "-", "-"]);
@@ -800,7 +889,7 @@ test.describe("targets, day and night", () => {
     await goTo(frame, "Garden");
     /* The limits are a tap away in a dialog, not a card on the page. */
     await expect(app(frame).locator(".tbl-wrap")).toHaveCount(0);
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await expect(dialog(frame).getByRole("heading", { name: "Targets: Garden" })).toBeVisible();
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "25", "27", "28"]);
     await page.evaluate(`fakeHA.setState("input_number.garden_day_temperature_min_threshold", "22.5")`);
@@ -809,7 +898,7 @@ test.describe("targets, day and night", () => {
     await expect(dialog(frame)).toHaveCount(0);
     /* History leads the page, then the zone's map, then Controls. */
     expect(await app(frame).locator("main h2").allTextContents()).toEqual(["History", "Zone map", "Controls"]);
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
   });
@@ -881,7 +970,7 @@ test.describe("targets, day and night", () => {
     expect(await serviceCalls(page)).toBe(0);
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "23", "24", "-", "27", "28"]);
   });
 
@@ -1067,7 +1156,7 @@ test.describe("targets, day and night", () => {
     expect([z.dayAt, z.nightAt, z.setup.targets, z.bands.night.vpd]).toEqual([360, 1080, "done", [0.65, 0.8, 0.9, 1, 1.15]]);
     await goTo(frame, "Flower tent");
     await expect(app(frame).locator(".tile", { has: frame.locator(".name", { hasText: /^Temperature$/ }) })).not.toContainText("Targets not set up yet");
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await expect(dayRow(frame, "Temperature")).toHaveText([/^Temperature/, "20.2", "22.2", "24.95", "27.7", "29.7"]);
   });
 });
@@ -1126,46 +1215,91 @@ test.describe("zones", () => {
     expect((await stored(page)).zones.map((z) => z.id)).not.toContain("seedlings");
   });
 
-  test("a dialog's buttons ride in the bar at the foot of the window, in place of the page's own", async ({ page }) => {
+  test("a dialog's buttons are its own foot, leaving first, and the page's bar stays pinned to the window", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    /* Leaving on the left and going on on the right, at the foot, clear of the dialog, and the only bar showing. */
-    const atFoot = async (box: Locator, names: string[]) => {
-      const bar = box.locator(".draftbar");
-      await expect(bar.getByRole("button")).toHaveText(names);
-      const gap = await bar.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
-      expect(gap).toBeGreaterThanOrEqual(8);
-      expect(gap).toBeLessThanOrEqual(40);
-      expect(await box.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(await bar.evaluate((el) => el.getBoundingClientRect().top));
-      await expect(app(frame).locator(".draftbar:visible")).toHaveCount(1);
-    };
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
     await app(frame).getByRole("menuitem", { name: "Zone details" }).click();
     await app(frame).getByLabel("Zone name").fill("Veg tent");
     await app(frame).getByLabel("Zone name").press("Enter");
+    /* A page with a draft keeps its bar at the foot of the window. */
+    const unsaved = app(frame).getByRole("region", { name: "Page buttons", exact: true });
+    const pinned = async () => {
+      const gap = await unsaved.evaluate((el) => innerHeight - el.getBoundingClientRect().bottom);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(40);
+    };
+    await pinned();
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
-    await atFoot(dialog(frame), ["Back to editing", "Apply 1 change"]);
+    await dialogFoot(dialog(frame), ["Back to editing", "Apply 1 change"]);
     await dialog(frame).getByRole("button", { name: "Back to editing" }).click();
-    /* With the dialog gone the page's own bar is back. */
-    await expect(app(frame).getByRole("button", { name: "Review and apply" })).toBeVisible();
+    await pinned();
     await goTo(frame, "Overview");
-    await atFoot(alert(frame), ["Keep editing", "Discard and continue"]);
+    await dialogFoot(alert(frame), ["Keep editing", "Discard and continue"]);
     await alert(frame).getByRole("button", { name: "Discard and continue" }).click();
     await goTo(frame, "Garden");
-    await app(frame).getByRole("button", { name: "View targets" }).click();
-    await atFoot(dialog(frame), ["Close", "Set targets"]);
+    await zoneMenu(frame, "View targets");
+    await dialogFoot(dialog(frame), ["Close", "Set targets"]);
     await dialog(frame).getByRole("button", { name: "Close" }).click();
     await expect(dialog(frame)).toHaveCount(0);
-    /* A box being typed in inside a dialog doesn't take its buttons away: the dialog stops short of the bar. */
+    await zoneMenu(frame, "View activity");
+    await dialogFoot(dialog(frame), ["Close"]);
+    await dialog(frame).getByRole("button", { name: "Close" }).click();
+    await expect(dialog(frame)).toHaveCount(0);
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
     await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
     await alert(frame).getByLabel("Type Nursery to confirm").fill("Nursery");
     await expect(alert(frame).getByLabel("Type Nursery to confirm")).toBeFocused();
-    await atFoot(alert(frame), ["Keep zone", "Remove zone"]);
+    await dialogFoot(alert(frame), ["Keep zone", "Remove zone"]);
     await alert(frame).getByRole("button", { name: "Keep zone" }).click();
     expect((await stored(page)).zones.map((z) => z.id)).toEqual(["garden", "veg", "nursery"]);
+  });
+
+  test("a dialog taller than the window scrolls its middle, and its title and buttons stay in view", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    for (const size of [{ width: 360, height: 480 }, { width: 740, height: 360 }]) {
+      await page.setViewportSize(size);
+      await zoneMenu(frame, "View targets");
+      const box = dialog(frame);
+      expect(await box.locator(".review-scroll").evaluate((el) => el.scrollHeight > el.clientHeight + 20)).toBe(true);
+      await expect(box.getByRole("heading", { name: "Targets: Garden" })).toBeInViewport({ ratio: 1 });
+      await dialogFoot(box, ["Close", "Set targets"]);
+      await box.getByRole("button", { name: "Close" }).click();
+    }
+  });
+
+  test("on a phone with the keyboard up, the box in Remove zone and the dialog's buttons are both above it", async ({ page }, info) => {
+    test.skip(info.project.name !== "phone", "Touch screens only: a mouse has no on-screen keyboard.");
+    for (const size of [null, { width: 839, height: 412 }]) {
+      if (size) await page.setViewportSize(size);
+      await page.goto(PAGE);
+      const frame = await panelFrame(page);
+      await goTo(frame, "Setup");
+      await app(frame).getByRole("button", { name: "Set up Nursery" }).click();
+      await app(frame).getByRole("menuitem", { name: "Remove zone" }).click();
+      const field = alert(frame).getByLabel("Type Nursery to confirm");
+      await field.fill("Nursery");
+      await expect(field).toBeFocused();
+      /* With nothing to measure, the keyboard is taken to cover the lower half of the screen, more of it lying down. */
+      const keysAt = await frame.evaluate(() => innerHeight * (innerHeight > innerWidth ? 0.5 : 0.38));
+      const at = () =>
+        frame.evaluate(() => {
+          const root = document.querySelector("ec-app")!.shadowRoot!, r = (sel: string) => root.querySelector(sel)!.getBoundingClientRect().toJSON() as DOMRect;
+          return { dialog: r(".dialog"), field: r("#dlg-confirm"), foot: r(".dlgfoot") };
+        });
+      await expect.poll(async () => (await at()).dialog.bottom).toBeLessThanOrEqual(keysAt);
+      /* The dialog scrolls the box clear of its buttons, where it can't show everything at once. */
+      await expect.poll(async () => { const x = await at(); return x.foot.top - x.field.bottom; }).toBeGreaterThanOrEqual(0);
+      const { field: f, foot: b } = await at();
+      expect(f.top).toBeGreaterThanOrEqual(0);
+      expect(f.bottom).toBeLessThanOrEqual(b.top);
+      expect(b.bottom).toBeLessThanOrEqual(keysAt);
+      await alert(frame).getByRole("button", { name: "Keep zone" }).click();
+    }
   });
 
   test("the setup guide's bar goes on to the next step still to do", async ({ page }) => {
@@ -1299,6 +1433,8 @@ test.describe("map devices", () => {
     await row(frame, "Spare Plug").getByRole("button").first().click();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    /* It's Garden's too, so it asks first. */
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
     await next(frame).click();
   }
 
@@ -1325,9 +1461,104 @@ test.describe("map devices", () => {
     await expect(next(frame)).toBeDisabled();
     await row(frame, "Spare Plug").getByLabel("Heater").check();
     await row(frame, "Garden Dehumidifier").getByRole("button").first().click();
+    await app(frame).getByRole("alertdialog").getByRole("button", { name: "Add to Flower tent" }).click();
     await expect(row(frame, "Garden Dehumidifier").getByLabel("Dehumidifier")).toBeChecked();
     await next(frame).click();
     await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+  });
+
+  test("a long review keeps its title and buttons in the window, and its list scrolls between them", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await pickAll(frame);
+    await page.setViewportSize({ width: 740, height: 360 });
+    await next(frame).click();
+    const box = dialog(frame);
+    expect(await box.locator(".review-scroll").evaluate((el) => el.scrollHeight > el.clientHeight + 40)).toBe(true);
+    await expect(box.getByRole("heading", { name: "Review changes" })).toBeInViewport({ ratio: 1 });
+    await dialogFoot(box, ["Back to editing", /^Apply \d+ changes$/]);
+  });
+
+  test("ticking a device another zone has asks first, and only Add ticks it; the review and Home Assistant's question follow as before", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    await next(frame).click();
+    const dehu = row(frame, "Garden Dehumidifier").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
+    await dehu.click();
+    await expect(ask.getByRole("heading", { name: "Add Garden Dehumidifier to Flower tent as well?", exact: true })).toBeFocused();
+    await expect(ask).toContainText("It's already in Garden. It's one device, so switching it here switches it there too.");
+    await dialogFoot(ask, ["Leave it out", "Add to Flower tent"]);
+    /* Adding loses nothing, so it's the usual button, not the red one. */
+    await expect(ask.getByRole("button", { name: "Add to Flower tent" })).not.toHaveClass(/danger/);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    /* Leave it out, Escape and the back gesture all leave it out. */
+    await ask.getByRole("button", { name: "Leave it out" }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await page.keyboard.press("Escape");
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await expect(ask).toHaveCount(1);
+    await page.evaluate(() => history.back());
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
+    await dehu.click();
+    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await expect(row(frame, "Garden Dehumidifier")).toContainText("Shared. Also in Garden.");
+    /* Unticking never asks, and neither does a device no other zone has. */
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await row(frame, "Spare Plug").locator(".pickrow").click();
+    await expect(ask).toHaveCount(0);
+    await expect(row(frame, "Spare Plug").locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
+    await row(frame, "Spare Plug").getByLabel("Heater").check();
+    await dehu.click();
+    await ask.getByRole("button", { name: "Add to Flower tent" }).click();
+    expect(await serviceCalls(page)).toBe(0);
+    await next(frame).click();
+    await expect(app(frame).locator(".review")).toContainText("Spare Plug (Heater), Garden Dehumidifier (Dehumidifier)");
+    await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* Home Assistant still asks before the newly switchable plug is saved. */
+    await expect.poll(() => hostDialogOpen(page)).toBe(true);
+    await page.waitForTimeout(1100);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    const saved = await stored(page);
+    expect(saved.devices.find((d) => d.entity === "humidifier.garden_dehumidifier")?.zones).toEqual(["garden", "flower_tent"]);
+    /* Now Flower tent has it saved, that sharing was agreed to: unticked and ticked again, it doesn't ask. */
+    await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
+    await app(frame).locator(".steps").getByRole("button", { name: "2. Devices", exact: true }).click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "false");
+    await dehu.click();
+    await expect(dehu).toHaveAttribute("aria-pressed", "true");
+    await expect(ask).toHaveCount(0);
+  });
+
+  test("a sensor another zone has asks first too, as a sensor", async ({ page }) => {
+    const frame = await newZoneMap(page);
+    await row(frame, "Environment board").getByRole("button").first().click();
+    for (let i = 0; i < 3; i++) await next(frame).click();
+    await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
+    await goTo(frame, "Setup");
+    await app(frame).getByRole("button", { name: "Set up Veg" }).click();
+    await app(frame).getByRole("menuitem", { name: "Device identification", exact: true }).click();
+    const board = row(frame, "Environment board").locator(".pickrow"), ask = app(frame).getByRole("alertdialog");
+    await board.click();
+    await expect(ask.getByRole("heading", { name: "Add Environment board to Veg as well?", exact: true })).toBeVisible();
+    await expect(ask).toContainText("It's already in Flower tent. It's one sensor, so its readings count there and here.");
+    await expect(board).toHaveAttribute("aria-pressed", "false");
+    await ask.getByRole("button", { name: "Add to Veg" }).click();
+    await expect(board).toHaveAttribute("aria-pressed", "true");
   });
 
   test("a soil probe is detected as Soil and asked for moisture, EC and temperature, not humidity, VPD or light", async ({ page }) => {
@@ -1708,7 +1939,7 @@ test.describe("zone layout and placement", () => {
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
-    await app(frame).getByRole("button", { name: "View targets" }).click();
+    await zoneMenu(frame, "View targets");
     await dialog(frame).getByRole("button", { name: "Set targets" }).click();
     await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Garden", exact: true })).toBeVisible();
