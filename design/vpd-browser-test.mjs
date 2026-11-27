@@ -674,7 +674,7 @@ check("Automations: the zone page has no Automations card, only the menu's way t
 check("Automations: with every failsafe on, the zone page has no failsafe warning", (await ev(`[...document.querySelectorAll("#main .notice.fix")].some(n=>n.dataset.autos)`)) === false);
 await tap(MORE); await tap('#zmenu--more [data-autos="alert"]');
 const autoChipsNow = () => ev(`(()=>{const g=document.querySelector('#main .seg[aria-label="Automations"]');return g && {role:g.getAttribute("role"),chips:[...g.querySelectorAll("button")].map(b=>[b.firstChild.textContent,b.querySelector(".segn").textContent,b.getAttribute("aria-label"),b.getAttribute("aria-pressed")])}})()`);
-const autoPage = () => ev(`({h1:document.querySelector("#main h1").textContent,sub:document.querySelector("#main h1").nextElementSibling.textContent,about:document.querySelector("#autos-about").textContent,repeat:!!document.querySelector("#alert-repeat"),groups:[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent),rows:document.querySelectorAll("[data-autorow]").length,link:!!document.querySelector('#main .row [data-linkautos]'),focus:document.activeElement.dataset.autopage||""})`);
+const autoPage = () => ev(`({h1:document.querySelector("#main h1").textContent,sub:document.querySelector("#main h1").nextElementSibling.textContent,about:document.querySelector("#autos-about").textContent,repeat:!!document.querySelector("#alert-repeat"),groups:[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent),rows:document.querySelectorAll("[data-autorow]").length,link:!!document.querySelector('#main .pagehead > .pageact[data-linkautos]')&&[...document.querySelectorAll('#main [data-linkautos]')].filter(b=>!b.closest(".notice")).length===1,focus:document.activeElement.dataset.autopage||""})`);
 let ap = await autoPage();
 check("Automations: one page, headed Automations: Garden, saying what it's for", ap.h1 === "Automations: Garden" && ap.sub === "Home Assistant runs these. Here you switch them on and off.", ap);
 check("Automations: chips for Alerts, Failsafes and Control, each counting what's on, in words to a screen reader, with Alerts picked", same(await autoChipsNow(), { role: "group", chips: [["Alerts", "15/16", "Alerts, 15 of 16 on", "true"], ["Failsafes", "3/3", "Failsafes, 3 of 3 on", "false"], ["Control", "4/4", "Control, 4 of 4 on", "false"]] }), await autoChipsNow());
@@ -737,8 +737,8 @@ await ev(`ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render()`); awa
 await tap('[data-autopage="control"]'); ap = await autoPage();
 check("Automations: Control holds its about sentence, its group and Link automations", ap.about === (await ev(`AUTO_PAGES.control.about`)) && !ap.repeat && same(ap.groups, ["Control"]) && ap.rows === 4 && ap.link, ap);
 await ev(`window.keptAutos=zoneById("nursery").automations;zoneById("nursery").automations=keptAutos.filter(a=>a.group!=="control");ui.zone="nursery";ui.autos={zone:"nursery",page:"control"};render()`); await sleep(30);
-const emptyChip = await ev(`(()=>{const n=document.querySelector("#main .notice.calm");return {chip:[...document.querySelectorAll("[data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.querySelector("strong").textContent,link:!!(n&&n.querySelector('[data-linkautos="nursery"]')),rows:document.querySelectorAll("[data-autorow]").length,linkRow:!!document.querySelector('#main .row [data-linkautos]')}})()`);
-check("Automations: a chip with nothing linked says so, in words too, and offers Link automations", same(emptyChip.chip, ["Alerts, 3 of 3 on|3/3", "Failsafes, 2 of 2 on|2/2", "Control, none linked|0/0"]) && emptyChip.notice === "No control linked to Nursery yet" && emptyChip.link && emptyChip.rows === 0 && !emptyChip.linkRow, emptyChip);
+const emptyChip = await ev(`(()=>{const n=document.querySelector("#main .notice.calm");return {chip:[...document.querySelectorAll("[data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.querySelector("strong").textContent,link:!!(n&&n.querySelector('[data-linkautos="nursery"]')),rows:document.querySelectorAll("[data-autorow]").length,head:!!document.querySelector('#main .pagehead > .pageact[data-linkautos="nursery"]'),loose:[...document.querySelectorAll('#main [data-linkautos]')].filter(b=>!b.closest(".notice")&&!b.closest(".pagehead")).length}})()`);
+check("Automations: a chip with nothing linked says so, in words too, and offers Link automations, the heading keeping its own", same(emptyChip.chip, ["Alerts, 3 of 3 on|3/3", "Failsafes, 2 of 2 on|2/2", "Control, none linked|0/0"]) && emptyChip.notice === "No control linked to Nursery yet" && emptyChip.link && emptyChip.rows === 0 && emptyChip.head && emptyChip.loose === 0, emptyChip);
 await ev(`zoneById("nursery").automations=keptAutos;render()`);
 for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small-phone"], [1280, 900, "desktop"]]) {
   if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
@@ -746,12 +746,15 @@ for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small-phone"], [128
     await ev(`ui.zone="garden";ui.autos={zone:"garden",page:"${k}"};render();window.scrollTo(0,0)`); await sleep(60);
     const fit = await ev(`(()=>{const g=document.querySelector('#main .seg[aria-label="Automations"]').getBoundingClientRect(),b=[...document.querySelectorAll("[data-autopage]")].map(x=>x.getBoundingClientRect());return {page:document.documentElement.scrollWidth<=innerWidth,inside:g.left>=0&&g.right<=innerWidth,oneLine:b.every(r=>Math.abs(r.top-b[0].top)<1)}})()`);
     check(`Automations ${name} ${k}: no sideways scroll, and the chips sit on screen${w === 320 ? "" : ", on one line"}`, fit.page && fit.inside && (fit.oneLine || w === 320), fit);
+    const hd = await ev(`(()=>{const r=(e)=>e.getBoundingClientRect(),a=document.querySelectorAll("#main [data-linkautos]"),b=document.querySelector("#main .pagehead > .pageact[data-linkautos]"),h=document.querySelector("#main .pagehead h1"),t=h&&h.parentElement,n=document.querySelector(".navmenu .burger"),w=r(document.querySelector("#main .wrap"));if(!b||!h)return {missing:true,n:a.length};const B=r(b),H=r(h),T=r(t),N=r(n),rg=document.createRange();rg.selectNodeContents(h);const G=rg.getBoundingClientRect();return {n:a.length,right:Math.abs(B.right-w.right)<1,levelNav:Math.abs(B.top-N.top)<1&&Math.abs(B.bottom-N.bottom)<1,besideTitle:B.left>=G.right&&Math.abs(B.bottom-T.bottom)<1,aboveTitle:B.bottom<=H.top&&B.left>N.right,clear:B.bottom<=H.top||B.left>=T.right||B.right<=T.left,titleWide:T.width>=(w.width-2*(N.width+8))-1}})()`);
+    check(`Automations ${name} ${k}: Link automations is the only page button, at the right of the heading's row, level with the menu button`, hd.n === 1 && hd.right && hd.levelNav && hd.clear, hd);
+    check(`Automations ${name} ${k}: ${w === 1280 ? "it's to the right of the title, level with the foot of the heading" : "on a phone it shares the menu button's row and the title takes the width beneath"}`, w === 1280 ? hd.besideTitle : hd.aboveTitle && hd.titleWide, hd);
     if (w !== 320) await shot(`autos-${k}-${name}`);
   }
 }
 await phone(390, 844);
 await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render();window.scrollTo(0,document.documentElement.scrollHeight)`); await sleep(60);
-check("Automations: scrolled to the end, Link automations clears the bar at the foot", (await ev(`(()=>{const l=document.querySelector('#main .row [data-linkautos]').getBoundingClientRect(),b=document.querySelector("#pagebar").getBoundingClientRect();return l.bottom<=b.top})()`)) === true);
+check("Automations: scrolled to the end, no Link automations is left at the foot of the page", (await ev(`[...document.querySelectorAll('#main [data-linkautos]')].every(b=>b.closest(".pagehead"))`)) === true);
 /* What a compromised UI could try. The host looks the automation up in its own config, so none of these reach HA. */
 nA = (await haCalls()).length;
 const autoRefused = await evp(`Promise.all([ask("automation",{zone:"garden",link:"nope",on:false}),ask("automation",{zone:"veg",link:"a1",on:"off"}),ask("automation",{zone:"nowhere",link:"a1",on:false}),ask("automation",{zone:"garden",on:false})]).then(rs=>rs.map(r=>r.ok))`);
@@ -765,7 +768,7 @@ await sleep(REPORT); await evp(`ask("automation",{zone:"garden",link:"a1",on:tru
 
 // ---------- Linking automations: only Environment Control's record changes, and a new one is allowed in HA's own dialog
 await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('[data-autopage="failsafe"]'); await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
+await tap('[data-autopage="failsafe"]'); await tap('#main .pagehead [data-linkautos="nursery"]'); await sleep(300);
 check("Link: opened from the Automations page, it's Nursery's Link automations", (await ev(`!!ui.linkw && document.querySelector("#main h1").textContent==="Link automations: Nursery"`)) === true);
 await tap("[data-linkback]");
 check("Link: Back comes back to the Automations page, on the chip it was opened from", (await ev(`ui.screen==="autos" && !ui.linkw && ui.autos.zone==="nursery" && ui.autos.page==="failsafe" && document.querySelector('[data-autopage="failsafe"]').getAttribute("aria-pressed")==="true" && document.querySelector("#main h1").textContent==="Automations: Nursery"`)) === true, await ev(`[ui.screen, ui.autos && ui.autos.page]`));
@@ -774,7 +777,7 @@ check("Link: it's still on a zone's menu on Setup", (await ev(`!!ui.linkw && ui.
 await tap("[data-linkback]");
 check("Link: and opened from there, Back comes back to Setup", (await ev(`ui.screen==="setup" && !ui.linkw`)) === true);
 await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('[data-autopage="control"]'); await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
+await tap('[data-autopage="control"]'); await tap('#main .pagehead [data-linkautos="nursery"]'); await sleep(300);
 const linkListed = await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`);
 check("Link: suggests what Nursery links and what's named for it, and none of the house's", linkListed.includes("automation.critical_nursery_vpd_high_day") && linkListed.includes("automation.failsafe_veg_fans_auto_on") && !linkListed.includes("automation.porch_light_on") && !linkListed.includes("automation.reservoir_refill_reminder"), linkListed);
 check("Link: the rest are a search away", (await ev(`document.querySelector("#link-more").textContent`)).includes("more in Home Assistant"));
@@ -830,7 +833,7 @@ check("Repeat: discarding goes to Failsafes, and the draft is gone", (await ev(`
 await tap('[data-autopage="alert"]');
 check("Repeat: and back on Alerts it holds the helper's value again", (await ev(`document.querySelector("#repeat-in").value`)) === "15");
 await ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="30";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`); await sleep(20);
-await tap('#main .row [data-linkautos="garden"]');
+await tap('#main .pagehead [data-linkautos="garden"]');
 check("Repeat: Link automations asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?");
 await tap("[data-gdiscard]"); await sleep(200); await tap("[data-linkback]");
 check("Repeat: and coming back from it, Alerts holds the helper's value, not the draft discarded", (await ev(`ui.screen==="autos" && ui.autos.page==="alert" && ui.autos.repeat===undefined && document.querySelector("#repeat-in").value==="15" && document.querySelector("#draftbar").hidden`)) === true, await ev(`[ui.autos && ui.autos.repeat, document.querySelector("#repeat-in")?.value]`));
@@ -1340,7 +1343,7 @@ await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
 const linkSearch = async (text) => { await ev(`(()=>{const i=document.querySelector("#link-q");i.value=${JSON.stringify(text)};i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(40); };
 const AUX_FULL = "automation.warning_veg_auxiliary_dehumidifier_full";
 await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="nursery"]'); await sleep(300); await linkSearch("auxiliary");
+await tap('#main .pagehead [data-linkautos="nursery"]'); await sleep(300); await linkSearch("auxiliary");
 await tap(`[data-lpick="${AUX_FULL}"]`);
 check("Share: ticking an automation another zone links asks first", same(await shareAsk(), { ...DEHU_ASK, title: "Add Warning Veg Auxiliary Dehumidifier Full to Nursery as well?", text: "It's already linked in Veg. It's one automation, so switching it off here switches it off there too." }) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined, await shareAsk());
 await shot("share-ask-automation-phone");
@@ -1364,7 +1367,7 @@ await tap("[data-dreview]");
 check("Share: the review goes as before, from not linked to its group", (await ev(`document.querySelector("#review-items").textContent`)) === "Warning Veg Auxiliary Dehumidifier FullNot linked → Device alerts", await ev(`document.querySelector("#review-items")?.textContent`));
 await tap("[data-rapply]"); await sleep(400);
 check("Share: applied, it's linked in both, with no question from the host for one it already switches", (await diskZone("nursery")).automations.some((a) => a.entity === AUX_FULL && a.group === "alert_device") && (await diskZone("veg")).automations.some((a) => a.entity === AUX_FULL) && (await hostDialog()).open === false);
-await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
+await tap('#main .pagehead [data-linkautos="nursery"]'); await sleep(300);
 await tap(`[data-lpick="${AUX_FULL}"]`);
 check("Share: unticking it once saved never asks", (await noAsk()) && (await ev(`ui.linkw.pick["${AUX_FULL}"]`)) === undefined);
 await tap(`[data-lpick="${AUX_FULL}"]`);
@@ -1372,7 +1375,7 @@ check("Share: nor ticking it again", (await noAsk()) && (await ev(`ui.linkw.pick
 await tap(`[data-lpick="${AUX_FULL}"]`); await tap("[data-dreview]"); await tap("[data-rapply]"); await sleep(400);
 check("Share: and unlinked again, it's Veg's alone", (await diskZone("nursery")).automations.every((a) => a.entity !== AUX_FULL));
 await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="garden"]'); await sleep(300); await linkSearch("veg fans");
+await tap('#main .pagehead [data-linkautos="garden"]'); await sleep(300); await linkSearch("veg fans");
 await tap('[data-lpick="automation.failsafe_veg_fans_auto_on"]');
 check("Share: an automation in several zones names them as the panel joins them", (await ev(`document.querySelector("#dlg-text").textContent`)) === "It's already linked in Veg and Nursery. It's one automation, so switching it off here switches it off there too." && (await ev(`document.querySelector("#dlg-title").textContent`)) === "Add Failsafe Veg Fans Auto On to Garden as well?", await shareAsk());
 await tap("[data-gkeep]"); await tap("[data-linkback]");

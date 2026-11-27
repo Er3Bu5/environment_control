@@ -38,7 +38,15 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu, .pagehead > .pageact { grid-column: 3; grid-row: 1; justify-self: end; }
+  /* A page's own action is wider than a menu button, so on a phone it would squeeze the title to a few words: there
+     it and the menu button make a row of their own at the top, and the title takes the full width beneath. */
+  @media (max-width: 640px) {
+    .pagehead:has(> .pageact) { grid-template-columns: minmax(0, 1fr) auto; }
+    .pagehead:has(> .pageact) > div { grid-column: 1 / -1; grid-row: 2; }
+    .pagehead > .pageact { grid-column: 2; }
+    .navmenu:has(+ .pagehead > .pageact) { align-self: start; }
+  }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -69,6 +77,8 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
   .btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
   .btn.burger[aria-expanded="true"] { border-color: var(--primary); }
+  /* Level with the menu button beside it, top and foot, wherever the heading row puts them. */
+  .btn.pageact { height: 34px; padding-block: 0; white-space: nowrap; }
   .menu { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
   .menu[hidden] { display: none; }
   .menu button { text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
@@ -349,7 +359,7 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
   .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
   body.drafting:not(.vtyping) main { padding-bottom: 96px; }
-  /* Back rides in the same place on a page, so a page's last button, such as Link automations, isn't left under it. */
+  /* Back rides in the same place on a page, so a page's last card isn't left under it. */
   main:has(#pagebar:not([hidden])) { padding-bottom: 96px; }
   /* Saving Link automations comes back to a page with Back in that bar, and the toast saying so mustn't lie over it. */
   body:has(#pagebar:not([hidden])) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
@@ -1503,9 +1513,9 @@ function renderAutos() {
   }).join("");
   const empty = `<div class="notice calm"><strong>No ${p.title.toLowerCase()} linked to ${esc(z.name)} yet</strong><button class="fixlink" data-linkautos="${z.id}">Link automations &rsaquo;</button></div>`;
   /* Back rides in the bar at the foot, as on every page since #54; the draft bar takes over while the repeat rate differs. */
-  return `<div class="wrap"><div><h1>Automations: ${esc(z.name)}</h1><p class="muted small">Home Assistant runs these. Here you switch them on and off.</p></div>
+  return `<div class="wrap"><div class="pagehead"><div><h1>Automations: ${esc(z.name)}</h1><p class="muted small">Home Assistant runs these. Here you switch them on and off.</p></div><button class="btn pageact" data-linkautos="${z.id}">Link automations</button></div>
     ${autoChips(z, page)}<p class="muted small" id="autos-about">${p.about}</p>
-    ${page === "alert" ? repeatCard() : ""}${sections || empty}${sections ? `<div class="row"><button class="btn" data-linkautos="${z.id}">Link automations</button></div>` : ""}
+    ${page === "alert" ? repeatCard() : ""}${sections || empty}
     <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-go="zone" data-zone="${z.id}">Back</button></div></div>`;
 }
 
