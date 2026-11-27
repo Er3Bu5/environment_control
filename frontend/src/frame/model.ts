@@ -173,6 +173,24 @@ export function removeZone(c: RawConfig, id: string): void {
   }
 }
 
+/* What's asked before something another zone already has is added to this one as well. Sharing is allowed, some
+   hardware really does serve several zones, but never with one unnoticed tap. */
+export interface ShareAsk {
+  title: string;
+  text: string;
+  keep: string;
+  go: string;
+}
+export function shareAsk(kind: "device" | "sensor" | "automation", name: string, zone: string, others: string[]): ShareAsk {
+  const where = others.join(" and ");
+  const text = {
+    device: `It's already in ${where}. It's one device, so switching it here switches it there too.`,
+    sensor: `It's already in ${where}. It's one sensor, so its readings count there and here.`,
+    automation: `It's already linked in ${where}. It's one automation, so switching it off here switches it off there too.`,
+  }[kind];
+  return { title: `Add ${name} to ${zone} as well?`, text, keep: "Leave it out", go: `Add to ${zone}` };
+}
+
 /* HA can't tell how some devices are connected, ESPHome boards above all, so Setup asks and keeps the answer, marked as
    confirmed so a later look at the catalog doesn't overwrite it. A sensor in several zones takes the answer in each. */
 export function confirmLink(c: RawConfig, id: string, link: "ethernet" | "wifi"): void {

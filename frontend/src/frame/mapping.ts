@@ -257,6 +257,19 @@ export function swapControl(d: MapDraft, from: string, to: string): void {
 }
 export const takesExtraMode = (entity: string) => entity.startsWith("humidifier.");
 
+/* The other zones that already have a device or a sensor, by name, so ticking it here asks first. Only the saved setup
+   counts, never an unsaved draft. Nothing when this zone has it saved: that sharing was agreed to when it was saved, so
+   unticking it and ticking it again in the same draft doesn't ask again. */
+const zoneNames = (c: RawConfig, ids: unknown[]) => c.zones.filter((z) => ids.includes(z.id)).map((z) => str(z.name) || str(z.id));
+export function deviceElsewhere(c: RawConfig, zoneId: string, entity: string): string[] {
+  const zones = c.devices.filter((d) => str(d.entity) === entity).flatMap((d) => (Array.isArray(d.zones) ? d.zones : []));
+  return zones.includes(zoneId) ? [] : zoneNames(c, zones);
+}
+export function sensorElsewhere(c: RawConfig, zoneId: string, id: string): string[] {
+  const zones = c.zones.filter((z) => Array.isArray(z.sensors) && z.sensors.some((x) => isObj(x) && x.id === id)).map((z) => z.id);
+  return zones.includes(zoneId) ? [] : zoneNames(c, zones);
+}
+
 export interface Issue {
   text: string;
   step: 1 | 2;

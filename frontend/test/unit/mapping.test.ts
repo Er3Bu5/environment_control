@@ -4,6 +4,7 @@ import {
   addVirtual,
   applyMap,
   controlCandidates,
+  deviceElsewhere,
   deviceId,
   mapChanges,
   mapIssues,
@@ -12,6 +13,7 @@ import {
   removeVirtual,
   seedSlots,
   sensorCandidates,
+  sensorElsewhere,
   shownName,
   swapControl, toggleMode,
 } from "../../src/frame/mapping";
@@ -351,5 +353,42 @@ describe("the draft", () => {
     d.controls = {};
     applyMap(c, d, sensors, controls);
     expect(c.devices).toEqual([{ id: "d1", entity: "switch.tent_lights", type: "Light", zones: ["nursery"], place: { nursery: [1, 1] } }]);
+  });
+});
+
+describe("already in another zone", () => {
+  const c = copyConfig(
+    [
+      { id: "garden", name: "Garden", sensors: [{ id: "soil", name: "Soil 1" }] },
+      { id: "veg", name: "Veg", sensors: [{ id: "soil", name: "Soil 1" }, { id: "board1", name: "Left board" }] },
+      { id: "nursery", name: "Nursery", sensors: [] },
+    ],
+    [
+      { id: "d1", entity: "humidifier.dehu", type: "Dehumidifier", zones: ["veg", "nursery"] },
+      { id: "d2", entity: "switch.heater_plug", type: "Heater", zones: ["garden"] },
+    ],
+  );
+
+  it("names the other zones that have a device saved, in the zones' order", () => {
+    expect(deviceElsewhere(c, "garden", "humidifier.dehu")).toEqual(["Veg", "Nursery"]);
+    expect(deviceElsewhere(c, "veg", "switch.heater_plug")).toEqual(["Garden"]);
+  });
+
+  it("says nothing for a device no zone has, or one this zone has saved already", () => {
+    expect(deviceElsewhere(c, "garden", "fan.dehu_fan")).toEqual([]);
+    expect(deviceElsewhere(c, "veg", "humidifier.dehu")).toEqual([]);
+  });
+
+  it("does the same for a sensor, which can be in several zones too", () => {
+    expect(sensorElsewhere(c, "nursery", "soil")).toEqual(["Garden", "Veg"]);
+    expect(sensorElsewhere(c, "garden", "board1")).toEqual(["Veg"]);
+    expect(sensorElsewhere(c, "garden", "soil")).toEqual([]);
+    expect(sensorElsewhere(c, "garden", "board2")).toEqual([]);
+  });
+
+  it("goes by the saved setup, so a draft that ticks it doesn't count", () => {
+    const d = openMap(c, "nursery");
+    d.controls["switch.heater_plug"] = "Heater";
+    expect(deviceElsewhere(c, "veg", "switch.heater_plug")).toEqual(["Garden"]);
   });
 });
