@@ -21,8 +21,9 @@ name: Beta
 # the repository, which a commit or starting one by hand sets going again.
 on:
   schedule:
-    # Off the hour, when scheduled runs queue up.
-    - cron: "17 * * * *"
+    # On the hour, the owner's call. GitHub is busiest then, so a run can start some minutes late, and now and then one
+    # is dropped altogether, in which case the next hour's run takes its place.
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions: {}
