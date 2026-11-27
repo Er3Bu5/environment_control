@@ -79,7 +79,17 @@ test.describe("a zone's Automations page", () => {
     await expect(row(frame, "Critical Garden VPD Low Night")).toContainText("Off. Last triggered");
     await expect(row(frame, "Critical Garden Temperature Low Day")).toContainText("On. Never triggered.");
     await expect(row(frame, "Critical Garden Temperature High Day").locator(".dev-sub")).toHaveText(/^On\. Last triggered (today|yesterday|\d{1,2} [A-Z][a-z]{2}( \d{4})?) at \d\d:\d\d\.$/);
-    await expect(app(frame).getByRole("button", { name: "Link automations", exact: true })).toBeVisible();
+    /* The page's own action sits at the right of its heading, level with the page menu, on every chip and never at
+       the foot of the page. */
+    const link = app(frame).getByRole("button", { name: "Link automations", exact: true });
+    for (const c of ["Alerts", "Failsafes", "Control"]) {
+      await chip(frame, c).click();
+      await expect(link).toHaveCount(1);
+      await expect(app(frame).locator(".pagehead").getByRole("button", { name: "Link automations", exact: true })).toBeVisible();
+    }
+    const menu = (await app(frame).getByRole("button", { name: "Menu", exact: true }).boundingBox())!, at = (await link.boundingBox())!;
+    expect(Math.abs(at.y + at.height - (menu.y + menu.height))).toBeLessThanOrEqual(3);
+    await chip(frame, "Alerts").click();
     /* Back rides in the bar at the foot of the window, and returns to the zone's page. */
     await pageBar(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Garden")).toBeVisible();
@@ -106,6 +116,7 @@ test.describe("a zone's Automations page", () => {
     await expect(chip(frame, "Control")).toHaveText("Control 0/0");
     await chip(frame, "Control").click();
     await expect(app(frame).locator(".notice.calm")).toContainText("No control linked to Garden yet");
+    await expect(app(frame).getByRole("button", { name: "Link automations", exact: true })).toHaveCount(1);
     await app(frame).locator(".notice.calm").getByRole("button", { name: "Link automations" }).click();
     await expect(heading(frame, "Link automations: Garden")).toBeVisible();
   });
@@ -603,6 +614,13 @@ test.describe("on a phone", () => {
     expect(await offScreen(frame)).toEqual([]);
     await zoneMenu(frame, "View automations");
     expect(await offScreen(frame)).toEqual([]);
+    /* The heading keeps the whole width for the title, with Link automations under it at the right, level with the
+       page menu, never laid over the title or squeezing it onto more lines. */
+    const title = (await heading(frame, "Automations: Veg").boundingBox())!, link = (await app(frame).getByRole("button", { name: "Link automations", exact: true }).boundingBox())!;
+    const menu = (await app(frame).getByRole("button", { name: "Menu", exact: true }).boundingBox())!;
+    expect(link.y).toBeGreaterThanOrEqual(title.y + title.height);
+    expect(title.height).toBeLessThan(40);
+    expect(Math.abs(link.y + link.height - (menu.y + menu.height))).toBeLessThanOrEqual(3);
     await typeRepeat(frame, "500");
     await expect(draftBar(frame)).toBeVisible();
     expect(await offScreen(frame)).toEqual([]);

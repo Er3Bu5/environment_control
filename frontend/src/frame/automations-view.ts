@@ -86,13 +86,17 @@ export interface AutomationsPageView {
 }
 
 /* One page per zone: the chips with what's on in each, the picked chip's about sentence, on Alerts the repeat card,
-   then a card per group that links anything, or a notice that the chip links nothing yet. Back rides in main.ts's
-   bar at the foot of the window. */
+   then a card per group that links anything, or a notice that the chip links nothing yet. The page's own action sits
+   at the right of its heading, as the zone page's menu does, so it's found in the same place whatever the chip; Back
+   rides in main.ts's bar at the foot of the window. */
 export function automationsPage(o: AutomationsPageView) {
   const mark = CHIP[o.chip].icon;
-  return html`<div>
-      <h1>Automations: ${o.zone.name}</h1>
-      <p class="muted small">Home Assistant runs these. Here you switch them on and off.</p>
+  return html`<div class="pagehead">
+      <div>
+        <h1>Automations: ${o.zone.name}</h1>
+        <p class="muted small">Home Assistant runs these. Here you switch them on and off.</p>
+      </div>
+      <button class="btn" @click=${o.onLink}>Link automations</button>
     </div>
     <div class="seg" role="group" aria-label="Automations">
       ${o.chips.map(
@@ -104,13 +108,12 @@ export function automationsPage(o: AutomationsPageView) {
     <p class="muted small">${CHIP[o.chip].about}</p>
     ${o.chip === "alert" ? repeatCardView(o.repeat, o.onRepeat, o.onLinkOnSetup) : nothing}
     ${o.groups.length
-      ? html`${o.groups.map(
-            (g) => html`<section class="card" data-agroup=${g.group}>
-              <div class="card-head"><h2>${g.title}</h2><span class="small muted">${g.count}</span></div>
-              <div class="devs">${repeat(g.links, (a) => a.id, (a) => autoRowView(o.row(a), mark, o.icon, o.onTap))}</div>
-            </section>`,
-          )}
-          <div class="row"><button class="btn" @click=${o.onLink}>Link automations</button></div>`
+      ? o.groups.map(
+          (g) => html`<section class="card" data-agroup=${g.group}>
+            <div class="card-head"><h2>${g.title}</h2><span class="small muted">${g.count}</span></div>
+            <div class="devs">${repeat(g.links, (a) => a.id, (a) => autoRowView(o.row(a), mark, o.icon, o.onTap))}</div>
+          </section>`,
+        )
       : html`<div class="notice calm">
           <strong>${emptyText(o.chip, o.zone.name)}</strong><button class="fixlink" @click=${o.onLink}>Link automations &rsaquo;</button>
         </div>`}`;
