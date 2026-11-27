@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setDetails, setHistory, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
+import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setAlertRepeat, setDetails, setHistory, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
 
 const base = () =>
   copyConfig(
@@ -119,5 +119,63 @@ describe("links HA can't tell", () => {
       { id: "b1", name: "Board", link: "ethernet", linkSource: "confirmed" },
     ]);
     expect(unknownLinks(c).map((x) => x.id)).toEqual(["d1"]);
+  });
+});
+
+describe("a zone's automations", () => {
+  const link = (id: string, entity: string, group: string) => ({ id, entity: `automation.${entity}`, group });
+
+  it("reads each link to an automation, in its group, in the order saved", () => {
+    const [z] = readZones([{ id: "veg", name: "Veg", automations: [link("a2", "tent_lights_on", "control"), link("a1", "failsafe_veg_fans_auto_on", "failsafe")] }]);
+    expect(z.automations).toEqual([
+      { id: "a2", entity: "automation.tent_lights_on", group: "control" },
+      { id: "a1", entity: "automation.failsafe_veg_fans_auto_on", group: "failsafe" },
+    ]);
+  });
+
+  it("leaves out a link that isn't the right shape, or that repeats an id or an automation, and keeps the rest", () => {
+    const [z] = readZones([
+      {
+        id: "veg",
+        name: "Veg",
+        automations: [
+          link("a1", "ok", "alert_day"),
+          link("a2", "ok", "alert_night"),
+          link("a1", "other", "alert_night"),
+          { id: "a3", entity: "script.ok", group: "control" },
+          link("A4", "upper_id", "control"),
+          link("a5", "odd_group", "alerts"),
+          { id: "a6", entity: "automation.no_group" },
+          "automation.bare",
+          link("a7", "last", "alert_device"),
+        ],
+      },
+    ]);
+    expect(z.automations.map((a) => a.id)).toEqual(["a1", "a7"]);
+    for (const automations of [undefined, "automation.x", { a1: "automation.x" }]) expect(readZones([{ id: "veg", name: "Veg", automations }])[0].automations).toEqual([]);
+  });
+});
+
+describe("the room's settings", () => {
+  it("ride along on a copy only when given, so a save without them leaves the host keeping what's stored", () => {
+    const room = { alertRepeat: "input_number.alert_repeat_rate" };
+    const c = copyConfig([], [], room);
+    expect(c.room).toEqual(room);
+    c.room = {};
+    expect(room).toEqual({ alertRepeat: "input_number.alert_repeat_rate" });
+    expect("room" in copyConfig([], [])).toBe(false);
+  });
+
+  it("link, change and unlink the alert repeat helper, unlinking as an empty room rather than none", () => {
+    const c = copyConfig([], [], {});
+    setAlertRepeat(c, "input_number.alert_repeat_rate");
+    expect(c.room).toEqual({ alertRepeat: "input_number.alert_repeat_rate" });
+    setAlertRepeat(c, "input_number.other");
+    expect(c.room).toEqual({ alertRepeat: "input_number.other" });
+    setAlertRepeat(c, null);
+    expect(c.room).toEqual({});
+    const fresh = copyConfig([], []);
+    setAlertRepeat(fresh, null);
+    expect(fresh.room).toEqual({});
   });
 });
