@@ -2856,8 +2856,12 @@ function renderTd() {
     <div id="map-em" tabindex="-1">${chips("Red lights source", "em-src", Object.entries(EM_MODES), m.em, "data-mem")}</div>${emBody[m.em]}</section>`;
   const sp = sharesLights(z) ? parentOf(z) : null, src = tdIssues();
   if (sp) { [times, emerson] = sharedSchedule(z, sp); issues.length = 0; }
-  return `<div class="wrap"><div class="sched-title"><h1>Targets, day and night: ${esc(z.name)}</h1><p class="muted small">Where ${esc(z.name)}'s times and limits come from, and what they are. Nothing changes until you review and apply.</p></div>
-    ${confirmNote(zoneById(m.id), "targets", "A new zone's times and limits all start at 0, so set them, then Confirm.")}${times}${emerson}
+  /* Sharing both lights and a sensor leaves nothing here to change, so the page mustn't talk of setting or applying anything. */
+  const allParent = sp && sharesSensor(z);
+  const intro = allParent ? `Everything on this page is Zone: ${esc(sp.name)}'s, so there's nothing to change here. ${esc(editIn(sp))}.` : `Where ${esc(z.name)}'s times and limits come from, and what they are. Nothing changes until you review and apply.`;
+  const note = allParent ? (stepOpen(zoneById(m.id), "targets") ? `<div class="notice" id="confirm-note">Not confirmed yet. There's nothing to set here, so Confirm once you've looked.</div>` : "") : confirmNote(zoneById(m.id), "targets", "A new zone's times and limits all start at 0, so set them, then Confirm.");
+  return `<div class="wrap"><div class="sched-title"><h1>Targets, day and night: ${esc(z.name)}</h1><p class="muted small" id="td-intro">${intro}</p></div>
+    ${note}${times}${emerson}
     <div class="vissues" id="s-issues" data-html="${esc(sIssueHtml(issues))}">${sIssueHtml(issues)}</div>
     ${renderVpd()}
     <div class="vissues" id="td-issues">${tdIssueHtml(src)}</div>
