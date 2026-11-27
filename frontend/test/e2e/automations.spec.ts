@@ -37,7 +37,12 @@ const review = (frame: Frame) => app(frame).getByRole("dialog");
 const toast = (frame: Frame) => app(frame).locator(".toast");
 const repeatBox = (frame: Frame) => app(frame).getByRole("textbox", { name: "Minutes between buzzes", exact: true });
 const pick = (frame: Frame, name: string) => app(frame).locator(".pickwrap", { has: frame.locator(".pick-text strong", { hasText: new RegExp(`^${name.replace(/[<>"=]/g, ".")}$`) }) });
-const back = (page: Page) => page.evaluate(() => history.back());
+/* The back gesture reaches the panel only through the history entry the host keeps in front while the panel has
+   somewhere to go back to. The host lays it again after each step, so each step waits for it first. */
+async function back(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => !!(history.state && (history.state as { ecBack?: boolean }).ecBack))).toBe(true);
+  await page.evaluate(() => history.back());
+}
 
 async function openAutos(page: Page, zone = "Garden"): Promise<Frame> {
   await page.goto(PAGE);
@@ -512,8 +517,9 @@ test.describe("Setup's Alerts card", () => {
     await box.getByRole("combobox", { name: "Alert repeat helper" }).fill("spare vpd");
     await box.getByRole("option", { name: /Spare VPD threshold/ }).click();
     await allow(page);
-    await expect(toast(frame)).toHaveText("Alert repeat linked.");
-    expect((await stored(page)).room).toEqual({ alertRepeat: "input_number.spare_vpd_threshold" });
+    /* The same words as the first link's toast, which can still be showing, so it's the stored setup that's waited for. */
+    await expect.poll(async () => (await stored(page)).room).toEqual({ alertRepeat: "input_number.spare_vpd_threshold" });
+    await expect(box).toContainText("On your helper, input_number.spare_vpd_threshold.");
     await box.getByRole("button", { name: "Unlink" }).click();
     await expect(toast(frame)).toHaveText("Alert repeat unlinked. Your helper stays as it is.");
     expect((await stored(page)).room).toEqual({});
