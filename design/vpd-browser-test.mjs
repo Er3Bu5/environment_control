@@ -1726,11 +1726,12 @@ check("Bar: gets out of the way of the keyboard", (await ev(`getComputedStyle(do
 await key("Enter", 13); await sleep(120);
 check("Bar: comes back after", (await ev(`getComputedStyle(document.querySelector("#draftbar")).display`)) !== "none", await ev(`document.body.className`));
 await ev(`toast("Testing the toast")`); await sleep(300);
-const toastBox = `(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect(),b=document.querySelector("#draftbar").getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {shown:!t.hidden,top:r.top,bottom:r.bottom,h:innerHeight,clear:r.bottom<=b.top,onTop:!!hit&&t.contains(hit)}})()`;
+const toastBox = `(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect(),b=document.querySelector("#draftbar").getBoundingClientRect(),pe=t.style.pointerEvents;t.style.pointerEvents="auto";const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);t.style.pointerEvents=pe;return {shown:!t.hidden,top:r.top,bottom:r.bottom,h:innerHeight,clear:r.bottom<=b.top,onTop:!!hit&&t.contains(hit)}})()`;
 let tb = await ev(toastBox);
 check("Bar: the toast drops in at the top of the view, nowhere near the bar", tb.shown && tb.top >= 0 && tb.bottom <= tb.h / 4 && tb.clear && tb.onTop, tb);
 await tap("[data-dreview]"); await sleep(150); await ev(`toast("Testing the toast over a dialog")`); await sleep(300); tb = await ev(toastBox);
 check("Bar: and it shows over an open dialog", (await ev(`!document.querySelector("#modal").hidden`)) && tb.shown && tb.top >= 0 && tb.onTop, tb);
+check("Bar: a tap where the toast lies goes through to the page under it", (await ev(`(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !t.hidden&&!!hit&&!t.contains(hit)})()`)) === true);
 check("Bar: the toast is a quiet surface, not the inverted ink", (await ev(`(()=>{const c=getComputedStyle(document.querySelector("#toast")),b=getComputedStyle(document.body);return c.backgroundColor!==b.color&&c.color!==b.backgroundColor})()`)) === true);
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); await ev(`toast("Testing the toast still")`);
 check("Bar: with reduced motion the toast appears without sliding", (await ev(`getComputedStyle(document.querySelector("#toast")).animationName`)) === "none");

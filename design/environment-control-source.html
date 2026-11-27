@@ -137,8 +137,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
   .review-row b { font-weight: 500; }
-  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus. */
-  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; animation: toast-in .2s ease-out; }
+  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus.
+     Taps go through it: it can lie over the heading's buttons for a moment and must not swallow them. */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; pointer-events: none; animation: toast-in .2s ease-out; }
   .toast.leaving { animation: toast-out .2s ease-in forwards; }
   @keyframes toast-in { from { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
   @keyframes toast-out { to { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
