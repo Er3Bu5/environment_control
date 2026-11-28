@@ -1520,6 +1520,24 @@ await ev(`ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;render()`);
 await open();
 check("Chart: mixed offsets say they're an average", (await ev(`document.querySelector("#main").textContent`)).includes("the average of 3 sensors"), await ev(`ui.vpdw.leaf`));
 check("Chart: uses the average of the counted sensors", (await ev(`ui.vpdw.leaf`)) === -0.8, await ev(`ui.vpdw.leaf`));
+// The leaf offset line is in the accent colour, words and button alike, and readable on the card in both themes (#159)
+/* HA's own colours, as the host sends them for its light and dark themes; the attribute alone leaves HA's colours in place. */
+const LEAF_THEMES = { light: { card: "#FFFFFF", fg: "#212121", muted: "#727272" }, dark: { card: "#1C1C1C", fg: "#E1E1E1", muted: "#9B9B9B" } };
+const leafLook = (theme, accent) => ev(`(()=>{const r=document.documentElement;r.dataset.theme="${theme}";r.style.setProperty("--primary","${accent}");Object.entries(${JSON.stringify(LEAF_THEMES[theme])}).forEach(([k,v])=>r.style.setProperty("--"+k,v));
+const rgb=(c)=>{const n=c.match(/[0-9.]+/g).map(Number);return c.startsWith("color(")?n.slice(0,3).map((x)=>x*255):n.slice(0,3)},lin=(v)=>(v/=255)<=0.03928?v/12.92:((v+0.055)/1.055)**2.4,lum=(c)=>{const [a,g,b]=rgb(c);return 0.2126*lin(a)+0.7152*lin(g)+0.0722*lin(b)},ratio=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)};
+const w=document.querySelector("#vleaf"),t=w.querySelector("span"),b=w.querySelector(".vleafbtn"),cs=getComputedStyle,p=document.createElement("i");let card=w,bg;
+while(card&&((bg=cs(card).backgroundColor)==="rgba(0, 0, 0, 0)"||bg==="transparent"))card=card.parentElement;
+p.style.color="var(--primary-text)";w.append(p);const acc=cs(p).color;p.style.color="var(--muted)";const muted=cs(p).color;p.style.color="var(--fg)";const fg=cs(p).color;p.remove();
+const [ar,ag,ab]=rgb(acc),hue=ar>ag+40&&ar>ab+40?"red":ab>ar+40&&ab>ag?"blue":"";
+return {acc,muted,fg,hue,bg,text:cs(t).color,btn:cs(b).color,border:cs(b).borderTopColor,contrast:Math.round(ratio(cs(t).color,bg)*100)/100}})()`);
+const themeBefore = await ev(`[document.documentElement.dataset.theme||"",document.documentElement.style.cssText]`), leafBgs = new Set();
+for (const theme of ["light", "dark"]) for (const [accent, said, hue] of [["#F44336", "red", "red"], ["#03A9F4", "HA's light blue", "blue"]]) {
+  const l = await leafLook(theme, accent); leafBgs.add(l.bg);
+  check(`Chart: the leaf offset words and the Change button's label and outline take the accent text colour, ${said} in ${theme}`, l.text === l.acc && l.btn === l.acc && l.border === l.acc && l.acc !== l.muted && l.acc !== l.fg && l.hue === hue, l);
+  check(`Chart: the leaf offset line is 4.5:1 or better on the card, ${said} in ${theme}`, l.contrast >= 4.5, l);
+}
+check("Chart: the leaf offset colours were judged on both themes' cards", leafBgs.size === 2, [...leafBgs]);
+await ev(`(()=>{const r=document.documentElement,[t,css]=${JSON.stringify(themeBefore)};if(t)r.dataset.theme=t;else delete r.dataset.theme;r.style.cssText=css})()`);
 const targetBefore = await band("vpd", 2);
 await ev(`document.querySelector("[data-calw]").click()`); await sleep(50);
 await ev(`(document.querySelector("[data-lexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(50);

@@ -7,6 +7,10 @@
 :root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --vline: #6E6E6E; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
 :root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
+/* Accent-coloured text. The raw primary on the card is 2.6:1 for HA's light blue and 3.7:1 for a red accent in the light
+   theme, short of the 4.5:1 that text needs, so it is mixed toward the text colour, which keeps HA's usual accents at 4.5:1 or
+   better in either theme. */
+:root { --primary-text: color-mix(in srgb, var(--primary) 60%, var(--fg)); }
 html, body { margin: 0; }
 
 /* The frontend's styles (frontend/src/frame/styles.ts), with :host as the page. */
@@ -311,8 +315,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong { font-weight: 500; }
   /* Right above the grid, where the eye already is: the only place that says which leaf offset the chart is drawn at, and the way to change it. */
-  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-  .vleafbtn { padding: 4px 10px; font-size: 13px; }
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
   @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
 
