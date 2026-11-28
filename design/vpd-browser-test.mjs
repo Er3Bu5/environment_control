@@ -2873,6 +2873,11 @@ let nCalls = (await haCalls()).length;
 /* #111: a tap on what's read only answers in the same dialog Link automations shows, over the Automations dialog. */
 const notHereNow = () => ev(`(()=>{const o=document.querySelector("#modal > .modal.over .dialog")||document.querySelector("#modal .dialog");return o && {role:o.getAttribute("role"),title:o.querySelector("#dlg-title").textContent,text:o.querySelector("#dlg-text").textContent,buttons:[...o.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id,over:!!document.querySelector("#modal > .modal.over")}})()`);
 await ev(`(()=>{window.autosWas=document.querySelector("#modal [data-autosdlg]");const s=document.querySelector("#autos-scroll");s.scrollTop=s.scrollHeight;window.autosTop=s.scrollTop})()`);
+for (const look of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: look === "dark" ? [{ name: "prefers-color-scheme", value: "dark" }] : [] }); await sleep(80);
+  await ev(`document.querySelector("#autos-scroll").scrollTop=window.autosTop`); await shot(`linked-from-card-phone-${look}`);
+}
+await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(60);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
 let nh = await notHereNow();
 check("Linked: tapping a read only switch switches nothing and opens the one-button dialog, titled with its name, over the Automations dialog", same(nh, { role: "alertdialog", title: "Failsafe Veg Fans Auto On", text: "This automation is associated to Zone: Veg. Please edit it in Veg.", buttons: ["OK|btn primary"], focus: "dlg-title", over: true }) && (await haCalls()).length === nCalls && (await onHA(`fakeHA.states["automation.failsafe_veg_fans_auto_on"].state`)) === "on", nh);
@@ -2885,19 +2890,23 @@ await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_au
 check("Linked: Escape closes only that dialog, the Automations dialog staying open", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await tellBack();
 check("Linked: and so does Back", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
-/* #111: what's read only is dimmed before it's tapped, by one shared look (--ro-dim on a control, --ro-fg and --ro-surface on
-   text), and stays readable at 4.5:1. */
+/* #111: what's read only reads as not yours before it's tapped, by one shared look: no accent colour on its icon or switch,
+   controls at --ro-dim, a dashed --ro-surface outline barely off the card, its name in --ro-fg at 4.5:1 on that and its
+   second line at 3:1. */
+const grey = (c) => { const v = (c.match(/[\d.]+/g) || []).slice(0, 3); return v.length === 3 && v[0] === v[1] && v[1] === v[2]; };
+const roTiled = (r, ed) => !!r && !!ed && r.tile === r.roBg && r.tile !== ed.tile && r.rowBorder === "dashed" && ed.rowBorder !== "dashed" && [r.icFill, r.icBg, r.knob, r.swBorder].every(grey) && r.nameRatio >= 4.5 && r.subRatio >= 3;
 const roLook = (sel) => ev(`(()=>{const tok=(n,p)=>{const e=document.createElement("span");e.style[p]="var("+n+")";document.body.append(e);const c=getComputedStyle(e)[p];e.remove();return c};
   const lum=(c)=>{const v=c.match(/[\\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=0.03928?x/12.92:((x+0.055)/1.055)**2.4});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2]};
   const bgOf=(e)=>{for(;e;e=e.parentElement){const b=getComputedStyle(e).backgroundColor;if(b&&!/rgba\\(.*, 0\\)|transparent/.test(b))return b}return "rgb(255, 255, 255)"};
   const ratio=(e)=>{const a=lum(getComputedStyle(e).color),b=lum(bgOf(e));return Math.round((Math.max(a,b)+0.05)/(Math.min(a,b)+0.05)*100)/100};
   const el=document.querySelector(${JSON.stringify("SEL")});if(!el)return null;const cs=getComputedStyle(el),row=el.closest(".dev"),name=row&&row.querySelector(".dev-name");
-  return {dim:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ro-dim")),op:parseFloat(cs.opacity),cursor:cs.cursor,color:cs.color,bg:cs.backgroundColor,roFg:tok("--ro-fg","color"),roBg:tok("--ro-surface","backgroundColor"),
+  return {dim:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ro-dim")),op:parseFloat(cs.opacity),cursor:cs.cursor,color:cs.color,bg:cs.backgroundColor,roFg:tok("--ro-fg","color"),roBg:tok("--ro-surface","backgroundColor"),tile:row?getComputedStyle(row).backgroundColor:"",rowBorder:row?getComputedStyle(row).borderTopStyle:"",icFill:row&&row.querySelector(":scope > .ic svg")?getComputedStyle(row.querySelector(":scope > .ic svg")).fill:"",icBg:row&&row.querySelector(":scope > .ic")?getComputedStyle(row.querySelector(":scope > .ic")).backgroundColor:"",
+    knob:row&&row.querySelector(".sw i")?getComputedStyle(row.querySelector(".sw i")).backgroundColor:"",swBorder:row&&row.querySelector(".sw")?getComputedStyle(row.querySelector(".sw")).borderTopColor:"",subRatio:row&&row.querySelector(".dev-sub")?ratio(row.querySelector(".dev-sub")):0,
     name:name?getComputedStyle(name).color:"",nameRatio:name?ratio(name):0,ratio:ratio(el)}})()`.replace('"SEL"', JSON.stringify(sel)));
-const roDimmed = (r) => !!r && r.dim > 0.5 && r.dim < 0.8 && r.op === r.dim && r.cursor === "not-allowed";
+const roDimmed = (r) => !!r && r.dim === 0.45 && r.op === r.dim && r.cursor === "not-allowed";
 const edAuto = await roLook('#modal [data-autorow]:not([data-from]) .sw:not(:disabled)'), roAuto = await roLook('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
-const fromText = await ev(`(()=>{const c=document.querySelector("#modal [data-fromzone]"),h=c.querySelector("h3"),p=c.querySelector("p");return [(()=>{const e=document.createElement("span");e.style.color="var(--ro-fg)";document.body.append(e);const f=getComputedStyle(e).color;e.remove();return getComputedStyle(h).color!==f&&getComputedStyle(h).opacity==="1"})(),getComputedStyle(p).color===getComputedStyle(document.querySelector("#modal [data-autorow]:not([data-from]) .dev-sub")).color,getComputedStyle(c).opacity]})()`);
-check("Linked: a read only switch in the From card is dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where this zone's own switch isn't; the card's heading and line aren't dimmed", roDimmed(roAuto) && roAuto.name === roAuto.roFg && roAuto.nameRatio >= 4.5 && !!edAuto && edAuto.op === 1 && edAuto.cursor !== "not-allowed" && edAuto.name !== roAuto.name && same(fromText, [true, true, "1"]), { roAuto, edAuto, fromText });
+const fromText = await ev(`(()=>{const c=document.querySelector("#modal [data-fromzone]"),h=c.querySelector("h3"),p=c.querySelector("p");const own=document.querySelector("#modal [data-autorow]:not([data-from])").closest("section")?.querySelector("h3");return [!!own&&own!==h&&getComputedStyle(h).color===getComputedStyle(own).color&&getComputedStyle(h).opacity==="1",getComputedStyle(p).color===getComputedStyle(document.querySelector("#modal [data-autorow]:not([data-from]) .dev-sub")).color,getComputedStyle(c).opacity]})()`);
+check("Linked: a read only switch in the From card is dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where this zone's own switch isn't; no accent colour on its icon or switch where this zone's own has it, on a dashed near-card outline, second line 3:1; the card's heading and line aren't dimmed", roDimmed(roAuto) && roTiled(roAuto, edAuto) && !grey(edAuto.icFill) && !grey(edAuto.knob) && roAuto.name === roAuto.roFg && roAuto.nameRatio >= 4.5 && !!edAuto && edAuto.op === 1 && edAuto.cursor !== "not-allowed" && edAuto.name !== roAuto.name && same(fromText, [true, true, "1"]), { roAuto, edAuto, fromText });
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
 check("Linked: dimmed, it still takes the tap that opens the dialog", ((await notHereNow()) || {}).title === "Failsafe Veg Fans Auto On"); await tap("[data-gkeep]");
 await tap('#modal [data-fromzone] h3');
@@ -2946,7 +2955,7 @@ const roDev = await roLook('[data-devrow="lp-tent"][data-zone="nursery"] .sw'), 
 await ev(`ui.zone="garden";render()`); await sleep(30);
 const edDev = await roLook('.dev[data-zone="garden"]:not(.ro) .dev-ctl .sw:not(:disabled)');
 await ev(`ui.zone="nursery";render()`); await sleep(30);
-check("Linked: a shared device's switch, dial and mode chips are dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where an unlinked zone's aren't", [roDev, roDial, roChip].every(roDimmed) && roDev.name === roDev.roFg && roDev.nameRatio >= 4.5 && !!edDev && edDev.op === 1 && edDev.name !== roDev.name, { roDev, roDial, roChip, edDev });
+check("Linked: a shared device's switch, dial and mode chips are dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, with no accent colour on its icon or switch, on a dashed near-card outline, second line 3:1, where an unlinked zone's aren't", [roDev, roDial, roChip].every(roDimmed) && roTiled(roDev, edDev) && roDev.name === roDev.roFg && roDev.nameRatio >= 4.5 && !!edDev && edDev.op === 1 && edDev.name !== roDev.name, { roDev, roDial, roChip, edDev });
 check("Linked: dimmed, the device's switch still takes the tap that opens the dialog", (await devAsk('[data-devrow="lp-tent"][data-zone="nursery"] .sw'))[0] === (await devName("lp-tent")));
 await ev(`ui.zone="veg";render()`); await sleep(30);
 const vegTent = await devRow("lp-tent", "veg");
