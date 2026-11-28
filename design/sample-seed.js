@@ -289,6 +289,16 @@ const SEED = (() => {
     dev(at(17, "08:00:04"), "switch.heater_mains", "Heater Mains", "off", NONE),
   ];
   const activity = { now: new Date(MOCK_NOW).toISOString(), earliest: { garden: at(15, "09:14:00"), veg: at(16, "00:00:00"), nursery: at(17, "00:00:00") }, entries: { garden, veg, nursery } };
+  /* How Garden's temperature limits came to be what they are, for the History chart (#148). The chart's now is 14:20 on
+     3 Nov, so the changes are dated back from it. Max, the target and night Min live on helpers, whose past HA records;
+     Low and High are stored here, and the panel's log of them starts on 31 Oct, so before then Low is assumed. Day and
+     night are worked out from each zone's times, and Veg's cross midnight. Every last value is the zone's limit now. */
+  const u = (s) => Date.parse(`${s}:00+13:00`) / 1000;
+  const limitsLog = { now: u("2026-11-03T14:20"), offsetMin: 13 * 60, zones: { garden: { knownFrom: u("2026-10-31T08:00"),
+    day: { temperature: { max: [[u("2026-10-20T08:00"), 29], [u("2026-10-31T10:00"), 28.5], [u("2026-11-03T09:30"), 28]],
+      low: [[u("2026-10-31T08:00"), 23.5], [u("2026-11-01T12:00"), 23], [u("2026-11-03T11:00"), 24]],
+      target: [[u("2026-10-20T08:00"), 25.5], [u("2026-11-02T10:00"), null], [u("2026-11-02T15:30"), 25]] } },
+    night: { temperature: { min: [[u("2026-10-20T08:00"), 17], [u("2026-10-30T21:00"), 16]] } } } } };
   automationEntities();
-  return { config: { revision: 1, zones, devices, room }, states, failsafes, registry: { entities, areas }, activity };
+  return { config: { revision: 1, zones, devices, room }, states, failsafes, registry: { entities, areas }, activity, limitsLog };
 })();

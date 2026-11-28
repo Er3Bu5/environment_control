@@ -22,6 +22,7 @@
   const AUTOMATION = /^automation\.[a-z0-9_]{1,200}$/;
   /* Activity is asked for by zone and local day, never by entity. */
   const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const HISTORY_METRICS = ["temperature", "humidity", "vpd", "light"], HISTORY_HOURS = [6, 24, 72, 168];
   const automationLinks = (z) => (Array.isArray(z.automations) ? z.automations : []).filter((a) => a && typeof a.entity === "string" && AUTOMATION.test(a.entity));
   /* The room's own settings: the one helper every alert's repeat rate comes from. */
   const roomHelper = (config) => { const e = config && config.room && config.room.alertRepeat; return typeof e === "string" && /^input_number\.[a-z0-9_]{1,200}$/.test(e) ? e : null; };
@@ -219,6 +220,7 @@
       else if (m.type === "automation") this.automation(m);
       else if (m.type === "automations") this.automations(m);
       else if (m.type === "activity") this.activity(m);
+      else if (m.type === "history") this.history(m);
       else if (m.type === "appearance") this.setAppearance(m);
     }
     /* Setup's helper picker: number helpers and time-only date helpers, with only the allowlisted attributes. Reading the list
@@ -264,6 +266,17 @@
       } catch (e) {
         this.reply(m.req, false, e && (e.code === "busy" || e.code === "timeout") ? e.code : "failed");
       } finally { clearTimeout(timer); }
+    }
+    /* A zone's limits over a range, for the History chart. Asked by zone, metric and range, never by entity, and only the
+       limits come back, so the frame can't use this to read anything else. The frame checks their shape before drawing. */
+    async history(m) {
+      if (!Number.isInteger(m.req)) return;
+      const zones = (this.config && Array.isArray(this.config.zones)) ? this.config.zones : [];
+      if (typeof m.zone !== "string" || !zones.some((z) => z && z.id === m.zone) || !HISTORY_METRICS.includes(m.metric) || !HISTORY_HOURS.includes(m.hours)) return this.reply(m.req, false, "failed");
+      try {
+        const answer = await this._hass.connection.sendMessagePromise({ type: "environment_control/history", zone: m.zone, metric: m.metric, hours: m.hours });
+        this.post({ type: "result", req: m.req, ok: true, limits: answer && answer.limits });
+      } catch { this.reply(m.req, false, "failed"); }
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 

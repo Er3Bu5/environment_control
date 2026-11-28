@@ -13,6 +13,9 @@ class FakeHA {
     this.registry.devices = this.registry.devices || {};
     this.activity = seed.activity || { now: new Date().toISOString(), earliest: {}, entries: {} };
     this.activityCalls = [];
+    /* Each zone's limits and day and night as they changed, for the history answer's limits (#148). */
+    this.limitsLog = seed.limitsLog || null;
+    this.historyCalls = [];
     this.knobs = { reportMs: 600, dropNext: false, dropAll: false, activityMs: 300, activity: null, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
     this.calls = [];
     this.saves = [];
@@ -132,6 +135,7 @@ class FakeHA {
     if (msg.type === "environment_control/config") return JSON.parse(JSON.stringify(this.config));
     if (msg.type === "environment_control/config/save") return this.save(msg);
     if (msg.type === "environment_control/activity") return this.activityPage(msg);
+    if (msg.type === "environment_control/history") return this.historyPage(msg);
     this.fail(`Unknown command ${msg.type}`);
   }
   /* One zone's activity for one local day, newest first, in the shape the backend's command returns. A real HA takes seconds
@@ -153,6 +157,44 @@ class FakeHA {
       .sort((a, b) => Date.parse(b.when) - Date.parse(a.when));
     const iso = (t) => new Date(t).toISOString();
     return JSON.parse(JSON.stringify({ zone: msg.zone, start: iso(Math.max(from, earliest)), end: iso(Math.max(to, from)), earliest: iso(earliest), more: from > earliest, next_end: iso(from), entries }));
+  }
+  /* What the backend's history command adds for a zone, a metric and a range: each limit as it was at the start of the
+     range and then each change, day and night apiece, and which of the two was in force, in unix seconds. The readings
+     themselves the mock draws from its own data. A limit with no recorded past is flat at what the zone holds now, and one
+     the log ends short of now ends at it, so a change saved in the mock steps at the right-hand edge. */
+  async historyPage(msg) {
+    this.historyCalls.push(JSON.parse(JSON.stringify(msg)));
+    if (Object.keys(msg).some((k) => !["type", "zone", "metric", "hours"].includes(k))) this.fail("History is asked for by zone, metric and range only");
+    const z = this.config.zones.find((o) => o.id === msg.zone);
+    if (!z) this.fail(`Zone ${msg.zone} not found`);
+    if (!["temperature", "humidity", "vpd", "light"].includes(msg.metric)) this.fail(`No metric ${msg.metric}`);
+    if (![6, 24, 72, 168].includes(msg.hours)) this.fail("A range is 6, 24, 72 or 168 hours");
+    const L = this.limitsLog || {}, log = (L.zones || {})[z.id] || {}, now = L.now || Math.floor(Date.now() / 1000), start = now - msg.hours * 3600;
+    const slice = (changes, current) => {
+      const out = [[start, changes.length ? changes[0][1] : current]];
+      for (const [t, v] of changes) { if (t <= start) out[0][1] = v; else if (t <= now && v !== out[out.length - 1][1]) out.push([t, v]); }
+      if (current !== undefined && out[out.length - 1][1] !== current) out.push([now, current]);
+      return out;
+    };
+    const light = { day: { min: z.lightLimits && z.lightLimits.dayMin }, night: { max: z.lightLimits && z.lightLimits.nightMax } };
+    const limits = { known_from: log.knownFrom > start ? log.knownFrom : null, period: slice(this.periodSwitches(z, start, now, L.offsetMin || 0)) };
+    for (const p of ["day", "night"]) {
+      limits[p] = {};
+      ["min", "low", "target", "high", "max"].forEach((s, i) => {
+        const current = msg.metric === "light" ? light[p][s] ?? null : (((z.bands || {})[p] || {})[msg.metric] || [])[i] ?? null;
+        limits[p][s] = slice((((log[p] || {})[msg.metric] || {})[s]) || [], current);
+      });
+    }
+    return JSON.parse(JSON.stringify({ zone: z.id, metric: msg.metric, hours: msg.hours, limits }));
+  }
+  /* Lights on and off at the zone's times, day by local day, across midnight where the times wrap. */
+  periodSwitches(z, start, now, offsetMin) {
+    const on = (z.dayAt ?? 0) * 60, off = (z.nightAt ?? 0) * 60, shift = offsetMin * 60, events = [];
+    for (let d = Math.floor((start + shift) / 86400) - 1; d <= Math.floor((now + shift) / 86400) + 1; d++) {
+      const midnight = d * 86400 - shift;
+      events.push([midnight + on, "day"], [midnight + off, "night"]);
+    }
+    return events.sort((a, b) => a[0] - b[0]);
   }
   /* The real backend checks every field against a schema. This checks enough to catch a host that forwards junk. */
   checkConfig(c, before) {
