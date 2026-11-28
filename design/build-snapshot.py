@@ -32,6 +32,9 @@ def band(zone, period, metric, stage):
     tg = num(tkey) if tkey in S else None
     if period == "day":
         lo, hi = [min(mx, max(mn, x)) for x in ATHENA[stage][metric]]
+        # A target outside the assumed stage would be refused as out of order, so Low and High widen to take it in.
+        if tg is not None:
+            lo, hi = min(lo, tg), max(hi, tg)
     else:
         mid = r2((mn + mx) / 2) if tg is None else tg
         lo, hi = r2((mn + mid) / 2), r2((mid + mx) / 2)
