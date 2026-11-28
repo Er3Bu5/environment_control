@@ -2546,6 +2546,8 @@ check("Limits 7d: the key says Low and High before 31 Oct 08:00 are shown as the
 top = await edge("range");
 check("Limits 7d: Max steps from 29 to 28.5 at 10:00 on 31 Oct", stepAt(top, (await at(-3*1440 + 600, 29))[0], (await at(0, 29))[1], (await at(0, 28.5))[1]), top && top.length);
 check("Limits 7d: one step per change or switch, no more", !!top && top.length < 60, top && top.length);
+const unknown = await ev(`(()=>{const v=(x)=>[[0,x]],side={min:v(20),low:v(22),target:v(null),high:v(26),max:v(28)},r=readLimits({day:side,night:side,period:[[0,"day"],[3600,null]],known_from:null},6);return r&&limitSteps(r,NOW-360,NOW).map(s=>[s.p,s.vals[4]])})()`);
+check("Limits: a stretch where day or night isn't known draws no band", JSON.stringify(unknown) === JSON.stringify([["day", 28], [null, null]]), unknown);
 await rangeBtn(6); await sleep(250);
 check("Limits 6h: no key line, Low and High are known for all of it", (await ev(`!document.querySelector("#chart-kf")`)) === true, await ev(`document.querySelector("#chart-key").textContent`));
 /* Veg has no recorded changes: flat at its limits now, stepping only at lights on (16:00) and off (10:00), across midnight. */
