@@ -14,6 +14,7 @@ what it watched is the zone's own. Home Assistant's own wording of a trigger can
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -46,6 +47,8 @@ PAD = timedelta(seconds=1)
 # The recorder's database threads are shared with Home Assistant's own history and logbook, and a timed-out read keeps
 # its thread, so only one Activity read runs at a time.
 _READ = f"{DOMAIN}_activity_read"
+
+_LOGGER = logging.getLogger(__name__)
 
 ENTITY = r"[a-z0-9_]+\.[a-z0-9_]+"
 # Triggers that start with what they watched: a zone's entering or leaving, and a template's entity.
@@ -281,6 +284,14 @@ async def _page(
             del hass.data[_READ]
 
 
+def _done(read: _Read, task: asyncio.Task[Any]) -> None:
+    # Runs before any caller still waiting is woken, so a caller left means the failure reaches it.
+    if task.cancelled() or (err := task.exception()) is None or read.waiters:
+        return
+    # A read whose callers all timed out has nobody to raise to.
+    _LOGGER.error("An Activity read failed after every caller had stopped waiting", exc_info=err)
+
+
 async def async_activity(
     hass: HomeAssistant, zone_id: str, zone: tuple[list[str], set[str], dict[str, str]], start: float, end: float
 ) -> dict[str, Any]:
@@ -303,15 +314,17 @@ async def async_activity(
     if read is not None and read.key != key:
         raise ActivityBusy
     if read is None:
-        read = hass.data[_READ] = _Read(key)
+        read = _Read(key)
         kept = set(entities)
         collapse = Collapse(set(devices) & kept, linked & kept, names, MAX_ENTRIES)
         event_types = async_determine_event_types(hass, entities, None)
         read.task = hass.async_create_background_task(
             _page(hass, read, collapse, entities, event_types, page), name=f"{DOMAIN} activity read"
         )
-        # A read whose callers all timed out has nobody to raise to.
-        read.task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        read.task.add_done_callback(lambda t: _done(read, t))
+        # Only once the task exists, whose end clears it: set any earlier, a line above that raised would leave
+        # Activity busy until Home Assistant restarts.
+        hass.data[_READ] = read
     else:
         read.waiters += 1
     try:

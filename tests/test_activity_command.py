@@ -435,3 +435,28 @@ async def test_a_read_that_timed_out_holds_its_place_until_its_thread_is_done(ro
     await asyncio.sleep(0.6)
     monkeypatch.setattr(activity, "_read", _slow_read([], 0))
     assert (await _activity(room, **{**msg, "end": msg["end"] - 60}))["success"]
+
+
+async def test_a_failure_before_the_read_starts_leaves_activity_free(room, monkeypatch) -> None:
+    from homeassistant.components.logbook import helpers
+
+    real = helpers.async_determine_event_types
+    monkeypatch.setattr(helpers, "async_determine_event_types", lambda *a: 1 / 0)
+    assert not (await _activity(room, **_day()))["success"]
+    monkeypatch.setattr(helpers, "async_determine_event_types", real)
+    r = await _activity(room, **_day())
+    assert r["success"], r
+
+
+async def test_a_read_that_fails_with_nobody_waiting_is_logged(room, monkeypatch, caplog) -> None:
+    def failing(*_args):
+        time.sleep(0.2)
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(activity, "SLICE_HOURS", 25)
+    monkeypatch.setattr(activity, "QUERY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(activity, "_read", failing)
+    assert (await _activity(room, **_day()))["error"]["code"] == "timeout"
+    await asyncio.sleep(0.4)
+    failed = [r for r in caplog.records if r.name == activity.__name__ and r.levelname == "ERROR"]
+    assert len(failed) == 1 and failed[0].exc_info[0] is RuntimeError
