@@ -6,7 +6,7 @@ import { LitElement, type PropertyValues, html, nothing, svg, type TemplateResul
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
-import { familyOrder, familyRuns, linkText, linkedZones, moveWords, parentChoices, parentOf, setParent } from "./family";
+import { familyOrder, familyRuns, linkText, linkedZones, moveWords, parentChoices, parentOf, setParent, zoneList } from "./family";
 import { editIn, effectiveZone, notHereWords, takesOf, type Takes } from "./inherit";
 import { inOrder, moveFamily, moveZone, orderZones } from "./sort";
 import {
@@ -3424,7 +3424,7 @@ export class EcApp extends LitElement {
   private linkedBox(w: Wizard) {
     const kids = w.id ? linkedZones(this.zones, w.id) : [];
     if (kids.length)
-      return html`<p class="small" id="wiz-linked">${kids.map((o) => `Zone: ${o.name}`).join(", ")} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.</p>`;
+      return html`<p class="small" id="wiz-linked">${zoneList(kids)} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.</p>`;
     return html`<div id="wiz-linked">
       <label class="inavg"
         ><input type="checkbox" id="wiz-linkme" .checked=${live(w.linked)} @change=${(e: Event) => {

@@ -95,6 +95,9 @@ describe("sharing a sensor", () => {
     expect(sensorRefusal([Z("veg"), Z("garden"), Z("tent", "garden")], "veg", ["tent"])).toBe(
       "This sensor is already associated to Zone: Tent. Tent is itself linked to Zone: Garden, so it can't be this zone's parent.",
     );
+    expect(sensorRefusal([...zones, Z("seedlings", "veg")], "veg", ["garden"])).toBe(
+      "This sensor is already associated to Zone: Garden. Zone: Nursery and Seedlings are linked to this zone, so it can't be linked to another.",
+    );
   });
 });
 
@@ -104,8 +107,14 @@ describe("linkText", () => {
   it("names a linked zone's parent, and the zones linked to a parent", () => {
     expect(linkText(zones, zones[2])).toBe("Linked to Zone: Veg");
     expect(linkText(zones, zones[1])).toBe("Zone: Nursery is linked to this zone");
+  });
+
+  it("says Zone: once for two or three linked zones, then the bare names", () => {
     const two = [...zones, { id: "seedlings", name: "Seedlings", parent: "veg" }];
-    expect(linkText(two, two[1])).toBe("Zone: Nursery, Zone: Seedlings are linked to this zone");
+    expect(linkText(two, two[1])).toBe("Zone: Nursery and Seedlings are linked to this zone");
+    const three = [...two, { id: "clones", name: "Clones", parent: "veg" }];
+    expect(linkText(three, three[1])).toBe("Zone: Nursery, Seedlings and Clones are linked to this zone");
+    expect(linkText(three, three[2])).toBe("Linked to Zone: Veg");
   });
 
   it("says nothing for a zone on its own, or one linked to a zone that's gone", () => {
