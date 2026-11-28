@@ -272,8 +272,149 @@ def _check_room(room: Any) -> None:
         _fail("The alert repeat rate links to something that isn't a number helper")
 
 
-def validate_config(c: Any) -> None:
-    """Raise InvalidConfig if the setup can't be stored."""
+# Linked zones. A zone may name one parent; a parent and the zones linked to it are a family. These rules and their
+# messages mirror the mock's fake backend (design/fake-ha.js, checkConfig and save) word for word, so the two refuse
+# the same things.
+_NO_PARENT = object()
+
+
+def _zone_name(z: dict[str, Any]) -> str:
+    return z.get("name") or z["id"]
+
+
+def _zone_list(zones: list[dict[str, Any]]) -> str:
+    """The zones as one sentence, written as the panel names zones: "Zone: X" the first time, the bare name after."""
+    names = [_zone_name(z) for z in zones]
+    return "Zone: " + (names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}")
+
+
+def _check_zone_name(z: dict[str, Any]) -> None:
+    """A zone's name goes into refusals, so it is held to a link's name: short text with no control characters."""
+    name = z.get("name")
+    if name is not None and not (
+        isinstance(name, str)
+        and name.strip(JS_TRIMMED)
+        and len(name.encode("utf-16-le", "surrogatepass")) // 2 <= MAX_NAME
+        and LINK_NAME.fullmatch(name)
+    ):
+        _fail(f"{z['id']} has a name that isn't short text")
+
+
+def _check_parents(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
+    """A linked zone shows what its parent runs, so a parent has to be a plain zone: one level, never itself."""
+    was = {z.get("id"): z.get("parent", _NO_PARENT) for z in before if isinstance(z, dict)}
+    by_id = {z["id"]: z for z in zones}
+
+    def moved(z: dict[str, Any]) -> bool:
+        return was.get(z["id"], _NO_PARENT) != z.get("parent", _NO_PARENT)
+
+    # The reason is told from the side of the zone whose link just changed: a new zone linked to a linked zone hears
+    # that its parent is linked, not that the parent has zones linked to it.
+    for z in sorted(zones, key=lambda z: not moved(z)):
+        if "parent" not in z:
+            continue
+        zid, pid = z["id"], z["parent"]
+        parent = by_id.get(pid) if isinstance(pid, str) else None
+        if parent is None:
+            _fail(f"{zid} is linked to a zone that doesn't exist")
+        if parent is z:
+            _fail(f"{zid} can't be linked to itself")
+        if any(o.get("parent") == zid for o in zones):
+            _fail(f"{zid} has zones linked to it, so it can't be linked to another")
+        if "parent" in parent:
+            _fail(f"{zid} is linked to a zone that is itself linked to another")
+
+
+def _check_shared_sensors(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
+    """A sensor in two zones shows one zone's readings in another, which only a parent link may do."""
+    was = {z.get("id"): z.get("parent") for z in before if isinstance(z, dict)}
+    held: dict[Any, set[Any]] = {}
+    for z in before:
+        for x in z.get("sensors") if isinstance(z.get("sensors"), list) else []:
+            if isinstance(x, dict) and isinstance(x.get("id"), str):
+                held.setdefault(x["id"], set()).add(z.get("id"))
+    holders: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    for z in zones:
+        for x in z.get("sensors") or []:
+            holders.setdefault(x["id"], []).append((z, x.get("name") or x["id"]))
+
+    def family(z: dict[str, Any]) -> Any:
+        return z.get("parent") or z["id"]
+
+    def family_before(zid: str) -> Any:
+        return was.get(zid) or zid
+
+    for sid, found in holders.items():
+        if len({family(z) for z, _ in found}) == 1:
+            continue
+        # A setup stored before this rule can hold a sensor in several unrelated zones, and the panel saves one zone at
+        # a time, so such a share is let through while it only shrinks: no zone joins it and no linked pair in it
+        # comes apart. Refusing it outright would leave a sensor in three unrelated zones impossible to repair.
+        if {z["id"] for z, _ in found} <= held.get(sid, set()) and all(
+            family_before(a["id"]) != family_before(b["id"])
+            for a, _ in found
+            for b, _ in found
+            if family(a) != family(b)
+        ):
+            continue
+        # The zone stops sharing only by taking the shared sensor out first, so breaking the link is refused by name.
+        # A link this save leaves in place isn't being broken, so that pair isn't what the save got wrong.
+        for i, (a, sensor) in enumerate(found):
+            for j, (b, _) in enumerate(found):
+                child, other = (a, b) if was.get(a["id"]) == b["id"] else (b, a)
+                if i != j and was.get(child["id"]) == other["id"] and child.get("parent") != other["id"]:
+                    _fail(
+                        f"{sensor} is in both {_zone_name(a)} and {_zone_name(b)}. "
+                        f"Take it out of {_zone_name(child)} before unlinking it."
+                    )
+        named: list[dict[str, Any]] = []
+        for z, _ in found:
+            if not any(z is n for n in named):
+                named.append(z)
+        _fail(
+            f"{found[0][1]} is in {_zone_list(named)}. "
+            "A sensor can only be shared between a zone and the zones linked to it."
+        )
+
+
+def unlink_removed_parents(before: dict[str, Any], c: Any) -> Any:
+    """Removing a parent zone unlinks the zones linked to it, which stay, unless one still has a sensor of the parent's.
+
+    The panel saves the whole setup at once, so a zone removed in this save can still be named as a parent by the zones
+    linked to it. Only a parent the stored setup has and this save drops is unlinked: a parent no setup ever had is
+    left for validate_config to refuse, so nothing stored can name a zone that isn't there.
+    """
+    if not isinstance(c, dict) or not isinstance(c.get("zones"), list):
+        return c
+    old = [z for z in before.get("zones") or [] if isinstance(z, dict)]
+    kept = {z.get("id") for z in c["zones"] if isinstance(z, dict) and isinstance(z.get("id"), str)}
+    removed = [z for z in old if z.get("id") not in kept]
+    if not removed:
+        return c
+    was = {z.get("id"): z.get("parent") for z in old}
+    zones = []
+    for z in c["zones"]:
+        zid = z.get("id") if isinstance(z, dict) else None
+        if not (isinstance(zid, str) and ZONE_ID.fullmatch(zid)):
+            zones.append(z)
+            continue
+        names = {p for p in (z.get("parent"), was.get(zid)) if isinstance(p, str)}
+        sensors = z.get("sensors") if isinstance(z.get("sensors"), list) else []
+        mine = [s.get("id") for s in sensors if isinstance(s, dict)]
+        for gone in (p for p in removed if p.get("id") in names):
+            shared = next((s for s in gone.get("sensors") or [] if s.get("id") in mine), None)
+            if shared is not None:
+                _check_zone_name(z)
+                sensor, here, there = shared.get("name") or shared["id"], _zone_name(z), _zone_name(gone)
+                _fail(f"{sensor} is in both {there} and {here}. Take it out of {here} before removing {there}.")
+        if any(p.get("id") == z.get("parent") for p in removed):
+            z = {k: v for k, v in z.items() if k != "parent"}
+        zones.append(z)
+    return {**c, "zones": zones}
+
+
+def validate_config(c: Any, before: dict[str, Any] | None = None) -> None:
+    """Raise InvalidConfig if the setup can't be stored. `before` is the stored setup it replaces."""
     if not isinstance(c, dict) or not isinstance(c.get("zones"), list) or not isinstance(c.get("devices"), list):
         _fail("Config isn't zones and devices")
     if not set(c) <= CONFIG_KEYS:
@@ -290,7 +431,11 @@ def validate_config(c: Any) -> None:
     ids = [z.get("id") for z in zones]
     if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.fullmatch(i) for i in ids):
         _fail("Zone ids must be unique slugs")
+    for z in zones:
+        _check_zone_name(z)
     by_id = {z["id"]: z for z in zones}
+    stored = [z for z in (before or {}).get("zones") or [] if isinstance(z, dict)]
+    _check_parents(zones, stored)
     linked: set[str] = set()
 
     for z in zones:
@@ -383,6 +528,7 @@ def validate_config(c: Any) -> None:
                 # One added in Device identification has no spot until Device placement gives it one.
                 if v.get("pos") is not None and not _spot_ok(v.get("pos"), z.get("layout")):
                     _fail(f"{vid} is placed outside {zid}'s map")
+    _check_shared_sensors(zones, stored)
 
     for d in devices:
         did, dz = d.get("id"), d.get("zones")
