@@ -370,8 +370,14 @@ test.describe("targets, day and night", () => {
     await chart.scrollIntoViewIfNeeded();
     const r = await chart.boundingBox();
     if (!r) throw new Error("no chart");
-    /* The chart's own units: 692 wide, a column of 34 per degree from 16° centred at 55. */
-    const x = (t: number) => r.x + ((38 + (t - 16) * 34 + 17) / 692) * r.width, y = r.y + r.height / 2;
+    /* Page x of a temperature, read off the axis labels as drawn now: the axis follows the limits once a drag ends. */
+    const xNow = async () => {
+      const t = chart.locator("[data-vtick]"), [a, b] = [(await t.nth(0).boundingBox())!, (await t.nth(1).boundingBox())!];
+      const [ta, tb] = [Number(await t.nth(0).getAttribute("data-vtick")), Number(await t.nth(1).getAttribute("data-vtick"))];
+      return (deg: number) => a.x + a.width / 2 + ((deg - ta) * (b.x + b.width / 2 - a.x - a.width / 2)) / (tb - ta);
+    };
+    let x = await xNow();
+    const y = r.y + r.height / 2;
     await page.mouse.move(x(28.2), y);
     await page.mouse.down();
     await page.mouse.move(x(30), y, { steps: 4 });
@@ -380,6 +386,7 @@ test.describe("targets, day and night", () => {
     await expect(card(frame).locator(".now")).toContainText("Temperature Max 30°");
     await page.keyboard.press("ArrowLeft");
     await expect(box(frame, "Temperature Max")).toHaveValue("29.5");
+    x = await xNow();
     await page.mouse.move(x(29.5), y);
     await page.mouse.down();
     await page.mouse.move(x(20), y, { steps: 4 });

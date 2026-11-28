@@ -24,6 +24,16 @@ export function moveZone(order: readonly string[], id: string, by: -1 | 1, zones
   return runs.flatMap((r) => ids(r.zones));
 }
 
+/* A whole family, by its own arrows, one step past the next zone or family. Its order inside is kept, and at either end
+   the order comes back as it was. */
+export function moveFamily(order: readonly string[], root: string, by: -1 | 1, zones: readonly Kin[] = []): string[] {
+  const runs = familyRuns(order.map((x) => zones.find((z) => z.id === x) ?? { id: x }));
+  const at = runs.findIndex((r) => r.root === root), to = at + by;
+  if (at < 0 || to < 0 || to >= runs.length) return [...order];
+  runs.splice(to, 0, ...runs.splice(at, 1));
+  return runs.flatMap((r) => r.zones.map((z) => z.id as string));
+}
+
 /* A zone added or removed elsewhere while sorting is taken in rather than lost or kept: a removed one drops out, and a
    new one joins at the end. */
 export function inOrder<T extends { id?: unknown }>(list: readonly T[], order: readonly string[]): T[] {
