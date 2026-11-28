@@ -113,6 +113,15 @@ export function niceTicks(lo: number, hi: number, about = 4): { at: number[]; dp
   return { at, dp };
 }
 
+/* The y axis numbers get a gutter only as wide as the widest of them, so a narrow axis (temperature) doesn't leave the
+   left looking empty beside a plot that runs almost to the right edge. Both sides keep the same small inset, just enough
+   that a hover dot at either end isn't cut off. Label widths are measured by the caller, which has the font. */
+export const CHART_EDGE = 4, CHART_GAP = 6;
+export function chartGutters(W: number, labelWidths: number[]): { L: number; R: number; PW: number } {
+  const L = CHART_EDGE + Math.ceil(Math.max(0, ...labelWidths)) + CHART_GAP;
+  return { L, R: CHART_EDGE, PW: W - L - CHART_EDGE };
+}
+
 /* Round clock times to label the x axis with: on the hour within a day, at midnight beyond, fewer on a narrow chart. */
 export function timeTicks(from: number, to: number, hours: number, narrow: boolean): number[] {
   const stepH = hours <= 6 ? (narrow ? 2 : 1) : hours <= 24 ? (narrow ? 6 : 4) : hours <= 72 || !narrow ? 24 : 48;

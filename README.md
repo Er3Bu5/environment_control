@@ -51,6 +51,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 # Frontend
 cd frontend && npm ci --ignore-scripts
 npm run typecheck && npm test && npm run build && npm run e2e
+# The browser tests serve the panel on port 4173; set PANEL_PORT (1024-65535) to run in two worktrees at once
 
 # Safety and privacy checks
 python3 scripts/check_backend_safety.py && python3 scripts/check_frontend_safety.py && python3 scripts/check_privacy.py

@@ -271,7 +271,7 @@ import {
   toggleLink,
 } from "./automations";
 import { alertsCard, automationsPage, failsafeNoticeView, linkPage } from "./automations-view";
-import { LIGHT_LINE, RANGES, type Point, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
+import { LIGHT_LINE, RANGES, type Point, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
@@ -441,6 +441,14 @@ export class EcApp extends LitElement {
   declare private chartAt: number | null;
   declare private chartW: number;
   private chartGeom: { W: number; L: number; PW: number; n: number } | null = null;
+  private chartPen: CanvasRenderingContext2D | null = null;
+  /* Measured at the chart's own 11px label size; a rough per-character width stands in where there's no canvas. */
+  private labelWidth(text: string): number {
+    this.chartPen ??= document.createElement("canvas").getContext("2d");
+    if (!this.chartPen) return text.length * 6.5;
+    this.chartPen.font = `11px ${getComputedStyle(this.chartEl ?? this).fontFamily}`;
+    return this.chartPen.measureText(text).width;
+  }
   private chartEl: Element | null = null;
   private chartRO: ResizeObserver | null = null;
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
@@ -2118,7 +2126,11 @@ export class EcApp extends LitElement {
     const bands = judged && k !== "light" ? { day: bandsOf(live, "day", k), night: bandsOf(live, "night", k) } : null;
     const limits = bands ? [bands.day, bands.night].flatMap((b) => (b ? [b[0], b[4]].filter((x): x is number => x !== null) : [])) : [];
     const [lo, hi] = yRange(rows.map((r) => r.line), k, limits);
-    const W = Math.max(300, this.chartW || 300), H = W < 520 ? 210 : 260, L = 46, Rm = 8, T = 8, B = 22, PW = W - L - Rm, PH = H - T - B;
+    /* Both axes are labelled at round numbers and round clock times, wherever those fall inside the plot. */
+    const yt = niceTicks(lo, hi);
+    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(yt.dp));
+    const W = Math.max(300, this.chartW || 300), H = W < 520 ? 210 : 260, T = 8, B = 22, PH = H - T - B;
+    const { L, R: Rm, PW } = chartGutters(W, yt.at.map((v) => this.labelWidth(axis(v))));
     this.chartGeom = { W, L, PW, n };
     const X = (i: number) => L + (n ? i / n : 0) * PW, Y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * PH;
     /* A zone following its switches has no times to shade by; that waits for their recorded history. */
@@ -2134,9 +2146,6 @@ export class EcApp extends LitElement {
         if (b[2] !== null) parts.push(svg`<line x1=${x} x2=${x + w} y1=${Y(tg)} y2=${Y(tg)} stroke="var(--muted)" stroke-dasharray="3 3"></line>`);
       }
     }
-    /* Both axes are labelled at round numbers and round clock times, wherever those fall inside the plot. */
-    const yt = niceTicks(lo, hi);
-    const axis = (v: number) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString() : `${Math.round(v / 1000)}k`) : v.toFixed(yt.dp));
     for (const v of yt.at) {
       const y = Y(v);
       parts.push(svg`<line x1=${L} x2=${W - Rm} y1=${y} y2=${y} stroke="var(--line)"></line><text x=${L - 6} y=${y + 4} text-anchor="end">${axis(v)}</text>`);

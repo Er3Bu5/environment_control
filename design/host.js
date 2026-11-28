@@ -20,6 +20,8 @@
   const HELPER = /^input_(number|datetime)\.[a-z0-9_]{1,200}$/;
   /* Automations a zone links can be switched on and off, and nothing else: HA keeps running them. */
   const AUTOMATION = /^automation\.[a-z0-9_]{1,200}$/;
+  /* Activity is asked for by zone and local day, never by entity. */
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
   const automationLinks = (z) => (Array.isArray(z.automations) ? z.automations : []).filter((a) => a && typeof a.entity === "string" && AUTOMATION.test(a.entity));
   /* The room's own settings: the one helper every alert's repeat rate comes from. */
   const roomHelper = (config) => { const e = config && config.room && config.room.alertRepeat; return typeof e === "string" && /^input_number\.[a-z0-9_]{1,200}$/.test(e) ? e : null; };
@@ -72,6 +74,8 @@
       this.shadow = this.attachShadow({ mode: "closed" });
       this.forwarded = {};
       this.onMessage = this.onMessage.bind(this);
+      /* A real HA can take many seconds over a day of logbook, but past this the frame offers a retry rather than spin on. */
+      this.activityTimeoutMs = 20000;
       /* The frame has no allow-modals, so it can't ask before the page closes. It says whether a draft is open, and this
          raises the browser's own leave prompt instead. The worst a compromised frame can do with that is ask needlessly. */
       this.onUnload = (e) => { if (this.draftOpen) { e.preventDefault(); e.returnValue = ""; } };
@@ -214,6 +218,7 @@
       else if (m.type === "helpers") this.helpers(m);
       else if (m.type === "automation") this.automation(m);
       else if (m.type === "automations") this.automations(m);
+      else if (m.type === "activity") this.activity(m);
       else if (m.type === "appearance") this.setAppearance(m);
     }
     /* Setup's helper picker: number helpers and time-only date helpers, with only the allowlisted attributes. Reading the list
@@ -244,6 +249,21 @@
         if (list.length >= 2000) break;
       }
       this.post({ type: "result", req: m.req, ok: true, automations: list });
+    }
+    /* One zone's activity for one day. The zone must be one this element holds, so the frame can't use this to read the
+       logbook for anything else. Busy and too slow come back as their own errors, so the frame can say which and retry. */
+    async activity(m) {
+      if (!Number.isInteger(m.req)) return;
+      const zones = (this.config && Array.isArray(this.config.zones)) ? this.config.zones : [];
+      if (typeof m.zone !== "string" || !zones.some((z) => z && z.id === m.zone) || typeof m.day !== "string" || !DAY.test(m.day)) return this.reply(m.req, false, "failed");
+      let timer;
+      const late = new Promise((_, no) => { timer = setTimeout(() => no(Object.assign(new Error("timeout"), { code: "timeout" })), this.activityTimeoutMs); });
+      try {
+        const page = await Promise.race([this._hass.connection.sendMessagePromise({ type: "environment_control/activity", zone: m.zone, day: m.day }), late]);
+        this.post({ type: "result", req: m.req, ok: true, page });
+      } catch (e) {
+        this.reply(m.req, false, e && (e.code === "busy" || e.code === "timeout") ? e.code : "failed");
+      } finally { clearTimeout(timer); }
     }
     reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
 
