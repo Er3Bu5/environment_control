@@ -1,10 +1,11 @@
 """The backend's own checks on a setup, the same ones the mock's fake backend makes."""
 
 import copy
+import re
 
 import pytest
 
-from custom_components.environment_control.validation import InvalidConfig, validate_config
+from custom_components.environment_control.validation import InvalidConfig, unlink_removed_parents, validate_config
 
 
 def test_the_sample_room_is_valid(sample_config) -> None:
@@ -15,6 +16,23 @@ def _bad(sample_config, change):
     c = copy.deepcopy({"zones": sample_config["zones"], "devices": sample_config["devices"]})
     change(c)
     return c
+
+
+# The mock's fake backend refuses exactly these too: the two mirror each other.
+BAD_LINK_NAMES = {
+    "that isn't text": 12,
+    "that is null": None,
+    "that is empty": "",
+    "of only spaces": "   ",
+    "with a space in front": " Fan",
+    "with a no-break space behind": "Fan\u00a0",
+    "with a byte order mark in front": "\ufeffFan",
+    "too long": "x" * 101,
+    "too long as JavaScript counts it": "\U0001f331" * 51,
+    "with a control character": "Fan\x07",
+    "with a newline": "Fan\nlights",
+    "with a delete character": "Fan\x7f",
+}
 
 
 CASES = {
@@ -176,16 +194,31 @@ CASES = {
         lambda c: c["zones"][0].update(
             automations=[{"id": "a1", "entity": "automation.x", "group": "control", "service": "automation.trigger"}]
         ),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
     "automation link without a group": (
         lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x"}]),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
     "automation link that isn't an object": (
         lambda c: c["zones"][0].update(automations=["automation.x"]),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
+    "automation link with a name and something else": (
+        lambda c: c["zones"][0].update(
+            automations=[{"id": "a1", "entity": "automation.x", "group": "control", "name": "Fan", "icon": "mdi:fan"}]
+        ),
+        "an id, an entity, a group and a name",
+    ),
+    **{
+        f"automation link name {why}": (
+            lambda c, name=name: c["zones"][0].update(
+                automations=[{"id": "a1", "entity": "automation.x", "group": "control", "name": name}]
+            ),
+            "name that isn't short text",
+        )
+        for why, name in BAD_LINK_NAMES.items()
+    },
     "automation link id with odd characters": (
         lambda c: c["zones"][0].update(automations=[{"id": "A 1", "entity": "automation.x", "group": "control"}]),
         "unique ids",
@@ -218,6 +251,43 @@ CASES = {
         ),
         "or one twice",
     ),
+    "automation with a trailing newline": (
+        lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x\n", "group": "control"}]),
+        "isn't an automation",
+    ),
+    "one automation linked twice in a zone, once with a trailing newline": (
+        lambda c: c["zones"][0].update(
+            automations=[
+                {"id": "a1", "entity": "automation.x", "group": "alert_day"},
+                {"id": "a2", "entity": "automation.x\n", "group": "failsafe"},
+            ]
+        ),
+        "isn't an automation",
+    ),
+    "one automation in two zones, once with a trailing newline": (
+        lambda c: (
+            c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x", "group": "control"}]),
+            c["zones"][1].update(automations=[{"id": "a1", "entity": "automation.x\n", "group": "control"}]),
+        ),
+        "isn't an automation",
+    ),
+    "device entity with a trailing newline": (
+        lambda c: c["devices"].append({"id": "x", "zones": [], "entity": "switch.x\n"}),
+        "can't control",
+    ),
+    "sensor reading with a trailing newline": (
+        lambda c: c["zones"][0]["sensors"][0].update(entities={"temperature": "sensor.x\n"}),
+        "isn't a sensor entity",
+    ),
+    "helper with a trailing newline": (
+        lambda c: c["zones"][0].update(helpers={"day": "input_datetime.x\n"}),
+        "isn't a helper",
+    ),
+    "alert repeat with a trailing newline": (
+        lambda c: c.update(room={"alertRepeat": "input_number.x\n"}),
+        "isn't a number helper",
+    ),
+    "zone id with a trailing newline": (lambda c: c["zones"][0].update(id=c["zones"][0]["id"] + "\n"), "unique slugs"),
     "automation in a group the panel doesn't know": (
         lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x", "group": "other"}]),
         "group this panel doesn't know",
@@ -248,6 +318,15 @@ def test_a_bad_setup_is_refused_with_why(sample_config, name) -> None:
     change, why = CASES[name]
     with pytest.raises(InvalidConfig, match=why):
         validate_config(_bad(sample_config, change))
+
+
+@pytest.mark.parametrize("name", ["Exhaust", "Lüfter Nacht - Zelt 2", "x" * 100, "\U0001f331" * 50])
+def test_an_automation_link_can_carry_a_short_name(sample_config, name) -> None:
+    sample_config["zones"][0]["automations"] = [
+        {"id": "a1", "entity": "automation.x", "group": "control", "name": name},
+        {"id": "a2", "entity": "automation.y", "group": "failsafe"},
+    ]
+    validate_config({"zones": sample_config["zones"], "devices": sample_config["devices"]})
 
 
 def test_a_boolean_is_not_a_minute(sample_config) -> None:
@@ -397,10 +476,24 @@ def test_a_zone_can_link_automations_in_every_group(sample_config) -> None:
     validate_config(c)
 
 
-def test_two_zones_can_share_an_automation(sample_config) -> None:
+def test_two_zones_cannot_link_one_automation(sample_config) -> None:
+    """Even in different groups and under different ids: switched off for one zone it would stop in the other."""
+    c = _bad(sample_config, lambda c: [z.update(automations=[]) for z in c["zones"]])
+    c["zones"][0]["automations"] = [{"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}]
+    c["zones"][2]["automations"] = [
+        {"id": "a1", "entity": "automation.tent_lights_on", "group": "control"},
+        {"id": "a2", "entity": "automation.failsafe_veg_fans_auto_on", "group": "alert_device"},
+    ]
+    with pytest.raises(InvalidConfig, match=r"^An automation can only be linked to one zone\.$"):
+        validate_config(c)
+
+
+def test_an_automation_can_be_linked_by_one_zone(sample_config) -> None:
     link = {"id": "a1", "entity": "automation.failsafe_veg_fans_auto_on", "group": "failsafe"}
-    c = _bad(sample_config, lambda c: [z.update(automations=[dict(link)]) for z in c["zones"][:2]])
-    validate_config(c)
+    for zone in range(3):
+        c = _bad(sample_config, lambda c: [z.update(automations=[]) for z in c["zones"]])
+        c["zones"][zone]["automations"] = [dict(link)]
+        validate_config(c)
 
 
 def test_a_zone_can_link_no_automations(sample_config) -> None:
@@ -410,3 +503,290 @@ def test_a_zone_can_link_no_automations(sample_config) -> None:
 @pytest.mark.parametrize("room", [{}, {"alertRepeat": "input_number.alert_repeat_rate"}])
 def test_the_room_can_link_the_alert_repeat_helper_or_nothing(sample_config, room) -> None:
     validate_config(_bad(sample_config, lambda c: c.update(room=room)))
+
+
+# Linked zones. The sample room has Nursery linked to Veg; Veg and Garden are plain zones. The mock's fake backend
+# refuses exactly these, with the same words: the two mirror each other.
+def _room(sample_config):
+    return copy.deepcopy({"zones": sample_config["zones"], "devices": sample_config["devices"]})
+
+
+def _zone(c, zid):
+    return next(z for z in c["zones"] if z["id"] == zid)
+
+
+def _sensor(c, zid, sid):
+    return copy.deepcopy(next(s for s in _zone(c, zid)["sensors"] if s["id"] == sid))
+
+
+def _bench(c, parent, *sensors):
+    """A fourth zone, as Add zone makes one."""
+    z = {"id": "bench", "name": "Bench", "sensors": [_sensor(c, *s) for s in sensors]}
+    for s in z["sensors"]:
+        s.pop("pos", None)  # Bench has no map yet
+    if parent is not None:
+        z["parent"] = parent
+    c["zones"].append(z)
+
+
+SHARED = "A sensor can only be shared between a zone and the zones linked to it."
+LINK_CASES = {
+    "a parent that isn't text": (
+        lambda c: _zone(c, "nursery").update(parent=5),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "a parent that is null": (
+        lambda c: _zone(c, "nursery").update(parent=None),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "a parent that is a list": (
+        lambda c: _zone(c, "nursery").update(parent=["veg"]),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "a parent that doesn't exist": (
+        lambda c: _zone(c, "nursery").update(parent="attic"),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "a zone linked to itself": (
+        lambda c: _zone(c, "nursery").update(parent="nursery"),
+        "nursery can't be linked to itself",
+    ),
+    "a zone linked to a linked zone": (
+        lambda c: _bench(c, "nursery"),
+        "bench is linked to a zone that is itself linked to another",
+    ),
+    "a plain zone linked to a linked zone": (
+        lambda c: _zone(c, "garden").update(parent="nursery"),
+        "garden is linked to a zone that is itself linked to another",
+    ),
+    "a parent becoming linked": (
+        lambda c: _zone(c, "veg").update(parent="garden"),
+        "veg has zones linked to it, so it can't be linked to another",
+    ),
+    "a sensor in two plain zones": (
+        lambda c: _zone(c, "garden")["sensors"].append(_sensor(c, "veg", "v-env")),
+        f"Veg environment is in Zone: Garden and Veg. {SHARED}",
+    ),
+    "a linked zone's sensor in an unrelated zone": (
+        lambda c: _zone(c, "garden")["sensors"].append(_sensor(c, "nursery", "n-env")),
+        f"Nursery environment is in Zone: Garden and Nursery. {SHARED}",
+    ),
+    "a sensor shared by zones linked to different parents": (
+        lambda c: (
+            _zone(c, "nursery")["sensors"].append(_sensor(c, "garden", "g-left")),
+            _bench(c, "garden", ("garden", "g-left")),
+        ),
+        f"Environment left is in Zone: Garden, Nursery and Bench. {SHARED}",
+    ),
+    "a parent that is empty text": (
+        lambda c: _zone(c, "nursery").update(parent=""),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "two zones linked to each other in one save": (
+        lambda c: (
+            _zone(c, "nursery").pop("parent"),
+            _zone(c, "garden").update(parent="veg"),
+            _zone(c, "veg").update(parent="garden"),
+        ),
+        "garden has zones linked to it, so it can't be linked to another",
+    ),
+    "a chain linked in one save": (
+        lambda c: (
+            _zone(c, "nursery").pop("parent"),
+            _zone(c, "garden").update(parent="veg"),
+            _zone(c, "veg").update(parent="nursery"),
+        ),
+        "garden is linked to a zone that is itself linked to another",
+    ),
+    "a zone name that isn't text": (
+        lambda c: _zone(c, "garden").update(name=5),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name that is too long": (
+        lambda c: _zone(c, "garden").update(name="G" * 101),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name with a line break": (
+        lambda c: _zone(c, "garden").update(name="Gar\nden"),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name that is only spaces": (
+        lambda c: _zone(c, "garden").update(name="  "),
+        "garden has a name that isn't short text",
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(LINK_CASES))
+def test_a_bad_link_is_refused_with_why(sample_config, name) -> None:
+    before = _room(sample_config)
+    change, why = LINK_CASES[name]
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(_bad(sample_config, change), before)
+
+
+ALLOWED = {
+    "a linked zone sharing its parent's sensor": lambda c: _zone(c, "nursery")["sensors"].append(
+        _sensor(c, "veg", "v-env")
+    ),
+    "a parent taking its linked zone's sensor": lambda c: _zone(c, "veg")["sensors"].append(
+        _sensor(c, "nursery", "n-env")
+    ),
+    "two linked zones sharing the parent's sensor": lambda c: (
+        _zone(c, "nursery")["sensors"].append(_sensor(c, "veg", "v-env")),
+        _bench(c, "veg", ("veg", "v-env"), ("nursery", "n-env")),
+    ),
+    "a new zone linked to a plain zone": lambda c: _bench(c, "garden", ("garden", "g-under")),
+    "a zone with no parent": lambda c: _zone(c, "nursery").pop("parent"),
+    "a device in unrelated zones": lambda c: c["devices"][0].update(zones=["garden", "veg", "nursery"]),
+}
+
+
+@pytest.mark.parametrize("name", list(ALLOWED))
+def test_a_family_may_share_sensors_and_any_zones_devices(sample_config, name) -> None:
+    validate_config(_bad(sample_config, ALLOWED[name]), _room(sample_config))
+
+
+def test_the_sample_room_has_a_linked_zone(sample_config) -> None:
+    assert _zone(sample_config, "nursery")["parent"] == "veg"
+    with pytest.raises(InvalidConfig, match="nursery is linked to a zone that doesn't exist"):
+        validate_config(_bad(sample_config, lambda c: c["zones"].remove(_zone(c, "veg"))))
+
+
+def _sharing(sample_config):
+    c = _room(sample_config)
+    _zone(c, "nursery")["sensors"].append(_sensor(c, "veg", "v-env"))
+    return c
+
+
+def test_unlinking_a_zone_that_shares_a_sensor_names_the_sensor(sample_config) -> None:
+    before = _sharing(sample_config)
+    c = copy.deepcopy(before)
+    del _zone(c, "nursery")["parent"]
+    why = "Veg environment is in both Veg and Nursery. Take it out of Nursery before unlinking it."
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, before)
+    # Linking it elsewhere breaks the same link.
+    _zone(c, "nursery")["parent"] = "garden"
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, before)
+
+
+def test_unlinking_a_zone_that_shares_nothing_is_allowed(sample_config) -> None:
+    before = _room(sample_config)
+    c = copy.deepcopy(before)
+    del _zone(c, "nursery")["parent"]
+    validate_config(c, before)
+    _zone(c, "nursery")["parent"] = "garden"
+    validate_config(c, before)
+
+
+def test_a_sensor_shared_by_a_family_and_an_unrelated_zone_is_not_an_unlinking(sample_config) -> None:
+    """The Veg and Nursery link stays: only Garden is new, so the refusal names the three zones, not an unlinking."""
+    before = _sharing(sample_config)
+    c = copy.deepcopy(before)
+    _zone(c, "garden")["sensors"].append(_sensor(c, "veg", "v-env"))
+    why = f"Veg environment is in Zone: Garden, Veg and Nursery. {SHARED}"
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, before)
+
+
+def _stored_before_the_rule(sample_config):
+    """A setup saved before linked zones existed: Veg's sensor in all three zones, none of them linked."""
+    c = _room(sample_config)
+    del _zone(c, "nursery")["parent"]
+    for zid in ("garden", "nursery"):
+        _zone(c, zid)["sensors"].append(_sensor(c, "veg", "v-env"))
+    return c
+
+
+def _drop(c, zid, sid):
+    c = copy.deepcopy(c)
+    _zone(c, zid)["sensors"] = [s for s in _zone(c, zid)["sensors"] if s["id"] != sid]
+    return c
+
+
+def test_a_stored_share_in_three_unrelated_zones_can_be_taken_apart_one_zone_at_a_time(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    once = _drop(stored, "nursery", "v-env")
+    validate_config(once, stored)
+    validate_config(_drop(once, "garden", "v-env"), once)
+
+
+def test_a_stored_share_saved_as_it_is_with_something_else_changed_is_allowed(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    c = copy.deepcopy(stored)
+    _zone(c, "garden")["name"] = "Flower"
+    validate_config(c, stored)
+
+
+def test_a_stored_share_may_not_grow(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    c = copy.deepcopy(stored)
+    _bench(c, None, ("veg", "v-env"))
+    why = f"Veg environment is in Zone: Garden, Veg, Nursery and Bench. {SHARED}"
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, stored)
+
+
+def test_a_stored_share_may_not_lose_a_link_it_had(sample_config) -> None:
+    """Shrinking means no zone joins and no linked pair in it comes apart: unlinking Nursery is a new illegal pair."""
+    stored = _room(sample_config)
+    for zid in ("garden", "nursery"):
+        _zone(stored, zid)["sensors"].append(_sensor(stored, "veg", "v-env"))
+    c = copy.deepcopy(stored)
+    del _zone(c, "nursery")["parent"]
+    why = "Veg environment is in both Veg and Nursery. Take it out of Nursery before unlinking it."
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, stored)
+
+
+def test_two_stored_illegal_pairs_can_each_be_taken_apart_on_its_own(sample_config) -> None:
+    stored = _room(sample_config)
+    del _zone(stored, "nursery")["parent"]
+    _zone(stored, "garden")["sensors"] += [_sensor(stored, "veg", "v-env"), _sensor(stored, "nursery", "n-env")]
+    validate_config(_drop(stored, "garden", "v-env"), stored)
+    validate_config(_drop(stored, "nursery", "n-env"), stored)
+
+
+def test_a_single_illegal_pair_can_be_taken_apart(sample_config) -> None:
+    """Pins the way out that already worked before stored shares were tolerated: take the sensor out of one zone."""
+    stored = _room(sample_config)
+    del _zone(stored, "nursery")["parent"]
+    _zone(stored, "garden")["sensors"].append(_sensor(stored, "veg", "v-env"))
+    validate_config(_drop(stored, "garden", "v-env"), stored)
+
+
+def test_a_zone_relinked_while_its_parent_is_removed_keeps_its_new_parent(sample_config) -> None:
+    before = _room(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    for d in c["devices"]:
+        d["zones"] = [z for z in d["zones"] if z != "veg"]
+        d.get("place", {}).pop("veg", None)
+    _zone(c, "nursery")["parent"] = "garden"
+    out = unlink_removed_parents(before, c)
+    assert _zone(out, "nursery")["parent"] == "garden"
+    validate_config(out, before)
+
+
+def test_a_zone_newly_linked_to_a_zone_removed_in_the_same_save_is_unlinked(sample_config) -> None:
+    before = _room(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    for d in c["devices"]:
+        d["zones"] = [z for z in d["zones"] if z != "veg"]
+        d.get("place", {}).pop("veg", None)
+    _zone(c, "garden")["parent"] = "veg"
+    out = unlink_removed_parents(before, c)
+    assert "parent" not in _zone(out, "garden") and "parent" not in _zone(out, "nursery")
+    validate_config(out, before)
+
+
+def test_a_bad_zone_name_is_refused_before_a_removal_message_can_carry_it(sample_config) -> None:
+    before = _sharing(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    _zone(c, "nursery")["name"] = "Nur\nsery"
+    with pytest.raises(InvalidConfig, match=r"^nursery has a name that isn't short text$"):
+        unlink_removed_parents(before, c)

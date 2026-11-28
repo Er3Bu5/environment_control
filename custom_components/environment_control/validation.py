@@ -13,19 +13,29 @@ from typing import Any
 
 from .const import MAX_CONFIG_BYTES, MAX_DEVICES, MAX_ZONES
 
-ZONE_ID = re.compile(r"^[a-z0-9_]{1,40}$")
-VIRTUAL_ID = re.compile(r"^v-[a-z0-9_]{1,40}$")
-CONTROLLABLE = re.compile(r"^(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}$")
-HELPER = re.compile(r"^input_(number|datetime)\.[a-z0-9_]{1,200}$")
-ON_OFF = re.compile(r"^(switch|light|input_boolean)\.[a-z0-9_]{1,200}$")
-NUMBER_ENTITY = re.compile(r"^number\.[a-z0-9_]{1,200}$")
-SENSOR_ENTITY = re.compile(r"^sensor\.[a-z0-9_]{1,200}$")
-NUMBER_HELPER = re.compile(r"^input_number\.[a-z0-9_]{1,200}$")
+# Every pattern is used with fullmatch: `$` with match also passes a trailing newline, which would make
+# "automation.x\n" a valid automation distinct from "automation.x".
+ZONE_ID = re.compile(r"[a-z0-9_]{1,40}")
+VIRTUAL_ID = re.compile(r"v-[a-z0-9_]{1,40}")
+CONTROLLABLE = re.compile(r"(switch|light|fan|humidifier)\.[a-z0-9_]{1,200}")
+HELPER = re.compile(r"input_(number|datetime)\.[a-z0-9_]{1,200}")
+ON_OFF = re.compile(r"(switch|light|input_boolean)\.[a-z0-9_]{1,200}")
+NUMBER_ENTITY = re.compile(r"number\.[a-z0-9_]{1,200}")
+SENSOR_ENTITY = re.compile(r"sensor\.[a-z0-9_]{1,200}")
+NUMBER_HELPER = re.compile(r"input_number\.[a-z0-9_]{1,200}")
 # Automations a zone links can be switched on and off by the panel's host, and nothing else: Home Assistant keeps
-# running them. A link is only which automation, under what id, in which group.
-AUTOMATION = re.compile(r"^automation\.[a-z0-9_]{1,200}$")
+# running them. A link is only which automation, under what id, in which group, and optionally a name the panel shows
+# instead of Home Assistant's.
+AUTOMATION = re.compile(r"automation\.[a-z0-9_]{1,200}")
+LINK_KEYS = frozenset({"id", "entity", "group"})
+# A link's name mirrors the mock's fake backend (design/fake-ha.js), so the two refuse the same names: 1 to MAX_NAME
+# characters counted as JavaScript counts them (UTF-16 units), no control character, and nothing that JavaScript's
+# trim() would take off either end. The trim set is JavaScript's, not str.strip()'s: the two disagree on a few
+# characters such as U+FEFF and U+0085.
+LINK_NAME = re.compile(r"[^\x00-\x1f\x7f]+")
+JS_TRIMMED = " \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200B))) + "\u2028\u2029\u202f\u205f\u3000\ufeff"
 AUTOMATION_GROUPS = ("alert_day", "alert_night", "alert_device", "failsafe", "control")
-LINK_ID = re.compile(r"^[a-z0-9_-]{1,64}$")
+LINK_ID = re.compile(r"[a-z0-9_-]{1,64}")
 MAX_AUTOMATIONS_PER_ZONE = 200
 # What a setup holds. Room settings are for the whole room rather than one zone: so far only the number helper every
 # alert's repeat rate comes from.
@@ -33,7 +43,7 @@ MAX_AUTOMATIONS_PER_ZONE = 200
 CONFIG_KEYS = frozenset({"zones", "devices", "room", "revision"})
 ROOM_KEYS = frozenset({"alertRepeat"})
 # A sensor is an HA device id, a device entry an id the panel makes; both stay short and safe in an id or a URL.
-ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+ITEM_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # Environment readings, then a soil probe's; which a sensor may use follows its class.
 READING_SLOTS = frozenset({"temperature", "humidity", "vpd", "light", "moisture", "ec"})
 SENSOR_CLASSES = ("env", "soil")
@@ -82,7 +92,7 @@ def _helpers_ok(v: Any) -> bool:
     if v is None:
         return True
     if isinstance(v, str):
-        return bool(HELPER.match(v))
+        return bool(HELPER.fullmatch(v))
     return isinstance(v, dict) and all(_helpers_ok(x) for x in v.values())
 
 
@@ -96,7 +106,7 @@ def _flat(v: Any) -> list[str]:
 
 def _on_off_ok(v: Any) -> bool:
     return v is None or (
-        isinstance(v, list) and len(v) <= 20 and all(isinstance(e, str) and ON_OFF.match(e) for e in v)
+        isinstance(v, list) and len(v) <= 20 and all(isinstance(e, str) and ON_OFF.fullmatch(e) for e in v)
     )
 
 
@@ -186,7 +196,7 @@ def _sensor_spot_ok(kind: Any, p: Any, layout: Any) -> bool:
 
 def _check_sensor(zid: str, x: Any) -> None:
     """A mapped sensor names only sensor entities for its readings and a number entity for its offset."""
-    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.match(x["id"]):
+    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ITEM_ID.fullmatch(x["id"]):
         _fail(f"{zid} has a sensor with an id this panel can't use")
     sid = x["id"]
     if "kind" in x and x["kind"] not in SENSOR_CLASSES:
@@ -198,11 +208,11 @@ def _check_sensor(zid: str, x: Any) -> None:
     if entities is not None and (
         not isinstance(entities, dict)
         or not set(entities) <= READING_SLOTS
-        or not all(isinstance(e, str) and SENSOR_ENTITY.match(e) for e in entities.values())
+        or not all(isinstance(e, str) and SENSOR_ENTITY.fullmatch(e) for e in entities.values())
     ):
         _fail(f"{sid} reads from something that isn't a sensor entity")
     leaf = x.get("leafEntity")
-    if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.match(leaf)):
+    if leaf is not None and not (isinstance(leaf, str) and NUMBER_ENTITY.fullmatch(leaf)):
         _fail(f"{sid} has a leaf temperature offset that isn't a number entity")
     kept = x.get("leaf")
     if kept is not None and not (_is_num(kept) and LEAF_RANGE[0] <= kept <= LEAF_RANGE[1]):
@@ -214,28 +224,43 @@ def _check_sensor(zid: str, x: Any) -> None:
         _fail(f"{sid} has a height this panel doesn't know")
 
 
-def _check_automations(zid: str, links: Any) -> None:
-    """A zone's automation links: each exactly an id, an automation entity and a group, with no id or automation twice.
+def _is_link_name(name: Any) -> bool:
+    return (
+        isinstance(name, str)
+        and len(name.encode("utf-16-le", "surrogatepass")) // 2 <= MAX_NAME
+        and name.strip(JS_TRIMMED) == name
+        and bool(LINK_NAME.fullmatch(name))
+    )
 
-    Nothing else may ride along, so a link can never name a service or anything but an automation. The same automation
-    may be linked in several zones, as a failsafe on shared hardware is.
+
+def _check_automations(zid: str, links: Any, elsewhere: set[str]) -> None:
+    """A zone's automation links: each an id, an automation entity, a group and maybe a name, no id or automation twice.
+
+    Nothing else may ride along, so a link can never name a service or anything but an automation. An automation belongs
+    to one zone: switched off for one zone it would stop in another without that zone saying so. `elsewhere` is what the
+    zones before this one link, and gains this zone's.
     """
     if not isinstance(links, list) or len(links) > MAX_AUTOMATIONS_PER_ZONE:
         _fail(f"{zid} links automations that aren't a short list")
     ids: set[str] = set()
     entities: set[str] = set()
     for a in links:
-        if not isinstance(a, dict) or set(a) != {"id", "entity", "group"}:
-            _fail(f"{zid} links an automation with something other than an id, an entity and a group")
+        if not isinstance(a, dict) or set(a) not in (LINK_KEYS, LINK_KEYS | {"name"}):
+            _fail(f"{zid} links an automation with something other than an id, an entity, a group and a name")
+        if "name" in a and not _is_link_name(a["name"]):
+            _fail(f"{zid} gives an automation a name that isn't short text")
         aid, entity = a["id"], a["entity"]
-        if not isinstance(aid, str) or not LINK_ID.match(aid) or aid in ids:
+        if not isinstance(aid, str) or not LINK_ID.fullmatch(aid) or aid in ids:
             _fail(f"{zid} has automation links without unique ids")
-        if not isinstance(entity, str) or not AUTOMATION.match(entity) or entity in entities:
+        if not isinstance(entity, str) or not AUTOMATION.fullmatch(entity) or entity in entities:
             _fail(f"{zid} links something that isn't an automation, or one twice")
         if a["group"] not in AUTOMATION_GROUPS:
             _fail(f"{zid} puts an automation in a group this panel doesn't know")
+        if entity in elsewhere:
+            _fail("An automation can only be linked to one zone.")
         ids.add(aid)
         entities.add(entity)
+    elsewhere |= entities
 
 
 def _check_room(room: Any) -> None:
@@ -243,12 +268,153 @@ def _check_room(room: Any) -> None:
     if not isinstance(room, dict) or not set(room) <= ROOM_KEYS:
         _fail("Room settings hold only the alert repeat rate")
     repeat = room.get("alertRepeat")
-    if "alertRepeat" in room and not (isinstance(repeat, str) and NUMBER_HELPER.match(repeat)):
+    if "alertRepeat" in room and not (isinstance(repeat, str) and NUMBER_HELPER.fullmatch(repeat)):
         _fail("The alert repeat rate links to something that isn't a number helper")
 
 
-def validate_config(c: Any) -> None:
-    """Raise InvalidConfig if the setup can't be stored."""
+# Linked zones. A zone may name one parent; a parent and the zones linked to it are a family. These rules and their
+# messages mirror the mock's fake backend (design/fake-ha.js, checkConfig and save) word for word, so the two refuse
+# the same things.
+_NO_PARENT = object()
+
+
+def _zone_name(z: dict[str, Any]) -> str:
+    return z.get("name") or z["id"]
+
+
+def _zone_list(zones: list[dict[str, Any]]) -> str:
+    """The zones as one sentence, written as the panel names zones: "Zone: X" the first time, the bare name after."""
+    names = [_zone_name(z) for z in zones]
+    return "Zone: " + (names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}")
+
+
+def _check_zone_name(z: dict[str, Any]) -> None:
+    """A zone's name goes into refusals, so it is held to a link's name: short text with no control characters."""
+    name = z.get("name")
+    if name is not None and not (
+        isinstance(name, str)
+        and name.strip(JS_TRIMMED)
+        and len(name.encode("utf-16-le", "surrogatepass")) // 2 <= MAX_NAME
+        and LINK_NAME.fullmatch(name)
+    ):
+        _fail(f"{z['id']} has a name that isn't short text")
+
+
+def _check_parents(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
+    """A linked zone shows what its parent runs, so a parent has to be a plain zone: one level, never itself."""
+    was = {z.get("id"): z.get("parent", _NO_PARENT) for z in before if isinstance(z, dict)}
+    by_id = {z["id"]: z for z in zones}
+
+    def moved(z: dict[str, Any]) -> bool:
+        return was.get(z["id"], _NO_PARENT) != z.get("parent", _NO_PARENT)
+
+    # The reason is told from the side of the zone whose link just changed: a new zone linked to a linked zone hears
+    # that its parent is linked, not that the parent has zones linked to it.
+    for z in sorted(zones, key=lambda z: not moved(z)):
+        if "parent" not in z:
+            continue
+        zid, pid = z["id"], z["parent"]
+        parent = by_id.get(pid) if isinstance(pid, str) else None
+        if parent is None:
+            _fail(f"{zid} is linked to a zone that doesn't exist")
+        if parent is z:
+            _fail(f"{zid} can't be linked to itself")
+        if any(o.get("parent") == zid for o in zones):
+            _fail(f"{zid} has zones linked to it, so it can't be linked to another")
+        if "parent" in parent:
+            _fail(f"{zid} is linked to a zone that is itself linked to another")
+
+
+def _check_shared_sensors(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
+    """A sensor in two zones shows one zone's readings in another, which only a parent link may do."""
+    was = {z.get("id"): z.get("parent") for z in before if isinstance(z, dict)}
+    held: dict[Any, set[Any]] = {}
+    for z in before:
+        for x in z.get("sensors") if isinstance(z.get("sensors"), list) else []:
+            if isinstance(x, dict) and isinstance(x.get("id"), str):
+                held.setdefault(x["id"], set()).add(z.get("id"))
+    holders: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    for z in zones:
+        for x in z.get("sensors") or []:
+            holders.setdefault(x["id"], []).append((z, x.get("name") or x["id"]))
+
+    def family(z: dict[str, Any]) -> Any:
+        return z.get("parent") or z["id"]
+
+    def family_before(zid: str) -> Any:
+        return was.get(zid) or zid
+
+    for sid, found in holders.items():
+        if len({family(z) for z, _ in found}) == 1:
+            continue
+        # A setup stored before this rule can hold a sensor in several unrelated zones, and the panel saves one zone at
+        # a time, so such a share is let through while it only shrinks: no zone joins it and no linked pair in it
+        # comes apart. Refusing it outright would leave a sensor in three unrelated zones impossible to repair.
+        if {z["id"] for z, _ in found} <= held.get(sid, set()) and all(
+            family_before(a["id"]) != family_before(b["id"])
+            for a, _ in found
+            for b, _ in found
+            if family(a) != family(b)
+        ):
+            continue
+        # The zone stops sharing only by taking the shared sensor out first, so breaking the link is refused by name.
+        # A link this save leaves in place isn't being broken, so that pair isn't what the save got wrong.
+        for i, (a, sensor) in enumerate(found):
+            for j, (b, _) in enumerate(found):
+                child, other = (a, b) if was.get(a["id"]) == b["id"] else (b, a)
+                if i != j and was.get(child["id"]) == other["id"] and child.get("parent") != other["id"]:
+                    _fail(
+                        f"{sensor} is in both {_zone_name(a)} and {_zone_name(b)}. "
+                        f"Take it out of {_zone_name(child)} before unlinking it."
+                    )
+        named: list[dict[str, Any]] = []
+        for z, _ in found:
+            if not any(z is n for n in named):
+                named.append(z)
+        _fail(
+            f"{found[0][1]} is in {_zone_list(named)}. "
+            "A sensor can only be shared between a zone and the zones linked to it."
+        )
+
+
+def unlink_removed_parents(before: dict[str, Any], c: Any) -> Any:
+    """Removing a parent zone unlinks the zones linked to it, which stay, unless one still has a sensor of the parent's.
+
+    The panel saves the whole setup at once, so a zone removed in this save can still be named as a parent by the zones
+    linked to it. Only a parent the stored setup has and this save drops is unlinked: a parent no setup ever had is
+    left for validate_config to refuse, so nothing stored can name a zone that isn't there.
+    """
+    if not isinstance(c, dict) or not isinstance(c.get("zones"), list):
+        return c
+    old = [z for z in before.get("zones") or [] if isinstance(z, dict)]
+    kept = {z.get("id") for z in c["zones"] if isinstance(z, dict) and isinstance(z.get("id"), str)}
+    removed = [z for z in old if z.get("id") not in kept]
+    if not removed:
+        return c
+    was = {z.get("id"): z.get("parent") for z in old}
+    zones = []
+    for z in c["zones"]:
+        zid = z.get("id") if isinstance(z, dict) else None
+        if not (isinstance(zid, str) and ZONE_ID.fullmatch(zid)):
+            zones.append(z)
+            continue
+        names = {p for p in (z.get("parent"), was.get(zid)) if isinstance(p, str)}
+        sensors = z.get("sensors") if isinstance(z.get("sensors"), list) else []
+        mine = [s.get("id") for s in sensors if isinstance(s, dict)]
+        for gone in (p for p in removed if p.get("id") in names):
+            shared = next((s for s in gone.get("sensors") or [] if s.get("id") in mine), None)
+            if shared is not None:
+                _check_zone_name(z)
+                sensor, here, there = shared.get("name") or shared["id"], _zone_name(z), _zone_name(gone)
+                _fail(f"{sensor} is in both {there} and {here}. Take it out of {here} before removing {there}.")
+        if any(p.get("id") == z.get("parent") for p in removed):
+            z = {k: v for k, v in z.items() if k != "parent"}
+        zones.append(z)
+    return {**c, "zones": zones}
+
+
+def validate_config(c: Any, before: dict[str, Any] | None = None) -> None:
+    """Raise InvalidConfig if the setup can't be stored. `before` is the stored setup it replaces."""
     if not isinstance(c, dict) or not isinstance(c.get("zones"), list) or not isinstance(c.get("devices"), list):
         _fail("Config isn't zones and devices")
     if not set(c) <= CONFIG_KEYS:
@@ -263,9 +429,14 @@ def validate_config(c: Any) -> None:
     if not all(isinstance(z, dict) for z in zones) or not all(isinstance(d, dict) for d in devices):
         _fail("Config isn't zones and devices")
     ids = [z.get("id") for z in zones]
-    if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.match(i) for i in ids):
+    if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.fullmatch(i) for i in ids):
         _fail("Zone ids must be unique slugs")
+    for z in zones:
+        _check_zone_name(z)
     by_id = {z["id"]: z for z in zones}
+    stored = [z for z in (before or {}).get("zones") or [] if isinstance(z, dict)]
+    _check_parents(zones, stored)
+    linked: set[str] = set()
 
     for z in zones:
         zid, h = z["id"], z.get("helpers")
@@ -309,7 +480,7 @@ def validate_config(c: Any) -> None:
             _fail(f"{zid} has a description that isn't short text")
         _check_limits(zid, z)
         if "automations" in z:
-            _check_automations(zid, z["automations"])
+            _check_automations(zid, z["automations"], linked)
         opens = z.get("history")
         if opens is not None and not (
             isinstance(opens, dict)
@@ -320,7 +491,7 @@ def validate_config(c: Any) -> None:
         ):
             _fail(f"{zid} opens its History on a graph or range this panel doesn't have")
         basis = z.get("leafBasis")
-        if basis is not None and not (isinstance(basis, str) and ITEM_ID.match(basis)):
+        if basis is not None and not (isinstance(basis, str) and ITEM_ID.fullmatch(basis)):
             _fail(f"{zid} draws its VPD chart at an offset this panel doesn't know")
         layout = z.get("layout")
         if layout is not None:
@@ -344,7 +515,7 @@ def validate_config(c: Any) -> None:
                 if (
                     not shape
                     or not isinstance(vid, str)
-                    or not VIRTUAL_ID.match(vid)
+                    or not VIRTUAL_ID.fullmatch(vid)
                     or vid in seen
                     or not isinstance(name, str)
                     or not name.strip()
@@ -357,10 +528,11 @@ def validate_config(c: Any) -> None:
                 # One added in Device identification has no spot until Device placement gives it one.
                 if v.get("pos") is not None and not _spot_ok(v.get("pos"), z.get("layout")):
                     _fail(f"{vid} is placed outside {zid}'s map")
+    _check_shared_sensors(zones, stored)
 
     for d in devices:
         did, dz = d.get("id"), d.get("zones")
-        if not isinstance(did, str) or not ITEM_ID.match(did):
+        if not isinstance(did, str) or not ITEM_ID.fullmatch(did):
             _fail("A device has an id this panel can't use")
         name = d.get("name")
         if name is not None and (not isinstance(name, str) or len(name) > MAX_NAME):
@@ -368,7 +540,7 @@ def validate_config(c: Any) -> None:
         if not isinstance(dz, list) or any(zid not in by_id for zid in dz):
             _fail(f"{did} is in a zone that doesn't exist")
         entity = d.get("entity")
-        if entity is not None and not (isinstance(entity, str) and CONTROLLABLE.match(entity)):
+        if entity is not None and not (isinstance(entity, str) and CONTROLLABLE.fullmatch(entity)):
             _fail(f"{did} has an entity this panel can't control")
         # A mode the device has that Home Assistant doesn't list. Only its name: the panel reaches it by moving the
         # device's own target humidity, which it may already set.

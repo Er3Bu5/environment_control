@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HISTORY_DEFAULT, addZone, confirmLink, copyConfig, markStep, readZones, removeZone, setDetails, setHistory, shareAsk, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
+import { HISTORY_DEFAULT, addZone, andList, confirmLink, copyConfig, markStep, readZones, removeZone, setAlertRepeat, setDetails, setHistory, shareAsk, stepsLeft, unknownLinks, zoneNameIssue } from "../../src/frame/model";
 
 const base = () =>
   copyConfig(
@@ -122,17 +122,101 @@ describe("links HA can't tell", () => {
   });
 });
 
+describe("a zone's automations", () => {
+  const link = (id: string, entity: string, group: string) => ({ id, entity: `automation.${entity}`, group });
+
+  it("reads each link to an automation, in its group, in the order saved", () => {
+    const [z] = readZones([{ id: "veg", name: "Veg", automations: [link("a2", "tent_lights_on", "control"), link("a1", "failsafe_veg_fans_auto_on", "failsafe")] }]);
+    expect(z.automations).toEqual([
+      { id: "a2", entity: "automation.tent_lights_on", group: "control" },
+      { id: "a1", entity: "automation.failsafe_veg_fans_auto_on", group: "failsafe" },
+    ]);
+  });
+
+  it("leaves out a link that isn't the right shape, or that repeats an id or an automation, and keeps the rest", () => {
+    const [z] = readZones([
+      {
+        id: "veg",
+        name: "Veg",
+        automations: [
+          link("a1", "ok", "alert_day"),
+          link("a2", "ok", "alert_night"),
+          link("a1", "other", "alert_night"),
+          { id: "a3", entity: "script.ok", group: "control" },
+          link("A4", "upper_id", "control"),
+          link("a5", "odd_group", "alerts"),
+          { id: "a6", entity: "automation.no_group" },
+          "automation.bare",
+          link("a7", "last", "alert_device"),
+        ],
+      },
+    ]);
+    expect(z.automations.map((a) => a.id)).toEqual(["a1", "a7"]);
+    for (const automations of [undefined, "automation.x", { a1: "automation.x" }]) expect(readZones([{ id: "veg", name: "Veg", automations }])[0].automations).toEqual([]);
+  });
+});
+
+describe("the room's settings", () => {
+  it("ride along on a copy only when given, so a save without them leaves the host keeping what's stored", () => {
+    const room = { alertRepeat: "input_number.alert_repeat_rate" };
+    const c = copyConfig([], [], room);
+    expect(c.room).toEqual(room);
+    c.room = {};
+    expect(room).toEqual({ alertRepeat: "input_number.alert_repeat_rate" });
+    expect("room" in copyConfig([], [])).toBe(false);
+  });
+
+  it("link, change and unlink the alert repeat helper, unlinking as an empty room rather than none", () => {
+    const c = copyConfig([], [], {});
+    setAlertRepeat(c, "input_number.alert_repeat_rate");
+    expect(c.room).toEqual({ alertRepeat: "input_number.alert_repeat_rate" });
+    setAlertRepeat(c, "input_number.other");
+    expect(c.room).toEqual({ alertRepeat: "input_number.other" });
+    setAlertRepeat(c, null);
+    expect(c.room).toEqual({});
+    const fresh = copyConfig([], []);
+    setAlertRepeat(fresh, null);
+    expect(fresh.room).toEqual({});
+  });
+});
+
 describe("adding something another zone has", () => {
-  it("asks in plain words, naming every zone that has it, with a button that says what it does", () => {
-    expect(shareAsk("device", "Dehumidifier", "Garden", ["Veg", "Nursery"])).toEqual({
-      title: "Add Dehumidifier to Garden as well?",
-      text: "It's already in Veg and Nursery. It's one device, so switching it here switches it there too.",
-      keep: "Leave it out",
-      go: "Add to Garden",
+  it("asks about a sensor by its name, naming the zone that has it once", () => {
+    expect(shareAsk("sensor", "Soil 1", ["Garden"])).toEqual({
+      title: "Soil 1",
+      text: "This sensor is already associated to Zone: Garden. Are you sure you want to duplicate it here?",
+      more: "This means that data is in sync in both zones.",
+      keep: "Cancel",
+      go: "Add",
     });
-    expect(shareAsk("automation", "Veg high humidity", "Nursery", ["Veg"]).text).toBe(
-      "It's already linked in Veg. It's one automation, so switching it off here switches it off there too.",
-    );
-    expect(shareAsk("sensor", "Soil 1", "Veg", ["Garden"]).text).toBe("It's already in Garden. It's one sensor, so its readings count there and here.");
+  });
+  it("says a device's controls are shared, and names the zone bare the second time", () => {
+    expect(shareAsk("device", "Dehumidifier", ["Garden"])).toEqual({
+      title: "Dehumidifier",
+      text: "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here?",
+      more: "This means that controls are in sync in both zones. Automations from Garden may affect the device state.",
+      keep: "Cancel",
+      go: "Add",
+    });
+  });
+  it("lists several zones as given, then joins the bare names as a sentence", () => {
+    const two = shareAsk("device", "Dehumidifier", ["Garden", "Veg"]);
+    expect(two.text).toBe("This device is already associated to Zones: Garden, Veg. Are you sure you want to duplicate it here?");
+    expect(two.more).toBe("This means that controls are in sync in all of these zones. Automations from Garden and Veg may affect the device state.");
+    const three = shareAsk("device", "Dehumidifier", ["Garden", "Nursery", "Veg"]);
+    expect(three.text).toBe("This device is already associated to Zones: Garden, Nursery, Veg. Are you sure you want to duplicate it here?");
+    expect(three.more).toBe("This means that controls are in sync in all of these zones. Automations from Garden, Nursery and Veg may affect the device state.");
+    expect(shareAsk("sensor", "Soil 1", ["Veg", "Garden"]).text).toBe("This sensor is already associated to Zones: Veg, Garden. Are you sure you want to duplicate it here?");
+    expect(shareAsk("sensor", "Soil 1", ["Veg", "Garden"]).more).toBe("This means that data is in sync in all of these zones.");
+  });
+});
+
+describe("bare zone names in a sentence", () => {
+  it("reads as a sentence does", () => {
+    expect(andList([])).toBe("");
+    expect(andList(["Veg"])).toBe("Veg");
+    expect(andList(["Garden", "Veg"])).toBe("Garden and Veg");
+    expect(andList(["Garden", "Nursery", "Veg"])).toBe("Garden, Nursery and Veg");
+    expect(andList(["A", "B", "C", "D"])).toBe("A, B, C and D");
   });
 });

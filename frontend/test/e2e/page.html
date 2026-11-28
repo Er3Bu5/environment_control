@@ -100,6 +100,16 @@ let historyFor = (entity, msg, start) => {
   const v = Number(fakeHA.states[entity] && fakeHA.states[entity].state);
   return { first: start, values: Array.from({ length: msg.buckets }, () => (Number.isFinite(v) ? [v, v - 0.5, v + 0.5] : null)) };
 };
+/* HA's automations, as the backend lists them from the entity registry: enabled ones only, in entity id order, each with
+   its name, its area's name and, from its state as it is when asked, whether it's on and when it last ran. */
+const automationCatalog = () => Object.values(fakeHA.registry.entities)
+  .filter((r) => r.entity_id.startsWith("automation.") && !r.disabled_by)
+  .sort((a, b) => (a.entity_id < b.entity_id ? -1 : 1))
+  .map((r) => {
+    const st = fakeHA.states[r.entity_id], a = (st && st.attributes) || {}, area = r.area_id ? fakeHA.registry.areas[r.area_id] : null;
+    return { entity_id: r.entity_id, name: a.friendly_name || r.name || r.original_name || r.entity_id, state: st ? st.state : null, area: area ? area.name : null,
+      last_triggered: typeof a.last_triggered === "string" ? a.last_triggered : null };
+  });
 const backendCommand = fakeHA.command.bind(fakeHA);
 fakeHA.command = async (msg) => {
   if (msg && msg.type === "environment_control/history") {
@@ -111,7 +121,7 @@ fakeHA.command = async (msg) => {
   }
   if (!msg || msg.type !== "environment_control/catalog") return backendCommand(msg);
   if (catalogDown) fakeHA.fail("Catalog not ready");
-  return JSON.parse(JSON.stringify(CATALOG));
+  return { ...JSON.parse(JSON.stringify(CATALOG)), automations: automationCatalog() };
 };
 /* HA's panel list, which says where each panel's code is served from. A test points it at a new release to play an update
    that happened while the page stayed open. */

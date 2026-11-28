@@ -5,6 +5,7 @@ const PATHS = {
   menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
   dots: "M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z",
   home: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
   sun: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM11 1h2v3h-2zm0 19h2v3h-2zM1 11h3v2H1zm19 0h3v2h-3zM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1zm15 15 2.1 2.1-1.4 1.4-2.1-2.1zM2.8 19.8l2.1-2.1 1.4 1.4-2.1 2.1zm15-15 2.1-2.1 1.4 1.4-2.1 2.1z",
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3Z",
@@ -21,6 +22,13 @@ const PATHS = {
   tank: "M12 2C7.6 2 4 3.3 4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5c0-1.7-3.6-3-8-3Zm0 2c3.6 0 6 .9 6 1s-2.4 1-6 1-6-.9-6-1 2.4-1 6-1Zm6 14.9c-.3.4-2.6 1.1-6 1.1s-5.7-.7-6-1.1V13c1.5.7 3.6 1 6 1s4.5-.3 6-1v5.9Z",
   /* A turn-back arrow, for putting a box back to what was last saved. */
   reset: "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z",
+  /* The Automations page's three chips: alerts, failsafes, and the automations that switch hardware on a schedule. */
+  bell: "M21 19v1H3v-1l2-2v-6c0-3.1 2-5.8 5-6.7V4a2 2 0 0 1 4 0v.3c3 .9 5 3.6 5 6.7v6l2 2Zm-7 2a2 2 0 0 1-4 0",
+  shield: "M10 17 6 13l1.4-1.4 2.6 2.6 6.6-6.6L18 9l-8 8ZM12 1 3 5v6c0 5.6 3.8 10.7 9 12 5.2-1.3 9-6.4 9-12V5l-9-4Z",
+  clock: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-18a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm.5 5v5.2l4.5 2.7-.8 1.2-5.2-3.1V7h1.5Z",
+  /* Sort on Overview: a card's move to previous and move to next. */
+  up: "M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z",
+  down: "M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

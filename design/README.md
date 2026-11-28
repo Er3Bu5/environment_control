@@ -29,10 +29,12 @@ Each change is one commit, made only once both suites pass. The tests assemble t
 ```sh
 # Sample-data suite
 node vpd-browser-test.mjs "$PWD"
+# Its Chromium listens on port 9347; set MOCK_PORT (1024-65535) to run in two worktrees at once
+MOCK_PORT=9351 node vpd-browser-test.mjs "$PWD"
 
-# Real-data suite, after building
+# Real-data suite, after building (SMOKE loads snapshot-ui.html and snapshot-seed.js unless MOCK_FILE or SEED_FILE say otherwise)
 python3 build-snapshot.py "$PWD"
-MOCK_FILE=snapshot-ui.html SEED_FILE=snapshot-seed.js SMOKE=1 node vpd-browser-test.mjs "$PWD"
+SMOKE=1 node vpd-browser-test.mjs "$PWD"
 
 # The sample mock as one page, for viewing
 python3 build-mock.py "$PWD" environment-control-source.html sample-seed.js mock-dev.html

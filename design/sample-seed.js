@@ -86,6 +86,9 @@ const SEED = (() => {
     daylight: "input_number.emerson_effect_daylight_time", evening: "input_number.emerson_effect_evening_extension", bands: bandLinks("garden"), light: lightLinks("garden") };
   zones[1].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time", bands: bandLinks("veg"), light: lightLinks("veg") };
   zones[2].helpers = { day: "input_datetime.veg_day_time", night: "input_datetime.veg_night_time" };
+  /* Nursery is linked to Veg: it shares Veg's lights, light controller and fans, so its schedule is Veg's, and has an
+     environment sensor of its own, so its targets are its own. */
+  zones[2].parent = "veg";
   /* HA writes Celsius both ways, so Garden's temperature helpers say ℃ and the rest °C, as in this room. */
   const LIMITS = { temperature: [-20, 50, 0.1, "°C"], humidity: [0, 100, 0.1, "%"], vpd: [0, 3, 0.01, "kPa"], light: [0, 10000, 10, "lx"], minutes: [0, 59, 1, "minutes"] };
   const helper = (value, [min, max, step, unit], name) => ({ state: String(value), attributes: { friendly_name: name, min, max, step, mode: "box", unit_of_measurement: unit } });
@@ -113,7 +116,8 @@ const SEED = (() => {
   states["input_datetime.reservoir_refill_time"] = time(9 * 60, "Reservoir refill time");
   states["input_datetime.last_reservoir_refill"] = { state: "2026-11-03 09:12:00", attributes: { friendly_name: "Last reservoir refill", has_date: true, has_time: true } };
   /* The automations behind each zone's alerts, failsafes and light schedule. Home Assistant runs them; the panel only
-     switches them on and off. Veg and Nursery share their light schedule, so they share its automations and failsafes.
+     switches them on and off. An automation belongs to one zone, so the tent's light schedule and fans, which Veg and
+     Nursery share, are linked by Veg, and Nursery links automations of its own.
      Each is [object id, friendly name, area, on, last triggered in hours before the mock's time or null for never]. */
   const AUTOMATIONS = [
     ["critical_garden_temperature_high_day", "Critical Garden Temperature High Day", "garden", true, 30],
@@ -152,6 +156,10 @@ const SEED = (() => {
     ["critical_nursery_temperature_high_day", "Critical Nursery Temperature High Day", "nursery", true, null],
     ["critical_nursery_temperature_low_night", "Critical Nursery Temperature Low Night", "nursery", true, 9],
     ["critical_nursery_environment_sensor_unavailable", "Critical Nursery Environment Sensor Unavailable", "nursery", true, null],
+    ["failsafe_nursery_heat_mat_auto_off", "Failsafe Nursery Heat Mat Auto Off", "nursery", true, 12],
+    ["failsafe_nursery_dome_fan_auto_on", "Failsafe Nursery Dome Fan Auto On", "nursery", true, null],
+    ["nursery_heat_mat_on", "Nursery Heat Mat On", "nursery", true, 6],
+    ["nursery_heat_mat_off", "Nursery Heat Mat Off", "nursery", true, 18],
     /* Not linked to any zone yet, for the picker: one the name suggests for Nursery, a climate limit, and two that belong
        to the house and must never be suggested. */
     ["critical_nursery_vpd_high_day", "Critical Nursery VPD High Day", "nursery", true, null],
@@ -172,18 +180,22 @@ const SEED = (() => {
     ...link(["failsafe_garden_lights_recovery", "failsafe_garden_red_lights_recovery", "failsafe_dehumidifier_mains_auto_on"], "failsafe"),
     ...link(["garden_lights_on", "garden_lights_off", "garden_red_lights_on", "garden_red_lights_off"], "control"),
   ]);
-  const tent = [...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"), ...link(["tent_lights_on", "tent_lights_off"], "control")];
   zones[1].automations = numbered([
     ...link(["critical_veg_temperature_high_day", "critical_veg_temperature_low_day"], "alert_day"),
     ...link(["critical_veg_temperature_high_night", "critical_veg_temperature_low_night"], "alert_night"),
     ...link(["critical_veg_environment_sensor_unavailable", "warning_veg_auxiliary_dehumidifier_full"], "alert_device"),
-    ...tent,
+    ...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"),
+    ...link(["tent_lights_on", "tent_lights_off"], "control"),
   ]);
+  /* A few links carry a name of the panel's own, as a person might give them; the rest show Home Assistant's. */
+  const named = { "automation.garden_red_lights_on": "Red lights, morning", "automation.garden_red_lights_off": "Red lights, evening", "automation.tent_lights_off": "Tent lights off" };
+  for (const z of zones.slice(0, 2)) for (const a of z.automations) if (named[a.entity]) a.name = named[a.entity];
   zones[2].automations = numbered([
     ...link(["critical_nursery_temperature_high_day"], "alert_day"),
     ...link(["critical_nursery_temperature_low_night"], "alert_night"),
     ...link(["critical_nursery_environment_sensor_unavailable"], "alert_device"),
-    ...tent,
+    ...link(["failsafe_nursery_heat_mat_auto_off", "failsafe_nursery_dome_fan_auto_on"], "failsafe"),
+    ...link(["nursery_heat_mat_on", "nursery_heat_mat_off"], "control"),
   ]);
   /* One helper sets how often every alert in Home Assistant may buzz a phone, so it's linked once, for the whole room. */
   states["input_number.alert_repeat_rate"] = helper(15, [0, 120, 1, "min"], "Alert repeat rate");
@@ -195,6 +207,88 @@ const SEED = (() => {
     "switch.garden_lights_2": { want: "on", kind: "watchdog", by: "Garden lights recovery" },
     "switch.tent_lights": { want: "off", kind: "watchdog", by: "Tent lights recovery" },
   };
+  /* What the backend's activity command reads from the logbook and history, a few days of it per zone. The fake pages it
+     a day at a time, newest first, as the backend will. Runs that repeat are already collapsed into one streak, as the
+     backend collapses them, so a count in the thousands is one entry. Nothing here is a mode or a brightness: the
+     logbook records only on, off and unavailable. */
+  const at = (day, hms) => `2026-11-${day}T${hms}+13:00`;
+  const byAuto = (name, kind, tname, entity) => ({ type: "automation", name, trigger: tname ? { kind, name: tname } : { kind }, ...(entity ? { entity } : {}) });
+  const SAM = { type: "person", name: "Sam" }, STARTUP = { type: "startup" }, RECONNECT = { type: "reconnect" }, NONE = { type: "none" };
+  const dev = (when, entity, name, state, cause) => ({ kind: "device", when, entity, name, state, cause });
+  const many = (when, list, state, cause) => list.map(([entity, name]) => dev(when, entity, name, state, cause));
+  const flip = (when, entity, name, state, cause) => ({ kind: "automation", when, entity, name, state, cause });
+  const run = (entity, name, trigger, count, first, last) => ({ kind: "run", when: last, entity: `automation.${entity}`, name, trigger, count, first, last });
+  const climate = (when, metric, level, value) => ({ kind: "climate", when, metric, level, value });
+  const sensor = (when, name, state) => ({ kind: "sensor", when, name, state });
+  const overhead = [["light.garden_light_controller_overhead", "Garden Light Controller Overhead"], ["switch.garden_lights_1", "Garden Lights 1"], ["switch.garden_lights_2", "Garden Lights 2"], ["light.garden_light_controller_under_canopy", "Garden Light Controller Under Canopy"]];
+  const tent = [["light.tent_light_controller", "Tent Light Controller"], ["switch.tent_lights", "Tent Lights"]];
+  const lightsOn = byAuto("Garden Lights On", "time"), lightsOff = byAuto("Garden Lights Off", "time"), watchdog = byAuto("Failsafe Garden Lights Recovery", "time_pattern");
+  const humLow = (n, first, last) => run("critical_garden_humidity_low_day", "Critical Garden Humidity Low Day", { kind: "state", name: "Garden Environment Average Humidity" }, n, first, last);
+  const garden = [
+    /* Today, to the mock's 13:30. */
+    run("failsafe_garden_lights_recovery", "Failsafe Garden Lights Recovery", { kind: "time_pattern" }, 405, at(17, "00:00:00"), at(17, "13:28:00")),
+    sensor(at(17, "13:07:20"), "Environment under", "back"), sensor(at(17, "13:05:10"), "Environment under", "stopped"),
+    dev(at(17, "12:41:05"), "switch.air_conditioner", "Air Conditioner", "on", SAM),
+    dev(at(17, "11:23:12"), "switch.air_conditioner_exhaust_fan", "Air Conditioner Exhaust Fan", "on", RECONNECT),
+    climate(at(17, "11:22:00"), "humidity", "ok", 66.8),
+    dev(at(17, "11:20:47"), "switch.air_conditioner_exhaust_fan", "Air Conditioner Exhaust Fan", "unavailable", NONE),
+    dev(at(17, "10:59:31"), "humidifier.garden_dehumidifier", "Garden Dehumidifier", "on", byAuto("Day Humidity Upper Limit", "numeric_state", "Garden Environment Average Humidity", "automation.day_humidity_upper_limit")),
+    run("day_humidity_upper_limit", "Day Humidity Upper Limit", { kind: "numeric_state", name: "Garden Environment Average Humidity" }, 1, at(17, "10:59:31"), at(17, "10:59:31")),
+    climate(at(17, "10:58:00"), "humidity", "high", 67.4),
+    flip(at(17, "09:15:02"), "automation.critical_garden_humidity_low_day", "Critical Garden Humidity Low Day", "off", SAM),
+    humLow(790, at(17, "07:02:11"), at(17, "09:14:58")),
+    run("garden_lights_on", "Garden Lights On", { kind: "time" }, 1, at(17, "07:00:00"), at(17, "07:00:00")),
+    ...many(at(17, "07:00:00"), overhead, "on", lightsOn),
+    dev(at(17, "06:30:00"), "switch.garden_lights_red", "Garden Lights Red", "on", byAuto("Garden Red Lights On", "time")),
+    run("garden_red_lights_on", "Garden Red Lights On", { kind: "time" }, 1, at(17, "06:30:00"), at(17, "06:30:00")),
+    /* Yesterday: a restart in the night, and the alert that re-fires on every update while humidity is low. */
+    run("failsafe_garden_lights_recovery", "Failsafe Garden Lights Recovery", { kind: "time_pattern" }, 719, at(16, "00:00:00"), at(16, "23:58:00")),
+    dev(at(16, "21:10:44"), "switch.heater_mains", "Heater Mains", "on", SAM),
+    dev(at(16, "19:00:00"), "switch.garden_lights_2", "Garden Lights 2", "off", watchdog),
+    ...many(at(16, "19:00:00"), overhead.filter(([e]) => e !== "switch.garden_lights_2"), "off", lightsOff),
+    run("garden_lights_off", "Garden Lights Off", { kind: "time" }, 1, at(16, "19:00:00"), at(16, "19:00:00")),
+    humLow(3961, at(16, "07:02:04"), at(16, "18:59:51")),
+    climate(at(16, "14:40:00"), "vpd", "ok", 0.97), climate(at(16, "13:02:00"), "vpd", "low", 0.91),
+    run("garden_lights_on", "Garden Lights On", { kind: "time" }, 1, at(16, "07:00:00"), at(16, "07:00:00")),
+    ...many(at(16, "07:00:00"), overhead, "on", lightsOn),
+    dev(at(16, "06:55:02"), "switch.heater_mains", "Heater Mains", "off", NONE),
+    run("failsafe_dehumidifier_mains_auto_on", "Failsafe Dehumidifier Mains Auto On", { kind: "homeassistant" }, 1, at(16, "03:12:41"), at(16, "03:12:41")),
+    dev(at(16, "03:12:40"), "switch.garden_intake_fan", "Garden Intake Fan", "on", STARTUP),
+    dev(at(16, "03:12:40"), "humidifier.garden_dehumidifier", "Garden Dehumidifier", "on", STARTUP),
+    dev(at(16, "03:12:40"), "switch.plug_7", "Plug 7", "off", STARTUP),
+    /* The first day Home Assistant still keeps, from 09:14. */
+    run("failsafe_garden_lights_recovery", "Failsafe Garden Lights Recovery", { kind: "time_pattern" }, 443, at(15, "09:14:00"), at(15, "23:58:00")),
+    dev(at(15, "21:02:13"), "switch.heater_mains", "Heater Mains", "on", SAM),
+    ...many(at(15, "19:00:00"), overhead, "off", lightsOff),
+    run("garden_lights_off", "Garden Lights Off", { kind: "time" }, 1, at(15, "19:00:00"), at(15, "19:00:00")),
+    humLow(2310, at(15, "12:31:40"), at(15, "18:59:57")),
+    dev(at(15, "16:41:09"), "humidifier.garden_dehumidifier", "Garden Dehumidifier", "on", RECONNECT),
+    dev(at(15, "16:40:02"), "humidifier.garden_dehumidifier", "Garden Dehumidifier", "unavailable", NONE),
+    climate(at(15, "12:31:00"), "humidity", "low", 59.6),
+  ];
+  const veg = [
+    climate(at(17, "13:21:00"), "humidity", "crithigh", 70.3), climate(at(17, "13:02:00"), "vpd", "critlow", 0.68),
+    run("failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery", { kind: "time_pattern" }, 404, at(17, "00:00:00"), at(17, "13:26:00")),
+    run("tent_lights_off", "Tent Lights Off", { kind: "time" }, 1, at(17, "10:00:00"), at(17, "10:00:00")),
+    ...many(at(17, "10:00:00"), tent, "off", byAuto("Tent Lights Off", "time")),
+    run("critical_veg_temperature_low_day", "Critical Veg Temperature Low Day", { kind: "state", name: "Veg Environment Air Temp" }, 214, at(17, "06:12:30"), at(17, "09:58:10")),
+    dev(at(17, "06:40:01"), "switch.veg_oscillating_fans", "Veg Oscillating Fans", "on", byAuto("Failsafe Veg Fans Auto On", "state", "Veg Oscillating Fans")),
+    run("failsafe_veg_fans_auto_on", "Failsafe Veg Fans Auto On", { kind: "state", name: "Veg Oscillating Fans" }, 1, at(17, "06:40:01"), at(17, "06:40:01")),
+    dev(at(17, "06:40:00"), "switch.veg_oscillating_fans", "Veg Oscillating Fans", "off", SAM),
+    run("failsafe_tent_lights_recovery", "Failsafe Tent Lights Recovery", { kind: "time_pattern" }, 720, at(16, "00:00:00"), at(16, "23:58:00")),
+    run("tent_lights_on", "Tent Lights On", { kind: "time" }, 1, at(16, "16:00:00"), at(16, "16:00:00")),
+    ...many(at(16, "16:00:00"), tent, "on", byAuto("Tent Lights On", "time")),
+    run("tent_lights_off", "Tent Lights Off", { kind: "time" }, 1, at(16, "10:00:00"), at(16, "10:00:00")),
+    ...many(at(16, "10:00:00"), tent, "off", byAuto("Tent Lights Off", "time")),
+    dev(at(16, "08:00:04"), "switch.heater_mains", "Heater Mains", "off", NONE),
+  ];
+  /* Nursery's history starts today, so it shows where history ends without paging back. */
+  const nursery = [
+    run("nursery_heat_mat_on", "Nursery Heat Mat On", { kind: "time" }, 1, at(17, "06:00:00"), at(17, "06:00:00")),
+    ...many(at(17, "10:00:00"), tent, "off", byAuto("Tent Lights Off", "time")),
+    dev(at(17, "08:00:04"), "switch.heater_mains", "Heater Mains", "off", NONE),
+  ];
+  const activity = { now: new Date(MOCK_NOW).toISOString(), earliest: { garden: at(15, "09:14:00"), veg: at(16, "00:00:00"), nursery: at(17, "00:00:00") }, entries: { garden, veg, nursery } };
   automationEntities();
-  return { config: { revision: 1, zones, devices, room }, states, failsafes, registry: { entities, areas } };
+  return { config: { revision: 1, zones, devices, room }, states, failsafes, registry: { entities, areas }, activity };
 })();

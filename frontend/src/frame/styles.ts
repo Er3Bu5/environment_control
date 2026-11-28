@@ -8,12 +8,12 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
 } as const;
 
 export const styles = css`
-  :host { display: block; min-height: 100vh; background: var(--bg); color: var(--fg); font: 15px/1.45 Roboto, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  :host { --ro-dim: .45; --ro-fg: var(--muted); --ro-surface: color-mix(in srgb, var(--card) 98.5%, var(--fg)); display: block; min-height: 100vh; background: var(--bg); color: var(--fg); font: 15px/1.45 Roboto, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
   * { box-sizing: border-box; }
   button, select, input { font: inherit; color: inherit; }
   button { cursor: pointer; }
@@ -31,8 +31,7 @@ export const styles = css`
   /* The page menu's button and the page's heading share the top row: the button at the left, at the foot of the
      heading block, and the heading centred. They're two items in one grid cell, so the button follows the heading's
      height whatever it holds. */
-  .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 12; }
-  .navmenu .menu { left: 0; right: auto; }
+  .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 25; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
@@ -41,21 +40,110 @@ export const styles = css`
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu, .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  /* Overview's Sort sits where a zone's More button does, as tall as it. */
+  .pagehead > .headbtn { height: 34px; }
+  /* A page's own action is a word or two wide, not a button's width, so on a phone it takes the heading's last line, at
+     the right and level with the page menu, and the title keeps the whole width above. */
+  @media (max-width: 640px) {
+    .pagehead:has(> .btn) { grid-template-columns: 44px minmax(0, 1fr); }
+    .pagehead:has(> .btn) > div { grid-column: 1 / -1; padding-inline: 48px; }
+    .pagehead:has(> .btn) > .btn { grid-column: 2; grid-row: 2; }
+  }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+  /* Zone cards go three across only once each gets 640px: narrower, the tracks and state chips are cramped. Below that a
+     column is kept wider than a third, so the row holds two. The Overview's width is let out only on a screen wide enough
+     for three; under it the page keeps the width every other page has. Four go across on the same 640px, so the width is
+     let out again only on an ultrawide screen with room for four (#119). Two go across only once each gets 520px:
+     narrower, a card's tracks get too short to read (#119). */
+  .cards.zones { container-type: inline-size; grid-template-columns: repeat(auto-fit, minmax(max(min(520px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
+  /* One across, a card stops at about the widest it gets two across, so the step down from two is a modest change in its
+     size rather than a doubling. A phone is narrower than that, so there it still fills the width. */
+  @container (max-width: 1051.98px) { .cards.zones > .zone-card, .cards.zones > .fam { width: 100%; max-width: 700px; justify-self: center; } }
+  @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
+  @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
+  /* The linked line and the combine note share the name's line, so they push nothing down and the tracks of every card in
+     a row start level. Too long for it, the note wraps under the name rather than squeezing it. */
+  .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
+  /* Given a row's height by levelHeads, the head keeps its name at the top rather than floating in the middle. */
+  .zone-card .card-head { align-content: flex-start; }
+  .cardnote { margin-left: auto; text-align: right; min-width: 0; align-self: baseline; }
+  /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
+     card that was moved, as it is scrolled into view. */
+  .zone-card.sorting:hover { border-color: var(--line); }
+  .zone-card.sorting { scroll-margin-block: 12px 150px; }
+  /* A family is one joined card: its cards touch, sharing one border as the seam, with the link tab on it. It never
+     wraps apart: side by side where the row has room for all of it, else stacked, the seam running across. The seam is
+     drawn heavier than a card's outer border so it reads as the join, and the cards make room either side of it so the
+     tab on it doesn't crowd a state chip or a reading's icon. */
+  .fam { display: flex; flex-direction: column; min-width: 0; grid-row: span var(--n); --seam: 2px; --seampad-block: 22px; --seampad-inline: 26px; }
+  .famcards { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .famcards > .zone-card { position: relative; border-radius: 0; }
+  .famcards > .zone-card:not(:last-child) { border-bottom-width: var(--seam); padding-bottom: var(--seampad-block); }
+  .famcards > .zone-card + .zone-card { margin-top: calc(var(--seam) * -1); border-top-width: var(--seam); padding-top: var(--seampad-block); }
+  .famcards > .zone-card:first-child { border-radius: 12px 12px 0 0; }
+  .famcards > .zone-card:last-child { border-radius: 0 0 12px 12px; }
+  /* A card's own border shows whole on that card, over the neighbour it shares the seam with. */
+  .famcards > .zone-card:hover, .famcards > .zone-card:focus-visible { z-index: 1; }
+  .linktab { position: absolute; z-index: 2; left: 50%; width: 28px; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: var(--card); border: var(--seam) solid var(--line); }
+  .linktab svg { width: 16px; height: 16px; fill: var(--fg); rotate: 90deg; }
+  /* Offset by half the seam: the cards overlap by its whole width, so a card's inner edge is the seam's far side. */
+  .linktab.after { bottom: calc(var(--seam) / -2); transform: translate(-50%, 50%); }
+  .linktab.before { top: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+  /* Beside the name, not pushed to the far side with the rest of the heading. */
+  .parentbadge { color: var(--fg); margin-right: auto; }
+  /* While sorting, the family's own arrows sit on a strip joined to the top of its cards. */
+  .fambar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--tile); border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; }
+  .fambar .ic { flex: none; }
+  .fam.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; border-top-right-radius: 0; }
+  @container (min-width: 1052px) {
+    .fam.n2 { grid-column: span 2; grid-row: auto; }
+    .fam.n2 .famcards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fam.n2 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n2 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n2.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n2.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n2 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n2 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n2 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n2 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n2 .linktab svg { rotate: 0deg; }
+  }
+  @container (min-width: 1944px) {
+    .fam.n3 { grid-column: span 3; grid-row: auto; }
+    .fam.n3 .famcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .fam.n3 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n3 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n3.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n3.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n3 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n3 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n3 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n3 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n3 .linktab svg { rotate: 0deg; }
+  }
+  .arrows { display: flex; gap: 8px; margin-left: auto; }
+  .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
+  .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
+  .zlinked { margin: 2px 0 0; }
   .pill.dashed { color: var(--muted); border-color: var(--line); border-style: dashed; }
   .notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
   .notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+  .crit-text { color: var(--crit); }
 
   .task { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
   .task:first-child { border-top: 0; padding-top: 0; }
@@ -72,7 +160,7 @@ export const styles = css`
   .btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
   .btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
   .btn.burger[aria-expanded="true"] { border-color: var(--primary); }
-  .menu { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
+  .menu { min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
   .menu[hidden] { display: none; }
   .menu button { text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
   .menu button:hover, .menu button:focus-visible { background: var(--tile); outline: none; }
@@ -92,6 +180,10 @@ export const styles = css`
   .fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
   .fixlink:hover { text-decoration: underline; }
   .fixlink[hidden] { display: none; }
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
+  @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
   .fixgo { flex: none; font-weight: 500; color: var(--primary); }
   .pill.ok { color: var(--ok); }
@@ -107,11 +199,32 @@ export const styles = css`
   .field input[aria-invalid="true"] { border-color: var(--crit); }
   .task[aria-current="step"] strong { color: var(--primary); }
 
-  /* A dialog leaves the foot of the window to its buttons, which ride in the bar there. */
-  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px)); background: #00000080; }
-  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .modal { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: #00000080; }
+  /* Only the middle gives up height, so a dialog taller than the window keeps its title and its buttons in view while
+     the middle scrolls. Should even those not fit, the dialog scrolls and its buttons hold to its foot. */
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .dialog > * { flex: none; }
+  .dialog > .review-scroll { flex: 0 1 auto; }
+  /* A dialog's foot is the dialog's own background under a divider: a contrasting strip read as a band of the other
+     theme. The leaving button is outlined so it still reads as a button on that background. */
+  .dlgfoot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); background: var(--card); }
+  .dlgfoot .btn:not(.primary, .danger) { background: transparent; border-color: var(--muted); }
+  /* On a touch screen with the keyboard up, the dialog moves to the top and stops above the keyboard, a little tighter,
+     and the box typed in keeps clear of the buttons when the dialog scrolls to it. */
+  :host(.dlgkeys) .modal { align-items: flex-start; padding-top: 8px; }
+  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 65px; }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
+  /* The Automations dialog's rows scroll under its heading and chips, since a zone can hold fifty or so automations.
+     One height whatever the chip, so moving between chips doesn't make the dialog jump. */
+  .autosdlg { height: min(calc(100dvh - 32px - env(safe-area-inset-bottom, 0px)), 760px); }
+  .autoshead { display: flex; flex-direction: column; gap: 8px; }
+  .autoshead > p { margin: 0; }
+  .dialog.autosdlg > .review-scroll { flex: 1 1 auto; gap: 12px; }
+  .autosdlg .review-scroll > p { margin: 0; }
+  .autosdlg .card { padding: 12px; }
+  .autosdlg .card h3 { margin: 0; font-size: 15px; }
+  .dlgfoot .btn[hidden] { display: none; }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
   /* What a dialog lists keeps its own height and the list scrolls, rather than each part being squeezed and cut short. */
   .review-scroll > * { flex: none; }
@@ -120,7 +233,13 @@ export const styles = css`
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
   .review-row b { font-weight: 500; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
+  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus.
+     Taps go through it: it can lie over the heading's buttons for a moment and must not swallow them. */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; pointer-events: none; animation: toast-in .2s ease-out; }
+  .toast.leaving { animation: toast-out .2s ease-in forwards; }
+  @keyframes toast-in { from { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @keyframes toast-out { to { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @media (prefers-reduced-motion: reduce) { .toast, .toast.leaving { animation: none; } }
 
   .combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
   .inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
@@ -130,6 +249,13 @@ export const styles = css`
   .pickwrap:has(.pickrow[aria-pressed="true"]) { border-color: var(--primary); }
   .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; background: none; text-align: left; }
   .tick { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid var(--off); border-radius: 6px; font-size: 14px; }
+  .pickrow[aria-disabled="true"] { cursor: help; }
+  .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
+  .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
+  .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+  button.chip { color: var(--fg); }
+  button.chip[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
+  button.chip[aria-pressed="true"]::before { content: "✓" / ""; margin-right: 5px; font-size: 12px; }
   .pickrow[aria-pressed="true"] .tick { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
   .pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .pick-text strong { font-weight: 500; overflow-wrap: anywhere; }
@@ -242,11 +368,28 @@ export const styles = css`
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
   .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  /* A shared device's dial and mode chips, which automation rows don't have, in the same read-only greys (#91). */
+  .ro > .ic { background: color-mix(in srgb, var(--off) 20%, transparent); }
+  .dial:has([data-roctl]), .chip:has(input[data-roctl]) { opacity: var(--ro-dim); cursor: not-allowed; filter: grayscale(1); }
+  .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
   .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 32px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
   .sw.on i { background: var(--primary); }
+  /* A tap anywhere on an automation's tile is a tap on its switch, so the tile shows it as the switch would. */
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. It has to read as not yours to
+     switch at a glance (#111), so it loses the accent colour as well as brightness: one look everywhere, an outline barely
+     off the card (--ro-surface, dashed), text in --ro-fg kept at 4.5:1 on it, and controls in greys at --ro-dim. On or
+     off still shows by the knob's side and the On./Off. line. It still takes the tap that says where it's changed. */
+  .ro .dev-name { color: var(--ro-fg); }
+  .dev.ro { background: var(--ro-surface); border: 1px dashed var(--off); padding: 9px; cursor: not-allowed; }
+  .ro > .ic svg { fill: var(--ro-fg); }
+  .sw[data-roctl], .sw.on[data-roctl], .sw[data-roctl]:hover { opacity: var(--ro-dim); border-color: var(--off); cursor: not-allowed; }
+  .sw[data-roctl] i, .sw.on[data-roctl] i { background: var(--off); }
+  .seg .star { margin-left: 1px; }
+  .dev[data-auto]:has(.sw:not(:disabled)) { cursor: pointer; }
+  .dev[data-auto]:hover .sw:not(:disabled) { border-color: var(--muted); }
   .sw:disabled, .dial.busy, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
   /* The dial: an arc open at the bottom, with the plus and minus buttons tucked into the gap. Only the arc itself
      takes a finger, so a thumb scrolling the page over the middle of it changes nothing. */
@@ -340,25 +483,21 @@ export const styles = css`
   .issues:empty { display: none; }
   @media (pointer: coarse) { .lcell input { font-size: 16px; } }
 
-  /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
-  .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
+  /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved.
+     A grey of its own, not the inverted fg and bg, which read as a stark white or black slab. The hairline is a shadow so
+     the bar keeps its size, and with the soft shadow it keeps the bar standing off a light page. */
+  .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--barbg); color: var(--barfg); box-shadow: 0 0 0 1px var(--barline), 0 6px 20px #00000029; }
   :host(.drafting) main { padding-bottom: 96px; }
-  :host(.drafting) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   :host(.typing) .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
   .draft-text { flex: 1; min-width: 0; font-size: 14px; }
   .draft-text strong { font-weight: 500; }
   .draft-why { opacity: .8; }
   .draft-discard, .draft-review { flex: none; height: 44px; padding: 0 14px; border-radius: 10px; font-size: 14px; white-space: nowrap; }
-  .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
-  .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
+  .draft-discard { border: 1px solid var(--barout); background: transparent; color: inherit; }
+  .draft-review { border: 0; background: var(--primary); color: var(--on-primary); font-weight: 500; }
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
-  .draft-review.danger { background: var(--crit); color: #FFFFFF; }
   .draft-discard:disabled { opacity: .5; cursor: not-allowed; }
-  /* A dialog's buttons in the bar. The dialog stops short of the bar, so it never lies over a box being typed in. */
-  :host(.typing) .dlgbar { display: flex; }
-  /* The page's own bar steps aside while a dialog is open, so the dialog's buttons are the only ones at the foot. */
-  .draftbar[inert] { visibility: hidden; }
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
   .wizbar .fixlink { color: inherit; text-decoration: underline; }
   .wizbar[data-bare] .draft-text { opacity: .8; }
@@ -374,7 +513,6 @@ export const styles = css`
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     :host(.drafting) main { padding-bottom: 136px; }
-    :host(.drafting) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* History, as the mock draws it. The chart scrolls the page vertically under a finger and reads a point sideways. */
@@ -427,6 +565,10 @@ export const styles = css`
   .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#91). A muted box and text rather than
+     opacity, which would take the figures under 4.5:1. */
+  input[data-roctl]:read-only { background: var(--ro-surface); color: var(--ro-fg); border-style: dashed; cursor: not-allowed; }
+  .vchart[data-roctl] { cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
@@ -435,6 +577,9 @@ export const styles = css`
   /* Helper search boxes: a field, and a short list of matches under it. */
   .picker { display: flex; flex-direction: column; gap: 4px; position: relative; }
   .picker .field { max-width: none; }
+  /* A dropped list is placed by droplist.ts, fixed to the window: above cards and the draft bar, under a dialog's layer. */
+  .drop { position: fixed; z-index: 25; box-sizing: border-box; width: max-content; margin: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .drop[hidden] { display: none; }
   .picklist-menu { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 6px 18px #00000026; }
   .picklist-menu li { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
   .picklist-menu li.active, .picklist-menu li:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }

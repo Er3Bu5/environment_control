@@ -1,5 +1,6 @@
 /* The stored setup as the frame uses it. The backend checks every save, but the frame still reads what it is given
    field by field: a zone it can't make sense of is left out of the screens rather than breaking them. */
+import { AUTOMATION_ID, type Room } from "./messages";
 
 export const SETUP_STEPS = ["details", "devices", "layout", "place", "calibrate", "targets"] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -22,6 +23,24 @@ export interface HistoryView {
 /* Until a zone says otherwise. */
 export const HISTORY_DEFAULT: HistoryView = { metric: "temperature", hours: 24 };
 
+/* The groups a zone's linked automations are switched in, as the backend accepts them. */
+export const AUTOMATION_GROUPS = ["alert_day", "alert_night", "alert_device", "failsafe", "control"] as const;
+export type AutomationGroup = (typeof AUTOMATION_GROUPS)[number];
+/* A Home Assistant automation a zone switches. The frame names it to the host by id, never by entity. */
+export interface AutomationLink {
+  id: string;
+  entity: string;
+  group: AutomationGroup;
+  /* The panel's own name for it, absent when it goes by Home Assistant's. */
+  name?: string;
+}
+/* As long as a device's name may be, counted as the backend counts it, in UTF-16 units. */
+export const MAX_LINK_NAME = 100;
+/* What the backend stores as a link's name. Anything else it refuses, so a save carries a name only when it passes. */
+export const linkNameOk = (v: unknown): v is string =>
+  typeof v === "string" && v !== "" && v.length <= MAX_LINK_NAME && v === v.trim() && !/[\u0000-\u001f\u007f]/.test(v);
+const LINK_ID = /^[a-z0-9_-]{1,64}$/;
+
 export interface Zone {
   id: string;
   name: string;
@@ -31,6 +50,9 @@ export interface Zone {
   layout: Layout | null;
   sensors: { id: string; placed: boolean }[];
   setup: Partial<Record<SetupStep, StepState>>;
+  automations: AutomationLink[];
+  /* The zone it's linked to (#91), null when it isn't. */
+  parent: string | null;
 }
 export interface Device {
   id: string;
@@ -51,6 +73,18 @@ function readHistory(v: unknown): HistoryView | null {
   return { metric: v.metric as HistoryView["metric"], hours: v.hours as number };
 }
 
+/* A link that isn't the right shape is left out on its own, and so is a second one with an id or automation already
+   seen, since the host would switch only the first. */
+export function readLinks(v: unknown): AutomationLink[] {
+  const out: AutomationLink[] = [];
+  for (const a of Array.isArray(v) ? v : []) {
+    if (!isObj(a) || typeof a.id !== "string" || !LINK_ID.test(a.id) || typeof a.entity !== "string" || !AUTOMATION_ID.test(a.entity)) continue;
+    if (!AUTOMATION_GROUPS.includes(a.group as AutomationGroup) || out.some((x) => x.id === a.id || x.entity === a.entity)) continue;
+    out.push({ id: a.id, entity: a.entity, group: a.group as AutomationGroup, ...(linkNameOk(a.name) ? { name: a.name } : {}) });
+  }
+  return out;
+}
+
 export function readZones(list: unknown[]): Zone[] {
   const out: Zone[] = [];
   for (const z of list) {
@@ -60,7 +94,7 @@ export function readZones(list: unknown[]): Zone[] {
     const sensors = Array.isArray(z.sensors)
       ? z.sensors.filter(isObj).filter((s) => typeof s.id === "string").map((s) => ({ id: s.id as string, placed: Array.isArray(s.pos) }))
       : [];
-    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, history: readHistory(z.history), layout: readLayout(z.layout), sensors, setup });
+    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, history: readHistory(z.history), layout: readLayout(z.layout), sensors, setup, automations: readLinks(z.automations), parent: typeof z.parent === "string" ? z.parent : null });
   }
   return out;
 }
@@ -77,11 +111,13 @@ export const stepsLeft = (z: Zone): SetupStep[] => SETUP_STEPS.filter((k) => z.s
 
 /* Editing. Every change works on a copy of what is stored, and the copy is only kept once the backend has saved it, so
    fields this frame doesn't know about yet pass through untouched. */
-export type RawConfig = { zones: Record<string, unknown>[]; devices: Record<string, unknown>[] };
+/* The room rides along only when one was given, so a save without it leaves the host keeping what's stored. */
+export type RawConfig = { zones: Record<string, unknown>[]; devices: Record<string, unknown>[]; room?: Room };
 
-export const copyConfig = (zones: unknown[], devices: unknown[]): RawConfig => structuredClone({
+export const copyConfig = (zones: unknown[], devices: unknown[], room?: Room): RawConfig => structuredClone({
   zones: zones.filter(isObj),
   devices: devices.filter(isObj),
+  ...(room ? { room } : {}),
 });
 
 export const STEP_TITLE: Record<SetupStep, string> = {
@@ -154,6 +190,15 @@ export function setHistory(c: RawConfig, id: string, view: HistoryView): void {
   else z.history = { metric: view.metric, hours: view.hours };
 }
 
+/* The one number helper every alert's repeat rate comes from, linked for the whole room. Unlinking sends an empty room
+   rather than none, since none is how a save says to keep what's stored. */
+export function setAlertRepeat(c: RawConfig, entity: string | null): void {
+  const room = { ...c.room };
+  if (entity) room.alertRepeat = entity;
+  else delete room.alertRepeat;
+  c.room = room;
+}
+
 export function markStep(c: RawConfig, id: string, step: SetupStep, state: StepState): void {
   const z = c.zones.find((x) => x.id === id);
   if (!z) return;
@@ -178,17 +223,20 @@ export function removeZone(c: RawConfig, id: string): void {
 export interface ShareAsk {
   title: string;
   text: string;
+  more: string;
   keep: string;
   go: string;
 }
-export function shareAsk(kind: "device" | "sensor" | "automation", name: string, zone: string, others: string[]): ShareAsk {
-  const where = others.join(" and ");
-  const text = {
-    device: `It's already in ${where}. It's one device, so switching it here switches it there too.`,
-    sensor: `It's already in ${where}. It's one sensor, so its readings count there and here.`,
-    automation: `It's already linked in ${where}. It's one automation, so switching it off here switches it off there too.`,
-  }[kind];
-  return { title: `Add ${name} to ${zone} as well?`, text, keep: "Leave it out", go: `Add to ${zone}` };
+/* Bare names in a sentence read as one does, "Garden, Nursery and Veg"; a labelled list keeps its commas (#115). */
+export const andList = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+/* Others come in the order Overview shows the zones. "Zone: X" is said once per paragraph, then the bare name (#115). */
+export function shareAsk(kind: "device" | "sensor", name: string, others: string[]): ShareAsk {
+  const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
+  const more =
+    kind === "device"
+      ? `This means that controls are in sync in ${all}. Automations from ${andList(others)} may affect the device state.`
+      : `This means that data is in sync in ${all}.`;
+  return { title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
 }
 
 /* HA can't tell how some devices are connected, ESPHome boards above all, so Setup asks and keeps the answer, marked as

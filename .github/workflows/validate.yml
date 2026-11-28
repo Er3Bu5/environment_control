@@ -1,8 +1,9 @@
 name: Validate
 
-# Runs on each pull request, daily on main, and by hand. Not on a merge to main: the pull request's run already tested
-# the merged content, and the last job records that content by its git tree hash, so Beta and Release can confirm
-# exactly what they build passed here without running the suites a second time.
+# Runs on each pull request, whatever its base (work into dev, and dev into main), daily on main, and by hand. Not on
+# a merge: the pull request's run already tested the merged content, and the last job records that content by its git
+# tree hash, so Beta and Release can confirm exactly what they build passed here without running the suites a second
+# time. For main, that record comes from the pull request that moves dev to main.
 on:
   pull_request:
   schedule:
@@ -124,8 +125,8 @@ jobs:
 
   tested:
     name: Tested
-    # Only once every check above passed. For a pull request the checkout is GitHub's test merge with main, so this is
-    # the tree a merge lands when main hasn't moved since.
+    # Only once every check above passed. For a pull request the checkout is GitHub's test merge with its base branch,
+    # so this is the tree a merge lands when the base hasn't moved since.
     needs: [backend, frontend, hassfest, marketplace, secrets-and-privacy]
     runs-on: ubuntu-24.04
     permissions:

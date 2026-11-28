@@ -1,7 +1,8 @@
 # Builds the published mock: the tested source with its fixture swapped for what Home Assistant reported.
 # Bands: Min, Target and Max are the user's HA helpers. HA has no Low or High, so day Low and High come from the
 # Athena stage assumed for each zone, held inside Min and Max, and night ones are midpoints. A zone with no target
-# helpers (Veg, Nursery) has no target.
+# helpers (Veg, Nursery, Breeding) has no target. Breeding's lights are switched by hand and its light sensor is off, so
+# it has no lux reading and no light limits.
 import datetime as dt, json, os, re, statistics, sys
 
 root = sys.argv[1]
@@ -31,6 +32,9 @@ def band(zone, period, metric, stage):
     tg = num(tkey) if tkey in S else None
     if period == "day":
         lo, hi = [min(mx, max(mn, x)) for x in ATHENA[stage][metric]]
+        # A target outside the assumed stage would be refused as out of order, so Low and High widen to take it in.
+        if tg is not None:
+            lo, hi = min(lo, tg), max(hi, tg)
     else:
         mid = r2((mn + mx) / 2) if tg is None else tg
         lo, hi = r2((mn + mid) / 2), r2((mid + mx) / 2)
@@ -63,18 +67,18 @@ def shaped(cells):
 
 HISTORY, HISTORY_LONG = {}, {}
 # HA purges what it doesn't keep, so the long arrays start where the first sensor does.
-kept = min(next(i for i, c in enumerate(b) if c) for b in LONG["buckets"].values())
+kept = min(next((i for i, c in enumerate(b) if c), len(b)) for b in LONG["buckets"].values())
 def history(sid, slug):
     HISTORY[sid] = shaped({m: buckets(f"sensor.{slug}_{ENTITY[m]}") for m in DP})
     HISTORY_LONG[sid] = shaped({m: LONG["buckets"][f"sensor.{slug}_{ENTITY[m]}"][kept:] for m in DP})
 
 toMin = lambda e: int(S[e]["state"][:2]) * 60 + int(S[e]["state"][3:5])
-limits = lambda z: {"dayMin": num(f"input_number.day_lights_{z}_min_threshold"), "nightMax": num(f"input_number.night_lights_{z}_max_threshold")}
+limits = lambda z: {k: num(e) if e in S else None for k, e in (("dayMin", f"input_number.day_lights_{z}_min_threshold"), ("nightMax", f"input_number.night_lights_{z}_max_threshold"))}
 def env(sid, name, short, slug, pos, level):
     history(sid, slug)
     return {"id": sid, "name": name, "short": short, "slug": slug, "kind": "env", "pos": pos, "level": level,
             "t": round(num(f"sensor.{slug}_air_temp"), 2), "h": round(num(f"sensor.{slug}_humidity"), 2),
-            "vpd": round(num(f"sensor.{slug}_vpd"), 3), "lux": round(num(f"sensor.{slug}_light"), 1), "link": "Ethernet",
+            "vpd": round(num(f"sensor.{slug}_vpd"), 3), "lux": round(num(f"sensor.{slug}_light"), 1) if f"sensor.{slug}_light" in S else None, "link": "Ethernet",
             "leafEntity": f"number.{slug}_leaf_temperature_offset", "leafLive": num(f"number.{slug}_leaf_temperature_offset")}
 
 zones = [
@@ -89,23 +93,26 @@ zones = [
     {"id": "nursery", "name": "Nursery", "dayAt": toMin("input_datetime.veg_day_time"), "nightAt": toMin("input_datetime.veg_night_time"), "bands": bands("nursery", "veg"), "linked": True, "lightLimits": limits("nursery"),
      "layout": {"w": 1.2, "d": 0.6, "units": 8, "rows": 2, "cols": 4},
      "sensors": [env("n-env", "Nursery environment", "Nursery env", "nursery_environment", [0.5, 1.5], "in")]},
+    {"id": "breeding", "name": "Breeding", "dayAt": toMin("input_datetime.breeding_day_time"), "nightAt": toMin("input_datetime.breeding_night_time"), "bands": bands("breeding", "bulk"), "linked": True, "lightLimits": limits("breeding"),
+     "layout": {"w": 1.2, "d": 1.2, "units": 4, "rows": 2, "cols": 2},
+     "sensors": [env("br-env", "Breeding environment", "Breeding env", "breeding_environment", [0.5, 0.5], "in")]},
 ]
-# The helpers each zone links to, only where HA has them: Veg and Nursery have no target helpers.
+# The helpers each zone links to, only where HA has them: Veg, Nursery and Breeding have no target helpers, Breeding no light ones.
 def links(zone, sched, emerson):
     have = lambda e: e if e in S else None
     bands = {p: {m: {k: e for k, e in (("min", have(f"input_number.{zone}_{p}_{m}_min_threshold")), ("target", have(f"input_number.{zone}_{p}_{m}_target")),
                                         ("max", have(f"input_number.{zone}_{p}_{m}_max_threshold"))) if e} for m in METRICS} for p in ("day", "night")}
     out = {"day": f"input_datetime.{sched}_day_time", "night": f"input_datetime.{sched}_night_time", "bands": bands,
-           "light": {"dayMin": f"input_number.day_lights_{zone}_min_threshold", "nightMax": f"input_number.night_lights_{zone}_max_threshold"}}
+           "light": {k: e for k, e in (("dayMin", f"input_number.day_lights_{zone}_min_threshold"), ("nightMax", f"input_number.night_lights_{zone}_max_threshold")) if e in S}}
     if emerson:
         out.update(morning="input_number.emerson_effect_morning_extension", daylight="input_number.emerson_effect_daylight_time", evening="input_number.emerson_effect_evening_extension")
     return out
-for z, sched in zip(zones, ("garden", "veg", "veg")):
+for z, sched in zip(zones, ("garden", "veg", "veg", "breeding")):
     z["helpers"] = links(z["id"], sched, z["id"] == "garden")
 for z in zones:
     e = [s for s in z["sensors"] if s["kind"] == "env"]
     z["now"] = {"temperature": statistics.fmean(s["t"] for s in e), "humidity": statistics.fmean(s["h"] for s in e),
-                "vpd": statistics.fmean(s["vpd"] for s in e), "light": statistics.fmean(s["lux"] for s in e)}
+                "vpd": statistics.fmean(s["vpd"] for s in e), "light": statistics.fmean(lux) if (lux := [s["lux"] for s in e if s["lux"] is not None]) else None}
 
 def is_day(z, minute):
     d, n = z["dayAt"], z["nightAt"]
@@ -139,7 +146,7 @@ devices = [
     plug("lp-veg", "Veg Lights", "switch.veg_lights", ["veg", "nursery"]),
     board("b-left", "Garden Environment Left", ["garden"]), board("b-right", "Garden Environment Right", ["garden"]),
     board("b-veg", "Veg Environment", ["veg"]), board("b-nursery", "Nursery Environment", ["nursery"]),
-    {"id": "pulse", "name": "Pulse Pro", "type": "Sensor", "integration": "pulselabs", "family": "Pulse", "link": "wifi", "source": "detected", "path": "Cloud", "hub": "", "zones": ["veg"], "state": "Online"},
+    board("b-breeding", "Breeding Environment", ["breeding"]),
     {"id": "vpd", "name": "Garden environment average VPD", "type": "Calculated", "integration": "template", "family": "Template", "link": "derived", "source": "detected", "path": "Local", "hub": "", "zones": ["garden"], "state": "Online"},
 ]
 def ha_state(entity):
@@ -180,50 +187,15 @@ FAILSAFES = {"switch.veg_oscillating_fans": {"want": "on", "kind": "failsafe", "
              "switch.garden_lights_under_canopy": {"want": schedule("garden"), "kind": "watchdog", "by": "Garden lights under canopy recovery"},
              "switch.veg_lights": {"want": schedule("veg"), "kind": "watchdog", "by": "Veg lights recovery"}}
 
-# Activity: the logbook, plus band crossings worked out from history, as the real panel would.
+# Activity rows are built further down, once each zone's automations are known: a zone's runs are its own automations'.
 LOG = {"switch.air_conditioner": ("Air conditioner", "device", ["garden"]), "switch.heater_mains": ("Heater", "device", ["garden", "veg", "nursery"]),
        "switch.garden_intake_fan": ("Intake fan", "device", ["garden"]), "switch.air_conditioner_exhaust_fan": ("Air conditioner exhaust fan", "device", ["garden"]),
        "switch.veg_oscillating_fans": ("Oscillating fans", "device", ["veg", "nursery"]), d1: ("Dehumidifier", "device", ["garden"]), aux: ("Auxiliary dehumidifier", "device", ["garden", "veg", "nursery"]),
        "fan.garden_dehumidifier": ("Dehumidifier fan", "device", ["garden"]), "switch.garden_lights_f_l": ("Overhead lights", "lights", ["garden"]), "switch.garden_lights_under_canopy": ("Under canopy lights", "lights", ["garden"]),
        "switch.garden_lights_red": ("Red lights", "lights", ["garden"]), "switch.veg_lights": ("Veg lights", "lights", ["veg", "nursery"])}
-rows = {z["id"]: [] for z in zones}
-for e in H["logbook"]:
-    known = LOG.get(e.get("entity_id"))
-    if not known or e.get("state") not in ("on", "off"):
-        continue
-    name, kind, zs = known
-    when = parse(e["when"]).astimezone(NZ)
-    who = e.get("context_name") or ("Manual" if e.get("context_user_id") else "Device")
-    for z in zs:
-        rows[z].append((when, [f"{when:%H:%M}", kind, f"{name} turned {e['state']}", who]))
-
-midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-for z in zones:
-    e = [s for s in z["sensors"] if s["kind"] == "env"]
-    for metric in METRICS:
-        label, unit, dp = LABEL[metric]
-        last = None
-        for i in range(289):
-            vals = [HISTORY[s["id"]][metric][i] for s in e if HISTORY[s["id"]][metric][i] is not None]
-            if not vals:
-                continue
-            at = (now - dt.timedelta(minutes=(288 - i) * 5)).astimezone(NZ)
-            v = statistics.fmean(vals)
-            mn, lo, _, hi, mx = z["bands"]["day" if is_day(z, at.hour * 60 + at.minute) else "night"][metric]
-            state = "critlow" if v < mn else "crithigh" if v > mx else "low" if v < lo else "high" if v > hi else "ok"
-            if last is not None and state != last and at >= midnight:
-                text = {"ok": "back in ideal zone", "low": "below ideal zone", "high": "above ideal zone", "critlow": "critical low", "crithigh": "critical high"}[state]
-                rows[z["id"]].append((at, [f"{at:%H:%M}", "climate", f"{label} {text} at {v:.{dp}f}{unit}", "Reading"]))
-            last = state
-
-def recent(zone):
-    device = [r for r in rows[zone] if r[1][1] != "climate"]
-    climate = [r for r in rows[zone] if r[1][1] == "climate"][-8:]
-    return [r[1] for r in sorted(device + climate, key=lambda r: r[0], reverse=True)]
-ACTIVITY = {z["id"]: recent(z["id"]) for z in zones}
 
 lights = {"garden": [[f"switch.garden_lights_{p}", f"Garden Lights {p.replace('_', '/').upper()}"] for p in ("f_l", "f_r", "b_l", "b_r")],
-          "veg": [["switch.veg_lights", "Veg Lights"]], "nursery": [["switch.veg_lights", "Veg Lights"]]}
+          "veg": [["switch.veg_lights", "Veg Lights"]], "nursery": [["switch.veg_lights", "Veg Lights"]], "breeding": []}
 onoff = [[e, S[e]["name"] or e, word(e)] for e in ("light.garden_light_controller_overhead", "light.garden_light_controller_under_canopy", "light.veg_light_controller", "switch.garden_lights_under_canopy", "switch.garden_lights_red") if e in S]
 
 js = lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":"))
@@ -237,7 +209,8 @@ def sub(pattern, replacement):
 
 sub(r'const NOW = 14 \* 60 \+ 20;\nconst DATA_LABEL = .*?HISTORY_LONG = \{\};\n',
     f'const NOW = {NOW};\nconst DATA_LABEL = "HA snapshot", BASE_DATE = "{local:%Y-%m-%d}", HISTORY = {js(HISTORY)}, HISTORY_LONG = {js(HISTORY_LONG)};\n')
-sub(r'const ACTIVITY = \{.*?\n\};\n', f'const ACTIVITY = {js(ACTIVITY)};\n')
+# The frame asks for today by the mock's clock, so the clock is the snapshot's, or today would be an empty day in 2026.
+sub(r'const MOCK_CLOCK = Date\.parse\("[^"]*"\);', f'const MOCK_CLOCK = Date.parse("{now.astimezone(NZ).isoformat()}");')
 sub(r'const EXTRA_SENSORS = \[.*?\n\];\n', 'const EXTRA_SENSORS = [];\n')
 sub(r'const LIGHTS = \{.*?\n\};\n', f'const LIGHTS = {js(lights)};\n')
 sub(r'const ALL_ON_OFF = \[.*?\n\];\n', f'const ALL_ON_OFF = {js(onoff)};\n')
@@ -256,28 +229,112 @@ if os.path.exists(f"{root}/ha-snap/automations.json"):
         REGISTRY["entities"][e] = {"entity_id": e, "platform": "automation", "area_id": area_id(name)}
         if name:
             REGISTRY["areas"].setdefault(area_id(name), {"area_id": area_id(name), "name": name})
+    # An automation belongs to one zone and the fake refuses every save otherwise, so the first zone to list it keeps it.
+    taken = set()
     for z in zones:
-        z["automations"] = [{"id": f"a{i + 1}", **x} for i, x in enumerate(A["links"].get(z["id"], []))]
+        mine = [x for x in A["links"].get(z["id"], []) if x["entity"] not in taken]
+        taken.update(x["entity"] for x in mine)
+        z["automations"] = [{"id": f"a{i + 1}", **x} for i, x in enumerate(mine)]
     if A.get("repeat"):
         STATES[A["repeat"]["entity"]] = {"state": A["repeat"]["state"], "attributes": A["repeat"]["attributes"]}
         ROOM = {"alertRepeat": A["repeat"]["entity"]}
-seed = {"config": {"revision": 1, "zones": zones, "devices": devices, "room": ROOM}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY}
-if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed, ACTIVITY]), re.I):
+# Activity: the logbook, plus band crossings worked out from history, in the shape the backend's activity command returns
+# per zone: device changes and automations switched on or off with their cause, and repeated runs collapsed into one
+# streak. Written without a snapshot to test against, so every logbook key is read with .get: a key that isn't there
+# loses a row or a cause, never the build.
+LOGBOOK = sorted((e for e in H.get("logbook", []) if isinstance(e, dict) and e.get("when")), key=lambda e: parse(e["when"]))
+USERS = json.load(open(f"{root}/ha-snap/users.json")) if os.path.exists(f"{root}/ha-snap/users.json") else {}
+STARTS = [parse(e["when"]) for e in LOGBOOK if e.get("domain") == "homeassistant" and "start" in str(e.get("message") or "").lower()]
+iso = lambda t: t.astimezone(NZ).isoformat()
+
+def trigger_of(text):
+    t = re.sub(r"^triggered by\s+", "", str(text or "").strip().lower())
+    for word, kind in (("time pattern", "time_pattern"), ("numeric state", "numeric_state"), ("state", "state"), ("time", "time"), ("home assistant", "homeassistant"),
+                       ("sun", "sun"), ("template", "template"), ("event", "event"), ("webhook", "webhook"), ("action", "action"), ("service", "action")):
+        if t.startswith(word):
+            m = re.search(r"\b([a-z_]+\.[a-z0-9_]+)", t[len(word):])
+            name = (S.get(m.group(1)) or {}).get("name") if m and kind in ("state", "numeric_state") else None
+            return {"kind": kind, **({"name": name} if name else {})}
+    return {"kind": "unknown"}
+
+def cause_of(e, before):
+    if e.get("context_event_type") == "automation_triggered" or e.get("context_domain") == "automation":
+        return {"type": "automation", "name": e.get("context_name") or e.get("context_entity_id_name") or "an automation",
+                "trigger": trigger_of(e.get("context_message") or e.get("context_source")), **({"entity": e["context_entity_id"]} if e.get("context_entity_id") else {})}
+    if e.get("context_user_id"):
+        return {"type": "person", "name": USERS.get(e["context_user_id"]) or "a person"}
+    when = parse(e["when"])
+    if any(dt.timedelta(0) <= when - s <= dt.timedelta(minutes=5) for s in STARTS):
+        return {"type": "startup"}
+    return {"type": "reconnect"} if before == "unavailable" else {"type": "none"}
+
+entries = {z["id"]: [] for z in zones}
+linked = {z["id"]: {a.get("entity") for a in z.get("automations", []) if isinstance(a, dict)} for z in zones}
+last_state, runs = {}, {z["id"]: {} for z in zones}
+for e in LOGBOOK:
+    eid, state, when = e.get("entity_id"), e.get("state"), parse(e["when"])
+    if eid in LOG and state in ("on", "off", "unavailable"):
+        name, _, zs = LOG[eid]
+        for z in zs:
+            if z in entries:
+                entries[z].append({"kind": "device", "when": iso(when), "entity": eid, "name": name, "state": state, "cause": cause_of(e, last_state.get(eid))})
+    elif str(eid).startswith("automation."):
+        owners = [z for z in entries if eid in linked[z]]
+        ran = str(e.get("message") or "").lower().startswith("triggered")
+        for z in owners:
+            if state in ("on", "off") and not ran:
+                entries[z].append({"kind": "automation", "when": iso(when), "entity": eid, "name": e.get("name") or eid, "state": state, "cause": cause_of(e, last_state.get(eid))})
+            elif ran:
+                trig = trigger_of(e.get("message") or e.get("source"))
+                # A run joins its automation's streak while the trigger is the same, the day is the same and the gap is short.
+                cur = runs[z].get(eid)
+                if cur and cur["trigger"] == trig and when - parse(cur["last"]) <= dt.timedelta(hours=1) and when.astimezone(NZ).date() == parse(cur["first"]).astimezone(NZ).date():
+                    cur["count"] += 1; cur["last"] = cur["when"] = iso(when)
+                else:
+                    runs[z][eid] = {"kind": "run", "when": iso(when), "entity": eid, "name": e.get("name") or eid, "trigger": trig, "count": 1, "first": iso(when), "last": iso(when)}
+                    entries[z].append(runs[z][eid])
+    if eid and state:
+        last_state[eid] = state
+
+start = now - dt.timedelta(minutes=288 * 5)
+for z in zones:
+    e = [s for s in z["sensors"] if s["kind"] == "env"]
+    for metric in METRICS:
+        _, _, dp = LABEL[metric]
+        last = None
+        for i in range(289):
+            vals = [HISTORY[s["id"]][metric][i] for s in e if HISTORY[s["id"]][metric][i] is not None]
+            if not vals:
+                continue
+            at = (now - dt.timedelta(minutes=(288 - i) * 5)).astimezone(NZ)
+            v = statistics.fmean(vals)
+            mn, lo, _, hi, mx = z["bands"]["day" if is_day(z, at.hour * 60 + at.minute) else "night"][metric]
+            state = "critlow" if v < mn else "crithigh" if v > mx else "low" if v < lo else "high" if v > hi else "ok"
+            if last is not None and state != last:
+                entries[z["id"]].append({"kind": "climate", "when": iso(at), "metric": metric, "level": state, "value": round(v, dp)})
+            last = state
+first_logged = parse(LOGBOOK[0]["when"]) if LOGBOOK else start
+ACTIVITY = {"now": iso(now), "earliest": {z["id"]: iso(min(first_logged, start)) for z in zones}, "entries": entries}
+seed = {"config": {"revision": 1, "zones": zones, "devices": devices, "room": ROOM}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY, "activity": ACTIVITY}
+if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed]), re.I):
     sys.exit("network identifier in the snapshot")
 open(f"{root}/snapshot-ui.html", "w", encoding="utf-8").write(src)
 open(f"{root}/snapshot-seed.js", "w", encoding="utf-8").write(f'"use strict";\n/* A real room, read from Home Assistant by build-snapshot.py. Not committed. */\nconst SEED = {js(seed)};\n')
 import subprocess
 subprocess.run([sys.executable, f"{root}/build-mock.py", root, "snapshot-ui.html", "snapshot-seed.js", "environment-control-mock.html"], check=True)
 
+# Breeding has no light reading and no light limits, so it expects none.
 expect = {"zones": {
     "garden": {"temperature": num("sensor.garden_environment_average_temperature"), "humidity": num("sensor.garden_environment_average_humidity"), "vpd": num("sensor.garden_environment_average_vpd"),
                "light": zones[0]["now"]["light"]},
     "veg": {"temperature": num("sensor.veg_environment_air_temp"), "humidity": num("sensor.veg_environment_humidity"), "vpd": num("sensor.veg_environment_vpd"), "light": num("sensor.veg_environment_light")},
-    "nursery": {"temperature": num("sensor.nursery_environment_air_temp"), "humidity": num("sensor.nursery_environment_humidity"), "vpd": num("sensor.nursery_environment_vpd"), "light": num("sensor.nursery_environment_light")}}}
+    "nursery": {"temperature": num("sensor.nursery_environment_air_temp"), "humidity": num("sensor.nursery_environment_humidity"), "vpd": num("sensor.nursery_environment_vpd"), "light": num("sensor.nursery_environment_light")},
+    "breeding": {"temperature": num("sensor.breeding_environment_air_temp"), "humidity": num("sensor.breeding_environment_humidity"), "vpd": num("sensor.breeding_environment_vpd"),
+                 "light": num("sensor.breeding_environment_light") if "sensor.breeding_environment_light" in S else None}}}
 clock = lambda e: S[e]["state"][:5]
 level = S["light.garden_light_controller_overhead"]["attrs"].get("brightness")
 expect["lights"] = {"overhead": None if S["light.garden_light_controller_overhead"]["state"] != "on" or level is None else round(level / 255 * 100)}
-expect["sched"] = {z: {"day": clock(f"input_datetime.{h}_day_time"), "night": clock(f"input_datetime.{h}_night_time"), **limits(z)} for z, h in (("garden", "garden"), ("veg", "veg"), ("nursery", "veg"))}
+expect["sched"] = {z: {"day": clock(f"input_datetime.{h}_day_time"), "night": clock(f"input_datetime.{h}_night_time"), **limits(z)} for z, h in (("garden", "garden"), ("veg", "veg"), ("nursery", "veg"), ("breeding", "breeding"))}
 e = zones[0]["emerson"]; on, off = zones[0]["dayAt"], zones[0]["nightAt"]
 hm = lambda m: f"{int(m) // 60 % 24:02d}:{int(m) % 60:02d}"
 expect["emerson"] = f"Red lights {hm(on - e['morning'])} - {hm(on + e['daylight'])} and {hm(off - e['daylight'])} - {hm(off + e['evening'])}"
@@ -285,4 +342,4 @@ json.dump(expect, open(f"{root}/ha-snap/expect.json", "w"))
 print(f"built at {local:%H:%M}, {len(src) // 1024} KB")
 for z in zones:
     print(z["id"], z["bands"]["day"], "|", z["bands"]["night"])
-print({k: len(v) for k, v in ACTIVITY.items()})
+print({k: len(v) for k, v in ACTIVITY["entries"].items()})
