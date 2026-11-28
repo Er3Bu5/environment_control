@@ -677,6 +677,36 @@ await phone(390, 844);
   check("Grid: with four zones on their own, a row holds two at 1700px, three at 2300px and 2560px, and four at 3440px and 5120px, a card never wider than about 700px there", same(wide, { 1700: 2, 2300: 3, 2560: 3, 3440: 4, 5120: 4 }) && cardW >= 640 && cardW <= 700, { wide, cardW });
   const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
   check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
+  /* #119: two across only while each card's tracks stay long enough to read, and one across a card stops at about the
+     widest it gets two across, centred, so the step between the two is modest. */
+  const across = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const g=document.querySelector("#main .cards.zones").getBoundingClientRect(),cs=[...document.querySelectorAll("#main .zone-card")].map(c=>{const r=c.getBoundingClientRect();return {top:Math.round(r.top),w:Math.round(r.width),l:Math.round(r.left-g.left),r:Math.round(g.right-r.right),track:Math.round(Math.min(...[...c.querySelectorAll(".track")].map(t=>t.getBoundingClientRect().width)))}});return {side:cs.some((c,i)=>cs.some((o,j)=>i!==j&&o.top===c.top)),cs}})()`); };
+  const short = {}, oneWide = {};
+  for (let w = 600; w <= 1400; w += 100) {
+    const a = await across(w);
+    if (a.side && a.cs.some((c) => c.track < 150)) short[w] = a.cs.map((c) => c.track);
+    if (!a.side && a.cs.some((c) => c.w > 700 || Math.abs(c.l - c.r) > 1)) oneWide[w] = a.cs;
+  }
+  check("Grid: from 600px to 1400px, whenever two cards sit side by side every track is at least 150px long", Object.keys(short).length === 0, short);
+  const at900 = await across(900), at1000 = await across(1000), at1100 = await across(1100);
+  check("Grid: at 900px and 1000px Overview is one across and goes two across by 1100px", !at900.side && !at1000.side && at1100.side, { at900, at1000, at1100 });
+  check("Grid: one across, a card is no wider than 700px and sits centred", Object.keys(oneWide).length === 0 && at1000.cs.every((c) => c.w <= 700 && c.w >= 680), oneWide);
+  /* The linked line on the parent's half is the longer one: where it wraps and the other half's line doesn't, the halves still start their readings level. */
+  const levelAt = async (w) => { await across(w); return ev(`(()=>{const o=(id)=>{const c=document.querySelector('#main .zone-card[data-zone="'+id+'"]');return Math.round(c.querySelector(".mrow").getBoundingClientRect().top-c.getBoundingClientRect().top)};return {veg:o("veg"),nursery:o("nursery")}})()`); };
+  const nurseryName = await ev(`zones.find(z=>z.id==="nursery").name`), level = {};
+  await ev(`zones.find(z=>z.id==="nursery").name="Nursery bench by the door";render()`);
+  for (const w of [900, 1000, 1100]) level[w] = await levelAt(w);
+  await ev(`zones.find(z=>z.id==="nursery").name="Nursery bench by the back door on the left shelf";render()`);
+  level.long1280 = await levelAt(1280);
+  await ev(`zones.find(z=>z.id==="nursery").name=${JSON.stringify(nurseryName)};render()`);
+  check("Joined: at 900px, 1000px and 1100px, and at 1280px with a linked line that wraps on one half only, both halves start their first reading row at the same height", Object.values(level).every((l) => l.veg === l.nursery), level);
+  /* Sorting uses the same grid: the family's strip runs the width of the family, stacked or side by side. */
+  const strip = {};
+  for (const w of [1000, 1280]) {
+    await across(w); await tap("[data-sort]");
+    strip[w] = await ev(`(()=>{const b=document.querySelector("#main .fambar").getBoundingClientRect(),f=document.querySelector("#main .famcards").getBoundingClientRect();return Math.abs(b.left-f.left)<=1&&Math.abs(b.right-f.right)<=1&&Math.abs(b.bottom-f.top)<=1})()`);
+    await tap("[data-sortback]");
+  }
+  check("Sort: the family's strip spans its cards at 1000px, stacked, and at 1280px, side by side", strip[1000] === true && strip[1280] === true, strip);
   const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
   for (const w of [2300, 1280, 760, 500]) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
