@@ -2514,6 +2514,57 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
   check(`Chart ${w}px: no sideways scroll on 7d`, await ev(`document.documentElement.scrollWidth<=innerWidth`), await ev(`document.documentElement.scrollWidth`));
 }
 await phone(390, 844); await ev(`ui.range=24;ui.metric="vpd";render();document.querySelector("#chart").scrollIntoView({block:"start"})`); await shot("chart-phone");
+/* #148: the bands are drawn as the limits were, stepping where one changed and at lights on and off. Garden's day Max went
+   28.5 to 28 at 09:30, its day Low 23 to 24 at 11:00, its day target was gone from 10:00 to 15:30 yesterday, and Low and
+   High are known only from 31 Oct 08:00. The chart's now is 14:20, chart minutes count from today's midnight. */
+{
+await onHA(`fakeHA.historyCalls=[];window.histAsked=[];if(!window.histHooked){window.histHooked=true;addEventListener("message",(e)=>{if(e.data&&e.data.type==="history")window.histAsked.push(e.data)})}`);
+await ev(`window.forgetLimits&&forgetLimits();ui.metric="temperature";ui.range=24;render()`); await sleep(250);
+/* The band's or line's outline as points, the first subpath's top edge for a band (to the plot's right end), every subpath for a line. */
+const edge = (band, all) => ev(`(()=>{const p=document.querySelector('#chart path[data-band="${band}"]');if(!p)return null;const c=chartNow,right=c.L+c.PW,subs=[];let x=0,y=0,cur=null;
+  for(const [,k,a,b] of p.getAttribute("d").matchAll(/([MHVZ])([-\\d.]*)\\s*([-\\d.]*)/g)){if(k==="Z"){cur=null;continue;}if(k==="M"){x=+a;y=+b;subs.push(cur=[]);}else if(k==="H")x=+a;else y=+a;cur.push([x,y]);}
+  if(${!!all})return subs;const top=[];for(const q of subs[0]){top.push(q);if(q[0]>=right-0.01)break;}return top;})()`);
+const at = (t, v) => ev(`chartNow.XT?[chartNow.XT(${t}),chartNow.Y(${v})]:[NaN,NaN]`);
+/* A vertical in the edge at about x, from the y before to the y after. */
+const stepAt = (pts, x, y0, y1) => !!pts && pts.some((q, i) => i > 0 && Math.abs(q[0] - x) <= 2 && Math.abs(pts[i - 1][0] - q[0]) < 0.01 && Math.abs(pts[i - 1][1] - y0) < 0.6 && Math.abs(q[1] - y1) < 0.6);
+const asked = await onHA(`window.histAsked.map(m=>({keys:Object.keys(m).sort().join(),zone:m.zone,metric:m.metric,hours:m.hours}))`), toHA = await onHA(`(fakeHA.historyCalls||[]).map(m=>Object.keys(m).sort().join())`);
+check("Limits: the chart asks for a zone, a metric and a range, and never an entity", asked.length > 0 && asked.every((m) => m.keys === "hours,metric,req,type,v,zone" && m.zone === "garden" && m.metric === "temperature" && m.hours === 24) && toHA.length > 0 && toHA.every((k) => k === "hours,metric,type,zone"), { asked, toHA });
+let top = await edge("range"), [xMax, yOld] = await at(570, 28.5), [, yNew] = await at(570, 28);
+check("Limits 24h: the Max edge steps from 28.5 to 28 at 09:30, where the helper changed", stepAt(top, xMax, yOld, yNew), { xMax, yOld, yNew, top });
+const [xOff, yDay] = await at(-300, 28.5), [, yNight] = await at(-300, 26), [xOn] = await at(420, 28.5);
+check("Limits 24h: at lights off it steps to the night Max, and at lights on back to the day's", stepAt(top, xOff, yDay, yNight) && stepAt(top, xOn, yNight, yDay), { xOff, xOn, yDay, yNight, top });
+const ideal = await edge("ideal"), [, yHi] = await at(660, 27);
+check("Limits 24h: the ideal band's High holds through the Low change", !!ideal && ideal.filter((q) => q[0] > xOn + 1).every((q) => Math.abs(q[1] - yHi) < 0.6), ideal);
+let tg = await edge("target", true);
+check("Limits 24h: the target starts at 15:30 yesterday, where it was set again after being removed", !!tg && tg.length === 1 && Math.abs(tg[0][0][0] - (await at(-510, 25))[0]) <= 2, tg && tg.map((r) => r[0]));
+check("Limits 24h: Limits before 31 Oct aren't in this range, so the key says nothing about them", (await ev(`!document.querySelector("#chart-kf")`)) === true);
+await rangeBtn(72); await sleep(250);
+tg = await edge("target", true);
+check("Limits 72h: a gap in the target from 10:00 to 15:30 yesterday, while it was removed", !!tg && tg.length === 2 && Math.abs(tg[0][tg[0].length - 1][0] - (await at(-840, 25))[0]) <= 2 && Math.abs(tg[1][0][0] - (await at(-510, 25))[0]) <= 2, tg && tg.map((r) => [r[0], r[r.length - 1]]));
+await rangeBtn(168); await sleep(250);
+check("Limits 7d: the key says Low and High before 31 Oct 08:00 are shown as they are now", (await ev(`(document.querySelector("#chart-kf")||{}).textContent`)) === "Limits before Sat 31 08:00 are shown as they are now.", await ev(`document.querySelector("#chart-key").textContent`));
+top = await edge("range");
+check("Limits 7d: Max steps from 29 to 28.5 at 10:00 on 31 Oct", stepAt(top, (await at(-3*1440 + 600, 29))[0], (await at(0, 29))[1], (await at(0, 28.5))[1]), top && top.length);
+check("Limits 7d: one step per change or switch, no more", !!top && top.length < 60, top && top.length);
+const unknown = await ev(`(()=>{const v=(x)=>[[0,x]],side={min:v(20),low:v(22),target:v(null),high:v(26),max:v(28)},r=readLimits({day:side,night:side,period:[[0,"day"],[3600,null]],known_from:null},6);return r&&limitSteps(r,NOW-360,NOW).map(s=>[s.p,s.vals[4]])})()`);
+check("Limits: a stretch where day or night isn't known draws no band", JSON.stringify(unknown) === JSON.stringify([["day", 28], [null, null]]), unknown);
+await rangeBtn(6); await sleep(250);
+check("Limits 6h: no key line, Low and High are known for all of it", (await ev(`!document.querySelector("#chart-kf")`)) === true, await ev(`document.querySelector("#chart-key").textContent`));
+/* Veg has no recorded changes: flat at its limits now, stepping only at lights on (16:00) and off (10:00), across midnight. */
+await ev(`ui.zone="veg";ui.range=24;render()`); await sleep(250);
+top = await edge("range");
+const vy = await ev(`[chartNow.Y(28),chartNow.Y(25)]`), vOff = (await at(600, 28))[0], vOn = (await at(-480, 28))[0];
+check("Limits: a zone with no changes is flat at its Max now, day and night", !!top && top.every((q) => Math.abs(q[1] - vy[0]) < 0.6 || Math.abs(q[1] - vy[1]) < 0.6), { vy, top });
+check("Limits: and steps only where its lights went on and off, across midnight", stepAt(top, vOn, vy[1], vy[0]) && stepAt(top, vOff, vy[0], vy[1]) && top.length === 6, { vOn, vOff, top });
+check("Limits: with no key line", (await ev(`!document.querySelector("#chart-kf")`)) === true);
+/* A linked zone that shares one of Garden's sensors is held to Garden's targets, so it asks for and draws Garden's limits. */
+await onHA(`window.histAsked=[]`);
+await ev(`(()=>{const g=zoneById("garden");zones.push({...JSON.parse(JSON.stringify(g)),id:"bench",name:"Bench",parent:"garden",sensors:[JSON.parse(JSON.stringify(g.sensors[0]))],bands:JSON.parse(JSON.stringify(zoneById("veg").bands))});window.forgetLimits&&forgetLimits();ui.zone="bench";render()})()`); await sleep(250);
+top = await edge("range"); [xMax, yOld] = await at(570, 28.5); [, yNew] = await at(570, 28);
+check("Limits: a linked zone sharing a sensor draws its parent's Max step", stepAt(top, xMax, yOld, yNew), top);
+check("Limits: having asked for the parent's limits", (await onHA(`window.histAsked.some(m=>m.zone==="garden"&&m.metric==="temperature")`)) === true, await onHA(`window.histAsked.map(m=>m.zone)`));
+await ev(`zones.splice(zones.findIndex(z=>z.id==="bench"),1);ui.zone="garden";ui.range=24;ui.metric="vpd";render()`); await sleep(100);
+}
 /* The stakeholder, #104: the plot sits evenly in the card, with no more room left of the axis numbers than they need. */
 const chartInsets = () => ev(`(()=>{const svg=document.querySelector("#chart svg"),card=svg.closest(".card"),cs=getComputedStyle(card),cr=card.getBoundingClientRect();
   const inL=cr.left+parseFloat(cs.paddingLeft)+parseFloat(cs.borderLeftWidth),inR=cr.right-parseFloat(cs.paddingRight)-parseFloat(cs.borderRightWidth);
@@ -3370,7 +3421,7 @@ const gardenLeft = await ev(`JSON.stringify(zoneById("garden").sensors.find(s=>s
 await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[{...JSON.parse(${JSON.stringify(gardenLeft)}),pos:null}]})`); await sleep(100);
 check("Linked: it shares Garden's left environment sensor", (await diskZone(bench)).sensors.some((s) => s.id === "g-left"));
 await ev(`ui.guide=null;ui.screen="zone";ui.zone="${bench}";ui.metric="temperature";ui.range=24;render();window.scrollTo(0,0)`); await sleep(80);
-const benchTile = await ev(`(()=>{const t=[...document.querySelectorAll("#main .tile")].find(x=>x.querySelector(".name").textContent==="Temperature");return {range:[...t.querySelectorAll(".range b")].map(b=>b.textContent),pill:t.querySelector(".pill")?.textContent||"",bands:document.querySelectorAll('#chart rect[fill="var(--band)"]').length}})()`);
+const benchTile = await ev(`(()=>{const t=[...document.querySelectorAll("#main .tile")].find(x=>x.querySelector(".name").textContent==="Temperature");return {range:[...t.querySelectorAll(".range b")].map(b=>b.textContent),pill:t.querySelector(".pill")?.textContent||"",bands:document.querySelectorAll('#chart [fill="var(--band)"]').length}})()`);
 const gardenRange = await ev(`zoneById("garden").bands[period(zoneById("${bench}"))].temperature.map(v=>v===null?"-":String(v))`);
 check("Linked: its tiles judge its readings against Garden's targets, and its History draws Garden's bands", same(benchTile.range, gardenRange) && benchTile.pill !== "No targets yet" && benchTile.bands > 0, [benchTile, gardenRange]);
 const benchCard = await ev(`(()=>{ui.screen="overview";render();const c=[...document.querySelectorAll("#main .zone-card")].find(x=>x.querySelector("h2").textContent==="Bench");const r=c.querySelector(".mrow");return {unset:!!r.querySelector(".track.unset"),pill:r.querySelector(".pillcell").textContent,own:bandState(zoneById("${bench}"),"temperature")}})()`);

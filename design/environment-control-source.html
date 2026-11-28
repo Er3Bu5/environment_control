@@ -297,6 +297,7 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
   .key span { display: inline-flex; align-items: center; gap: 5px; }
   .key i { width: 11px; height: 11px; display: inline-block; }
+  .key .keyline { flex-basis: 100%; }
   .key i.unit { border: 1px solid var(--off); border-radius: 50%; background: var(--tile); }
   .key i.wall { border: 2px solid var(--muted); }
   .mk { width: 22px; height: 22px; border: 2px solid var(--c); border-radius: 6px; display: inline-grid; place-items: center; flex: none; background: var(--card); }
@@ -1744,6 +1745,86 @@ function chartStats(line) {
   return { min, max };
 }
 const LINE = ["var(--primary)", "var(--temp)", "var(--under)"];
+/* Limits as they were over the range shown (#148), from the history answer, each a step series in chart minutes. Until it
+   arrives, or if it never does, the zone's limits now stand in for the whole range, which is all the chart had before. */
+const SLOTS = ["min", "low", "target", "high", "max"], LIMITS = {};
+let limitsGen = 0;
+function limitsNow(zt, zs, k, hours) {
+  const start = NOW - hours * 60, period = [];
+  for (let t = start; t <= NOW; t++) { const p = isDay(zs, t) ? "day" : "night"; if (!period.length || period[period.length - 1][1] !== p) period.push([t, p]); }
+  const side = (p) => Object.fromEntries(SLOTS.map((sl, i) => [sl, [[start, ((zt.bands[p] || {})[k] || [])[i] ?? null]]]));
+  return { day: side("day"), night: side("night"), period, knownFrom: null };
+}
+/* The answer is in unix seconds from the range's start, which is the first pair of every series. Anything not shaped as the
+   contract says draws nothing from it. A period of null is a source following switches while none of them reports, and
+   nothing is drawn for that stretch, since neither day's nor night's limits are known to apply. */
+function readLimits(raw, hours) {
+  const ok = (ser, f) => Array.isArray(ser) && ser.length > 0 && ser.length <= 5000 && ser.every((x, i) => Array.isArray(x) && x.length === 2 && Number.isFinite(x[0]) && (i === 0 || x[0] >= ser[i - 1][0]) && f(x[1]));
+  if (!raw || typeof raw !== "object" || !ok(raw.period, (v) => v === "day" || v === "night" || v === null)) return null;
+  const start = raw.period[0][0], at = (t) => NOW - hours * 60 + (t - start) / 60, conv = (ser) => ser.map(([t, v]) => [at(t), v]);
+  const out = { period: conv(raw.period), knownFrom: Number.isFinite(raw.known_from) ? at(raw.known_from) : null };
+  for (const p of ["day", "night"]) {
+    out[p] = {};
+    for (const sl of SLOTS) { const ser = raw[p] && raw[p][sl]; if (!ok(ser, (v) => v === null || Number.isFinite(v))) return null; out[p][sl] = conv(ser); }
+  }
+  return out;
+}
+/* Asked once per zone, metric and range until the setup changes. A late answer redraws only the chart it was asked for,
+   and keeps a point being read. */
+function askLimits(zid, k, hours) {
+  const key = `${zid}|${k}|${hours}`;
+  if (key in LIMITS) return LIMITS[key];
+  LIMITS[key] = null;
+  if (window.parent === window) return null;
+  const gen = limitsGen;
+  ask("history", { zone: zid, metric: k, hours }).then((r) => {
+    const l = gen === limitsGen && r && r.ok ? readLimits(r.limits, hours) : null;
+    if (!l) return;
+    LIMITS[key] = l;
+    if (ui.screen !== "zone" || ui.metric !== k || ui.range !== hours || !$("#chart")) return;
+    const at = chartNow ? chartNow.at : null;
+    drawChart();
+    if (at !== null && chartNow) chartAt(at);
+  });
+  return null;
+}
+function forgetLimits() { limitsGen++; for (const key of Object.keys(LIMITS)) delete LIMITS[key]; }
+/* The limits come from whichever zone's targets apply and day and night from whichever zone's lights do, as the tiles have it. */
+function chartLimits(z, k, hours) {
+  const zt = targetsOf(z), zs = scheduleOf(z), now = limitsNow(zt, z, k, hours);
+  if (k === "light") return now;
+  const a = askLimits(zt.id, k, hours) || now, b = zs === zt ? a : askLimits(zs.id, k, hours) || now;
+  return { day: a.day, night: a.night, period: b.period, knownFrom: a.knownFrom };
+}
+/* One entry per stretch in which the period and all five limits hold, from t0 to t1. */
+function limitSteps(lim, t0, t1) {
+  const series = [lim.period, ...["day", "night"].flatMap((p) => SLOTS.map((sl) => lim[p][sl]))];
+  const cuts = [...new Set(series.flatMap((ser) => ser.map(([t]) => t)).filter((t) => t > t0 && t < t1))].sort((a, b) => a - b);
+  const pos = series.map(() => 0), out = [];
+  for (const t of [t0, ...cuts]) {
+    const cur = series.map((ser, i) => { while (pos[i] + 1 < ser.length && ser[pos[i] + 1][0] <= t) pos[i]++; return ser[pos[i]][1]; });
+    const p = cur[0], vals = SLOTS.map((_, j) => (p === null ? null : cur[1 + (p === "day" ? 0 : 5) + j])), last = out[out.length - 1];
+    if (last && last.p === p && last.vals.every((v, j) => v === vals[j])) continue;
+    out.push({ t, p, vals });
+  }
+  return out.map((st, i) => ({ ...st, end: i + 1 < out.length ? out[i + 1].t : t1 }));
+}
+/* Stretches narrower than half a pixel fold into the one before, so hundreds of changes over a week can't swell the path. */
+function stepRuns(steps, XT, f) {
+  const runs = []; let run = null;
+  for (const st of steps) {
+    const ys = f(st.vals);
+    if (!ys) { run = null; continue; }
+    const seg = { a: XT(st.t), b: XT(st.end), ys }, last = run && run[run.length - 1];
+    if (!run) runs.push((run = [seg]));
+    else if (last.ys.every((y, i) => y === ys[i]) || seg.b - seg.a < 0.5) last.b = seg.b;
+    else run.push(seg);
+  }
+  return runs;
+}
+const n2 = (v) => +v.toFixed(2);
+const stepLine = (runs) => runs.map((r) => `M${n2(r[0].a)} ${n2(r[0].ys[0])}` + r.map((g, i) => `${i && g.ys[0] !== r[i - 1].ys[0] ? `V${n2(g.ys[0])}` : ""}H${n2(g.b)}`).join("")).join("");
+const stepArea = (runs) => runs.map((r) => stepLine([r]) + `V${n2(r[r.length - 1].ys[1])}` + [...r].reverse().map((g, i, all) => `${i && g.ys[1] !== all[i - 1].ys[1] ? `V${n2(g.ys[1])}` : ""}H${n2(g.a)}`).join("") + "Z").join("");
 let chartNow = null, chartPen = null;
 function textWidth(text, el) {
   chartPen = chartPen || document.createElement("canvas").getContext("2d");
@@ -1763,20 +1844,23 @@ function drawChart() {
     return { t: p.t, v: pick((x) => x.v), lo: pick((x) => x.lo), hi: pick((x) => x.hi) };
   });
   const vals = lines.flat().map((p) => p.v).filter((v) => v !== null), hasBand = k !== "light" && targetsSet(targetsOf(z)), tz = targetsOf(z);
+  const t0 = pts[0].t, t1 = pts[n].t, lim = chartLimits(z, k, ui.range), steps = limitSteps(lim, t0, t1);
   if (hasBand) for (const p of ["day", "night"]) vals.push(tz.bands[p][k][0], tz.bands[p][k][4]);
+  if (hasBand) for (const st of steps) vals.push(...[st.vals[0], st.vals[4]].filter((v) => v !== null));
   let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo = Math.max(0, lo - pad); hi += pad;
   const axis = (v) => (k === "light" ? (hi < 8000 ? Math.round(v).toLocaleString("en-NZ") : `${Math.round(v / 1000)}k`) : v.toFixed(k === "vpd" ? 2 : 0));
   /* The gutter is only as wide as this metric's numbers, so a narrow axis doesn't leave the left looking empty. */
   const L = EDGE + Math.ceil(Math.max(...[0, 1, 2, 3, 4].map((t) => textWidth(axis(lo + ((hi - lo) * t) / 4), el)))) + 6, PW = W - L - R;
   const X = (i) => L + (i / n) * PW, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * PH;
-  let s = "", i = 0;
-  while (i < n) {
-    let j = i; const d = isDay(z, pts[i].t);
-    while (j < n && isDay(z, pts[j].t) === d) j++;
-    const x = X(i), w = X(j) - x;
-    if (!d) s += `<rect x="${x}" y="${T}" width="${w}" height="${PH}" fill="var(--shade)"/>`;
-    if (hasBand) { const [mn, lo2, tg, hi2, mx] = tz.bands[d ? "day" : "night"][k]; s += `<rect x="${x}" y="${Y(mx)}" width="${w}" height="${Y(mn) - Y(mx)}" fill="var(--band)"/><rect x="${x}" y="${Y(hi2)}" width="${w}" height="${Y(lo2) - Y(hi2)}" fill="var(--ideal)"/>${tg === null ? "" : `<line x1="${x}" x2="${x + w}" y1="${Y(tg)}" y2="${Y(tg)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`}`; }
-    i = j;
+  /* Night shading and the bands step on the same moments: each lights on and off, and each change to a limit. */
+  const XT = (t) => L + ((t - t0) / (t1 - t0 || 1)) * PW;
+  let s = "";
+  for (const r of stepRuns(steps.map((st) => ({ ...st, vals: [st.p] })), XT, ([p]) => (p === "night" ? [0] : null))) s += `<rect x="${n2(r[0].a)}" y="${T}" width="${n2(r[r.length - 1].b - r[0].a)}" height="${PH}" fill="var(--shade)"/>`;
+  if (hasBand) {
+    const pair = (hi2, lo2) => (v) => (v[hi2] === null || v[lo2] === null ? null : [Y(v[hi2]), Y(v[lo2])]);
+    s += `<path data-band="range" d="${stepArea(stepRuns(steps, XT, pair(4, 0)))}" fill="var(--band)"/><path data-band="ideal" d="${stepArea(stepRuns(steps, XT, pair(3, 1)))}" fill="var(--ideal)"/>`;
+    const tg = stepLine(stepRuns(steps, XT, (v) => (v[2] === null ? null : [Y(v[2])])));
+    if (tg) s += `<path data-band="target" d="${tg}" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/>`;
   }
   for (let t = 0; t <= 4; t++) { const v = lo + ((hi - lo) * t) / 4, y = Y(v); s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${axis(v)}</text>`; }
   const ticks = W < 520 ? 3 : 6;
@@ -1794,8 +1878,9 @@ function drawChart() {
   $("#chart-stats").innerHTML = `<table class="cstats"><thead><tr><th>${M[k].unit}</th><th id="cs-at">Now</th>${extremes ? "<th>Min</th><th>Max</th>" : ""}</tr></thead><tbody>${rows.map((r, c) => { const st = chartStats(r.line); return `<tr><td><i style="background:${r.color}"></i>${esc(r.name)}</td><td id="cs-v${c}">${fmt(k, r.line[n].v)}</td>${extremes ? `<td data-cs="min">${cell(st.min)}</td><td data-cs="max">${cell(st.max)}</td>` : ""}</tr>`; }).join("")}</tbody></table>`;
   const held = pts[n].t - pts[0].t;
   $("#chart-note").textContent = held < ui.range * 60 - 60 ? `Home Assistant has kept ${Math.round(held / 1440)} days, back to ${dayWords(pts[0].t)}.` : "";
-  $("#chart-key").innerHTML = (hasBand ? `<span><i style="background:var(--ideal)"></i>Ideal zone</span><span><i style="background:var(--band);outline:1px solid var(--line)"></i>Min to max</span>` : "") + `<span><i style="background:var(--shade);outline:1px solid var(--line)"></i>Lights off</span>`;
-  chartNow = { k, n, W, L, PW, X, Y, T, PH, rows, at: null };
+  const kf = hasBand && lim.knownFrom !== null && lim.knownFrom > t0 && lim.knownFrom < t1 ? `<span class="keyline" id="chart-kf">Limits before ${whenWords(Math.round(lim.knownFrom), ui.range)} are shown as they are now.</span>` : "";
+  $("#chart-key").innerHTML = (hasBand ? `<span><i style="background:var(--ideal)"></i>Ideal zone</span><span><i style="background:var(--band);outline:1px solid var(--line)"></i>Min to max</span>` : "") + `<span><i style="background:var(--shade);outline:1px solid var(--line)"></i>Lights off</span>` + kf;
+  chartNow = { k, n, W, L, PW, X, XT, Y, T, PH, rows, at: null };
 }
 /* Reads a point in place, so moving across the chart redraws nothing. null goes back to now. */
 function chartAt(ix) {
@@ -4615,6 +4700,7 @@ function configOf() {
   return { zones: clone(zones), devices: devices.map((d) => { const out = clone(d); if (d.entity) for (const k of DERIVED) delete out[k]; return out; }), room: clone(room) };
 }
 function adoptConfig(c) {
+  forgetLimits();
   zones = familyOrder(clone(c.zones));
   devices = clone(c.devices);
   room = clone(c.room || {});

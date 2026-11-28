@@ -315,7 +315,30 @@ for z in zones:
             last = state
 first_logged = parse(LOGBOOK[0]["when"]) if LOGBOOK else start
 ACTIVITY = {"now": iso(now), "earliest": {z["id"]: iso(min(first_logged, start)) for z in zones}, "entries": entries}
-seed = {"config": {"revision": 1, "zones": zones, "devices": devices, "room": ROOM}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY, "activity": ACTIVITY}
+# Limits as they were (#148), in the shape the fake HA answers history with. A snapshot carries no log of the values
+# stored in the panel, so every zone's limits are known only from when it was read, and the History chart draws them
+# flat at what they are now with the key saying so. A helper's past is used where the snapshot holds it: limits.json,
+# one row per change of each limit helper, when the snapshot has one.
+HELPER_PAST = json.load(open(f"{root}/ha-snap/limits.json"))["history"] if os.path.exists(f"{root}/ha-snap/limits.json") else {}
+def recorded(entity):
+    out = []
+    for stamp, value in HELPER_PAST.get(entity) or H.get("history", {}).get(entity, []):
+        try:
+            out.append([int(parse(stamp).timestamp()), float(value)])
+        except (TypeError, ValueError):
+            continue
+    return sorted(out)
+read_at = int(local.timestamp())
+LIMITS_LOG = {"now": read_at, "offsetMin": int(local.utcoffset().total_seconds() // 60), "zones": {}}
+for z in zones:
+    log = {"knownFrom": read_at}
+    for p, metrics in z.get("helpers", {}).get("bands", {}).items():
+        for m, slots in metrics.items():
+            for slot, e in slots.items():
+                if past := recorded(e):
+                    log.setdefault(p, {}).setdefault(m, {})[slot] = past
+    LIMITS_LOG["zones"][z["id"]] = log
+seed = {"config": {"revision": 1, "zones": zones, "devices": devices, "room": ROOM}, "states": STATES, "failsafes": FAILSAFES, "registry": REGISTRY, "activity": ACTIVITY, "limitsLog": LIMITS_LOG}
 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|([0-9a-f]{2}:){5}[0-9a-f]{2}', json.dumps([zones, seed]), re.I):
     sys.exit("network identifier in the snapshot")
 open(f"{root}/snapshot-ui.html", "w", encoding="utf-8").write(src)
