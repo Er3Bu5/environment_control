@@ -266,6 +266,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .sw[data-roctl], .sw.on[data-roctl], .sw[data-roctl]:hover, .ctl[data-roctl]:hover { border-color: var(--off); }
   .sw[data-roctl] i, .sw.on[data-roctl] i { background: var(--off); }
   .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
+  .dev.ro { cursor: not-allowed; }
+  .dev[data-autorow]:not(.ro):has(.sw:not(:disabled)) { cursor: pointer; }
+  .dev[data-autorow]:not(.ro):hover .sw:not(:disabled) { border-color: var(--muted); }
   .zlinked { margin: 2px 0 0; }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
@@ -3908,6 +3911,13 @@ document.addEventListener("click", (e) => {
   let el;
   if ((el = q("[data-zmenu]"))) { if (el.getAttribute("aria-expanded") === "true") closeMenus(); else openMenu(el); return; }
   closeMenus();
+  /* The whole tile is the target (#113): a tap on it goes to the row's switch, or to the not-here answer on a read-only
+     row. Only the switch is focusable, so the keyboard path stays one stop per row; a drag to select the name isn't a tap. */
+  if (!q("button, input, a, label") && (el = q(".dev[data-autorow], .dev.ro")) && !String(getSelection())) {
+    const to = el.querySelector("[data-roctl], .sw[data-auto]");
+    if (to && !to.disabled) to.click();
+    return;
+  }
   if ((el = q("[data-roctl]")) && !topOpen()) { e.preventDefault(); notHere(el); return; }
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();

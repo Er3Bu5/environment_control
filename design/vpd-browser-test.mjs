@@ -2909,6 +2909,31 @@ const fromText = await ev(`(()=>{const c=document.querySelector("#modal [data-fr
 check("Linked: a read only switch in the From card is dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where this zone's own switch isn't; no accent colour on its icon or switch where this zone's own has it, on a dashed near-card outline, second line 3:1; the card's heading and line aren't dimmed", roDimmed(roAuto) && roTiled(roAuto, edAuto) && !grey(edAuto.icFill) && !grey(edAuto.knob) && roAuto.name === roAuto.roFg && roAuto.nameRatio >= 4.5 && !!edAuto && edAuto.op === 1 && edAuto.cursor !== "not-allowed" && edAuto.name !== roAuto.name && same(fromText, [true, true, "1"]), { roAuto, edAuto, fromText });
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
 check("Linked: dimmed, it still takes the tap that opens the dialog", ((await notHereNow()) || {}).title === "Failsafe Veg Fans Auto On"); await tap("[data-gkeep]");
+/* #113: the whole tile is the target, and only its switch takes focus. */
+const tileCur = await ev(`[getComputedStyle(document.querySelector('#modal [data-fromzone] [data-autorow] .dev-name')).cursor,getComputedStyle(document.querySelector('#modal [data-autorow]:not([data-from]) .dev-name')).cursor]`);
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .dev-name');
+const nhName = ((await notHereNow()) || {}).title; await tap("[data-gkeep]");
+const fsRow = await ev(`(()=>{const s=document.querySelector('#modal [data-autorow]:not([data-from]) .sw.on[data-auto]:not(:disabled)');return s&&s.closest("[data-autorow]").dataset.autorow})()`);
+await tap(`#modal [data-autorow="${fsRow}"] .dev-name`);
+const fsAsk = await ev(`ui.guard && ui.guard.title`); await ev(`ui.guard=null;renderModal()`); await sleep(40);
+check("Linked: a tap on a tile's name answers as its control does: not here on a read-only row, the failsafe question on an editable failsafe that is on; the cursor says which", nhName === "Failsafe Veg Fans Auto On" && /^Switch off /.test(fsAsk || "") && same(tileCur, ["not-allowed", "pointer"]), { nhName, fsAsk, tileCur });
+await openAutosAt("nursery", "alert");
+const swState = (e) => ev(`(()=>{const s=document.querySelector('#modal [data-autorow="${e}"] .sw');return s?s.getAttribute("aria-checked")+(s.disabled?"-busy":""):""})()`);
+const tgRow = await ev(`(()=>{const s=document.querySelector('#modal [data-autorow]:not([data-from]) .sw[data-auto]:not(:disabled)');return s&&s.closest("[data-autorow]").dataset.autorow})()`);
+const tgWas = await swState(tgRow), tgSeen = [];
+for (let i = 0; i < 2; i++) {
+  await tap(`#modal [data-autorow="${tgRow}"] .dev-name`);
+  if (await ev(`!!ui.guard`)) { await ev(`ui.guard=null;renderModal()`); break; }
+  for (let k = 0; k < 40 && /busy/.test(await swState(tgRow)); k++) await sleep(100);
+  tgSeen.push(await swState(tgRow));
+}
+const flip = tgWas === "true" ? "false" : "true";
+check("Automations: a tap on an editable row's name toggles its switch, and a second tap toggles it back", !!tgRow && same(tgSeen, [flip, tgWas]), { tgRow, tgWas, tgSeen });
+const tabbed = [];
+await ev(`document.querySelector('#modal [data-autorow] .sw').focus()`);
+for (let i = 0; i < 6; i++) { await key("Tab", 9); tabbed.push(await ev(`(()=>{const a=document.activeElement;return a.matches(".dev")?"tile":a.matches(".sw")?"switch":a.tagName})()`)); }
+check("Automations: Tab goes from switch to switch and never stops on a tile", tabbed.includes("switch") && !tabbed.includes("tile"), tabbed);
+await openAutosAt("nursery", "failsafe");
 await tap('#modal [data-fromzone] h3');
 check("Linked: nothing in the card takes you to Veg", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !!ui.autos && !ui.guard`)) === true);
 await ev(`ui.autos=null;renderModal()`);
