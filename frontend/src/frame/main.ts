@@ -746,6 +746,8 @@ export class EcApp extends LitElement {
     probe.style.color = colors.primary;
     document.body.append(probe);
     colors["on-primary"] = onColor(getComputedStyle(probe).color || colors.primary);
+    // The accent as text on the card: the accent alone can fall short of 4.5:1 there, so it leans toward the text colour.
+    colors["primary-text"] = "color-mix(in srgb, var(--primary) 60%, var(--fg))";
     probe.remove();
     for (const [k, v] of Object.entries(colors)) this.style.setProperty(`--${k}`, v);
     document.documentElement.dataset.theme = t.mode;
@@ -4396,7 +4398,6 @@ export class EcApp extends LitElement {
       </div>
       <div class="card-head">
         ${seg("Period", [["day", "Day"], ["night", "Night"]], t.period, (v) => this.setTgt((x) => Object.assign(x, { period: v as Period, sel: null, stage: null })))}
-        <div class="row"><span class="small muted">${leafText}</span><button class="fixlink small" ?disabled=${lock} @click=${() => this.openCalibration(z.id, false, true)}>Change &rsaquo;</button></div>
       </div>
       <div>
         <p class="small muted">Does ${z.name} aim for a target inside its ideal zone?</p>
@@ -4417,6 +4418,10 @@ export class EcApp extends LitElement {
               ><button aria-label="Lower" ?disabled=${lock} @click=${() => this.setTgt((x) => nudge(x, -1))}>-</button
               ><button aria-label="Higher" ?disabled=${lock} @click=${() => this.setTgt((x) => nudge(x, 1))}>+</button></span
             >
+          </div>
+          <div class="vleaf" id="vleaf">
+            <span class="small">${leafText}</span
+            ><button class="btn vleafbtn" ?disabled=${lock} aria-label="Change the leaf temperature offset" @click=${() => this.openCalibration(z.id, false, true)}>Change &rsaquo;</button>
           </div>
           <div
             class="map vchart"

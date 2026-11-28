@@ -126,6 +126,10 @@ export const styles = css`
   .fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
   .fixlink:hover { text-decoration: underline; }
   .fixlink[hidden] { display: none; }
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
+  @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
   .fixgo { flex: none; font-weight: 500; color: var(--primary); }
   .pill.ok { color: var(--ok); }

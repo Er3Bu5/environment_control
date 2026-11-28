@@ -128,3 +128,57 @@ test("a press on coinciding High and Max moves the selected one, or else Max; a 
   await expect(box(frame, "Temperature High")).toHaveValue("21");
 });
 
+/* WCAG contrast of two computed colours; Chromium gives a color-mix() result as color(srgb r g b) in 0 to 1. */
+const contrast = (fg: string, bg: string) => {
+  const rgb = (c: string) => {
+    const n = (c.match(/[\d.]+/g) ?? []).map(Number);
+    return c.startsWith("color(") ? n.slice(0, 3).map((v) => v * 255) : n.slice(0, 3);
+  };
+  const lum = (c: string) => {
+    const [r, g, b] = rgb(c).map((v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+  return (a + 0.05) / (b + 0.05);
+};
+
+for (const dark of [false, true])
+  for (const width of [1280, 500])
+    test(`the leaf offset line sits at the left right above the chart, in the accent text colour, ${dark ? "dark" : "light"} at ${width} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const frame = await open(page, "Nursery", dark);
+      await centred(frame);
+      const leaf = card(frame).locator("#vleaf"), button = leaf.getByRole("button", { name: "Change the leaf temperature offset", exact: true });
+      await expect(leaf.locator("span")).toHaveText("Leaf 1.0 °C below air");
+      await expect(button).toHaveText("Change ›");
+      const [l, c, g] = [await leaf.boundingBox(), await card(frame).boundingBox(), await chart(frame).boundingBox()];
+      if (!l || !c || !g) throw new Error("not drawn");
+      expect(l.x - c.x).toBeLessThan(c.width / 3);
+      expect(g.y - (l.y + l.height)).toBeGreaterThanOrEqual(0);
+      expect(g.y - l.y).toBeLessThan(80);
+      const seen = await leaf.evaluate((el) => {
+        const probe = document.createElement("i");
+        probe.style.color = "var(--primary-text)";
+        el.append(probe);
+        const want = getComputedStyle(probe).color;
+        probe.remove();
+        const btn = el.querySelector("button") as Element, text = el.querySelector("span") as Element, cardEl = el.closest(".card") as Element;
+        return { want, text: getComputedStyle(text).color, label: getComputedStyle(btn).color, border: getComputedStyle(btn).borderTopColor, card: getComputedStyle(cardEl).backgroundColor };
+      });
+      expect([seen.text, seen.label, seen.border]).toEqual([seen.want, seen.want, seen.want]);
+      expect(contrast(seen.want, seen.card)).toBeGreaterThanOrEqual(4.5);
+      if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(40);
+    });
+
+test("the leaf offset Change opens Sensor Calibration, keeping the chart's unsaved edits, and Back returns to the chart", async ({ page }) => {
+  const frame = await open(page, "Nursery");
+  await pick(frame, "Period", "Day");
+  await type(frame, "Temperature Max", "29");
+  await card(frame).getByRole("button", { name: "Change the leaf temperature offset", exact: true }).click();
+  await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Nursery", exact: true })).toBeVisible();
+  await app(frame).getByRole("button", { name: "Back", exact: true }).click();
+  await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Nursery", exact: true })).toBeVisible();
+  await pick(frame, "Period", "Day");
+  await expect(box(frame, "Temperature Max")).toHaveValue("29");
+  await expect(chart(frame)).toBeVisible();
+});
