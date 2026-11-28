@@ -42,6 +42,8 @@ export const styles = css`
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
   .pagehead > .zmenu, .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  /* Overview's Sort sits where a zone's More button does, as tall as it. */
+  .pagehead > .headbtn { height: 34px; }
   /* A page's own action is a word or two wide, not a button's width, so on a phone it takes the heading's last line, at
      the right and level with the page menu, and the title keeps the whole width above. */
   @media (max-width: 640px) {
@@ -55,8 +57,32 @@ export const styles = css`
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+  /* Zone cards go three across only once each gets 640px: narrower, the tracks and state chips are cramped. Below that a
+     column is kept wider than a third, so the row holds two. The Overview's width is let out only on a screen wide enough
+     for three; under it the page keeps the width every other page has. Four go across on the same 640px, so the width is
+     let out again only on an ultrawide screen with room for four (#119). Two go across only once each gets 520px:
+     narrower, a card's tracks get too short to read (#119). */
+  .cards.zones { container-type: inline-size; grid-template-columns: repeat(auto-fit, minmax(max(min(520px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
+  /* One across, a card stops at about the widest it gets two across, so the step down from two is a modest change in its
+     size rather than a doubling. A phone is narrower than that, so there it still fills the width. */
+  @container (max-width: 1051.98px) { .cards.zones > .zone-card { width: 100%; max-width: 700px; justify-self: center; } }
+  @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
+  @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
+  /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.
+     Too long for it, the note wraps under the name rather than squeezing it. */
+  .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
+  /* Given a row's height by levelHeads, the head keeps its name at the top rather than floating in the middle. */
+  .zone-card .card-head { align-content: flex-start; }
+  .cardnote { margin-left: auto; text-align: right; min-width: 0; align-self: baseline; }
+  /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
+     card that was moved, as it is scrolled into view. */
+  .zone-card.sorting:hover { border-color: var(--line); }
+  .zone-card.sorting { scroll-margin-block: 12px 150px; }
+  .arrows { display: flex; gap: 8px; margin-left: auto; }
+  .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
+  .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
