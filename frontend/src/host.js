@@ -61,6 +61,7 @@ const copyTrigger = (t) => copy(t, ["kind", "name"]);
 /** @param {any} e */
 function activityEntry(e) {
   if (e && e.kind === "run") return { ...copy(e, ["kind", "when", "entity", "name", "count", "first", "last"]), trigger: copyTrigger(e.trigger) };
+  if (e && e.kind === "sensor") return { ...copy(e, ["kind", "when", "sensor", "name", "reading", "state", "since"]), ...(e.cause ? { cause: copy(e.cause, ["type"]) } : {}) };
   if (!e || (e.kind !== "device" && e.kind !== "automation")) return null;
   const c = e.cause || {};
   return { ...copy(e, ["kind", "when", "entity", "name", "state"]), cause: { ...copy(c, ["type", "name", "entity"]), ...(c.trigger ? { trigger: copyTrigger(c.trigger) } : {}) } };
