@@ -8,15 +8,15 @@ import { HANDLES, type PeriodBands, RH_LOW, RH_TOP, SLOT_NAME, T_MAX, T_MIN, typ
 const ZONE_COLOR = ["var(--v0)", "var(--v1)", "var(--v2)", "var(--v3)", "var(--v0)"];
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 
-function flag(x: number, y: number, text: string, on: boolean) {
-  const w = 52, cx = Math.round(x);
-  return svg`<g pointer-events="none"><rect x=${cx - w / 2} y=${y} width=${w} height="18" rx="4" fill=${on ? "var(--vink)" : "var(--primary)"}></rect><text x=${cx} y=${y + 13} text-anchor="middle" fill="#FFFFFF" style="font-size:11px">${text}</text></g>`;
+function flag(x: number, y: number, text: string, on: boolean, slot: number) {
+  const w = 52, h = 18, cx = Math.round(x);
+  return svg`<g pointer-events="none" data-vflag=${slot}><rect x=${cx - w / 2 + 0.5} y=${y + 0.5} width=${w - 1} height=${h - 1} rx="4" fill=${on ? "var(--primary)" : "var(--tile)"} stroke=${on ? "var(--primary)" : "var(--off)"}></rect><text x=${cx} y=${y + 13} text-anchor="middle" fill=${on ? "var(--on-primary)" : "var(--muted)"} style="font-size:11px">${text}</text></g>`;
 }
 
 export function vpdChart(d: TargetsDraft, b: PeriodBands, leaf: number, showText: boolean) {
   const g = vGeom(), { X, Y } = g, on = (k: string) => d.edit === k;
   const at = (k: "temperature" | "humidity" | "vpd", i: number) => b[k][i] ?? 0;
-  const cells: TemplateResult[] = [], lines: TemplateResult[] = [], flags: TemplateResult[] = [];
+  const cells: TemplateResult[] = [], lines: TemplateResult[] = [], top: TemplateResult[] = [], flags: TemplateResult[] = [], flagTop: TemplateResult[] = [];
   for (let rh = RH_TOP; rh >= RH_LOW; rh -= 5) {
     cells.push(svg`<text x=${g.L - 6} y=${Y(rh) + 4} text-anchor="end" fill="var(--muted)">${rh}%</text>`);
     for (let t = T_MIN; t <= T_MAX; t++) {
@@ -28,10 +28,21 @@ export function vpdChart(d: TargetsDraft, b: PeriodBands, leaf: number, showText
   }
   for (let t = T_MIN; t <= T_MAX; t += 2) cells.push(svg`<text x=${X(t)} y=${g.H - 7} text-anchor="middle" fill="var(--muted)">${t}°</text>`);
   const stroke = (k: string, i: number) => (on(k) ? (d.sel === i ? 4 : 2.5) : 1), faded = (k: string) => (on(k) ? 1 : 0.3);
+  /* The selected line is drawn last, over any line it coincides with, with a light edge so the accent reads on every cell colour. */
+  const picked = (k: string, i: number) => on(k) && d.sel === i, ink = (k: string, i: number) => (picked(k, i) ? "var(--primary)" : "var(--vline)");
+  const put = (k: string, i: number, mark: TemplateResult, edge: TemplateResult) => (picked(k, i) ? top.push(edge, mark) : lines.push(mark));
+  const line = (x1: number, y1: number, x2: number, y2: number, k: string, i: number) =>
+    put(
+      k,
+      i,
+      svg`<line data-vline=${`${k}:${i}`} x1=${x1} y1=${y1} x2=${x2} y2=${y2} stroke=${ink(k, i)} stroke-width=${stroke(k, i)} opacity=${faded(k)}></line>`,
+      svg`<line x1=${x1} y1=${y1} x2=${x2} y2=${y2} stroke="#FFFFFF" stroke-width="8" opacity="0.7"></line>`,
+    );
+  const label = (x: number, y: number, text: string, i: number) => (d.sel === i ? flagTop : flags).push(flag(x, y, text, d.sel === i, i));
   for (const i of HANDLES) {
     const t = clamp(at("temperature", i), T_MIN, T_MAX), rh = clamp(at("humidity", i), RH_LOW, RH_TOP), vp = at("vpd", i);
-    lines.push(svg`<line x1=${X(t)} y1=${g.T} x2=${X(t)} y2=${g.bottom} stroke="var(--vink)" stroke-width=${stroke("temperature", i)} opacity=${faded("temperature")}></line>`);
-    lines.push(svg`<line x1=${g.L} y1=${Y(rh)} x2=${g.right} y2=${Y(rh)} stroke="var(--vink)" stroke-width=${stroke("humidity", i)} opacity=${faded("humidity")}></line>`);
+    line(X(t), g.T, X(t), g.bottom, "temperature", i);
+    line(g.L, Y(rh), g.right, Y(rh), "humidity", i);
     let path = "", pen = false;
     for (let c = T_MIN; c <= T_MAX; c += 0.25) {
       const r = rhAt(c, vp, leaf);
@@ -42,20 +53,26 @@ export function vpdChart(d: TargetsDraft, b: PeriodBands, leaf: number, showText
       path += `${pen ? "L" : "M"}${X(c).toFixed(1)} ${Y(r).toFixed(1)}`;
       pen = true;
     }
-    if (path) lines.push(svg`<path d=${path} fill="none" stroke="var(--vink)" stroke-width=${stroke("vpd", i)} stroke-dasharray="6 4" opacity=${faded("vpd")}></path>`);
-    const label = `${SLOT_NAME[i]} ${at(on("vpd") ? "vpd" : on("humidity") ? "humidity" : "temperature", i)}`;
-    if (on("temperature")) flags.push(flag(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24, label, d.sel === i));
-    if (on("humidity")) flags.push(flag(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9, label, d.sel === i));
+    if (path)
+      put(
+        "vpd",
+        i,
+        svg`<path data-vline=${`vpd:${i}`} d=${path} fill="none" stroke=${ink("vpd", i)} stroke-width=${stroke("vpd", i)} stroke-dasharray="6 4" opacity=${faded("vpd")}></path>`,
+        svg`<path d=${path} fill="none" stroke="#FFFFFF" stroke-width="8" opacity="0.7"></path>`,
+      );
+    const text = `${SLOT_NAME[i]} ${at(on("vpd") ? "vpd" : on("humidity") ? "humidity" : "temperature", i)}`;
+    if (on("temperature")) label(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24, text, i);
+    if (on("humidity")) label(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9, text, i);
     if (on("vpd")) {
       let c = { 0: 33, 1: 30, 3: 27, 4: 24 }[i] as number;
       while (c > T_MIN && (rhAt(c, vp, leaf) > RH_TOP || rhAt(c, vp, leaf) < RH_LOW)) c -= 0.5;
-      flags.push(flag(X(c), Y(clamp(rhAt(c, vp, leaf), RH_LOW, RH_TOP)) - 9, label, d.sel === i));
+      label(X(c), Y(clamp(rhAt(c, vp, leaf), RH_LOW, RH_TOP)) - 9, text, i);
     }
   }
   const T = b.temperature[2], RH = b.humidity[2], big = on("target");
   const target =
     T === null || RH === null
       ? null
-      : svg`<g><circle cx=${X(clamp(T, T_MIN, T_MAX))} cy=${Y(clamp(RH, RH_LOW, RH_TOP))} r=${big ? 15 : 10} fill="none" stroke="#FFFFFF" stroke-width="5"></circle><circle cx=${X(clamp(T, T_MIN, T_MAX))} cy=${Y(clamp(RH, RH_LOW, RH_TOP))} r=${big ? 15 : 10} fill=${big ? "#FFFFFF66" : "none"} stroke="var(--vink)" stroke-width="2.5"></circle></g>`;
-  return svg`<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${cells}${lines}${target}${flags}</svg>`;
+      : svg`<g><circle cx=${X(clamp(T, T_MIN, T_MAX))} cy=${Y(clamp(RH, RH_LOW, RH_TOP))} r=${big ? 15 : 10} fill="none" stroke="#FFFFFF" stroke-width="5"></circle><circle cx=${X(clamp(T, T_MIN, T_MAX))} cy=${Y(clamp(RH, RH_LOW, RH_TOP))} r=${big ? 15 : 10} fill=${big ? "#FFFFFF66" : "none"} stroke=${big ? "var(--primary)" : "var(--vline)"} stroke-width="2.5"></circle></g>`;
+  return svg`<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${cells}${lines}${target}${top}${flags}${flagTop}</svg>`;
 }
