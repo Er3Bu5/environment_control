@@ -150,7 +150,7 @@ test.describe("a zone's Automations dialog", () => {
     await expect(chip(frame, "Control")).toHaveAccessibleName("Control, none linked");
     await expect(chip(frame, "Control")).toHaveText("Control 0/0");
     await chip(frame, "Control").click();
-    await expect(autos(frame).locator(".notice.calm")).toHaveText("No control linked to Zone: Garden yet.Link automations in Setup.");
+    await expect(autos(frame).locator(".notice.calm")).toHaveText("No control linked to Garden yet.Link automations in Setup.");
     await expect(autos(frame).locator(".notice.calm").locator("button, a")).toHaveCount(0);
   });
 

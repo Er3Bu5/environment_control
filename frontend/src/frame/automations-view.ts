@@ -142,7 +142,7 @@ export function automationsDialog(o: AutomationsDialogView) {
               </section>`,
             )
           : html`<div class="notice calm" id="autos-empty">
-              <strong>${emptyText(o.chip, `Zone: ${o.zone.name}`)}.</strong><span>Link automations in Setup.</span>
+              <strong>${emptyText(o.chip, o.zone.name)}.</strong><span>Link automations in Setup.</span>
             </div>`}
       </div>
       <div class="dlgfoot">
