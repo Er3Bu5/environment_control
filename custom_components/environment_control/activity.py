@@ -3,12 +3,13 @@ time, shaped here so the panel never sees the raw log.
 
 Read only. The entities asked for come from the stored setup, never from the caller: the zone's mapped devices and the
 automations it links. Numeric sensors are never asked for: the logbook never holds them, and a query that names them is
-far slower for nothing. Their entries are worked out from recorded history instead.
+far slower for nothing. Their entries are read from recorded history instead.
 
 Almost all of a zone's log is automation runs, an alert re-firing on every sensor update or a watchdog on a timer, so
-repeated runs are collapsed into one row with a count. A mapped sensor reading that stopped reporting, and its return,
-is worked out from its recorded history by the panel's own stale rule, for a reading shown to report while its
-value holds, and merged in by time. Nothing that identifies a
+repeated runs are collapsed into one row with a count. A mapped sensor reading that Home Assistant recorded going
+unavailable or unknown, and its return to a number, is merged in by time. Silence is never inferred: two reviews found
+every rule for it giving false rows, so a sensor that freezes on its last value without saying so isn't shown. Nothing
+that identifies a
 login, a context or a device leaves here: a person is sent by name, an automation outside the zone by name only, a
 trigger as its kind, named only when what it watched is the zone's own, and a sensor by its id and name in the setup,
 never its entities or its readings' values. Home Assistant's own wording of a trigger can name any entity, topic or
@@ -30,7 +31,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MAX_LOOKBACK_HOURS
-from .history import STALE_S, number, reported, sensor_readings
+from .history import number, recorded, sensor_readings
 
 # A page is a local day, and a day across a clock change is 25 hours.
 MAX_PAGE_HOURS = 25
@@ -51,9 +52,6 @@ GONE = frozenset({"unavailable", "unknown"})
 # The logbook's own bounds are exclusive and its times finer than a datetime holds, so each slice is read this much
 # wider and cut to the exact times here.
 PAD = timedelta(seconds=1)
-# A reading's history is read from this far before each slice, so a stop or return just before the slice's start is
-# seen, and a group across that edge is seen whole from both sides.
-LOOK_BACK_S = 2 * STALE_S
 # Runs of a streak further apart than this are two rows, so a row's times mean the automation kept running across them.
 STREAK_GAP_S = 60 * 60
 # Readings of one sensor that stop or come back within this long of each other are one board's event, one row.
@@ -189,69 +187,38 @@ def _read(hass: HomeAssistant, processor: Any, start: float, end: float) -> tupl
 
 
 class Turn(NamedTuple):
-    """A reading stopping or coming back. since is its last real reading before the stop, None where that's unknown."""
+    """A reading stopping or coming back. since is when it stopped, None where that's before what was read."""
 
     when: float
     state: str
     since: float | None
 
 
-def proves_timed(rows: list[tuple[float, Any, float]], startups: Sequence[float]) -> bool:
-    """Whether a reading's rows, as `reported` gives them, show it reports while its value holds.
+def turns(rows: list[tuple[float, Any]]) -> list[Turn]:
+    """Where one reading stopped and came back, from its rows as `recorded` gives them.
 
-    Only then does silence mean it stopped. Some integrations (MQTT, Zigbee) write nothing at all for a value that
-    holds, so a steady reading from one looks exactly like a dead one. Proof is a report later than the row's last
-    change, or the same number written twice in a row, which is what force_update looks like; a restart writes every
-    state anew, so a repeat across one proves nothing.
-    """
-    for i, (t, state, heard) in enumerate(rows):
-        if heard > t:
-            return True
-        repeat = i and state == rows[i - 1][1] and number(state) is not None
-        if repeat and not any(rows[i - 1][0] < s <= t for s in startups):
-            return True
-    return False
-
-
-def turns(
-    rows: list[tuple[float, Any, float]], end: float, startups: Sequence[float] = (), timed: bool = True
-) -> list[Turn]:
-    """Where one reading stopped and came back, from its rows as `reported` gives them, read up to end.
-
-    A reading stops on a state that isn't a number, or, when timed, once it has gone unreported for longer than the
-    panel's stale rule, at its last report plus that rule; it is back at its first number after. Its state before its
-    first row is unknown, so neither the first row nor anything before it is a turn.
+    A reading stops on a state that isn't a number and is back at its first number after. Its state before its first
+    row is unknown, so the first row is never a turn.
     """
     out: list[Turn] = []
     up: bool | None = None
-    heard = 0.0
     since: float | None = None
-    for i, (t, state, last_report) in enumerate(rows):
-        if up and timed and t > heard + STALE_S:
-            out.append(Turn(heard + STALE_S, "stopped", since))
-            up = False
+    for t, state in rows:
         if number(state) is not None:
             if up is False:
                 out.append(Turn(t, "back", since))
-            up, heard, since = True, last_report, last_report
-            # The recorder never stores when a row current at a restart last reported, so the reading is taken as
-            # reporting up to the restart, and when it last read is unknown.
-            to = rows[i + 1][0] if i + 1 < len(rows) else end
-            if restarts := [s for s in startups if t < s <= to]:
-                heard, since = max(heard, *restarts), None
+            up = True
         elif up:
-            out.append(Turn(t, "stopped", since))
-            up = False
+            out.append(Turn(t, "stopped", t))
+            up, since = False, t
         elif up is None:
             up, since = False, None
-    if up and timed and heard + STALE_S < end:
-        out.append(Turn(heard + STALE_S, "stopped", since))
     return out
 
 
 @dataclass
 class SensorRow:
-    """A sensor row on its way to the panel, with each reading's own last reading before the stop kept beside it."""
+    """A sensor row on its way to the panel, with when each of its readings stopped kept beside it."""
 
     row: dict[str, Any]
     since: dict[str, float | None]
@@ -306,31 +273,20 @@ def sensor_rows(
     return out
 
 
-def _sensor_read(
-    hass: HomeAssistant,
-    readings: list[Reading],
-    start: float,
-    end: float,
-    live: dict[str, tuple[float, float]],
-    timed: set[str],
-) -> list[SensorRow]:
+def _sensor_read(hass: HomeAssistant, readings: list[Reading], start: float, end: float) -> list[SensorRow]:
     """In the recorder's executor: one slice of the sensor rows, from start up to but not including end.
 
-    Each reading is read from LOOK_BACK_S before the slice, to know its state at the slice's start, to TOGETHER_S past
-    it, so a group across the slice's end is seen whole from both sides. live is each reading's (last updated, last
-    reported) now; timed, the readings already shown to report while their value holds, grows as the page is read.
+    Each reading is read from TOGETHER_S either side of the slice, so a group across either edge is seen whole from
+    both sides.
     """
-    lo, hi = dt_util.utc_from_timestamp(start - LOOK_BACK_S), dt_util.utc_from_timestamp(end + TOGETHER_S)
-    # A silence that hasn't yet run past the stale rule isn't a stop yet.
-    known_to = min(hi.timestamp(), dt_util.utcnow().timestamp())
-    startups = _startups(hass, lo.timestamp(), hi.timestamp())
-    found = {}
-    for entity in dict.fromkeys(r.entity for r in readings):
-        rows = reported(hass, entity, lo, hi, live.get(entity))
-        if entity not in timed and proves_timed(rows, startups):
-            timed.add(entity)
-        found[entity] = turns(rows, known_to, startups, entity in timed)
-    return sensor_rows(readings, found, start, end, startups)
+    # The recorder drops a row timed exactly at a read's start, from both its start state and its changes, and slice
+    # edges fall on whole seconds or on a row's own time, so the read starts a microsecond off them.
+    lo, hi = start - TOGETHER_S - 1e-6, end + TOGETHER_S
+    found = {
+        e: turns(recorded(hass, e, dt_util.utc_from_timestamp(lo), dt_util.utc_from_timestamp(hi)))
+        for e in dict.fromkeys(r.entity for r in readings)
+    }
+    return sensor_rows(readings, found, start, end, _startups(hass, lo, hi))
 
 
 def _when(x: dict[str, Any] | SensorRow) -> Any:
@@ -474,8 +430,6 @@ async def _page(
     from homeassistant.components.recorder import get_instance
 
     start, end = page["start"], page["end"]
-    # Decided once a page and never undone, so a quiet slice doesn't turn a reading's silences off.
-    timed: set[str] = set()
     try:
         slice_end = end
         while slice_end > start:
@@ -494,14 +448,8 @@ async def _page(
                 )
             sensors = []
             if readings:
-                live = {
-                    r.entity: (s.last_updated_timestamp, s.last_reported_timestamp)
-                    for r in readings
-                    if (s := hass.states.get(r.entity)) is not None
-                }
-                timed.update(e for e, (updated, reported_at) in live.items() if reported_at > updated)
                 sensors = await get_instance(hass).async_add_executor_job(
-                    _sensor_read, hass, readings, slice_start, slice_end, live, timed
+                    _sensor_read, hass, readings, slice_start, slice_end
                 )
             if not collapse.feed(rows, await _user_names(hass, rows), startups, sensors):
                 break

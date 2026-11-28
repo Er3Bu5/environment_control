@@ -1,5 +1,5 @@
-"""Activity's sensor rows: a zone's mapped readings that stopped reporting and came back, worked out from recorded
-history by the panel's stale rule, merged by time with the logbook's rows and paged with them."""
+"""Activity's sensor rows: a zone's mapped readings that Home Assistant recorded going unavailable or unknown and coming
+back, merged by time with the logbook's rows and paged with them. Silence alone is never a row."""
 
 import json
 from datetime import timedelta
@@ -14,7 +14,6 @@ from pytest_homeassistant_custom_component.components.recorder.common import asy
 from custom_components.environment_control import activity
 from custom_components.environment_control.activity import Reading, Turn
 from custom_components.environment_control.const import DOMAIN
-from custom_components.environment_control.history import STALE_S
 
 
 @pytest.fixture(autouse=True)
@@ -83,7 +82,7 @@ class Clock:
     # Far less than half an hour in all, the life of the test's access token.
     def __init__(self, hass, freezer):
         self.hass, self.freezer = hass, freezer
-        # Past the recorder's start: a reading's row from before it would read as current across a restart.
+        # Past the recorder's start, so whether a row is within the startup window is judged from after it.
         self.now = dt_util.utcnow().replace(microsecond=0) + timedelta(seconds=1)
 
     async def at(self, seconds, *changes):
@@ -96,35 +95,22 @@ class Clock:
         return self.now.timestamp()
 
 
-def _left(state=None, prefix=""):
-    # HA records nothing for a state set again unchanged, so a reading that reports again reports something new.
-    return [(e, state or prefix + VALUES[r]) for r, e in LEFT.items()]
-
-
-def _rows(*pairs):
-    # A row reported only when it changed: its last report is its own time.
-    return [(t, state, t) for t, state in pairs]
+def _left(state=None):
+    return [(e, state or VALUES[r]) for r, e in LEFT.items()]
 
 
 def test_unavailable_then_back_is_a_stop_and_a_return() -> None:
-    rows = _rows((0, "20"), (100, "20.5"), (150, "unavailable"), (400, "21"))
-    assert activity.turns(rows, 1000) == [Turn(150, "stopped", 100), Turn(400, "back", 100)]
-    assert activity.turns(_rows((0, "20"), (100, "unknown"), (110, "21")), 200) == [
-        Turn(100, "stopped", 0),
-        Turn(110, "back", 0),
-    ]
+    rows = [(0, "20"), (100, "20.5"), (150, "unavailable"), (400, "21")]
+    assert activity.turns(rows) == [Turn(150, "stopped", 150), Turn(400, "back", 150)]
 
 
-def test_silence_past_the_stale_rule_is_a_stop_at_its_edge() -> None:
-    rows = _rows((10, "20"), (20, "20"), (20 + STALE_S + 60, "21"))
-    assert activity.turns(rows, 1200) == [Turn(20 + STALE_S, "stopped", 20), Turn(20 + STALE_S + 60, "back", 20)]
-    # Still silent at the end of what was read.
-    assert activity.turns(_rows((10, "20")), 10 + STALE_S + 1) == [Turn(10 + STALE_S, "stopped", 10)]
+def test_unknown_counts_like_unavailable() -> None:
+    rows = [(0, "20"), (100, "unknown"), (105, "unavailable"), (110, "21")]
+    assert activity.turns(rows) == [Turn(100, "stopped", 100), Turn(110, "back", 100)]
 
 
-def test_a_shorter_silence_is_nothing() -> None:
-    assert activity.turns(_rows((10, "20"), (10 + STALE_S, "21")), 10 + STALE_S + 1) == []
-    assert activity.turns(_rows((10, "20")), 10 + STALE_S) == []
+def test_a_reading_already_down_at_the_first_row_is_only_back() -> None:
+    assert activity.turns([(0, "unavailable"), (50, "unknown"), (100, "21")]) == [Turn(100, "back", None)]
 
 
 def test_four_readings_stopping_together_are_one_row_and_three_are_three() -> None:
@@ -169,12 +155,7 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     t_back = await clock.at(1, *_left())
     t_lux = await clock.at(1, ("sensor.left_lux", "unknown"))
     t_lux_back = await clock.at(1, ("sensor.left_lux", "40000"))
-    # Left reports its values again unchanged, which records nothing but shows it reports while a value holds.
-    t_heard = await clock.at(1, *_left()[:3], ("sensor.left_lux", "40000"))
-    # Right keeps reporting; Left goes quiet past the stale rule, then reports again.
-    for _ in range(3):
-        await clock.at(STALE_S / 3 - 30, (RIGHT, str(clock.now.second)))
-    t_quiet = await clock.at(STALE_S + 30 - 3 * (STALE_S / 3 - 30), *_left(prefix="1"))
+    t_late = await clock.at(activity.STARTUP_S + 30, ("sensor.left_lux", "unavailable"))
     t_heat = await clock.at(1, (HEATER, "on"))
     await async_wait_recording_done(hass)
 
@@ -183,12 +164,10 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     rows = [(e["kind"], e["when"], e.get("reading"), e.get("state"), e.get("since")) for e in result["entries"]]
     assert rows == [
         ("device", t_heat, None, "on", None),
-        # Silent from their last report, not their last change, and back together.
-        ("sensor", t_quiet, "all", "back", t_heard),
-        ("sensor", t_heard + STALE_S, "all", "stopped", None),
-        ("sensor", t_lux_back, "light", "back", t_back),
+        ("sensor", t_late, "light", "stopped", None),
+        ("sensor", t_lux_back, "light", "back", t_lux),
         ("sensor", t_lux, "light", "stopped", None),
-        ("sensor", t_back, "all", "back", t0),
+        ("sensor", t_back, "all", "back", t_gone),
         ("device", t_off, None, "off", None),
         ("sensor", t_gone, "all", "stopped", None),
         ("device", t_on, None, "on", None),
@@ -196,7 +175,7 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     sensor_rows = [e for e in result["entries"] if e["kind"] == "sensor"]
     assert all(e["sensor"] == "s1" and e["name"] == "Left" for e in sensor_rows)
     # The test's recorder started just before t0, so the early rows read as a restart's and the late ones don't.
-    assert [e.get("cause") for e in sensor_rows if e["when"] in (t_gone, t_quiet)] == [None, {"type": "startup"}]
+    assert [e.get("cause") for e in sensor_rows if e["when"] in (t_gone, t_late)] == [None, {"type": "startup"}]
     allowed = {"kind", "when", "sensor", "name", "reading", "state", "since", "cause"}
     assert all(set(e) <= allowed for e in sensor_rows)
     text = json.dumps(result)
@@ -208,19 +187,19 @@ async def test_a_reading_stopped_before_the_page_shows_only_its_return(room, has
     clock = Clock(hass, freezer)
     t0 = await clock.at(0, (HEATER, "off"), (RIGHT, "19.5"), ("sensor.left_temp", "20.5"))
     t_gone = await clock.at(5, (RIGHT, "unavailable"), ("sensor.left_temp", "unavailable"))
-    t_back = await clock.at(activity.LOOK_BACK_S + 100, ("sensor.left_temp", "21.5"))
+    t_back = await clock.at(120, ("sensor.left_temp", "21.5"))
     await async_wait_recording_done(hass)
 
-    # Right is stopped all through the page and Left stopped before it: only Left's return, and when it last read is
+    # Right is stopped all through the page and Left stopped before it: only Left's return, and when it stopped is
     # further back than the page reaches.
-    result = await room(zone="garden", start=t_gone + activity.LOOK_BACK_S + 60, end=t_back + 1)
+    result = await room(zone="garden", start=t_gone + 60, end=t_back + 1)
     assert [(e["reading"], e["state"], e.get("since")) for e in result["entries"]] == [("temperature", "back", None)]
 
-    # A page that reaches the stop, read in slices too short for the return's look-back to reach it, pairs them.
+    # A page that reaches the stop, read in slices too short for the return's to reach it, pairs them.
     monkeypatch.setattr(activity, "SLICE_HOURS", 60 / 3600)
     result = await room(zone="garden", start=t0 - 60, end=t_back + 1)
     assert [(e["when"], e["sensor"], e["reading"], e["state"], e.get("since")) for e in result["entries"]] == [
-        (t_back, "s1", "temperature", "back", t0),
+        (t_back, "s1", "temperature", "back", t_gone),
         (t_gone, "s3", "temperature", "stopped", None),
         (t_gone, "s1", "temperature", "stopped", None),
     ]
@@ -270,52 +249,28 @@ async def _direct(hass, start, end):
     return [(e["when"], e["reading"], e["state"]) for e in result["entries"] if e["kind"] == "sensor"]
 
 
-async def test_a_value_reported_again_unchanged_is_not_silence(room, hass, freezer) -> None:
+async def test_a_reading_silent_for_an_hour_but_still_a_number_is_no_row(room, hass, freezer) -> None:
     clock = Clock(hass, freezer)
     t0 = await clock.at(0, (RIGHT, "19.5"))
-    # Home Assistant writes no row for these, only moves the state's last report.
-    for _ in range(10):
-        await clock.at(STALE_S / 4, (RIGHT, "19.5"))
-    t_end = await clock.at(60, (RIGHT, "19.6"))
+    # Reported again unchanged, then nothing at all for an hour.
+    await clock.at(60, (RIGHT, "19.5"))
+    t_end = await clock.at(60 * 60, (RIGHT, "19.6"))
     await async_wait_recording_done(hass)
     assert await _direct(hass, t0 - 60, t_end + 1) == []
 
 
-async def test_a_steady_reading_still_current_is_not_silence(room, hass, freezer) -> None:
+async def test_a_steady_reading_with_an_attribute_only_change_is_no_row(room, hass, freezer) -> None:
     clock = Clock(hass, freezer)
     t0 = await clock.at(0, (RIGHT, "19.5"))
-    for _ in range(10):
-        t_end = await clock.at(STALE_S / 4, (RIGHT, "19.5"))
-    await async_wait_recording_done(hass)
-    # Its last report is held only by the live state until the next change is recorded.
-    assert await _direct(hass, t0 - 60, t_end + 1) == []
-
-
-async def test_a_reporting_reading_that_goes_silent_stops_at_its_last_report(room, hass, freezer) -> None:
-    clock = Clock(hass, freezer)
-    t0 = await clock.at(0, (RIGHT, "19.5"))
-    t_heard = await clock.at(60, (RIGHT, "19.5"))
-    t_back = await clock.at(30 * 60, (RIGHT, "19.6"))
-    await async_wait_recording_done(hass)
-    assert await _direct(hass, t0 - 60, t_back + 1) == [
-        (t_back, "temperature", "back"),
-        (t_heard + STALE_S, "temperature", "stopped"),
-    ]
-
-
-async def test_a_forced_update_reading_that_goes_silent_stops(room, hass, freezer) -> None:
-    clock = Clock(hass, freezer)
-    t0 = await clock.at(0)
-    # force_update writes the same value again as a new row.
     for _ in range(3):
-        t_last = await clock.at(10)
-        hass.states.async_set(RIGHT, "19.5", force_update=True)
-    t_back = await clock.at(30 * 60, (RIGHT, "19.6"))
+        await clock.at(4 * 60, (RIGHT, "19.5"))
+    # A unit or name change writes a row whose state hasn't moved.
+    await clock.at(60)
+    hass.states.async_set(RIGHT, "19.5", {"unit_of_measurement": "C"})
+    for _ in range(7):
+        t_end = await clock.at(4 * 60, (RIGHT, "19.5"))
     await async_wait_recording_done(hass)
-    assert await _direct(hass, t0 - 60, t_back + 1) == [
-        (t_back, "temperature", "back"),
-        (t_last + STALE_S, "temperature", "stopped"),
-    ]
+    assert await _direct(hass, t0 - 60, t_end + 1) == []
 
 
 async def test_a_reading_that_writes_only_changes_is_judged_by_its_states(room, hass, freezer) -> None:
@@ -330,16 +285,6 @@ async def test_a_reading_that_writes_only_changes_is_judged_by_its_states(room, 
         (t_back, "temperature", "back"),
         (t_gone, "temperature", "stopped"),
     ]
-
-
-def test_a_reading_current_across_a_restart_counts_as_reporting_up_to_it() -> None:
-    # The recorder never stores the last report of a row current when Home Assistant stopped.
-    rows = _rows((0, "20"), (5000, "unavailable"), (5100, "21"))
-    assert activity.turns(rows, 5500, [4990]) == [Turn(5000, "stopped", None), Turn(5100, "back", None)]
-    assert activity.turns(rows, 5500) == [Turn(STALE_S, "stopped", 0), Turn(5100, "back", 0)]
-    # A repeat across a restart is the restart writing every state anew, not force_update.
-    assert activity.proves_timed(_rows((0, "20"), (100, "20")), [50]) is False
-    assert activity.proves_timed(_rows((0, "20"), (100, "20")), []) is True
 
 
 async def test_readings_stopping_half_a_second_apart_across_a_slice_edge_are_one_row(
@@ -373,13 +318,3 @@ async def test_a_stop_at_the_cursor_beside_a_logbook_row_is_taken_once(room, has
         e for e in whole if e["kind"] == "sensor"
     ]
     assert [e["when"] for e in first["entries"] + second["entries"]] == [e["when"] for e in whole]
-
-
-async def test_a_reading_silent_across_several_slices_stops_once(room, hass, freezer, monkeypatch) -> None:
-    monkeypatch.setattr(activity, "SLICE_HOURS", 120 / 3600)
-    clock = Clock(hass, freezer)
-    t0 = await clock.at(0, (RIGHT, "19.5"))
-    t_heard = await clock.at(30, (RIGHT, "19.5"))
-    t_end = await clock.at(STALE_S + 15 * 60, (HEATER, "on"))
-    await async_wait_recording_done(hass)
-    assert await _direct(hass, t0 - 60, t_end + 1) == [(t_heard + STALE_S, "temperature", "stopped")]
