@@ -55,7 +55,6 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
   @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
-  .cards.zones > .zone-card.lone { grid-column: 1 / -1; }
   .zone-card:hover { border-color: var(--primary); }
   /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
      card that was moved, as it is scrolled into view. */
@@ -3862,24 +3861,8 @@ function render() {
   $("#main").innerHTML = screen();
   const wrap = $("#main .wrap");
   if (wrap) wrap.insertAdjacentHTML("afterbegin", navMenu());
-  stretchLone();
   drawChart();
   draftSync();
-}
-/* At two across, a zone that a joined family pushes onto a row of its own takes the whole row rather than leaving half of
-   it empty (#119). Only there: the last odd card, and three or four across, keep their width. Where a card lands is the
-   grid's to say, so it's read back after layout, and widening one already alone on its row moves nothing. */
-function stretchLone() {
-  const g = $("#main .cards.zones");
-  if (!g) return;
-  const kids = [...g.children];
-  for (const k of kids) k.classList.remove("lone");
-  if (getComputedStyle(g).gridTemplateColumns.split(" ").length !== 2) return;
-  const left = g.getBoundingClientRect().left;
-  kids.forEach((k, i) => {
-    const n = kids[i + 1], r = k.getBoundingClientRect();
-    if (k.matches(".zone-card") && n && n.matches(".fam") && Math.abs(r.left - left) < 1 && n.getBoundingClientRect().top >= r.bottom) k.classList.add("lone");
-  });
 }
 /* Every warning lands on the thing that fixes it. */
 const refocus = (id) => { const t = document.getElementById(id); if (t) t.focus({ preventScroll: true }); };
@@ -4346,7 +4329,6 @@ document.addEventListener("input", (e) => {
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
 window.addEventListener("resize", vReveal);
-window.addEventListener("resize", stretchLone);
 /* A keyboard that shortens the window leaves a dialog's box where it was, perhaps below the fold of the dialog's
    middle, and scrolling the page can't reach a dialog fixed to the window, so the box is brought into view here. */
 window.addEventListener("resize", () => { const a = document.activeElement; if (a && a.matches("input") && a.closest("#modal")) a.scrollIntoView({ block: "nearest" }); });
