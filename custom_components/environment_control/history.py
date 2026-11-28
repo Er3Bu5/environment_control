@@ -13,7 +13,7 @@ and high, so a spike inside a bucket still shows in a range's Min and Max.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -106,19 +106,38 @@ def recorded(hass: HomeAssistant, entity: str, start: datetime, end: datetime) -
     return [(float(r["lu"]), r["s"]) for r in found if isinstance(r, dict) and "lu" in r]
 
 
-def _read(hass: HomeAssistant, entities: list[str], start: datetime, end: datetime, n: int) -> dict[str, Any]:
+# Given a reader of one entity's recorded rows over the range, the range's start and its end: the answer's `limits`.
+Limits = Callable[[Callable[[str], list[tuple[float, Any]]], float, float], dict[str, Any]]
+
+
+def _read(
+    hass: HomeAssistant, entities: list[str], start: datetime, end: datetime, n: int, limits: Limits | None = None
+) -> dict[str, Any]:
     """In the recorder's executor: each entity's rows, bucketed one entity at a time so only one is held at once."""
     start_ts, end_ts, series = start.timestamp(), end.timestamp(), {}
     for entity in entities:
         rows = recorded(hass, entity, start, end)
         series[entity] = {"first": rows[0][0] if rows else None, "values": bucket(rows, start_ts, end_ts, n)}
-    return {"start": start_ts, "end": end_ts, "step": (end_ts - start_ts) / n, "series": series}
+    out = {"start": start_ts, "end": end_ts, "step": (end_ts - start_ts) / n, "series": series}
+    if limits is not None:
+        # A limit's helpers are few and change rarely, so their rows are kept while the answer is worked out.
+        read: dict[str, list[tuple[float, Any]]] = {}
+
+        def rows_of(entity: str) -> list[tuple[float, Any]]:
+            if entity not in read:
+                read[entity] = recorded(hass, entity, start, end)
+            return read[entity]
+
+        out["limits"] = limits(rows_of, start_ts, end_ts)
+    return out
 
 
-async def async_history(hass: HomeAssistant, entities: list[str], hours: int, buckets: int) -> dict[str, Any]:
-    """The bucketed history of each entity over the last hours, ending now."""
+async def async_history(
+    hass: HomeAssistant, entities: list[str], hours: int, buckets: int, limits: Limits | None = None
+) -> dict[str, Any]:
+    """The bucketed history of each entity over the last hours, ending now, and a zone's limits over them if asked."""
     from homeassistant.components.recorder import get_instance
 
     end = dt_util.utcnow()
     start = end - timedelta(hours=hours)
-    return await get_instance(hass).async_add_executor_job(_read, hass, entities, start, end, buckets)
+    return await get_instance(hass).async_add_executor_job(_read, hass, entities, start, end, buckets, limits)
