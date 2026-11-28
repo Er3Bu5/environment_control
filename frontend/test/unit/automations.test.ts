@@ -215,6 +215,13 @@ describe("a switch after a tap", () => {
     expect(autoAnswered(autoSend(true), { ok: false }, st("off"))).toEqual({ status: "error", error: "Home Assistant didn't take it." });
   });
 
+  it("an answer that comes after giving up still counts: a refusal says why, a yes leaves it waiting for the report", () => {
+    const stuck = autoGiveUp(autoSend(true));
+    expect(autoAnswered(stuck, { ok: false, error: "No." }, st("off"))).toEqual({ status: "error", error: "No." });
+    expect(autoAnswered(stuck, { ok: true }, st("off"))).toBe(stuck);
+    expect(autoAnswered(stuck, { ok: true }, st("on"))).toBeUndefined();
+  });
+
   it("gives up after the wait, and still counts a report that comes after that", () => {
     const stuck = autoGiveUp(autoSend(true));
     expect(stuck).toEqual({ status: "stuck", want: "on" });

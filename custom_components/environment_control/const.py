@@ -21,3 +21,7 @@ MAX_CATALOG_DEVICES = 1000
 MAX_CATALOG_ENTITIES = 5000
 # Automations a zone can link to switch on and off. A home that automates a lot has a few hundred.
 MAX_CATALOG_AUTOMATIONS = 2000
+
+# How far back the panel reads Home Assistant's records: History's longest range, and the oldest page of Activity.
+# HA's recorder keeps 10 days by default; one value for both, so they move together when it changes.
+MAX_LOOKBACK_HOURS = 168

@@ -31,6 +31,7 @@ HOST_ACCEPTS = {
     "save",
     "calibrate",
     "history",
+    "activity",
     "setting",
     "device",
     "automation",
