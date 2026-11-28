@@ -44,6 +44,7 @@ import {
   setAlertRepeat,
   setDetails,
   setHistory,
+  andList,
   shareAsk,
   stepsLeft,
   unknownLinks,
@@ -184,6 +185,7 @@ import {
   zoneReading,
 } from "./readings";
 import { onColor } from "./colour";
+import { levelledHeights } from "./heads";
 import { PALETTES, styles } from "./styles";
 import {
   KEPT,
@@ -274,12 +276,12 @@ import {
   setLinkGroup,
   toggleLink,
 } from "./automations";
-import { alertsCard, automationsPage, failsafeNoticeView, linkPage } from "./automations-view";
+import { alertsCard, automationsDialog, failsafeNoticeView, linkPage } from "./automations-view";
 import { LIGHT_LINE, RANGES, type Point, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
-type Screen = "overview" | "zone" | "devices" | "setup" | "autos";
+type Screen = "overview" | "zone" | "devices" | "setup";
 type Appearance = Theme["appearance"];
 type Result = Extract<HostMessage, { type: "result" }>;
 interface Change {
@@ -298,6 +300,8 @@ interface Guard {
   kind: "guard";
   title: string;
   text: string;
+  /* A second paragraph of the question itself, before any rows. */
+  more?: string;
   rows?: [string, string][];
   note?: string;
   confirm?: string;
@@ -458,6 +462,17 @@ export class EcApp extends LitElement {
   }
   private chartEl: Element | null = null;
   private chartRO: ResizeObserver | null = null;
+  private zoneGrid: Element | null = null;
+  private zoneGridW = 0;
+  /* Only a change of width can move a line break; the heights levelHeads sets change the grid's height, and must not set it
+     off again. */
+  private zoneGridRO = new ResizeObserver(([e]) => {
+    const w = Math.round(e.contentRect.width);
+    if (w !== this.zoneGridW) {
+      this.zoneGridW = w;
+      this.levelHeads();
+    }
+  });
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
@@ -477,7 +492,7 @@ export class EcApp extends LitElement {
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
   declare private ctlDrag: Record<string, number>;
-  /* A zone's Automations page while it's open, Link automations while it's open, and what each automation's switch is
+  /* A zone's Automations dialog while it's open, Link automations while it's open, and what each automation's switch is
      waiting for or last heard, by automation. */
   declare private autos: AutosPage | null;
   /* Sort on Overview while it's open: the order as it's been moved so far, by zone id. */
@@ -493,6 +508,7 @@ export class EcApp extends LitElement {
   private waiting = new Map<number, (r: Result) => void>();
   private draftHeld = false;
   private modalOpener: Element | null = null;
+  private autosOpener: Element | null = null;
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
@@ -561,6 +577,8 @@ export class EcApp extends LitElement {
     window.removeEventListener("resize", this.onResize);
     clearInterval(this.clock);
     this.chartRO?.disconnect();
+    this.zoneGridRO.disconnect();
+    this.zoneGrid = null;
     super.disconnectedCallback();
   }
 
@@ -618,7 +636,7 @@ export class EcApp extends LitElement {
       resolve?.(m);
     }
     /* A zone removed elsewhere takes its tab, its guide and its open details with it. */
-    if ((this.screen === "zone" || this.screen === "autos") && !this.zoneById(this.zoneId)) this.go("overview");
+    if (this.screen === "zone" && !this.zoneById(this.zoneId)) this.go("overview");
     if (this.guide && !this.zoneById(this.guide)) this.guide = null;
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
@@ -797,21 +815,42 @@ export class EcApp extends LitElement {
         this.chartRO.observe(chart);
       }
     }
+    const zoneGrid = this.shadowRoot?.querySelector(".cards.zones") ?? null;
+    if (zoneGrid !== this.zoneGrid) {
+      this.zoneGridRO.disconnect();
+      this.zoneGrid = zoneGrid;
+      this.zoneGridW = 0;
+      if (zoneGrid) this.zoneGridRO.observe(zoneGrid);
+    }
+    if (zoneGrid) this.levelHeads();
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos" || this.sortOn);
+    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.sortOn);
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
       parent.postMessage({ v: 1, type: "draft", open: held }, "*");
     }
     if (this.canGoBack !== this.backSaid) this.sayBack();
+    const focus = (sel: string) => (this.shadowRoot?.querySelector(sel) as HTMLElement | null)?.focus({ preventScroll: true });
+    /* A control that asked can be gone, hidden or busy by the time its question closes, a switch sending what was
+       asked: focus then goes to the Automations dialog's title, so it stays in the dialog. */
+    const usable = (el: Element | null): el is HTMLElement => el instanceof HTMLElement && el.isConnected && !el.hidden && !(el as HTMLButtonElement).disabled;
+    if (changed.has("autos") && !!this.autos !== !!changed.get("autos")) {
+      if (this.autos) {
+        this.autosOpener = this.shadowRoot?.activeElement ?? null;
+        focus("#autos-title");
+      } else if (usable(this.autosOpener)) this.autosOpener.focus({ preventScroll: true });
+      /* A notice that opened it can be gone by the time it closes, its failsafe switched back on in it. */
+      else focus(`[data-zmenu="${MORE}"]`);
+    }
     if (changed.has("modal")) {
       const before = changed.get("modal");
       if (this.modal && !before) {
         this.modalOpener = this.shadowRoot?.activeElement ?? null;
-        (this.shadowRoot?.querySelector("#dlg-title") as HTMLElement | null)?.focus({ preventScroll: true });
-      } else if (!this.modal && before && this.modalOpener instanceof HTMLElement && this.modalOpener.isConnected) {
-        this.modalOpener.focus({ preventScroll: true });
+        focus("#dlg-title");
+      } else if (!this.modal && before) {
+        if (usable(this.modalOpener)) this.modalOpener.focus({ preventScroll: true });
+        else if (this.autos) focus("#autos-title");
       }
       if (!this.modal) this.classList.remove("dlgkeys");
     }
@@ -838,7 +877,7 @@ export class EcApp extends LitElement {
   private backSaid: boolean | null = null;
 
   private go(screen: Screen, zoneId: string | null = null): void {
-    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && ((a.screen !== "zone" && a.screen !== "autos") || a.zoneId === b.zoneId);
+    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && (a.screen !== "zone" || a.zoneId === b.zoneId);
     const here = { screen: this.screen, zoneId: this.zoneId }, to = { screen, zoneId }, before = this.trail[this.trail.length - 1];
     if (!same(here, to)) {
       if (before && same(before, to)) this.trail.pop();
@@ -851,9 +890,8 @@ export class EcApp extends LitElement {
     this.menu = null;
     this.chartAt = null;
     if (screen !== "overview") this.sorting = null;
-    /* The Automations page's chip and its alert repeat draft go with it. Come back to by Back, it opens on Alerts. */
-    if (screen !== "autos") this.autos = null;
-    else if (this.autos?.zoneId !== zoneId && zoneId) this.autos = { zoneId, chip: "alert" };
+    /* The Automations dialog sits over the zone's page, so leaving the page closes it. */
+    this.autos = null;
     window.scrollTo(0, 0);
   }
 
@@ -866,6 +904,7 @@ export class EcApp extends LitElement {
      its guard for unsaved changes included, and otherwise the page before this one comes back. */
   private back(): void {
     if (this.modal) return void this.closeModal();
+    if (this.autos) return void this.autosBack();
     if (this.menu) return void (this.menu = null);
     if (this.sortOn) return void this.sortBack();
     if (this.wiz) return void this.cancelWizard();
@@ -874,7 +913,6 @@ export class EcApp extends LitElement {
     if (this.leafw) return void this.leafExit();
     if (this.sched) return void this.schedExit();
     if (this.linkw) return void this.linkExit();
-    if (this.autos) return void this.autosBack();
     const before = this.trail[this.trail.length - 1];
     if (this.guide) return void this.leaveTo(before?.screen ?? "setup", before?.zoneId ?? null);
     if (before) this.go(before.screen, before.zoneId);
@@ -900,6 +938,9 @@ export class EcApp extends LitElement {
     if (this.modal) {
       e.preventDefault();
       this.closeModal();
+    } else if (this.autos) {
+      e.preventDefault();
+      this.autosBack();
     } else if (this.menu) {
       const id = this.menu;
       this.menu = null;
@@ -1088,7 +1129,7 @@ export class EcApp extends LitElement {
         d.sensors[s.id] = seedSlots(s);
       });
     const others = sensorElsewhere(this.config, z.id, s.id);
-    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, others), add);
     else add();
   }
 
@@ -1098,7 +1139,7 @@ export class EcApp extends LitElement {
     if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
     const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
     const others = deviceElsewhere(this.config, z.id, c.entity);
-    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("device", c.name, others), add);
     else add();
   }
 
@@ -1652,7 +1693,7 @@ export class EcApp extends LitElement {
     const note = [
       moved && t ? `Light goes from ${dayLength(t.dayAt, t.nightAt)} to ${dayLength(toMin(d.day), toMin(d.night))} a day.` : "",
       emersonApplies(d) && timesApply(d) && sc.length ? `${emersonLine(d.day, d.night, d.emerson)}.` : "",
-      moved && others.length && d.period === "helper" ? `${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "",
+      moved && others.length && d.period === "helper" ? `${andList(others)} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "",
       timesOnHelpers
         ? "Values on your helpers change there, and anything reading them, like your alerts and light automations, follows straight away, so lights can switch within minutes."
         : onHelpers
@@ -1778,8 +1819,8 @@ export class EcApp extends LitElement {
     this.menu = null;
     const inZone = this.devices.filter((d) => d.zones.includes(id));
     const alone = inZone.filter((d) => d.zones.length === 1), shared = inZone.filter((d) => d.zones.length > 1);
-    const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
-    const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
+    const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name);
+    const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${andList(others)}` : ""].filter(Boolean).join(", ");
     const rows: [string, string][] = [
       ["Layout", z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}` : ""],
       ["Sensors", z.sensors.length ? `${z.sensors.length} unmapped` : ""],
@@ -1824,20 +1865,27 @@ export class EcApp extends LitElement {
     return this.stored?.room;
   }
 
-  /* Automations: a zone's Home Assistant automations, switched from its own page. HA keeps running them. */
+  /* Automations: a zone's Home Assistant automations, switched in a dialog over its page. HA keeps running them. */
   private openAutos(zoneId: string, chip: AutoChip): void {
-    this.go("autos", zoneId);
+    this.menu = null;
     this.autos = { zoneId, chip };
   }
 
+  /* Closing drops an alert repeat draft, so it asks first. */
   private autosBack = (): void => {
-    const a = this.autos;
-    if (a) this.guarded(() => this.go("zone", a.zoneId));
+    if (this.autos) this.guarded(() => (this.autos = null));
   };
 
+  /* Each chip's rows start at the top; a question over the dialog leaves its scroll as it was. */
   private pickChip(chip: AutoChip): void {
     if (!this.autos || this.autos.chip === chip) return;
-    this.guarded(() => (this.autos = this.autos && { ...this.autos, chip, repeat: undefined }));
+    this.guarded(() => {
+      this.autos = this.autos && { ...this.autos, chip, repeat: undefined };
+      void this.updateComplete.then(() => {
+        const rows = this.shadowRoot?.querySelector("#autos-scroll");
+        if (rows) rows.scrollTop = 0;
+      });
+    });
   }
 
   private setAutoCtl(entity: string, c: AutoCtl | undefined): void {
@@ -1970,14 +2018,14 @@ export class EcApp extends LitElement {
     return { type: "result", req: 0, ok: false, error: repeatStuck(this.states[entity]) };
   }
 
-  /* Link automations: from a zone's Automations page, coming back to the chip it was opened on, or from Setup. */
-  private openLinkAutos(zoneId: string, from: AutoChip | null): void {
+  /* Link automations: from a zone's menu on Setup, coming back to Setup. */
+  private openLinkAutos(zoneId: string): void {
     this.guarded(() => {
       const z = this.zoneById(zoneId);
       if (!z) return;
       this.linkBack = { screen: this.screen, zoneId: this.zoneId };
       this.menu = null;
-      this.linkw = openLinks(z, from);
+      this.linkw = openLinks(z, null);
       void this.askCatalog();
       this.go("setup");
     });
@@ -1996,8 +2044,7 @@ export class EcApp extends LitElement {
 
   private linkDone(d: LinkDraft): void {
     this.linkw = null;
-    if (d.from && this.zoneById(d.zoneId)) this.openAutos(d.zoneId, d.from);
-    else this.go(this.linkBack.screen, this.linkBack.zoneId);
+    this.go(this.linkBack.screen, this.linkBack.zoneId);
   }
 
   private linkExit = (): void => {
@@ -2480,11 +2527,13 @@ export class EcApp extends LitElement {
           : judgedAny
             ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
             : nothing}
-      <div class="cards">
+      <div class="cards zones">
         ${repeat(shown, (z) => z.id, (z, i) => {
           const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
+          /* A linked zone's line joins the combine note here, with its Parent badge after the name, once zones link (#91). */
+          const note = n >= 2 ? html`<span class="small muted cardnote"><span class="zcombined">${METHODS[this.methodOf(z.id)]} of ${n} sensors</span></span>` : nothing;
           return card(z, html`
-            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
+            <div class="card-head"><h2>${z.name}</h2>${note}${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
             ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
             <div class="rows">
               ${METRICS.map(
@@ -2503,10 +2552,21 @@ export class EcApp extends LitElement {
                     ${this.lightSpark(z, 34, "lspark")}
                   </div>`}
             </div>
-            ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
             <p class="small muted">${this.zoneCounts(z)}</p>`);
         })}
       </div>`;
+  }
+
+  /* A card whose combine note wraps under its name would start its day strip and tracks lower than its neighbour's, so
+     every head in a row takes the tallest one's height. */
+  private levelHeads(): void {
+    const heads = [...(this.zoneGrid?.querySelectorAll<HTMLElement>(".zone-card > .card-head") ?? [])];
+    for (const h of heads) h.style.minHeight = "";
+    const wanted = levelledHeights(heads.map((h) => h.getBoundingClientRect()));
+    heads.forEach((h, i) => {
+      const t = wanted[i];
+      if (t !== null) h.style.minHeight = `${t}px`;
+    });
   }
 
   private tile(z: Zone, k: Metric) {
@@ -2729,11 +2789,11 @@ export class EcApp extends LitElement {
   private deviceControl(z: Zone, d: ControlDevice, cls: string) {
     const st = this.states[d.entity], v = deviceView(d.entity, st), c = this.ctl[d.id], busy = v.down || c?.status === "sending";
     const lk = CLASS_LOOK[cls], line = ctlLine(c, d, v);
-    const others = d.zones.filter((id) => id !== z.id).map((id) => this.zoneById(id)?.name ?? id);
+    const others = this.zones.filter((o) => o.id !== z.id && d.zones.includes(o.id)).map((o) => o.name);
     const extra = [
       v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "",
       v.offList && v.mode && v.mode !== d.extraMode ? `${cap(v.mode)} isn't in its mode list.` : "",
-      others.length ? `Shared with ${others.join(" and ")}.` : "",
+      others.length ? `Shared with ${andList(others)}.` : "",
     ].filter(Boolean).join(" ");
     /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
        it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
@@ -2888,10 +2948,10 @@ export class EcApp extends LitElement {
     </div>`;
   }
 
-  private autosScreen() {
+  private autosDialog() {
     const a = this.autos, z = a && this.zoneById(a.zoneId);
     if (!a || !z) return nothing;
-    return automationsPage({
+    return automationsDialog({
       zone: z,
       chip: a.chip,
       chips: chipViews(z, this.states),
@@ -2901,7 +2961,10 @@ export class EcApp extends LitElement {
       icon,
       onChip: (c) => this.pickChip(c),
       onTap: (l) => this.tapAuto(z, l),
-      onLink: () => this.openLinkAutos(z.id, a.chip),
+      repeatChanged: this.repeatChangeList().length > 0,
+      covered: !!this.modal,
+      onReview: this.repeatReview,
+      onClose: this.autosBack,
       onRepeat: (v) => (this.autos = this.autos && { ...this.autos, repeat: v }),
       onLinkOnSetup: () => {
         this.leaveTo("setup");
@@ -2975,13 +3038,15 @@ export class EcApp extends LitElement {
     type Row = { name: string; zones: string[]; role: string; family: string; link: LinkKind; source: string; path: string; hub: string; state: string; down: boolean };
     const rows: Row[] = [];
     const str = (v: unknown) => (typeof v === "string" ? v : "");
+    /* Overview's order, as every other list of zones. */
+    const order = c.zones.map((z) => z.id), inZoneOrder = (ids: string[]) => [...ids].sort((a, b) => (order.indexOf(a) + 1 || Infinity) - (order.indexOf(b) + 1 || Infinity));
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || !d.zones.length) continue;
       const st = typeof d.entity === "string" ? this.states[d.entity] : undefined, down = !st || st.state === "unavailable" || st.state === "unknown";
       const bri = st && typeof st.attributes.brightness === "number" ? `, ${Math.round((st.attributes.brightness / 255) * 100)}%` : "";
       const mode = st && typeof st.attributes.mode === "string" ? `, ${st.attributes.mode} mode` : "";
       rows.push({
-        name: str(d.name) || str(d.entity), zones: d.zones as string[], role: str(d.type), family: str(d.family), link: (str(d.link) || "unknown") as LinkKind, source: str(d.linkSource),
+        name: str(d.name) || str(d.entity), zones: inZoneOrder(d.zones as string[]), role: str(d.type), family: str(d.family), link: (str(d.link) || "unknown") as LinkKind, source: str(d.linkSource),
         path: str(d.path), hub: str(d.hub), state: down ? "Unavailable" : st.state === "on" ? `On${bri}${mode}` : st.state === "off" ? "Off" : st.state, down,
       });
     }
@@ -3326,7 +3391,7 @@ export class EcApp extends LitElement {
                 >`
               : nothing}
             ${this.modesOffered(m, c.entity)}
-            <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${otherNames.join(" and ")} too` : ""}.</p>
+            <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${andList(otherNames)} too` : ""}.</p>
           </div>`
         : nothing}
     </div>`;
@@ -3845,7 +3910,7 @@ export class EcApp extends LitElement {
      hasn't been confirmed, until something differs from what's saved, and then the count, Discard and Review and apply
      beside Back. */
   private draftBar() {
-    if (this.screen !== "setup" && this.screen !== "autos" && !this.sortOn) return nothing;
+    if (this.screen !== "setup" && !this.sortOn) return nothing;
     let bar: { zoneId: string; where?: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
     if (this.sortOn) {
       bar = { zoneId: "", where: "Overview", changes: this.sortChangeList(), issue: undefined, sending: false, back: this.sortBack, discard: this.sortDiscard, review: this.sortReview, confirm: null };
@@ -3860,10 +3925,6 @@ export class EcApp extends LitElement {
     } else if (this.linkw) {
       const d = this.linkw;
       bar = { zoneId: d.zoneId, changes: this.linkChangeList(d), issue: undefined, sending: false, back: this.linkExit, discard: this.linkDiscard, review: this.linkReview, confirm: null };
-    } else if (this.autos) {
-      const a = this.autos, changes = this.repeatChangeList(), card = repeatCard(this.room, this.states, a.repeat);
-      const issue = changes.length && card.kind === "ready" && card.problem ? card.problem : undefined;
-      bar = { zoneId: a.zoneId, changes, issue, sending: false, back: this.autosBack, discard: this.repeatDiscard, review: this.repeatReview, confirm: null };
     }
     if (!bar) return nothing;
     const n = bar.changes.length;
@@ -4064,7 +4125,7 @@ export class EcApp extends LitElement {
       helper: html`${this.helperChips("Lights on helper", "sh-on", tOptions, d.onHelper, [...zoneWords, "day", "on"], pickTime("onHelper"), lock)}
         ${this.helperChips("Lights off helper", "sh-off", tOptions, d.offHelper, [...zoneWords, "night", "off"], pickTime("offHelper"), lock)}
         ${timesApply(d)
-          ? html`${times}<p class="small muted">These are your helpers. Anything reading them, like your light schedule, follows straight away.${others.length ? ` ${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : ""}</p>`
+          ? html`${times}<p class="small muted">These are your helpers. Anything reading them, like your light schedule, follows straight away.${others.length ? ` ${andList(others)} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : ""}</p>`
           : nothing}`,
       fixed: html`${times}<p class="small muted">Stored in Environment Control.</p>`,
       detected: html`${this.followPicker("s-lights", "lights", d.lights, (e) => this.setSched((x) => (x.lights = x.lights.includes(e) ? x.lights.filter((y) => y !== e) : [...x.lights, e])), lock)}
@@ -4348,7 +4409,7 @@ export class EcApp extends LitElement {
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Device placement</button>
             <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
             <button role="menuitem" @click=${() => this.openSchedule(z.id)}>Targets, day and night</button>
-            <button role="menuitem" @click=${() => this.openLinkAutos(z.id, null)}>Link automations</button>
+            <button role="menuitem" @click=${() => this.openLinkAutos(z.id)}>Automations</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -4421,10 +4482,11 @@ export class EcApp extends LitElement {
     if (m.kind === "guard") {
       const blocked = !!m.confirm && this.confirmText !== m.confirm;
       return html`<div class="modal">
-        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby=${m.more ? "dlg-text dlg-more" : "dlg-text"}>
           <h2 id="dlg-title" tabindex="-1">${m.title}</h2>
           <div class="review-scroll">
             <p class="muted" id="dlg-text">${m.text}</p>
+            ${m.more ? html`<p class="muted" id="dlg-more">${m.more}</p>` : nothing}
             ${m.rows?.length
               ? html`<div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
                   ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}`
@@ -4512,10 +4574,9 @@ export class EcApp extends LitElement {
       zone: () => this.zone(),
       devices: () => this.devicesScreen(),
       setup: () => this.setup(),
-      autos: () => this.autosScreen(),
     };
-    return html`<main ?inert=${!!this.modal}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
-      ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast ${this.toastLeaving ? "leaving" : ""}" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
+    return html`<main ?inert=${!!this.modal || !!this.autos}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
+      ${this.draftBar()}${this.autosDialog()}${this.modalView()}${this.toastText ? html`<div class="toast ${this.toastLeaving ? "leaving" : ""}" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
   }
 }
 
