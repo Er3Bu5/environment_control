@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
 } as const;
 
 export const styles = css`
@@ -126,6 +126,10 @@ export const styles = css`
   .fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
   .fixlink:hover { text-decoration: underline; }
   .fixlink[hidden] { display: none; }
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
+  @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
   .fixgo { flex: none; font-weight: 500; color: var(--primary); }
   .pill.ok { color: var(--ok); }

@@ -5,15 +5,18 @@ import {
   type TargetsDraft,
   applyStage,
   applyTargetsConfig,
+  chartAxes,
+  fitAxis,
   followLeaf,
   hasTarget,
-  idealCount,
+  idealFits,
   limitHelpers,
   liveBands,
   moveOnChart,
   nudge,
   openTargets,
   pickLink,
+  rhAt,
   setSource,
   setTarget,
   storedBands,
@@ -134,17 +137,80 @@ describe("the draft", () => {
   });
 
   it("drags a line no further than its neighbours, picks the nearest on a press, and nudges by its step", () => {
-    const d = open(here()), g = vGeom();
+    const d = open(here()), axes = chartAxes(d.bands.day, LEAF), g = vGeom(axes), grab = { dx: 0, dy: 0 };
     d.edit = "temperature";
-    moveOnChart(d, LEAF, g.X(28.2), g.Y(60), true);
+    moveOnChart(d, LEAF, g.X(28.2), g.Y(60), true, axes, grab);
     expect(d.sel).toBe(4);
-    moveOnChart(d, LEAF, g.X(20), g.Y(60), false);
+    moveOnChart(d, LEAF, g.X(20), g.Y(60), false, axes, grab);
     expect(d.bands.day.temperature[4]).toBe(27);
     nudge(d, 1);
     expect(d.bands.day.temperature[4]).toBe(27.5);
     d.edit = "target";
-    moveOnChart(d, LEAF, g.X(40), g.Y(10), true);
+    moveOnChart(d, LEAF, g.X(40), g.Y(10), true, axes, grab);
     expect([d.bands.day.temperature[2], d.bands.day.humidity[2]]).toEqual([27, 60]);
+  });
+
+  it("fits the axes to the limits for the period on show, with room past Min and Max", () => {
+    const d = open(here());
+    /* The stakeholder's limits: Min 13 sat off the old 16 to 34 grid, on top of Low. */
+    d.bands.day.temperature = [13, 16, null, 21, 21];
+    expect(chartAxes(d.bands.day, LEAF).t).toEqual({ lo: 8, hi: 26, step: 1, n: 19 });
+    expect(fitAxis("temperature", [23, 24, 25, 27, 28])).toEqual({ lo: 17, hi: 35, step: 1, n: 19 });
+    expect(d.bands.night.temperature).toEqual([16, 20, 23, 25, 26]);
+    expect(chartAxes(d.bands.night, LEAF).t).toEqual({ lo: 12, hi: 30, step: 1, n: 19 });
+  });
+
+  it("keeps the axes inside what a limit may be, never fewer cells than the old grid, and takes a bigger step for a wide span", () => {
+    expect(fitAxis("temperature", [0.5, 2])).toEqual({ lo: 0, hi: 18, step: 1, n: 19 });
+    expect(fitAxis("temperature", [48, 50])).toEqual({ lo: 32, hi: 50, step: 1, n: 19 });
+    expect(fitAxis("humidity", [2, 5])).toEqual({ lo: 0, hi: 60, step: 5, n: 13 });
+    expect(fitAxis("humidity", [97, 100])).toEqual({ lo: 40, hi: 100, step: 5, n: 13 });
+    expect(fitAxis("temperature", [24, 24.4]).n).toBe(19);
+    expect(fitAxis("humidity", [60, 62]).n).toBe(13);
+    expect(fitAxis("temperature", [5, 40])).toEqual({ lo: 0, hi: 44, step: 2, n: 23 });
+    expect(fitAxis("humidity", [10, 95])).toEqual({ lo: 0, hi: 100, step: 10, n: 11 });
+  });
+
+  it("widens the humidity axis until every VPD line and the target cross it", () => {
+    const d = open(here()), b = d.bands.day;
+    b.vpd = [0.2, 0.3, 0.4, 0.5, 2.4];
+    const { t, rh } = chartAxes(b, LEAF), mid = (t.lo + t.hi) / 2;
+    for (const vp of b.vpd as number[]) expect(rhAt(mid, vp, LEAF)).toBeGreaterThanOrEqual(rh.lo), expect(rhAt(mid, vp, LEAF)).toBeLessThanOrEqual(rh.hi);
+    expect(rh.lo).toBeLessThanOrEqual(Math.min(...(b.humidity as number[])));
+    expect(rh.hi).toBeGreaterThanOrEqual(Math.max(...(b.humidity as number[])));
+    expect(rh.lo).toBeLessThan(30);
+  });
+
+  it("on coinciding lines a press takes the selected limit, or else the outer one; a press on a label takes its limit without moving it", () => {
+    const d = open(here()), b = d.bands.day, grab = { dx: 0, dy: 0 };
+    b.temperature = [13, 16, null, 21, 21];
+    d.edit = "temperature";
+    const axes = chartAxes(b, LEAF), g = vGeom(axes), y = g.Y(60);
+    d.sel = 3;
+    moveOnChart(d, LEAF, g.X(21), y, true, axes, grab);
+    expect(d.sel).toBe(3);
+    moveOnChart(d, LEAF, g.X(20), y, false, axes, grab);
+    expect(b.temperature.slice(3)).toEqual([20, 21]);
+    b.temperature[3] = 21;
+    d.sel = null;
+    moveOnChart(d, LEAF, g.X(21), y, true, axes, grab);
+    expect(d.sel).toBe(4);
+    /* Low's label sits on the lower row of labels, Min's on the upper; both pushed apart from their neighbours. */
+    d.sel = null;
+    moveOnChart(d, LEAF, g.X(16), 24 + 9, true, axes, grab);
+    expect([d.sel, b.temperature[1]]).toEqual([1, 16]);
+    moveOnChart(d, LEAF, g.X(17), 24 + 9, false, axes, grab);
+    expect(b.temperature[1]).toBe(17);
+  });
+
+  it("a dragged line stops at the edge of the axes held since the press", () => {
+    const d = open(here()), b = d.bands.day, grab = { dx: 0, dy: 0 };
+    d.edit = "temperature";
+    const axes = chartAxes(b, LEAF), g = vGeom(axes);
+    moveOnChart(d, LEAF, g.X(28), g.Y(60), true, axes, grab);
+    moveOnChart(d, LEAF, g.right + 500, g.Y(60), false, axes, grab);
+    expect(b.temperature[4]).toBe(axes.t.hi);
+    expect(chartAxes(b, LEAF).t.hi).toBeGreaterThan(axes.t.hi);
   });
 
   it("with no target, Low and High stop at each other", () => {
@@ -202,10 +268,22 @@ describe("problems", () => {
   it("says when no conditions fit the ideal zone at this offset, as Athena's flower finish at 1 °C below air", () => {
     const d = open(here());
     applyStage(d, "finish");
-    expect(idealCount(d.bands.day, -1)).toBe(0);
-    expect(idealCount(d.bands.day, 0)).toBeGreaterThan(0);
+    expect(idealFits(d.bands.day, -1)).toBe(false);
+    expect(idealFits(d.bands.day, 0)).toBe(true);
     expect(targetIssues(d, states, catalog, -1)[0]).toEqual({ text: "No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.", calibrate: true });
     expect(texts(d, states, 0)).toEqual([]);
+  });
+
+  it("judges the ideal zone over everything a limit may be, not the chart's old 16 to 34 degree, 30 to 90 % grid", () => {
+    const b = open(here()).bands.day;
+    Object.assign(b, { temperature: [8, 10, 12, 14, 16], humidity: [55, 60, 65, 70, 75], vpd: [0.2, 0.3, 0.4, 0.5, 0.6] });
+    expect(idealFits(b, -1)).toBe(true);
+    b.vpd = [1.1, 1.2, 1.3, 1.4, 1.5];
+    expect(idealFits(b, -1)).toBe(false);
+    /* Narrower than a chart cell, and between the old grid's half degrees. */
+    const v = calcVpd(24.3, 61, -1);
+    Object.assign(b, { temperature: [23, 24.1, null, 24.4, 26], humidity: [55, 60, null, 62, 70], vpd: [v - 0.2, v - 0.02, null, v + 0.02, v + 0.2] });
+    expect(idealFits(b, -1)).toBe(true);
   });
 
   it("asks for at least one helper, in the limit's own unit, used once", () => {
