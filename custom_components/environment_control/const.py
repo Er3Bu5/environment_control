@@ -25,3 +25,7 @@ MAX_CATALOG_AUTOMATIONS = 2000
 # How far back the panel reads Home Assistant's records: History's longest range, and the oldest page of Activity.
 # HA's recorder keeps 10 days by default; one value for both, so they move together when it changes.
 MAX_LOOKBACK_HOURS = 168
+
+# The log of changes to limits and times stored here, beside the setup rather than in it: the setup is sent to the
+# panel and checked on every save, and the log is neither.
+CHANGES_STORAGE_KEY = f"{DOMAIN}.changes"
