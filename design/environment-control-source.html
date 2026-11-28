@@ -38,17 +38,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .navmenu + .pagehead { padding-inline: 0; }
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .pagehead > .zmenu, .pagehead > .pageact { grid-column: 3; grid-row: 1; justify-self: end; }
+  .pagehead > .zmenu { grid-column: 3; grid-row: 1; justify-self: end; }
   /* Overview's Arrange sits where a zone's More button does, as tall as it. */
   .pagehead > .headbtn { grid-column: 3; grid-row: 1; justify-self: end; height: 34px; }
-  /* A page's own action is wider than a menu button, so on a phone it would squeeze the title to a few words: there
-     it and the menu button make a row of their own at the top, and the title takes the full width beneath. */
-  @media (max-width: 640px) {
-    .pagehead:has(> .pageact) { grid-template-columns: minmax(0, 1fr) auto; }
-    .pagehead:has(> .pageact) > div { grid-column: 1 / -1; grid-row: 2; }
-    .pagehead > .pageact { grid-column: 2; }
-    .navmenu:has(+ .pagehead > .pageact) { align-self: start; }
-  }
 
   main { padding: 18px 16px 48px; }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -86,8 +78,6 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
   .btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
   .btn.burger[aria-expanded="true"] { border-color: var(--primary); }
-  /* Level with the menu button beside it, top and foot, wherever the heading row puts them. */
-  .btn.pageact { height: 34px; padding-block: 0; white-space: nowrap; }
   .menu { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
   .menu[hidden] { display: none; }
   .menu button { text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
@@ -138,6 +128,18 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .dlgfoot .btn:not(.primary, .danger) { background: transparent; border-color: var(--muted); }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
+  /* The Automations dialog's rows scroll under its heading and chips, since a zone can hold fifty or so automations. */
+  /* One height whatever the chip, so moving between chips doesn't make the dialog jump. */
+  .autosdlg { height: min(calc(100dvh - 32px - env(safe-area-inset-bottom, 0px)), 760px); }
+  .autoshead { flex: none; display: flex; flex-direction: column; gap: 8px; }
+  .autoshead > p { margin: 0; }
+  .autosdlg .review-scroll { flex: 1; gap: 12px; }
+  .autosdlg .review-scroll > p { margin: 0; }
+  .autosdlg .card { padding: 12px; }
+  .autosdlg .card h3 { margin: 0; font-size: 15px; }
+  .seg .segn .star { margin-left: 1px; }
+  /* A question asked from a dialog sits over it, which stays in view, dimmed, under the question. */
+  .modal.over { z-index: 31; }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
   /* What a dialog lists keeps its own height and the list scrolls, rather than each part being squeezed and cut short. */
   .review-scroll > * { flex: none; }
@@ -472,6 +474,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
+  .autonotes { display: contents; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#111); it keeps the disabled look. */
+  input[data-roctl]:read-only { opacity: .6; cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
@@ -672,6 +677,21 @@ const zoneById = (id) => zones.find((z) => z.id === id);
 const parentOf = (z) => (z && z.parent ? zoneById(z.parent) || null : null);
 const linkedZones = (z) => zones.filter((o) => o.parent === z.id);
 const editIn = (p) => `Edit in Zone: ${p.name}`;
+/* A tap on anything read only that a linked zone shows from its parent answers in a dialog, the way Link automations
+   answers a tap on an automation another zone has (#111): never a toast, and never a way to the parent. The words are
+   all here, so they're changed in one place once the stakeholder rules on them. */
+const NOT_HERE = {
+  auto: (p) => `This automation is associated to Zone: ${p.name}. Please edit it in Zone: ${p.name}.`,
+  device: (p) => `This device runs on Zone: ${p.name}'s automations. Please control it in Zone: ${p.name}.`,
+  setting: (p) => `These settings are Zone: ${p.name}'s. Please edit them in Zone: ${p.name}.`,
+};
+const roData = (kind, title, p) => `data-roctl="${kind}" data-rotitle="${esc(title)}" data-ropar="${esc(p.id)}" aria-disabled="true" title="${esc(editIn(p))}"`;
+function notHere(el) {
+  const p = zoneById(el.dataset.ropar);
+  if (!p || !NOT_HERE[el.dataset.roctl]) return;
+  ui.guard = { title: el.dataset.rotitle, text: NOT_HERE[el.dataset.roctl](p), ok: "OK" };
+  renderModal();
+}
 const zoneList = (list) => list.map((o) => `Zone: ${o.name}`).join(", ");
 /* The one rule: a linked zone that shares hardware with its parent is the same space for what that hardware measures or
    does, so the parent's settings for it apply. Any environment sensor brings the targets, any light the day and night.
@@ -813,7 +833,7 @@ function track(z, k) {
 /* The pages are in a menu behind one button at the top left of every page, as the panel has it since #37. The mock's
    own data label sits at the foot of the menu, since the panel has no title bar to carry it. */
 function navMenu() {
-  const item = (label, go, zone) => { const cur = ui.screen === go && (go !== "zone" || ui.zone === zone) || (go === "zone" && ui.screen === "autos" && ui.zone === zone); return `<button role="menuitem" data-go="${go}"${zone ? ` data-zone="${zone}"` : ""}${cur ? ' aria-current="page"' : ""}>${esc(label)}</button>`; };
+  const item = (label, go, zone) => { const cur = ui.screen === go && (go !== "zone" || ui.zone === zone); return `<button role="menuitem" data-go="${go}"${zone ? ` data-zone="${zone}"` : ""}${cur ? ' aria-current="page"' : ""}>${esc(label)}</button>`; };
   return `<nav class="zmenu navmenu" aria-label="Environment Control"><button class="btn burger" data-zmenu="nav" aria-haspopup="menu" aria-expanded="false" aria-controls="zmenu-nav" aria-label="Menu">${icon("menu")}</button>
     <div class="menu" id="zmenu-nav" role="menu" hidden>${item("Overview", "overview")}${zones.length ? `<hr>${zones.map((z) => item(z.name, "zone", z.id)).join("")}` : ""}<hr>${item("Devices", "devices")}${item("Setup", "setup")}<hr><p class="small muted navnote">${DATA_LABEL}, ${hhmm(NOW)}</p></div></nav>`;
 }
@@ -1214,8 +1234,8 @@ const controlGroupOf = (d) => (CONTROL_GROUPS.find((g) => g.types.includes(d.typ
 /* Every device a linked zone shares with its parent runs on the parent's automations, so it's switched only there. */
 const deviceOwner = (d, z) => { const p = parentOf(z); return p && d.zones.includes(p.id) ? p : null; };
 /* A read only control keeps its look but answers a tap with where to change it, so it carries no action of its own. */
-const readOnly = (html, p) => html.replace(/ data-(dev|act|dialin|dialstep|dial|dir)="[^"]*"/g, "").replace(/ disabled(?=[ >])/g, "")
-  .replace(/<(button|input)\b/g, `<$1 data-roctl="${esc(editIn(p))}" aria-disabled="true" title="${esc(editIn(p))}"`).replace(/<input data-roctl([^>]*)type="range"/g, "<input disabled data-roctl$1type=\"range\"");
+const readOnly = (html, p, name) => html.replace(/ data-(dev|act|dialin|dialstep|dial|dir)="[^"]*"/g, "").replace(/ disabled(?=[ >])/g, "")
+  .replace(/<(button|input)\b/g, `<$1 ${roData("device", name, p)}`).replace(/<input data-roctl([^>]*)type="range"/g, "<input disabled data-roctl$1type=\"range\"");
 function deviceRow(d, z) {
   const owner = deviceOwner(d, z), v = deviceView(d), c = owner ? undefined : ctlState[d.id], busy = v.down || (c && c.status === "sending"), lk = CLASS_LOOK[controlGroupOf(d)] || { icon: "plug", c: "var(--muted)" }, line = ctlLine(c, d, v);
   const others = d.zones.filter((id) => id !== z.id).map((id) => (zoneById(id) || {}).name || id);
@@ -1229,7 +1249,7 @@ function deviceRow(d, z) {
   }
   const addMode = !owner && v.offList && v.mode && v.mode !== extraOf(d) ? `<button class="fixlink" data-addmode="${d.id}" data-zone="${z.id}">Add ${esc(cap(v.mode))} as a mode &rsaquo;</button>` : "";
   let sw = `<button class="sw ${v.on ? "on" : ""}" data-dev="${d.id}" data-act="${v.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${v.on}" aria-label="${esc(d.name)}"${busy ? " disabled" : ""}><i></i></button>`;
-  if (owner) [controls, modes, sw] = [controls, modes, sw].map((h) => readOnly(h, owner));
+  if (owner) [controls, modes, sw] = [controls, modes, sw].map((h) => readOnly(h, owner, d.name));
   return `<div class="dev" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
     <div class="dev-text"><div class="dev-name">${esc(d.name)}</div><div class="dev-sub">${v.down ? `<span class="pill dead">${esc(v.text)}</span>` : `${esc(v.text)}.`} ${esc(extra)}</div><div class="dev-sub">${esc([d.family, LINK[d.link]].filter(Boolean).join(", "))}</div>${addMode}</div>
     ${modes ? `<div class="dev-modes">${modes}</div>` : ""}
@@ -1369,7 +1389,7 @@ function renderZone() {
   /* Since #33: History, then the map and Controls. The targets and Activity moved behind the menu in the heading. The map's
      card is Zone map here and Device placement only in Setup, where it's the step that puts things on it. */
   return `<div class="wrap"><div class="pagehead"><div><h1>${esc(z.name)}</h1>${z.description ? `<p class="muted zdesc">${esc(z.description)}</p>` : ""}${linkLine(z)}<p class="muted small">${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}</p></div>${zoneMore(z)}</div>
-    ${unfinished}${autosNotice(z)}${parentFailsafeNotice(z)}${periodBlock(z)}
+    ${unfinished}<div class="autonotes" id="z-autonotes">${autosNotice(z)}${parentFailsafeNotice(z)}</div>${periodBlock(z)}
     <div class="tiles">${["temperature", "humidity", "vpd"].map((k) => tile(z, k)).join("")}${lightCards(z)}</div>
     <section class="card"><div class="card-head"><h2>History</h2><div class="row segs">${segChips("data-metric", ui.metric, Object.keys(M).map((k) => [k, M[k].short]), "Metric")}${segChips("data-range", ui.range, RANGES, "Range")}</div></div>
       <div class="chart" id="chart"></div><div id="chart-stats"></div><p class="chart-note" id="chart-note"></p><div class="key" id="chart-key"></div>${alwaysOpen(z)}</section>
@@ -1569,12 +1589,15 @@ function autoCount(key) {
   return list.length ? `${list.filter(autoOn).length} of ${list.length} on` : "None linked";
 }
 /* A page's chip: its count as a fraction to the eye, and in words to a screen reader. */
+/* The count stays the zone's own; the asterisk says its parent has some in the group too, in words to a screen reader. */
 function chipWords(key) {
   const [zid, page] = key.split(":"), z = zoneById(zid), list = z ? autosOf(z, page) : [], on = list.filter(autoOn).length, title = AUTO_PAGES[page].title;
-  return { count: `${on}/${list.length}`, label: list.length ? `${title}, ${on} of ${list.length} on` : `${title}, none linked` };
+  const p = parentOf(z), star = !!p && autosOf(p, page).length > 0, also = star ? `, and Zone: ${p.name} has some that also run here` : "";
+  return { count: `${on}/${list.length}`, star, label: (list.length ? `${title}, ${on} of ${list.length} on` : `${title}, none linked`) + also };
 }
+const segnHtml = (w) => `${w.count}${w.star ? '<span class="star" aria-hidden="true">*</span>' : ""}`;
 function autoChips(z, cur) {
-  return `<div class="seg" role="group" aria-label="Automations">${Object.entries(AUTO_PAGES).map(([k, p]) => { const w = chipWords(`${z.id}:${k}`); return `<button data-autopage="${k}" data-autochip="${z.id}:${k}" aria-pressed="${k === cur}" aria-label="${esc(w.label)}">${p.title}<span class="segn">${w.count}</span></button>`; }).join("")}</div>`;
+  return `<div class="seg" role="group" aria-label="Automations">${Object.entries(AUTO_PAGES).map(([k, p]) => { const w = chipWords(`${z.id}:${k}`); return `<button data-autopage="${k}" data-autochip="${z.id}:${k}" aria-pressed="${k === cur}" aria-label="${esc(w.label)}">${p.title}<span class="segn">${segnHtml(w)}</span></button>`; }).join("")}</div>`;
 }
 /* owner is set for a parent's automation shown in its linked zone: drawn as it is, and switched only in the parent. */
 function autoRow(a, z, owner) {
@@ -1582,7 +1605,7 @@ function autoRow(a, z, owner) {
   const last = st && st.attributes && st.attributes.last_triggered;
   const now = !st ? "Home Assistant doesn't have it any more." : down ? "Unavailable in Home Assistant." : on ? "On." : "Off.";
   const sub = [now, st ? (last ? `Last triggered ${ranWords(last)}.` : "Never triggered.") : ""].filter(Boolean).join(" ");
-  const sw = owner ? `<button class="ctl sw ${on ? "on" : ""}" data-roctl="${esc(editIn(owner))}" role="switch" aria-checked="${on}" aria-disabled="true" aria-label="${esc(autoName(a))}" title="${esc(editIn(owner))}"><i></i></button>`
+  const sw = owner ? `<button class="ctl sw ${on ? "on" : ""}" ${roData("auto", autoName(a), owner)} role="switch" aria-checked="${on}" aria-disabled="true" aria-label="${esc(autoName(a))}" title="${esc(editIn(owner))}"><i></i></button>`
     : `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
   const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
   return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
@@ -1597,7 +1620,10 @@ function redrawAuto(entity) {
     if (focused) { const again = document.querySelector(`[data-autorow="${CSS.escape(entity)}"][data-zone="${z.id}"] .sw`); if (again && !again.disabled) again.focus(); }
   }
   for (const el of document.querySelectorAll("[data-autocount]")) el.textContent = autoCount(el.dataset.autocount);
-  for (const el of document.querySelectorAll("[data-autochip]")) { const w = chipWords(el.dataset.autochip); el.querySelector(".segn").textContent = w.count; el.setAttribute("aria-label", w.label); }
+  /* The zone page stays under the dialog, so its failsafe notices follow a switch made in it. */
+  const notes = $("#z-autonotes"), z0 = notes && zoneById(ui.zone), html = z0 ? autosNotice(z0) + parentFailsafeNotice(z0) : "";
+  if (notes && notes.innerHTML !== html) notes.innerHTML = html;
+  for (const el of document.querySelectorAll("[data-autochip]")) { const w = chipWords(el.dataset.autochip); el.querySelector(".segn").innerHTML = segnHtml(w); el.setAttribute("aria-label", w.label); }
 }
 async function sendAuto(z, a, on) {
   const want = on ? "on" : "off", c = { status: "sending", text: `Sent. Waiting for Home Assistant to report it ${want}.`, want };
@@ -1640,23 +1666,28 @@ function autosNotice(z) {
 function fromParent(z, page) {
   const p = parentOf(z), list = p ? autosOf(p, page) : [];
   if (!list.length) return "";
-  return `<section class="card" data-fromzone="${p.id}"><div><h2>From Zone: ${esc(p.name)}</h2><p class="small muted">These belong to Zone: ${esc(p.name)} and run devices this zone shares. ${esc(editIn(p))}.</p></div><div class="devs">${list.map((a) => autoRow(a, z, p)).join("")}</div></section>`;
+  return `<section class="card" data-fromzone="${p.id}"><div><h3>From Zone: ${esc(p.name)}</h3><p class="small muted">These belong to Zone: ${esc(p.name)} and run devices this zone shares. ${esc(editIn(p))}.</p></div><div class="devs">${list.map((a) => autoRow(a, z, p)).join("")}</div></section>`;
 }
-/* One page per zone, its Alerts, Failsafes and Control behind chips as the panel has them since 2026-11-27, in place of a
-   card on the zone page leading to three pages. */
-function renderAutos() {
-  if (ui.linkw) return renderLinkAutos();
-  const { zone, page } = ui.autos, z = zoneById(zone), p = AUTO_PAGES[page], list = autosOf(z, page);
+/* One dialog per zone over its page, as View targets and View activity are since #113, its Alerts, Failsafes and
+   Control behind chips. The heading and chips stay put and the rows scroll, since a zone can hold fifty or so. Changing
+   what's linked is done on Setup (#111), so nothing here leads there. */
+function autosDialog(z) {
+  const au = ui.autos, page = au.page, p = AUTO_PAGES[page], list = autosOf(z, page), par = parentOf(z);
   const sections = Object.entries(AUTO_GROUPS).filter(([, [pg]]) => pg === page).map(([g, [, title]]) => {
     const rows = list.filter((a) => a.group === g);
-    return rows.length ? `<section class="card" data-agroup="${g}"><div class="card-head"><h2>${title}</h2><span class="small muted" data-autocount="${z.id}:${g}">${autoCount(`${z.id}:${g}`)}</span></div><div class="devs">${rows.map((a) => autoRow(a, z)).join("")}</div></section>` : "";
+    return rows.length ? `<section class="card" data-agroup="${g}"><div class="card-head"><h3>${title}</h3><span class="small muted" data-autocount="${z.id}:${g}">${autoCount(`${z.id}:${g}`)}</span></div><div class="devs">${rows.map((a) => autoRow(a, z)).join("")}</div></section>` : "";
   }).join("");
-  const empty = `<div class="notice calm"><strong>No ${p.title.toLowerCase()} linked to ${esc(z.name)} yet</strong><button class="fixlink" data-linkautos="${z.id}">Link automations &rsaquo;</button></div>`;
-  /* Back rides in the bar at the foot, as on every page since #54; the draft bar takes over while the repeat rate differs. */
-  return `<div class="wrap"><div class="pagehead"><div><h1>Automations: ${esc(z.name)}</h1><p class="muted small">Home Assistant runs these. Here you switch them on and off.</p></div><button class="btn pageact" data-linkautos="${z.id}">Link automations</button></div>
-    ${autoChips(z, page)}<p class="muted small" id="autos-about">${p.about}</p>
-    ${page === "alert" ? repeatCard() : ""}${sections || empty}${fromParent(z, page)}
-    <div class="draftbar wizbar" id="pagebar" role="region" aria-label="Page buttons" data-bare><span class="draft-text" id="pagebar-why"></span><button class="draft-discard" data-go="zone" data-zone="${z.id}">Back</button></div></div>`;
+  const empty = `<div class="notice calm" id="autos-empty"><strong>No ${p.title.toLowerCase()} linked to ${esc(z.name)} yet.</strong><span>Link automations in Setup.</span></div>`;
+  const starred = par && Object.keys(AUTO_PAGES).some((k) => autosOf(par, k).length);
+  const star = starred ? `<p class="small muted" id="autos-star"><span aria-hidden="true">*</span> Zone: ${esc(par.name)} has automations in this group that also run here.</p>` : "";
+  const show = starred ? `<div class="linkopts" id="autos-fromopt"><button class="chip" data-ufrom aria-pressed="${!au.hideFrom}">Show automations from Zone: ${esc(par.name)}</button></div>` : "";
+  /* The button is there, hidden, whenever the repeat rate can be changed, so typing shows it without a redraw. */
+  const canRepeat = page === "alert" && room.alertRepeat && haStates[room.alertRepeat] && haStates[room.alertRepeat].state !== "unavailable", d = canRepeat ? repeatDraft(au) : null;
+  return `<div class="dialog wide autosdlg" data-autosdlg="${z.id}" role="dialog" aria-modal="true" aria-labelledby="autos-title" aria-describedby="autos-sub"><div class="autoshead"><h2 id="autos-title" tabindex="-1">Automations: ${esc(z.name)}</h2><p class="muted small" id="autos-sub">Home Assistant runs these. Here you switch them on and off.</p>
+    ${autoChips(z, page)}${star}</div>
+    <div class="review-scroll" id="autos-scroll"><p class="muted small" id="autos-about">${p.about}</p>${show}
+    ${page === "alert" ? repeatCard() : ""}${sections || empty}${au.hideFrom ? "" : fromParent(z, page)}</div>
+    <div class="dlgfoot"><button class="btn" data-uclose>Close</button>${canRepeat ? `<button class="btn primary" data-ureview${d && draftCount(d) ? "" : " hidden"}${d && (d.blocked || d.busy) ? " disabled" : ""}>Review change</button>` : ""}</div></div>`;
 }
 
 /* Every alert's repeat rate is one Home Assistant helper, linked once for the whole room on Setup and changed here. */
@@ -1681,9 +1712,9 @@ function repeatDraft(au) {
   const [items, add] = changeList(), a = st.attributes || {}, unit = a.unit_of_measurement ? ` ${a.unit_of_measurement}` : "";
   add("Alert repeat", `${st.state}${unit}`, `${String(au.repeat).trim()}${unit}`);
   if (items.length && Number(au.repeat) === Number(st.state)) items.length = 0;
-  return { zone: "Alerts", affects: "This changes every alert in Home Assistant, not just this zone's.", items, skipped: [], bar: true, busy: !!au.sending, blocked: repeatProblem(au.repeat, a) ? "fix the problem before review" : "",
-    note: `On your helper, ${e}. Every alert follows it straight away.`, apply: (done) => saveRepeat(au, done), discard: () => { au.repeat = undefined; render(); },
-    back: () => guarded(() => { Object.assign(ui, { screen: "zone", autos: null }); render(); window.scrollTo(0, 0); }) };
+  /* The dialog carries its own Review button, so the bar at the foot of the window stays out of it. */
+  return { zone: "Alerts", affects: "This changes every alert in Home Assistant, not just this zone's.", items, skipped: [], bar: false, busy: !!au.sending, blocked: repeatProblem(au.repeat, a) ? "fix the problem before review" : "",
+    note: `On your helper, ${e}. Every alert follows it straight away.`, apply: (done) => saveRepeat(au, done), discard: () => { au.repeat = undefined; renderModal(); } };
 }
 async function saveRepeat(au, done) {
   const e = room.alertRepeat, value = Number(au.repeat);
@@ -1696,8 +1727,9 @@ async function saveRepeat(au, done) {
   if (!ok) { done([`Alert repeat: Home Assistant still reports ${(haStates[e] || {}).state}.`]); return; }
   au.repeat = undefined;
   toast("Alert repeat changed.");
-  render();
   done([]);
+  draftSync();
+  if (ui.autos === au) refocus("repeat-in");
 }
 
 /* Linking: which of Home Assistant's automations a zone switches, and in which group. Only Environment Control's own record
@@ -1715,15 +1747,13 @@ function loadAutomations() {
 }
 function openLinkAutos(id) {
   const z = zoneById(id), was = Object.fromEntries(autosOf(z).map((a) => [a.entity, a.group]));
-  /* An alert repeat draft was discarded on the way here, so coming back starts from the helper's value again. */
-  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, autos: ui.autos && { zone: ui.autos.zone, page: ui.autos.page }, zone: ui.zone } };
-  ui.screen = "autos";
-  ui.zone = id;
+  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, zone: ui.zone } };
+  ui.screen = "setup";
 }
 function closeLinkAutos() {
   const b = ui.linkw.back;
   ui.linkw = null;
-  Object.assign(ui, { screen: b.screen === "autos" && !b.autos ? "zone" : b.screen, autos: b.autos, zone: b.zone || ui.zone });
+  Object.assign(ui, { screen: b.screen, zone: b.zone || ui.zone });
   render();
   window.scrollTo(0, 0);
 }
@@ -2440,11 +2470,11 @@ function vCommitActive() {
 }
 function renderVpd() {
   /* Sharing a sensor with its parent, a linked zone's targets are the parent's: drawn, never edited here. */
-  const v = ui.vpdw, z = baseZone(v.id), tp = sharesSensor(z) ? parentOf(z) : null, all = tp ? vDraftBands(tp) : v.bands, b = all[v.period], issues = tp ? [] : vIssues(v, b), ro = tp ? roAttrs(tp) : "";
+  const v = ui.vpdw, z = baseZone(v.id), tp = sharesSensor(z) ? parentOf(z) : null, all = tp ? vDraftBands(tp) : v.bands, b = all[v.period], issues = tp ? [] : vIssues(v, b), ro = tp ? roAttrs(tp, "Targets") : "";
   const aim = hasTarget(all), tabs = [...(aim ? [["target", "Target"]] : []), ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
-  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => x === null ? `<span class="vcell vt vnone"><span class="vdash" role="img" aria-label="${VNAME[k]} Target, none">-</span>${SLOT_NAME[i]}</span>` : `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}" data-vin="${k}:${i}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}"${ro}>${SLOT_NAME[i]}</label>`).join("")}</div>`;
+  const summary = (k, label) => `<div class="vrow" data-vrow="${k}" data-on="${v.edit === k}"><button class="vrow-name" data-vedit="${k}">${label}</button>${b[k].map((x, i) => x === null ? `<span class="vcell vt vnone"><span class="vdash" role="img" aria-label="${VNAME[k]} Target, none">-</span>${SLOT_NAME[i]}</span>` : `<label class="vcell${i === 2 ? " vt" : ""}"><input id="vin-${k}-${i}"${tp ? "" : ` data-vin="${k}:${i}"`} type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x}" aria-label="${VNAME[k]} ${SLOT_NAME[i]}" aria-invalid="${issues.some((p) => p.edit === k && p.slot === i)}"${ro}>${SLOT_NAME[i]}</label>`).join("")}</div>`;
   const [, lightSlot, lightColumn] = LIGHT_LIMIT[v.period];
-  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0" data-vin="light:0" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}"${ro}>${lightSlot}</label></div>`;
+  const lightRow = `<div class="vrow" data-vrow="light"><span class="vrow-name">Light lx</span><p class="vnote${lightColumn ? " vleft" : ""}" id="vnote-light">${lightColumn ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p><label class="vcell${lightColumn ? " vlast" : ""}"><input id="vin-light-0"${tp ? "" : ' data-vin="light:0"'} type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${b.light[0]}" aria-label="Light ${lightSlot}" aria-describedby="vnote-light" aria-invalid="${issues.some((p) => p.edit === "light")}"${ro}>${lightSlot}</label></div>`;
   const counted = countedEnv(z), mixed = new Set(counted.map(leafOf)).size > 1, picked = counted.find((s) => s.id === z.leafBasis);
   const leafText = `${leafWords(v.leaf)}${!mixed ? "" : picked ? `, from ${picked.name}` : `, the average of ${counted.length} sensors`}`;
   const nudge = `<span class="stepper" id="vnudge"${vCanNudge(v) ? "" : " hidden"}><button data-vnudge="-1" aria-label="Lower">-</button><button data-vnudge="1" aria-label="Higher">+</button></span>`;
@@ -2463,7 +2493,7 @@ function renderVpd() {
     <div class="vgrid"><div class="vmain">
       <div class="seg vtabs" role="group" aria-label="What to edit">${tabs.map(([k, l]) => `<button data-vedit="${k}" aria-pressed="${v.edit === k}">${l}</button>`).join("")}</div>
       <div class="now" id="v-now"><strong id="vread">${esc(vReadout(v, b))}</strong>${nudge}</div>
-      <div class="map vchart" id="vwrap"${tp ? ` data-ro aria-label="Chart of ${esc(tp.name)}'s limits." title="${esc(editIn(tp))}"` : ` tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value."`}>${vChartInner(v, b)}</div>
+      <div class="map vchart" id="vwrap"${tp ? ` data-ro ${roData("setting", "Targets", tp)} aria-label="Chart of ${esc(tp.name)}'s limits."` : ` tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value."`}>${vChartInner(v, b)}</div>
       <div class="key">${VZONES.slice(1, 4).map(([c, l]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("")}<span><i style="background:var(--v0)"></i>Outside Athena's ranges</span></div>
     </div>
     <div class="vside">${summary("temperature", "Temperature °C")}${summary("humidity", "Humidity %")}${summary("vpd", "VPD kPa")}${lightRow}
@@ -2899,9 +2929,9 @@ function leaveTd(id, applied) {
 /* Sharing lights with its parent, a linked zone's day and night and red lights are the parent's: shown, with no source
    to choose and nothing to type. The zone keeps whatever it had stored, unused while it shares the lights. */
 function sharedSchedule(z, p) {
-  const vals = schedValues(p), ro = roAttrs(p), em = emersonModeOf(p);
+  const vals = schedValues(p), em = emersonModeOf(p);
   const line = (what) => `<p class="small" data-sharedline="${what}">This zone shares Zone: ${esc(p.name)}'s lights, so its ${what === "times" ? "day and night are" : "red lights are"} ${esc(p.name)}'s. ${esc(editIn(p))}.</p>`;
-  const field = (k, type) => `<label class="field" for="sro-${k}">${SCHED_NAME[k]}${type === "time" ? "" : ` (${SCHED_RANGE[k][3]})`}<input id="sro-${k}" type="${type}" value="${esc(vals[k])}"${ro}></label>`;
+  const field = (k, type) => `<label class="field" for="sro-${k}">${SCHED_NAME[k]}${type === "time" ? "" : ` (${SCHED_RANGE[k][3]})`}<input id="sro-${k}" type="${type}" value="${esc(vals[k])}"${roAttrs(p, type === "time" ? "Day and night" : "Red lights")}></label>`;
   const when = p.periodMode === "detected" ? `<p class="small muted">${esc(zonePeriod(p))}.</p>` : `<div class="fields">${field("day", "time")}${field("night", "time")}</div><div class="sched-len"><span>${sLength(vals)}</span><span>${sStrip(vals)}</span></div><p class="small muted">${esc(PERIOD_MODES[p.periodMode || "helper"])}, in Zone: ${esc(p.name)}.</p>`;
   const red = em === "none" ? `<p class="muted">Not used in Zone: ${esc(p.name)}.</p>` : em === "detected" ? `<p class="small muted">Followed as its red light switches turn on and off, in Zone: ${esc(p.name)}.</p>`
     : `<div class="fields">${EMERSON_KEYS.map((k) => field(k, "text")).join("")}</div><div class="now"><strong>${esc(emersonLine(vals))}</strong></div><p class="small muted">${esc(EM_MODES[em])}, in Zone: ${esc(p.name)}.</p>`;
@@ -2996,6 +3026,7 @@ function confirmRow(z, step) {
 const confirmNote = (z, step, what) => (stepOpen(z, step) ? `<div class="notice" id="confirm-note">Not confirmed yet. ${what} Applying a change confirms it too.</div>` : "");
 
 function renderSetup() {
+  if (ui.linkw) return renderLinkAutos();
   if (ui.leafw) return renderCalibration();
   if (ui.td) return renderTd();
   if (ui.mapw) return renderMap();
@@ -3231,7 +3262,7 @@ const BAND_SLOT = { 0: "min", 2: "target", 4: "max" };
 const bandSetting = (p, k, i) => `bands.${p}.${k}.${BAND_SLOT[i]}`;
 const lightSetting = (p) => `light.${LIGHT_LIMIT[p][0]}`;
 const settingLink = (z, name) => (z.linked || !/^(bands|light)\./.test(name) ? linkAtName(z, name) : undefined);
-const roAttrs = (p) => ` disabled title="${esc(editIn(p))}"`;
+const roAttrs = (p, title) => ` readonly ${roData("setting", title, p)}`;
 function vHelperIssues(v, p, b) {
   const z = baseZone(v.id), out = [];
   const check = (name, x, label, edit, slot) => {
@@ -3376,7 +3407,7 @@ async function saveWizard(w, said) {
   ui.screen = "zone"; toast(said); render();
   return [];
 }
-const autoDrafts = () => (ui.screen !== "autos" ? null : ui.linkw ? linkDraft(ui.linkw) : repeatDraft(ui.autos));
+const autoDrafts = () => (ui.linkw ? linkDraft(ui.linkw) : ui.autos ? repeatDraft(ui.autos) : null);
 const openDrafts = () => [arrangeDraft(), autoDrafts(), ui.leafw && leafDraft(ui.leafw), ui.td && tdDraft(ui.td), ui.mapw && mapDraft(ui.mapw), ui.wiz && wizDraft(ui.wiz)].filter(Boolean);
 const topDraft = () => (arrangeDraft() || autoDrafts() || (ui.leafw ? leafDraft(ui.leafw) : ui.td ? tdDraft(ui.td) : ui.mapw ? mapDraft(ui.mapw) : ui.wiz ? wizDraft(ui.wiz) : null));
 const draftCount = (d) => d.items.length + d.skipped.length;
@@ -3406,6 +3437,8 @@ function draftSync() {
     page.toggleAttribute("data-blocked", !!why); page.toggleAttribute("data-bare", !why);
   }
   $("[data-dback]").hidden = !(on && d.back);
+  const ur = $("#modal [data-ureview]"), rd = ur && ui.autos && repeatDraft(ui.autos);
+  if (ur) { ur.hidden = !rd || !draftCount(rd); ur.disabled = !rd || !!rd.blocked || rd.busy; }
   if (!on) return;
   const only = d.items[0] || d.skipped[0];
   $("#draft-count").textContent = n;
@@ -3471,19 +3504,63 @@ function modalHtml() {
     <div class="review-scroll"><p class="muted small" id="dlg-text">${esc(d.affects || `These changes affect ${d.zone} only.`)} Confirm each value before applying.</p>${n ? `<div class="review-list" id="review-items">${rows(d.items)}</div>` : ""}${preview}${d.note ? `<p class="small muted">${esc(d.note)}</p>` : ""}${failed}</div>
     <div class="dlgfoot"><button class="btn" data-rback${busy ? " disabled" : ""}>Back to editing</button><button class="btn primary" data-rapply${busy || !n ? " disabled" : ""}>${busy ? "Applying and verifying..." : `Apply ${n} ${n === 1 ? "change" : "changes"}`}</button></div></div>`;
 }
-let modalOpener = null;
+let modalOpener = null, overOpener = null;
+const autosOpen = () => !!(ui.autos && zoneById(ui.autos.zone));
+const topOpen = () => !!(ui.guard || ui.review || ui.tview || ui.aview);
+/* A question asked from inside the Automations dialog opens over it, and the dialog under it is left as it was, so
+   closing the question finds the same chip, the same scroll and the switch that asked. */
 function renderModal() {
-  const box = $("#modal"), open = !!(ui.guard || ui.review || ui.tview || ui.aview), wasOpen = !box.hidden;
+  const box = $("#modal"), base = autosOpen(), top = topOpen(), open = base || top, wasOpen = !box.hidden;
   if (open && !wasOpen) modalOpener = document.activeElement;
   box.hidden = !open;
-  box.innerHTML = open ? modalHtml() : "";
   document.querySelectorAll(".topbar, #main, #draftbar").forEach((el) => { el.inert = open; });
-  if (open) $("#dlg-title").focus({ preventScroll: true });
-  else if (wasOpen && modalOpener && modalOpener.isConnected) modalOpener.focus({ preventScroll: true });
+  if (!base) {
+    box.innerHTML = top ? modalHtml() : "";
+    if (top) $("#dlg-title").focus({ preventScroll: true });
+    else if (wasOpen) {
+      /* A notice that opened the dialog can be gone by the time it closes, its failsafe switched back on in it. */
+      const back = modalOpener && modalOpener.isConnected ? modalOpener : $(`#main [data-zmenu="${MORE}"]`);
+      if (back) back.focus({ preventScroll: true });
+    }
+    return;
+  }
+  let dlg = box.querySelector(":scope > [data-autosdlg]"), over = box.querySelector(":scope > .modal");
+  if (top) {
+    if (!over) overOpener = document.activeElement;
+    if (!dlg) { box.innerHTML = autosDialog(zoneById(ui.autos.zone)); dlg = box.firstElementChild; over = null; }
+    if (over) over.innerHTML = modalHtml(); else dlg.insertAdjacentHTML("afterend", `<div class="modal over">${modalHtml()}</div>`);
+    dlg.inert = true;
+    $("#dlg-title").focus({ preventScroll: true });
+    return;
+  }
+  if (over && dlg) {
+    over.remove();
+    dlg.inert = false;
+    (overOpener && overOpener.isConnected ? overOpener : $("#autos-title")).focus({ preventScroll: true });
+    return;
+  }
+  redrawAutosDialog();
+  $("#autos-title").focus({ preventScroll: true });
 }
+/* Keeps the rows' scroll across a redraw, as a chip or the tick box redraws the dialog in place. */
+function redrawAutosDialog() {
+  const box = $("#modal"), was = $("#autos-scroll"), top = was && ui.autos.page === was.dataset.page ? was.scrollTop : 0;
+  box.innerHTML = autosDialog(zoneById(ui.autos.zone));
+  $("#autos-scroll").dataset.page = ui.autos.page;
+  $("#autos-scroll").scrollTop = top;
+}
+/* Closes the dialog on top only: a question over the Automations dialog goes back to it. */
 function closeModal() {
   if (ui.review && ui.review.busy) return;
   ui.guard = null; ui.review = null; ui.tview = null; ui.aview = null;
+  renderModal();
+}
+/* Closing drops an alert repeat draft, so it asks first. */
+function closeAutos() {
+  guarded(() => { ui.autos = null; renderModal(); });
+}
+function openAutos(zone, page) {
+  ui.autos = { zone, page };
   renderModal();
 }
 /* Focus goes to a menu's button before a dialog opens from the menu, so closing the dialog hands focus back there and not
@@ -3499,7 +3576,7 @@ function render() {
   refreshReadings();
   renderChrome();
   document.body.classList.remove("vtyping");
-  const screen = { overview: renderOverview, zone: renderZone, autos: renderAutos, devices: renderDevices, setup: renderSetup }[ui.screen];
+  const screen = { overview: renderOverview, zone: renderZone, devices: renderDevices, setup: renderSetup }[ui.screen];
   $("#main").innerHTML = screen();
   const wrap = $("#main .wrap");
   if (wrap) wrap.insertAdjacentHTML("afterbegin", navMenu());
@@ -3545,7 +3622,7 @@ document.addEventListener("click", (e) => {
   let el;
   if ((el = q("[data-zmenu]"))) { if (el.getAttribute("aria-expanded") === "true") closeMenus(); else openMenu(el); return; }
   closeMenus();
-  if ((el = q("[data-roctl]")) && !ui.guard && !ui.review) { e.preventDefault(); toast(el.dataset.roctl); return; }
+  if ((el = q("[data-roctl]")) && !topOpen()) { e.preventDefault(); notHere(el); return; }
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();
   if (ui.sched && q("button")) sCommitActive();
@@ -3572,6 +3649,21 @@ document.addEventListener("click", (e) => {
     if (q("[data-gkeep], [data-rback]") || !q(".dialog")) closeModal();
     return;
   }
+  if (ui.autos) {
+    if (q("[data-uclose]") || !q(".dialog")) { closeAutos(); return; }
+    if (q("[data-ureview]")) { openReview(); return; }
+    if (q("[data-ufrom]")) { ui.autos.hideFrom = !ui.autos.hideFrom; renderModal(); refocusSel("#modal [data-ufrom]"); return; }
+    if ((el = q("[data-auto]"))) { const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.id === el.dataset.auto); if (a) tapAuto(z, a); return; }
+    /* Another chip drops an alert repeat draft, so it asks first, and focus stays on the chips. */
+    if ((el = q("[data-autopage]"))) {
+      const page = el.dataset.autopage, { zone, hideFrom } = ui.autos;
+      if (page !== ui.autos.page) guarded(() => { ui.autos = { zone, page, hideFrom }; renderModal(); refocusSel(`#modal [data-autopage="${page}"]`); });
+      return;
+    }
+    if (!q("[data-go]")) return;
+    ui.autos = null;
+    renderModal();
+  }
   if (q("[data-dback]")) { const d = topDraft(); if (d && d.back) d.back(); return; }
   if (q("[data-ddiscard]")) { const d = topDraft(); if (d) { d.discard(); toast("Changes discarded."); } return; }
   if (q("[data-dreview]")) { openReview(); return; }
@@ -3588,14 +3680,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-sensor]"))) { ui.picked = el.dataset.sensor; render(); return; }
   if ((el = q("[data-mapdev]"))) { ui.picked = `d:${el.dataset.mapdev}`; render(); return; }
   if ((el = q("[data-mapvirt]"))) { ui.picked = el.dataset.mapvirt; render(); return; }
-  if ((el = q("[data-auto]"))) { const z = zoneById(el.dataset.zone), a = z && autosOf(z).find((x) => x.id === el.dataset.auto); if (a) tapAuto(z, a); return; }
-  if ((el = q("[data-autos]"))) { const zone = el.dataset.zone, page = el.dataset.autos; guarded(() => { Object.assign(ui, { screen: "autos", zone, autos: { zone, page }, linkw: null }); render(); window.scrollTo(0, 0); }); return; }
-  /* Another chip drops an alert repeat draft, so it asks first, and focus stays on the chips. */
-  if ((el = q("[data-autopage]"))) {
-    const page = el.dataset.autopage;
-    if (page !== ui.autos.page) guarded(() => { ui.autos = { zone: ui.autos.zone, page }; render(); const again = document.querySelector(`[data-autopage="${page}"]`); if (again) again.focus({ preventScroll: true }); });
-    return;
-  }
+  if ((el = q("[data-autos]"))) { if (el.closest(".menu")) focusMenuButton(el); openAutos(el.dataset.zone, el.dataset.autos); return; }
   if ((el = q("[data-linkautos]"))) { const id = el.dataset.linkautos; guarded(() => { openLinkAutos(id); render(); window.scrollTo(0, 0); }); return; }
   if (q("[data-linkback]")) { guarded(closeLinkAutos); return; }
   if ((el = q("[data-lpick]"))) {
@@ -3768,6 +3853,10 @@ document.addEventListener("keydown", (e) => {
   if (ui.guard || ui.review) {
     if (e.key === "Escape") closeModal();
     if (e.key === "Enter" && e.target.id === "dlg-confirm" && guardConfirmed()) { e.preventDefault(); $("[data-gdiscard]").click(); }
+    return;
+  }
+  if (ui.autos) {
+    if (e.key === "Escape") closeAutos();
     return;
   }
   const menu = e.target.closest && (e.target.closest(".menu") || (e.target.closest("[aria-expanded=true][data-zmenu]") && document.getElementById(e.target.getAttribute("aria-controls"))));
@@ -4034,7 +4123,7 @@ window.addEventListener("message", (e) => {
   else if (m.type === "states") statesChanged(m.states);
   /* The back gesture reaches Home Assistant's page, not this frame, so the panel's host passes it on as this message. It
      takes one step back: a dialog closes, or else a menu does, or else arranging stops, asking first about an order not applied. */
-  else if (m.type === "back") { if (ui.guard || ui.review || ui.tview || ui.aview) closeModal(); else if (arrangeDraft() && !document.querySelector(".menu:not([hidden])")) arrangeDraft().back(); else closeMenus(true); }
+  else if (m.type === "back") { if (topOpen()) closeModal(); else if (ui.autos) closeAutos(); else if (arrangeDraft() && !document.querySelector(".menu:not([hidden])")) arrangeDraft().back(); else closeMenus(true); }
   else if (m.type === "theme") { setTheme(m.theme); if (ui.screen === "setup" && $("#appearance") && !ui.guard && !ui.review) render(); else drawChart(); }
   else if (m.type === "result" && bridge.waiting.has(m.req)) { bridge.waiting.get(m.req)(m); bridge.waiting.delete(m.req); }
 });
