@@ -290,6 +290,7 @@ import {
   toggleLink,
 } from "./automations";
 import { alertsCard, automationsDialog, failsafeNoticeView, linkPage, parentFailsafeNoticeView } from "./automations-view";
+import { placeOpenDrop } from "./droplist";
 import { LIGHT_LINE, RANGES, type Point, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
@@ -580,6 +581,12 @@ export class EcApp extends LitElement {
     window.addEventListener("message", this.onMessage);
     document.addEventListener("keydown", this.onKey);
     document.addEventListener("click", this.onOutsideClick);
+    document.addEventListener("pointerdown", this.onDropPress, true);
+    this.renderRoot.addEventListener("focusout", this.onDropLeave as EventListener);
+    window.addEventListener("scroll", this.onDropScroll, true);
+    this.renderRoot.addEventListener("scroll", this.onDropScroll, true);
+    window.visualViewport?.addEventListener("resize", this.onDropMove);
+    window.visualViewport?.addEventListener("scroll", this.onDropMove);
     /* On the shadow root, not the element: focus moving between two things inside the panel never reaches the element. */
     this.renderRoot.addEventListener("focusin", this.onFocus as EventListener);
     this.renderRoot.addEventListener("focusout", this.onFocus as EventListener);
@@ -593,6 +600,12 @@ export class EcApp extends LitElement {
     window.removeEventListener("message", this.onMessage);
     document.removeEventListener("keydown", this.onKey);
     document.removeEventListener("click", this.onOutsideClick);
+    document.removeEventListener("pointerdown", this.onDropPress, true);
+    this.renderRoot.removeEventListener("focusout", this.onDropLeave as EventListener);
+    window.removeEventListener("scroll", this.onDropScroll, true);
+    this.renderRoot.removeEventListener("scroll", this.onDropScroll, true);
+    window.visualViewport?.removeEventListener("resize", this.onDropMove);
+    window.visualViewport?.removeEventListener("scroll", this.onDropMove);
     this.renderRoot.removeEventListener("focusin", this.onFocus as EventListener);
     this.renderRoot.removeEventListener("focusout", this.onFocus as EventListener);
     window.removeEventListener("resize", this.onResize);
@@ -722,6 +735,7 @@ export class EcApp extends LitElement {
      grows again. Where the app lays the keyboard over the page nothing changes size, and a tap outside the box does it. */
   private viewH = 0;
   private onResize = (): void => {
+    this.onDropMove();
     const grew = window.innerHeight - this.viewH;
     this.viewH = window.innerHeight;
     if (this.typing && grew > 120) this.typing = false;
@@ -829,6 +843,7 @@ export class EcApp extends LitElement {
      lose anything, and only when that changes. */
   protected updated(changed: PropertyValues): void {
     this.fetchWanted();
+    if (!placeOpenDrop(this.renderRoot)) this.closeDrop();
     const chart = this.shadowRoot?.querySelector(".chart") ?? null;
     if (chart !== this.chartEl) {
       this.chartRO?.disconnect();
@@ -995,6 +1010,52 @@ export class EcApp extends LitElement {
     /* A point read on a touch screen stays until a tap elsewhere. */
     if (this.chartAt !== null && !e.composedPath().some((n) => n instanceof Element && n.classList.contains("chart"))) this.chartAt = null;
   };
+
+  /* The one list dropped from a control that may be open: a helper search box's matches (pickQ) or a menu. Opening
+     either closes the other, so there's never more than one, and every way out of one goes through here. */
+  private closeDrop(): void {
+    this.pickQ = null;
+    this.menu = null;
+  }
+
+  private openPick(id: string, q: string): void {
+    this.menu = null;
+    this.pickQ = { id, q, active: -1 };
+  }
+
+  private onDropMove = (): void => {
+    if (!placeOpenDrop(this.renderRoot)) this.closeDrop();
+  };
+
+  private onDropScroll = (e: Event): void => {
+    const list = e.composedPath()[0];
+    if (list instanceof HTMLElement && list.classList.contains("drop")) return;
+    if (!placeOpenDrop(this.renderRoot, true)) this.closeDrop();
+  };
+
+  /* A press outside the open list and its control closes it. Seen from the document a press inside the shadow root lands
+     on the host, so where it landed is read from composedPath. A press inside a list of matches leaves focus in its box,
+     so a phone's keyboard stays up. */
+  private onDropPress = (e: PointerEvent): void => {
+    if (!this.pickQ && !this.menu) return;
+    const path = e.composedPath();
+    const inside = (n: EventTarget) => n instanceof HTMLElement && (n.classList.contains("drop") || n.getAttribute("aria-controls") === this.dropId());
+    const list = path.find((n) => n instanceof HTMLElement && n.classList.contains("drop"));
+    if (list instanceof HTMLElement && list.getAttribute("role") === "listbox") e.preventDefault();
+    if (!path.some(inside)) this.closeDrop();
+  };
+
+  /* Tabbing out of a menu closes it. A press that takes focus nowhere, as a tap on a button does in Safari, is left to
+     the press itself, or the menu would close under the item being tapped. Search boxes close on their own blur. */
+  private onDropLeave = (e: FocusEvent): void => {
+    if (!this.menu || !e.relatedTarget) return;
+    const menu = this.renderRoot.querySelector(`#zmenu-${CSS.escape(this.menu)}`)?.closest(".zmenu");
+    if (menu && !menu.contains(e.relatedTarget as Node)) this.menu = null;
+  };
+
+  private dropId(): string | null {
+    return this.pickQ ? `${this.pickQ.id}-list` : this.menu ? `zmenu-${this.menu}` : null;
+  }
 
   private closeModal(): void {
     if (this.modal?.kind === "review" && this.modal.busy) return;
@@ -2211,7 +2272,7 @@ export class EcApp extends LitElement {
       <button class="btn burger" data-zmenu=${NAV} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${NAV}" aria-label="Menu" @click=${() => this.toggleMenu(NAV)}>
         ${icon("menu")}
       </button>
-      <div class="menu" id="zmenu-${NAV}" role="menu" ?hidden=${!open}>
+      <div class="menu drop" id="zmenu-${NAV}" role="menu" ?hidden=${!open}>
         ${item("Overview", "overview")}
         ${this.zones.length ? html`<hr />${this.zones.map((z) => item(z.name, "zone", z.id))}` : nothing}
         <hr />
@@ -3106,7 +3167,7 @@ export class EcApp extends LitElement {
       <button class="btn burger" data-zmenu=${MORE} aria-haspopup="menu" aria-expanded=${open ? "true" : "false"} aria-controls="zmenu-${MORE}" aria-label="More" @click=${() => this.toggleMenu(MORE)}>
         ${icon("dots")}
       </button>
-      <div class="menu" id="zmenu-${MORE}" role="menu" ?hidden=${!open}>
+      <div class="menu drop" id="zmenu-${MORE}" role="menu" data-align="end" ?hidden=${!open}>
         ${item("View targets", () => this.viewTargets(z.id))}
         ${item("View activity", () => (this.modal = { kind: "activity", zoneId: z.id }))}
         ${item("View automations", () => this.openAutos(z.id, "alert"))}
@@ -4188,7 +4249,9 @@ export class EcApp extends LitElement {
     const items = [...(none ? [{ value: "", text: opts.none as string, sub: "Stored in Environment Control" }] : []), ...matches.map((o) => ({ value: o.entity, text: o.name, sub: opts.plain ? o.entity : `${o.name === o.entity ? "" : `${o.entity}, `}${reads(o)}` }))];
     const active = open ? Math.min(this.pickQ?.active ?? -1, items.length - 1) : -1;
     const now = options.find((o) => o.entity === current);
-    /* Picking leaves the box, so a phone's keyboard closes and the draft bar comes back. */
+    /* Picking leaves the box, so a phone's keyboard closes and the draft bar comes back. A press on the box opens the
+       list again even while it has focus, since a tap outside closes the list without always taking focus away. A blur
+       closes it only if focus hasn't come straight back, or leaving and returning quickly would close it just opened. */
     const choose = (v: string) => {
       if (locked) return;
       this.pickQ = null;
@@ -4196,7 +4259,13 @@ export class EcApp extends LitElement {
       pick(v);
     };
     const key = (e: KeyboardEvent) => {
-      if (!this.pickQ || this.pickQ.id !== id) return;
+      if (!this.pickQ || this.pickQ.id !== id) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          this.openPick(id, (e.target as HTMLInputElement).value);
+        }
+        return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -4207,10 +4276,10 @@ export class EcApp extends LitElement {
         if (it) choose(it.value);
         (e.target as HTMLInputElement).blur();
       } else if (e.key === "Escape") {
+        /* Focus stays in the box, as it does when a menu closes and focus goes back to its button. */
         e.preventDefault();
         e.stopPropagation();
         this.pickQ = null;
-        (e.target as HTMLInputElement).blur();
       }
     };
     if (!options.length && !opts.none) return html`<div id=${id}><p class="small muted">${legend}: Home Assistant has no helper of the right kind yet.</p></div>`;
@@ -4231,13 +4300,14 @@ export class EcApp extends LitElement {
           placeholder=${opts.find ?? (now ? "Search to change it" : "Search your helpers")}
           .value=${live(q)}
           ?disabled=${locked}
-          @focus=${() => (this.pickQ = { id, q: "", active: -1 })}
-          @input=${(e: Event) => (this.pickQ = { id, q: (e.target as HTMLInputElement).value, active: -1 })}
+          @focus=${() => this.openPick(id, "")}
+          @click=${() => !open && this.openPick(id, "")}
+          @input=${(e: Event) => this.openPick(id, (e.target as HTMLInputElement).value)}
           @keydown=${key}
-          @blur=${() => setTimeout(() => this.pickQ?.id === id && (this.pickQ = null), 150)}
+          @blur=${() => setTimeout(() => this.pickQ?.id === id && this.shadowRoot?.activeElement?.id !== `${id}-q` && (this.pickQ = null), 150)}
       /></label>
       ${open
-        ? html`<ul class="picklist-menu" id="${id}-list" role="listbox" aria-label=${legend}>
+        ? html`<ul class="picklist-menu drop" id="${id}-list" tabindex="-1" role="listbox" aria-label=${legend}>
             ${items.map(
               (it, i) => html`<li
                 id="${id}-o${i}"
@@ -4699,7 +4769,7 @@ export class EcApp extends LitElement {
           >
             ${icon("menu")}
           </button>
-          <div class="menu" id="zmenu-${z.id}" role="menu" ?hidden=${!open}>
+          <div class="menu drop" id="zmenu-${z.id}" role="menu" data-align="end" ?hidden=${!open}>
             <button role="menuitem" @click=${() => this.openDetails(z.id)}>Zone details</button>
             <button role="menuitem" @click=${() => this.openMapDevices(z.id)}>Device identification</button>
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [1, 2])}>Zone layout</button>
@@ -4717,6 +4787,7 @@ export class EcApp extends LitElement {
 
   private toggleMenu(id: string): void {
     this.menu = this.menu === id ? null : id;
+    if (this.menu) this.pickQ = null;
     if (this.menu) void this.updateComplete.then(() => (this.shadowRoot?.querySelector(`#zmenu-${id} [role="menuitem"]`) as HTMLElement | null)?.focus());
   }
 
