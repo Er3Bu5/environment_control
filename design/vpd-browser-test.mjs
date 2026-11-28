@@ -2289,6 +2289,18 @@ await ev(`document.activeElement.blur()`);
 const wide = await ev(`({clipped:[...document.querySelectorAll("[data-vin]")].filter(i=>i.scrollWidth>i.clientWidth).map(i=>i.id), size:getComputedStyle(document.querySelector("[data-vin]")).fontSize})`);
 check("desktop: no box clips its number", wide.clipped.length === 0, wide);
 await shot("vpd-desktop");
+/* #159: the selected limit is the one in the accent colour; the others are grey, in every group. */
+const vLook = () => ev(`(()=>{const c=(v)=>{const p=document.createElement("i");p.style.color=v;document.body.appendChild(p);const x=getComputedStyle(p).color;p.remove();return x},prim=c("var(--primary)"),onp=c("var(--on-primary)");return {flags:[...document.querySelectorAll("#vwrap [data-vflag]")].map(g=>({slot:Number(g.dataset.vflag),fill:getComputedStyle(g.querySelector("rect")).fill,text:getComputedStyle(g.querySelector("text")).fill})),accent:[...document.querySelectorAll("#vwrap line, #vwrap path, #vwrap circle")].filter(l=>getComputedStyle(l).stroke===prim).length,prim,onp}})()`);
+for (const k of ["temperature", "humidity", "vpd"]) {
+  await open(); await ev(`ui.vpdw.edit="${k}";ui.vpdw.sel=3;vSync()`);
+  const lk = await vLook(), mine = lk.flags.filter((f) => f.slot === 3), rest = lk.flags.filter((f) => f.slot !== 3);
+  check(`Chart colours, ${k}: the selected label is filled in the accent colour with its text colour, the other three grey, and its line is in the accent`, mine.length === 1 && mine[0].fill === lk.prim && mine[0].text === lk.onp && rest.length === 3 && rest.every((f) => f.fill !== lk.prim && f.text !== lk.onp) && lk.accent >= 1, lk);
+}
+await open(); await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`);
+const lkNone = await vLook();
+check("Chart colours: with nothing selected no label or line is in the accent", lkNone.flags.length === 4 && lkNone.flags.every((f) => f.fill !== lkNone.prim) && lkNone.accent === 0, lkNone);
+await open(); await ev(`ui.vpdw.edit="target";vSync()`);
+check("Chart colours: on Target the circle is drawn in the accent", (await vLook()).accent >= 1, await vLook());
 await reset(); await goTab("Garden"); await shot("controls-desktop");
 await openL(); await sleep(60); await shot("leaf-desktop"); await reset();
 // ---------- The history chart

@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* The panel's own palettes, generated from the frontend's PALETTES so the two can't drift. */
-:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
+:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --vline: #6E6E6E; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
 :root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
 html, body { margin: 0; }
@@ -2609,9 +2609,9 @@ function idealCount(v, b) {
   }
   return n;
 }
-function chip(x, y, text, on) {
+function chip(x, y, text, on, slot) {
   const w = 52, h = 18, cx = Math.round(x);
-  return `<g pointer-events="none"><rect x="${cx - w / 2}" y="${y}" width="${w}" height="${h}" rx="4" fill="${on ? "var(--vink)" : "var(--primary)"}"/><text x="${cx}" y="${y + 13}" text-anchor="middle" fill="#FFFFFF" style="font-size:11px">${esc(text)}</text></g>`;
+  return `<g pointer-events="none" data-vflag="${slot}"><rect x="${cx - w / 2 + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="${on ? "var(--primary)" : "var(--tile)"}" stroke="${on ? "var(--primary)" : "var(--off)"}"/><text x="${cx}" y="${y + 13}" text-anchor="middle" fill="${on ? "var(--on-primary)" : "var(--muted)"}" style="font-size:11px">${esc(text)}</text></g>`;
 }
 function vChartInner(v, b) {
   const g = vGeom(), { X, Y } = g, showText = window.innerWidth >= 760;
@@ -2628,31 +2628,37 @@ function vChartInner(v, b) {
   for (let t = T_MIN; t <= T_MAX; t += 2) s += `<text x="${X(t)}" y="${g.H - 7}" text-anchor="middle" fill="var(--muted)">${t}°</text>`;
   const stroke = (k, i) => (on(k) ? (v.sel === i ? 4 : 2.5) : 1);
   const faded = (k) => (on(k) ? 1 : 0.3);
-  const ln = (x1, y1, x2, y2, k, i) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--vink)" stroke-width="${stroke(k, i)}" opacity="${faded(k)}"/>`;
-  let flags = "";
+  /* The selected line is drawn last, over any line it coincides with, with a light edge so the accent reads on every cell colour. */
+  const picked = (k, i) => on(k) && v.sel === i, halo = (k, i) => (picked(k, i) ? 8 : 0);
+  const ink = (k, i) => (picked(k, i) ? "var(--primary)" : "var(--vline)");
+  let top = "";
+  const put = (html, k, i) => { if (picked(k, i)) top += html; else s += html; };
+  const ln = (x1, y1, x2, y2, k, i) => put(`${halo(k, i) ? `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#FFFFFF" stroke-width="${halo(k, i)}" opacity="0.7"/>` : ""}<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ink(k, i)}" stroke-width="${stroke(k, i)}" opacity="${faded(k)}"/>`, k, i);
+  let flags = "", flagTop = "";
   for (const i of HANDLES) {
     const t = clamp(b.temperature[i], T_MIN, T_MAX), rh = clamp(b.humidity[i], RH_LOW, RH_TOP), vp = b.vpd[i];
-    s += ln(X(t), g.T, X(t), g.bottom, "temperature", i) + ln(g.L, Y(rh), g.right, Y(rh), "humidity", i);
+    ln(X(t), g.T, X(t), g.bottom, "temperature", i); ln(g.L, Y(rh), g.right, Y(rh), "humidity", i);
     let d = "", pen = false;
     for (let c = T_MIN; c <= T_MAX; c += 0.25) {
       const r = rhAt(c, vp, v.leaf);
       if (r > RH_TOP || r < RH_LOW) { pen = false; continue; }
       d += `${pen ? "L" : "M"}${X(c).toFixed(1)} ${Y(r).toFixed(1)}`; pen = true;
     }
-    if (d) s += `<path d="${d}" fill="none" stroke="var(--vink)" stroke-width="${stroke("vpd", i)}" stroke-dasharray="6 4" opacity="${faded("vpd")}"/>`;
+    if (d) put(`${halo("vpd", i) ? `<path d="${d}" fill="none" stroke="#FFFFFF" stroke-width="${halo("vpd", i)}" opacity="0.7"/>` : ""}<path d="${d}" fill="none" stroke="${ink("vpd", i)}" stroke-width="${stroke("vpd", i)}" stroke-dasharray="6 4" opacity="${faded("vpd")}"/>`, "vpd", i);
     const label = `${SLOT_NAME[i]} ${b[on("vpd") ? "vpd" : on("humidity") ? "humidity" : "temperature"][i]}`;
-    if (on("temperature")) flags += chip(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24, label, v.sel === i);
-    if (on("humidity")) flags += chip(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9, label, v.sel === i);
+    const flag = (x, y) => { const html = chip(x, y, label, v.sel === i, i); if (v.sel === i) flagTop += html; else flags += html; };
+    if (on("temperature")) flag(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24);
+    if (on("humidity")) flag(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9);
     if (on("vpd")) {
       let c = { 0: 33, 1: 30, 3: 27, 4: 24 }[i];
       while (c > T_MIN && (rhAt(c, vp, v.leaf) > RH_TOP || rhAt(c, vp, v.leaf) < RH_LOW)) c -= 0.5;
       const r = clamp(rhAt(c, vp, v.leaf), RH_LOW, RH_TOP);
-      flags += chip(X(c), Y(r) - 9, label, v.sel === i);
+      flag(X(c), Y(r) - 9);
     }
   }
   const tx = X(clamp(b.temperature[2], T_MIN, T_MAX)), ty = Y(clamp(b.humidity[2], RH_LOW, RH_TOP)), big = on("target");
-  if (b.temperature[2] !== null) s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="var(--vink)" stroke-width="2.5"/></g>`;
-  return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${flags}</svg>`;
+  if (b.temperature[2] !== null) s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="${big ? "var(--primary)" : "var(--vline)"}" stroke-width="2.5"/></g>`;
+  return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${top}${flags}${flagTop}</svg>`;
 }
 function vReadout(v, b) {
   const z = zoneById(v.id), tp = z && sharesSensor(z) ? parentOf(z) : null;
