@@ -6,8 +6,8 @@ import { LitElement, type PropertyValues, html, nothing, svg, type TemplateResul
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
-import { familyOrder, linkedZones, moveWords, parentChoices, setParent } from "./family";
-import { inOrder, moveZone, orderZones } from "./sort";
+import { familyOrder, familyRuns, linkText, linkedZones, moveWords, parentChoices, parentOf, setParent } from "./family";
+import { inOrder, moveFamily, moveZone, orderZones } from "./sort";
 import {
   type Catalog,
   type CatalogDevice,
@@ -2000,6 +2000,18 @@ export class EcApp extends LitElement {
     });
   }
 
+  /* A family moves as one block by its own arrows, so it's never split. */
+  private moveBlock(root: string, by: -1 | 1): void {
+    if (!this.sorting) return;
+    this.sorting = { order: moveFamily(this.sortedZones.map((z) => z.id), root, by, this.zones) };
+    void this.updateComplete.then(() => {
+      const arrow = (b: number) => this.shadowRoot?.querySelector(`[data-moveblock="${CSS.escape(root)}"][data-by="${b}"]`) as HTMLButtonElement | null;
+      const used = arrow(by);
+      (used?.disabled ? arrow(-by) : used)?.focus({ preventScroll: true });
+      used?.closest(".fam")?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   private sortDiscard = (): void => {
     if (this.sorting) this.sorting = { order: this.zones.map((z) => z.id) };
   };
@@ -2490,7 +2502,7 @@ export class EcApp extends LitElement {
     return html`<span class="pill ${state === "unset" ? "plain" : state}">${BAND_WORDS[state]}</span>`;
   }
 
-  private ic(name: "thermo" | "drop" | "gauge" | "sun", color: string) {
+  private ic(name: "thermo" | "drop" | "gauge" | "sun" | "link", color: string) {
     return html`<span class="ic" style="--c:${color}">${icon(name)}</span>`;
   }
 
@@ -2573,12 +2585,77 @@ export class EcApp extends LitElement {
       <div><h1>Overview</h1>${sorting ? html`<p class="muted small" id="sort-note" tabindex="-1">Sorting the cards: move them with the arrows.</p>` : nothing}</div>
       ${this.zones.length >= 2 && !sorting ? html`<button class="btn headbtn" data-sort @click=${this.startSort}>Sort</button>` : nothing}
     </div>`;
-    const arrows = (z: Zone, i: number) =>
-      html`<div class="arrows">${([[-1, "up", "to previous", i === 0], [1, "down", "to next", i === shown.length - 1]] as const).map(
-        ([by, look, word, off]) => html`<button class="btn move" data-move=${z.id} data-by=${by} aria-label="Move ${z.name} ${word}" ?disabled=${off} @click=${() => this.moveCard(z.id, by)}>${icon(look)}</button>`,
+    /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. A family moves as one
+       block, by its own arrows, and a card in it moves only inside it, so a family is never split (#91). */
+    const runs = familyRuns(shown), runOf = (z: Zone) => runs.findIndex((r) => r.zones.includes(z));
+    const arrows = (kind: "move" | "block", id: string, label: string, first: boolean, last: boolean, inner = false) =>
+      html`<div class="arrows">${([[-1, "up", "to previous", first], [1, "down", "to next", last]] as const).map(
+        ([by, look, word, off]) =>
+          html`<button
+            class="btn move${inner ? " inner" : ""}"
+            data-move=${kind === "move" ? id : nothing}
+            data-moveblock=${kind === "block" ? id : nothing}
+            data-by=${by}
+            aria-label="Move ${label} ${word}${inner ? " in its group" : ""}"
+            ?disabled=${off}
+            @click=${() => (kind === "block" ? this.moveBlock(id, by) : this.moveCard(id, by))}
+          >${icon(look)}</button>`,
       )}</div>`;
-    /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. */
-    const card = (z: Zone, body: TemplateResult) => (sorting ? html`<div class="card zone-card sorting" data-sortcard=${z.id}>${body}</div>` : html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>${body}</button>`);
+    const cardArrows = (z: Zone) => {
+      const at = runOf(z), r = runs[at], j = r.zones.indexOf(z);
+      return r.zones.length === 1 ? arrows("move", z.id, z.name, at === 0, at === runs.length - 1) : arrows("move", z.id, z.name, j === 0, j === r.zones.length - 1, true);
+    };
+    /* The link tab sits on the seam between a linked zone and its neighbour on the parent's side, so each seam has one. */
+    const tab = (z: Zone) => {
+      const r = runs[runOf(z)], p = parentOf(shown, z);
+      if (!p || r.zones.length < 2 || !r.zones.includes(p)) return nothing;
+      const said = `Zone: ${z.name} is linked to Zone: ${p.name}`;
+      return html`<span class="linktab ${r.zones.indexOf(z) < r.zones.indexOf(p) ? "after" : "before"}" role="img" aria-label=${said} title=${said}>${icon("link")}</span>`;
+    };
+    const card = (z: Zone, body: TemplateResult) =>
+      sorting
+        ? html`<div class="card zone-card sorting" data-sortcard=${z.id}>${tab(z)}${body}</div>`
+        : html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>${tab(z)}${body}</button>`;
+    const zoneCard = (z: Zone) => {
+      const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
+      const parts = [[linkText(shown, z), "zlinked"], [n >= 2 ? `${METHODS[this.methodOf(z.id)]} of ${n} sensors` : "", "zcombined"]].filter(([t]) => t);
+      const note = parts.length
+        ? html`<span class="small muted cardnote">${parts.map(([t, c], i) => html`${i ? html`<span aria-hidden="true"> · </span>` : nothing}<span class=${c}>${t}</span>`)}</span>`
+        : nothing;
+      const badge = runs[runOf(z)].zones.length > 1 && !parentOf(shown, z) ? html`<span class="pill plain parentbadge">Parent</span>` : nothing;
+      return card(z, html`
+        <div class="card-head"><h2>${z.name}</h2>${badge}${note}${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? cardArrows(z) : nothing}</div>
+        ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
+        <div class="rows">
+          ${METRICS.map(
+            (k) => html`<div class="mrow">
+              ${this.ic(...EcApp.LOOKS[k])}
+              <div><div class="t1">${METRIC[k].label}</div><div class="t2">${fmt(k, this.zoneNow(z.id, k).value)}<span>${METRIC[k].unit}</span></div></div>
+              ${this.track(z, k)}
+              <div class="pillcell">${this.pill(this.readingsOf(z.id).length ? this.stateOf(z, k) : "unset")}</div>
+            </div>`,
+          )}
+          ${this.noLight(z.id)
+            ? nothing
+            : html`<div class="mrow">
+                ${this.ic(...EcApp.LOOKS.light)}
+                <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
+                ${this.lightSpark(z, 34, "lspark")}
+              </div>`}
+        </div>
+        <p class="small muted">${this.zoneCounts(z)}</p>`);
+    };
+    /* A family is drawn as one joined card. Stacked, it takes a row per card, so the zones beside it fill in round it. */
+    const family = (r: (typeof runs)[number], i: number) => {
+      if (r.zones.length === 1) return zoneCard(r.zones[0]);
+      const names = andList(r.zones.map((z) => z.name));
+      const bar = sorting
+        ? html`<div class="fambar">${this.ic("link", "var(--muted)")}<span class="small">${names}</span>${arrows("block", r.root, names, i === 0, i === runs.length - 1)}</div>`
+        : nothing;
+      return html`<div class="fam n${Math.min(r.zones.length, 4)}${sorting ? " sorting" : ""}" role="group" aria-label="${names}, linked" data-family=${r.root} style="--n:${r.zones.length}">
+        ${bar}<div class="famcards">${repeat(r.zones, (z) => z.id, zoneCard)}</div>
+      </div>`;
+    };
     return html`${head}${sorting
         ? nothing
         : issues.length
@@ -2586,34 +2663,7 @@ export class EcApp extends LitElement {
           : judgedAny
             ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
             : nothing}
-      <div class="cards zones">
-        ${repeat(shown, (z) => z.id, (z, i) => {
-          const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
-          /* A linked zone's line joins the combine note here, with its Parent badge after the name, once zones link (#91). */
-          const note = n >= 2 ? html`<span class="small muted cardnote"><span class="zcombined">${METHODS[this.methodOf(z.id)]} of ${n} sensors</span></span>` : nothing;
-          return card(z, html`
-            <div class="card-head"><h2>${z.name}</h2>${note}${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
-            ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
-            <div class="rows">
-              ${METRICS.map(
-                (k) => html`<div class="mrow">
-                  ${this.ic(...EcApp.LOOKS[k])}
-                  <div><div class="t1">${METRIC[k].label}</div><div class="t2">${fmt(k, this.zoneNow(z.id, k).value)}<span>${METRIC[k].unit}</span></div></div>
-                  ${this.track(z, k)}
-                  <div class="pillcell">${this.pill(this.readingsOf(z.id).length ? this.stateOf(z, k) : "unset")}</div>
-                </div>`,
-              )}
-              ${this.noLight(z.id)
-                ? nothing
-                : html`<div class="mrow">
-                    ${this.ic(...EcApp.LOOKS.light)}
-                    <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
-                    ${this.lightSpark(z, 34, "lspark")}
-                  </div>`}
-            </div>
-            <p class="small muted">${this.zoneCounts(z)}</p>`);
-        })}
-      </div>`;
+      <div class="cards zones">${repeat(runs, (r) => (r.zones.length > 1 ? `fam:${r.root}` : r.root), family)}</div>`;
   }
 
   /* A card whose combine note wraps under its name would start its day strip and tracks lower than its neighbour's, so
@@ -2972,7 +3022,7 @@ export class EcApp extends LitElement {
     return html`<div class="pagehead">
         <div>
           <h1>${z.name}</h1>
-          ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}
+          ${z.description ? html`<p class="muted">${z.description}</p>` : nothing}${this.linkLine(z)}
           <p class="muted small">${L.w} x ${L.d} m, ${plural(L.units, "unit")}</p>
         </div>
         ${this.zoneMore(z)}
@@ -4470,12 +4520,17 @@ export class EcApp extends LitElement {
       </p>`;
   }
 
+  private linkLine(z: Zone) {
+    const t = linkText(this.zones, z);
+    return t ? html`<p class="small muted zlinked">${t}</p>` : nothing;
+  }
+
   private zoneRow(z: Zone) {
     const open = this.menu === z.id;
     return html`<div class="task">
       <div>
         <strong>${z.name}</strong>${stepsLeft(z).length ? html` <span class="pill warn">Not set up</span>` : nothing}
-        ${z.description ? html`<p class="small">${z.description}</p>` : nothing}
+        ${z.description ? html`<p class="small">${z.description}</p>` : nothing}${this.linkLine(z)}
         <p class="small muted">
           ${z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")} in ${plural(z.layout.rows, "row")}. ` : ""}${z.sensors.filter((s) => s.placed).length}
           of ${plural(z.sensors.length, "sensor")} placed.
