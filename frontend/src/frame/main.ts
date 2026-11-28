@@ -1814,14 +1814,16 @@ export class EcApp extends LitElement {
      A yes from the host means HA took the call, so the switch waits for HA to report the automation on or off. */
   private async sendAuto(z: Zone, a: AutomationLink, on: boolean): Promise<void> {
     const c = autoSend(on);
+    let mine = c;
     this.setAutoCtl(a.entity, c);
-    const r = await this.ask("automation", { zone: z.id, link: a.id, on });
-    if (this.autoCtl[a.entity] !== c) return;
-    const next = autoAnswered(c, r, this.states[a.entity]);
-    if (next !== c) return void this.setAutoCtl(a.entity, next);
+    /* Timed from the send, not the answer: a host that never answers must still end on Not confirmed. */
     setTimeout(() => {
-      if (this.autoCtl[a.entity] === c) this.setAutoCtl(a.entity, autoGiveUp(c));
+      if (this.autoCtl[a.entity] === c) this.setAutoCtl(a.entity, (mine = autoGiveUp(c)));
     }, CTL_GIVE_UP_MS);
+    const r = await this.ask("automation", { zone: z.id, link: a.id, on });
+    if (this.autoCtl[a.entity] !== mine) return;
+    const next = autoAnswered(mine, r, this.states[a.entity]);
+    if (next !== mine) this.setAutoCtl(a.entity, next);
   }
 
   private tapAuto(z: Zone, a: AutomationLink): void {
@@ -2506,20 +2508,19 @@ export class EcApp extends LitElement {
     const drag = { ...this.ctlDrag };
     delete drag[`${d.id}:${action}`];
     [this.ctl, this.ctlDrag] = [{ ...this.ctl, [d.id]: c }, drag];
+    let mine: Ctl = c;
+    /* Timed from the send, not the answer: a host that never answers must still end on Not confirmed. */
+    setTimeout(() => {
+      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: (mine = { status: "stuck", want, from }) };
+    }, CTL_GIVE_UP_MS);
     const r = await this.ask("device", { id: d.id, action, ...(value === undefined ? {} : { value }) });
-    if (this.ctl[d.id] !== c) return;
+    if (this.ctl[d.id] !== mine) return;
     if (!r.ok) {
       this.ctl = { ...this.ctl, [d.id]: { status: "error", error: r.error ?? "Home Assistant didn't take it." } };
       return;
     }
-    const reported = onReport(c, this.states[d.entity], undefined, Date.now());
-    if (reported && reported !== c) {
-      this.ctl = { ...this.ctl, [d.id]: reported };
-      return;
-    }
-    setTimeout(() => {
-      if (this.ctl[d.id] === c) this.ctl = { ...this.ctl, [d.id]: { status: "stuck", want, from } };
-    }, CTL_GIVE_UP_MS);
+    const reported = onReport(mine, this.states[d.entity], undefined, Date.now());
+    if (reported && reported !== mine) this.ctl = { ...this.ctl, [d.id]: reported };
   }
 
   /* Waits for the device to answer the command just sent: true once it has, false if it didn't or wasn't sent. */
