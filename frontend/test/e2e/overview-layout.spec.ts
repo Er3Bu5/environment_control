@@ -10,7 +10,8 @@ test.describe("overview layout", () => {
   const cards = (frame: Frame) => app(frame).locator(".zone-card");
   const LONG = "A zone with a very long name that runs on well past the width of its card";
 
-  /* What HA has stored, plus empty zones copied from Veg until there are `count`, read back after a restart. */
+  /* What HA has stored, plus empty zones copied from Veg until there are `count`, read back after a restart. Unlinked, as
+     these are the grid's rules for cards on their own: a family is joined (linked-overview.spec.ts). */
   async function zones(page: Page, count: number, rename: Record<string, string> = {}): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
@@ -18,12 +19,14 @@ test.describe("overview layout", () => {
     await page.evaluate(`(() => {
       fakeHA.knobs.restartMs = 100;
       const next = JSON.parse(fakeHA.disk), veg = next.zones.find((z) => z.id === "veg");
+      for (const z of next.zones) delete z.parent;
       for (let i = next.zones.length + 1; i <= ${count}; i++) next.zones.push({ ...veg, id: "zone_" + i, name: "Zone " + i, sensors: [], automations: [] });
       for (const z of next.zones) z.name = ${JSON.stringify(rename)}[z.id] ?? z.name;
       fakeHA.disk = JSON.stringify(next);
       fakeHA.restart();
     })()`);
     await expect(cards(frame)).toHaveCount(count);
+    await expect(app(frame).locator(".fam")).toHaveCount(0);
     return frame;
   }
   /* How many cards share the first card's row. */

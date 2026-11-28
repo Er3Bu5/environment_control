@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deviceElsewhere } from "../../src/frame/mapping";
 import { type RawConfig, readZones } from "../../src/frame/model";
-import { inOrder, moveZone, orderZones } from "../../src/frame/sort";
+import { inOrder, moveFamily, moveZone, orderZones } from "../../src/frame/sort";
 
 const order = ["garden", "nursery", "veg"];
 
@@ -20,6 +20,33 @@ describe("moveZone with linked zones", () => {
     expect(moveZone(all, "garden", 1, zones)).toEqual(["veg", "nursery", "seedlings", "garden", "tent"]);
     expect(moveZone(all, "tent", -1, zones)).toEqual(["garden", "tent", "veg", "nursery", "seedlings"]);
     expect(moveZone(all, "tent", 1, zones)).toEqual(all);
+  });
+});
+
+describe("moveFamily", () => {
+  const zones = [{ id: "garden" }, { id: "veg" }, { id: "nursery", parent: "veg" }, { id: "seedlings", parent: "veg" }, { id: "tent" }, { id: "flower" }, { id: "clones", parent: "flower" }];
+  const all = zones.map((z) => z.id);
+
+  it("steps a whole family past a zone on its own, keeping its order inside", () => {
+    expect(moveFamily(all, "veg", -1, zones)).toEqual(["veg", "nursery", "seedlings", "garden", "tent", "flower", "clones"]);
+    expect(moveFamily(all, "veg", 1, zones)).toEqual(["garden", "tent", "veg", "nursery", "seedlings", "flower", "clones"]);
+    const inside = ["garden", "seedlings", "veg", "nursery", "tent", "flower", "clones"];
+    expect(moveFamily(inside, "veg", -1, zones)).toEqual(["seedlings", "veg", "nursery", "garden", "tent", "flower", "clones"]);
+  });
+
+  it("steps a whole family past another family in one press", () => {
+    expect(moveFamily(all, "flower", -1, zones)).toEqual(["garden", "veg", "nursery", "seedlings", "flower", "clones", "tent"]);
+    const next = ["garden", "veg", "nursery", "seedlings", "flower", "clones", "tent"];
+    expect(moveFamily(next, "veg", 1, zones)).toEqual(["garden", "flower", "clones", "veg", "nursery", "seedlings", "tent"]);
+    expect(moveFamily(next, "flower", -1, zones)).toEqual(["garden", "flower", "clones", "veg", "nursery", "seedlings", "tent"]);
+  });
+
+  it("leaves a family at either end where it is, and ignores one that isn't in the order", () => {
+    expect(moveFamily(all, "flower", 1, zones)).toEqual(all);
+    const first = ["veg", "nursery", "seedlings", "garden", "tent", "flower", "clones"];
+    expect(moveFamily(first, "veg", -1, zones)).toEqual(first);
+    expect(moveFamily(all, "nowhere", 1, zones)).toEqual(all);
+    expect(all).toEqual(zones.map((z) => z.id));
   });
 });
 

@@ -65,13 +65,13 @@ export const styles = css`
   .cards.zones { container-type: inline-size; grid-template-columns: repeat(auto-fit, minmax(max(min(520px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
   /* One across, a card stops at about the widest it gets two across, so the step down from two is a modest change in its
      size rather than a doubling. A phone is narrower than that, so there it still fills the width. */
-  @container (max-width: 1051.98px) { .cards.zones > .zone-card { width: 100%; max-width: 700px; justify-self: center; } }
+  @container (max-width: 1051.98px) { .cards.zones > .zone-card, .cards.zones > .fam { width: 100%; max-width: 700px; justify-self: center; } }
   @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
   @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
-  /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.
-     Too long for it, the note wraps under the name rather than squeezing it. */
+  /* The linked line and the combine note share the name's line, so they push nothing down and the tracks of every card in
+     a row start level. Too long for it, the note wraps under the name rather than squeezing it. */
   .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
   /* Given a row's height by levelHeads, the head keeps its name at the top rather than floating in the middle. */
   .zone-card .card-head { align-content: flex-start; }
@@ -80,12 +80,67 @@ export const styles = css`
      card that was moved, as it is scrolled into view. */
   .zone-card.sorting:hover { border-color: var(--line); }
   .zone-card.sorting { scroll-margin-block: 12px 150px; }
+  /* A family is one joined card: its cards touch, sharing one border as the seam, with the link tab on it. It never
+     wraps apart: side by side where the row has room for all of it, else stacked, the seam running across. The seam is
+     drawn heavier than a card's outer border so it reads as the join, and the cards make room either side of it so the
+     tab on it doesn't crowd a state chip or a reading's icon. */
+  .fam { display: flex; flex-direction: column; min-width: 0; grid-row: span var(--n); --seam: 2px; --seampad-block: 22px; --seampad-inline: 26px; }
+  .famcards { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .famcards > .zone-card { position: relative; border-radius: 0; }
+  .famcards > .zone-card:not(:last-child) { border-bottom-width: var(--seam); padding-bottom: var(--seampad-block); }
+  .famcards > .zone-card + .zone-card { margin-top: calc(var(--seam) * -1); border-top-width: var(--seam); padding-top: var(--seampad-block); }
+  .famcards > .zone-card:first-child { border-radius: 12px 12px 0 0; }
+  .famcards > .zone-card:last-child { border-radius: 0 0 12px 12px; }
+  /* A card's own border shows whole on that card, over the neighbour it shares the seam with. */
+  .famcards > .zone-card:hover, .famcards > .zone-card:focus-visible { z-index: 1; }
+  .linktab { position: absolute; z-index: 2; left: 50%; width: 28px; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: var(--card); border: var(--seam) solid var(--line); }
+  .linktab svg { width: 16px; height: 16px; fill: var(--fg); rotate: 90deg; }
+  /* Offset by half the seam: the cards overlap by its whole width, so a card's inner edge is the seam's far side. */
+  .linktab.after { bottom: calc(var(--seam) / -2); transform: translate(-50%, 50%); }
+  .linktab.before { top: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+  /* Beside the name, not pushed to the far side with the rest of the heading. */
+  .parentbadge { color: var(--fg); margin-right: auto; }
+  /* While sorting, the family's own arrows sit on a strip joined to the top of its cards. */
+  .fambar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--tile); border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; }
+  .fambar .ic { flex: none; }
+  .fam.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; border-top-right-radius: 0; }
+  @container (min-width: 1052px) {
+    .fam.n2 { grid-column: span 2; grid-row: auto; }
+    .fam.n2 .famcards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fam.n2 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n2 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n2.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n2.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n2 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n2 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n2 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n2 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n2 .linktab svg { rotate: 0deg; }
+  }
+  @container (min-width: 1944px) {
+    .fam.n3 { grid-column: span 3; grid-row: auto; }
+    .fam.n3 .famcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .fam.n3 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n3 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n3.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n3.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n3 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n3 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n3 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n3 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n3 .linktab svg { rotate: 0deg; }
+  }
   .arrows { display: flex; gap: 8px; margin-left: auto; }
   .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
   .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
+  .zlinked { margin: 2px 0 0; }
   .pill.dashed { color: var(--muted); border-color: var(--line); border-style: dashed; }
   .notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
   .notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
