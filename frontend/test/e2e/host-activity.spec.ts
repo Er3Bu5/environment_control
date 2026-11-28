@@ -98,6 +98,29 @@ test("only the known fields of an Activity answer reach the frame", async ({ pag
   expect(entries.some((e) => e.kind === "secret")).toBe(false);
 });
 
+test("a sensor row reaches the frame with only its own fields, beside the other kinds unchanged", async ({ page }) => {
+  await page.goto(PAGE);
+  const frame = await panelFrame(page);
+  const end = now(), start = end - 24 * HOUR;
+  const stopped = { kind: "sensor", when: end - 300, sensor: "s1", name: "Left", reading: "temperature", state: "stopped",
+    entity: "sensor.left_temperature", extra: "x", cause: { type: "startup", entity: "sensor.left_temperature", name: "x" } };
+  const back = { kind: "sensor", when: end - 200, sensor: "s1", name: "Left", reading: "all", state: "back", since: end - 300, entity_id: "sensor.left_humidity" };
+  const automation = { kind: "automation", when: end - 100, entity: "automation.day_humidity", name: "Day humidity", state: "off", cause: { type: "user", name: "Alex", context_id: "c2" } };
+  const run = { kind: "run", when: end - 90, entity: "automation.day_humidity", name: "Day humidity", trigger: { kind: "time" }, count: 2, first: end - 95, last: end - 90 };
+  const device = { kind: "device", when: end - 60, entity: "switch.garden_heater", name: "Heater", state: "on", cause: { type: "reconnect" } };
+  const odd = { kind: "climate", when: end - 30, sensor: "s1", name: "Left" };
+  await fakeActivity(page, { zone: "garden", start, end, earliest: start, more: false, next_end: null, entries: [stopped, back, automation, run, device, odd] });
+  const answer = await ask(frame, { zone: "garden", start, end });
+  expect(answer.ok).toBe(true);
+  expect(answer.activity!.entries).toEqual([
+    { kind: "sensor", when: end - 300, sensor: "s1", name: "Left", reading: "temperature", state: "stopped", cause: { type: "startup" } },
+    { kind: "sensor", when: end - 200, sensor: "s1", name: "Left", reading: "all", state: "back", since: end - 300 },
+    { kind: "automation", when: end - 100, entity: "automation.day_humidity", name: "Day humidity", state: "off", cause: { type: "user", name: "Alex" } },
+    { kind: "run", when: end - 90, entity: "automation.day_humidity", name: "Day humidity", trigger: { kind: "time" }, count: 2, first: end - 95, last: end - 90 },
+    { kind: "device", when: end - 60, entity: "switch.garden_heater", name: "Heater", state: "on", cause: { type: "reconnect" } },
+  ]);
+});
+
 test("a busy or slow logbook reaches the frame as its own code, apart from other refusals", async ({ page }) => {
   await page.goto(PAGE);
   const frame = await panelFrame(page);
