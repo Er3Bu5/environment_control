@@ -95,6 +95,51 @@ test.describe("history", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("the chart leaves the same space left and right of what it draws, and nothing it draws leaves the card", async ({ page }) => {
+    const frame = await garden(page);
+    await goTo(frame, "Garden");
+    /* What the chart draws, measured against the card's content box: the gap on each side, and whether anything,
+       hover dots included, lands outside the card. */
+    const measure = () =>
+      card(frame).evaluate((el) => {
+        const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+        const left = r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+        const right = r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+        const drawn = [...el.querySelectorAll(".chart svg *")].map((n) => n.getBoundingClientRect()).filter((b) => b.width || b.height);
+        const dots = [...el.querySelectorAll(".chart svg circle")].map((n) => n.getBoundingClientRect());
+        const lo = Math.min(...drawn.map((b) => b.left)), hi = Math.max(...drawn.map((b) => b.right));
+        const inside = (b: DOMRect) => b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom;
+        return { leftGap: lo - left, rightGap: right - hi, allInside: drawn.every(inside), dots: dots.length, dotsInside: dots.every(inside) };
+      });
+    for (const width of [1280, 500]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const metric of ["Temp", "Light"]) {
+        await card(frame).getByRole("button", { name: metric, exact: true }).click();
+        const chart = card(frame).locator(".chart svg");
+        await expect(chart.locator("path")).not.toHaveCount(0);
+        /* The chart redraws at its new width once the resize is seen; until then it's scaled and proves nothing. */
+        await expect
+          .poll(() => chart.evaluate((s) => Math.abs((s as SVGSVGElement).viewBox.baseVal.width - s.getBoundingClientRect().width)))
+          .toBeLessThanOrEqual(1);
+        const still = await measure();
+        expect(Math.abs(still.leftGap - still.rightGap), `${metric} at ${width}px: ${JSON.stringify(still)}`).toBeLessThanOrEqual(2);
+        expect(still.leftGap, `${metric} at ${width}px`).toBeGreaterThanOrEqual(0);
+        expect(still.allInside, `${metric} at ${width}px`).toBe(true);
+        const box = await chart.boundingBox();
+        if (!box) throw new Error("no chart");
+        for (const x of [0.5, box.width - 0.5]) {
+          await chart.hover({ position: { x, y: box.height / 2 } });
+          await expect(chart.locator("circle").first()).toBeVisible();
+          const hovered = await measure();
+          expect(hovered.dots, `${metric} at ${width}px, x ${x}`).toBeGreaterThan(0);
+          expect(hovered.dotsInside && hovered.allInside, `${metric} at ${width}px, x ${x}: ${JSON.stringify(hovered)}`).toBe(true);
+        }
+        await page.mouse.move(0, 0);
+      }
+    }
+    await card(frame).screenshot({ path: test.info().outputPath("history-light-500.png") });
+  });
+
   test("light shows only Now, and Overview draws each zone's last 4 hours of light", async ({ page }) => {
     const frame = await garden(page);
     await expect(app(frame).getByRole("img", { name: "Light (Average) in Garden over the last 4 hours" })).toBeVisible();
