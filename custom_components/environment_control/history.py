@@ -20,10 +20,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from .const import MAX_LOOKBACK_HOURS
+
 # Matches the frontend's STALE_MS.
 STALE_S = 10 * 60
-# 4 is the light card's line; the rest are the History card's ranges. Nothing longer: HA keeps 10 days here.
-HOURS = frozenset({4, 6, 24, 72, 168})
+# 4 is the light card's line; the rest are the History card's ranges, the longest as far back as the panel reads.
+HOURS = frozenset({4, 6, 24, 72, MAX_LOOKBACK_HOURS})
 MIN_BUCKETS, MAX_BUCKETS = 12, 1000
 MAX_ENTITIES = 24
 
