@@ -57,6 +57,10 @@ export const styles = css`
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
+  /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.
+     Too long for it, the note wraps under the name rather than squeezing it. */
+  .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
+  .cardnote { margin-left: auto; text-align: right; min-width: 0; align-self: baseline; }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }

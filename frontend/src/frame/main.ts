@@ -2397,8 +2397,10 @@ export class EcApp extends LitElement {
       <div class="cards">
         ${this.zones.map((z) => {
           const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
+          /* A linked zone's line joins the combine note here, with its Parent badge after the name, once zones link (#91). */
+          const note = n >= 2 ? html`<span class="small muted cardnote"><span class="zcombined">${METHODS[this.methodOf(z.id)]} of ${n} sensors</span></span>` : nothing;
           return html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>
-            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
+            <div class="card-head"><h2>${z.name}</h2>${note}${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
             ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
             <div class="rows">
               ${METRICS.map(
@@ -2417,7 +2419,6 @@ export class EcApp extends LitElement {
                     ${this.lightSpark(z, 34, "lspark")}
                   </div>`}
             </div>
-            ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
             <p class="small muted">${this.zoneCounts(z)}</p>
           </button>`;
         })}
