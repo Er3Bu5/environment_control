@@ -1659,7 +1659,10 @@ function series(z, k, hours, ix) {
     const from = hours > 24 ? HISTORY_LONG[sensor.id] : real, step = hours > 24 ? 15 : 5, count = hours * 60 / step + 1;
     const part = from[k].slice(-count), low = from.lo[k].slice(-count), high = from.hi[k].slice(-count), last = part.length - 1;
     const live = k === "light" ? sensor.lux : sensorValue(z, sensor, k);
-    return part.map((v, i) => (i < last ? { t: NOW - (last - i) * step, v, lo: low[i], hi: high[i] } : { t: NOW, v: live, lo: live, hi: live }));
+    /* Now stands in for the last bucket, so it keeps that bucket's range: a spike just before now still counts, and the
+       24h and longer ranges, whose last buckets differ in length, agree on it. */
+    const edge = (f, b) => (live === null || live === undefined || b === null || b === undefined ? live : f(live, b));
+    return part.map((v, i) => (i < last ? { t: NOW - (last - i) * step, v, lo: low[i], hi: high[i] } : { t: NOW, v: live, lo: edge(Math.min, low[last]), hi: edge(Math.max, high[last]) }));
   }
   const step = hours <= 24 ? 5 : hours <= 72 ? 15 : hours <= 168 ? 30 : 60, n = Math.round(hours * 60 / step);
   const r = rng(zones.indexOf(z) * 97 + Object.keys(M).indexOf(k) * 31 + ix * 13 + 7);

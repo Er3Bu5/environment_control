@@ -57,7 +57,9 @@ await send("Page.enable"); await send("Runtime.enable");
 await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await phone(390, 844);
 /* The page plays Home Assistant: the fake HA and the host element sit on it, and the UI runs in the host's sandboxed frame, as it will in HA. */
-execFileSync("python3", [`${dir}/build-mock.py`, dir, process.env.MOCK_FILE || "environment-control-source.html", process.env.SEED_FILE || "sample-seed.js", "mock-dev.html"]);
+/* SMOKE compares against the snapshot, so on the sample room every reading check fails and reads as a fault in the build. */
+const smoke = process.env.SMOKE;
+execFileSync("python3", [`${dir}/build-mock.py`, dir, process.env.MOCK_FILE || (smoke ? "snapshot-ui.html" : "environment-control-source.html"), process.env.SEED_FILE || (smoke ? "snapshot-seed.js" : "sample-seed.js"), "mock-dev.html"]);
 writeFileSync(`${dir}/mock-page.html`, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${readFileSync(`${dir}/mock-dev.html`, "utf8")}</body></html>`);
 await send("Page.navigate", { url: `file://${dir}/mock-page.html` });
 await sleep(1200);
@@ -93,19 +95,19 @@ if (process.env.SMOKE) {
   }
   await go(`ui.screen="overview";render()`); await clean("Overview"); await shot("real-overview");
   check("Overview: every zone with light draws its graph", (await ev(`document.querySelectorAll("#main .zone-card svg.lspark").length`)) === (await ev(`zones.filter(z=>lightLine(z)).length`)));
-  for (const z of ["garden", "veg", "nursery"]) { await go(`ui.screen="zone";ui.zone="${z}";render()`); await clean(z); await shot(`real-${z}`); }
+  for (const z of ["garden", "veg", "nursery", "breeding"]) { await go(`ui.screen="zone";ui.zone="${z}";render()`); await clean(z); await shot(`real-${z}`); }
   for (const [s, name] of [["devices", "Devices"], ["setup", "Setup"]]) { await go(`ui.screen="${s}";render()`); await clean(name); }
   check("Setup: no made-up tasks left", (await ev(`document.querySelectorAll("#main [data-role], #main [data-answer]").length`)) === 0);
-  for (const id of ["garden", "veg", "nursery"]) {
+  for (const id of ["garden", "veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
-    const windows = {};
-    for (const k of ["temperature", "humidity", "vpd", "light"]) for (const h of [6, 24, 72, 168]) {
+    const windows = {}, kinds = ["temperature", "humidity", "vpd", ...(want.zones[id].light === null ? [] : ["light"])];
+    for (const k of kinds) for (const h of [6, 24, 72, 168]) {
       await go(`ui.metric="${k}";ui.range=${h};render()`); await clean(`${id} ${k} ${h}h`);
       const r = await ev(`(()=>{const c=chartNow,x=c.rows[0],s=chartStats(x.line);return {now:fmt("${k}",x.line[c.n].v),tile:fmt("${k}",zoneById("${id}").now.${k}),min:s.min.v,max:s.max.v,n:c.n,note:document.querySelector("#chart-note").textContent}})()`);
       check(`${id} ${k} ${h}h: the chart's Now is the tile's reading`, r.now === r.tile, r);
       windows[`${k}${h}`] = r;
     }
-    for (const k of ["temperature", "humidity", "vpd", "light"]) for (const [a, b] of [[6, 24], [24, 72], [72, 168]]) {
+    for (const k of kinds) for (const [a, b] of [[6, 24], [24, 72], [72, 168]]) {
       const small = windows[`${k}${a}`], big = windows[`${k}${b}`], slack = (big.max - big.min) * 0.02 + 0.01;
       check(`${id} ${k}: ${b}h holds ${a}h's min and max`, big.min <= small.min + slack && big.max >= small.max - slack, [small.min, big.min, small.max, big.max]);
     }
@@ -143,21 +145,24 @@ if (process.env.SMOKE) {
   await go(`ui.screen="setup";render();document.querySelector('[data-vpd="veg"]').click()`);
   check("Schedule: Veg says Nursery shares its helpers", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
   await go(`document.querySelector("[data-tdexit]").click()`);
-  for (const z of ["garden", "veg", "nursery"]) for (const p of ["day", "night"]) {
+  for (const z of ["garden", "veg", "nursery", "breeding"]) for (const p of ["day", "night"]) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;ui.td=null;ui.sched=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
-  check("Red lights: Garden's come from its helpers, and Veg and Nursery don't use them", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none"]));
-  check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false]));
-  for (const id of ["veg", "nursery"]) {
+  check("Red lights: Garden's come from its helpers, and Veg, Nursery and Breeding don't use them", JSON.stringify(await ev(`["garden","veg","nursery","breeding"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none", "none"]));
+  check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery","breeding"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false, false]));
+  for (const id of ["veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
     check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`(()=>{const d=document.createElement("div");d.innerHTML=targetsTable(zoneById(ui.zone));return d.querySelector("tbody tr").textContent})()`)).includes("-"));
   }
   /* Nothing in the real room is placed yet, so every zone's map says so, and says it's fine. */
-  for (const id of ["garden", "veg", "nursery"]) {
+  for (const id of ["garden", "veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";ui.level="all";render()`);
     const n = await ev(`placeable(zoneById("${id}")).length`), note = await ev(`document.querySelector("#unplaced-${id}")?.textContent || ""`);
-    check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
+    const wall = (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true;
+    // Breeding's lights are switched by hand, so it has nothing to control and nothing to place.
+    if (id === "breeding") check(`${id}: a wall round the map, and no devices to name`, n === 0 && wall && note === "", [n, note]);
+    else check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && wall && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
   }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
   /* The automations snapshot brings the alert repeat helper, which the states snapshot may predate. */
@@ -172,11 +177,21 @@ if (process.env.SMOKE) {
     if (id === "garden") { await go(`ui.vpdw.period="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
   }
   /* The real room's automations, grouped as its dashboards group them. */
-  if (autoSnap) for (const id of ["garden", "veg", "nursery"]) for (const page of ["alert", "failsafe", "control"]) {
-    await go(`ui.autos=null;renderModal();ui.linkw=null;ui.screen="zone";ui.zone="${id}";render();openAutos("${id}","${page}")`);
-    const rows = await ev(`document.querySelectorAll("#modal [data-autorow]").length`), want = autoSnap.links[id].filter((x) => (page === "alert" ? x.group.startsWith("alert_") : x.group === page)).length;
-    check(`${id}: the ${page} chip lists every one on its dashboard`, rows === want && want > 0, [rows, want]);
-    if (id === "garden" && page === "alert") await shot("real-alerts");
+  /* An automation belongs to one zone, so one the snapshot lists under two (Nursery's shared cards) stays with the first. */
+  const onPage = (x, page) => (page === "alert" ? x.group.startsWith("alert_") : x.group === page);
+  const owner = {};
+  if (autoSnap) for (const id of ["garden", "veg", "nursery", "breeding"]) for (const x of autoSnap.links[id] || []) owner[x.entity] ??= id;
+  if (autoSnap) for (const page of ["alert", "failsafe", "control"]) {
+    const listed = new Set(Object.values(autoSnap.links).flat().filter((x) => onPage(x, page)).map((x) => x.entity));
+    let shown = 0;
+    for (const id of ["garden", "veg", "nursery", "breeding"]) {
+      await go(`ui.autos=null;renderModal();ui.linkw=null;ui.screen="zone";ui.zone="${id}";render();openAutos("${id}","${page}")`);
+      const rows = await ev(`document.querySelectorAll("#modal [data-autorow]").length`), want = (autoSnap.links[id] || []).filter((x) => onPage(x, page) && owner[x.entity] === id).length;
+      shown += rows;
+      check(`${id}: the ${page} chip lists every one on its dashboard`, rows === want, [rows, want]);
+      if (id === "garden" && page === "alert") await shot("real-alerts");
+    }
+    check(`every ${page} on a dashboard is listed, in one zone`, shown === listed.size && listed.size > 0, [shown, listed.size]);
   }
   await go(`ui.autos=null;renderModal();ui.td=null;ui.sched=null;ui.vpdw=null;ui.screen="setup";render()`);
   await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
@@ -196,7 +211,7 @@ if (process.env.SMOKE) {
   await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`);
   check("Remove: real data, Garden's sensors stay findable", (await ev(`catalog().length`)) > (await ev(`zones.flatMap(z=>z.sensors).length`)));
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview without Garden"], [`ui.screen="devices";render()`, "Devices without Garden"], [`ui.screen="zone";ui.zone="veg";render()`, "Veg without Garden"], [`ui.screen="setup";render()`, "Setup without Garden"]]) { await go(e); await clean(name); }
-  for (const id of ["veg", "nursery"]) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`); }
+  for (const id of await ev(`zones.map(z=>z.id)`)) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`); }
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview with no zones"], [`ui.screen="devices";render()`, "Devices with no zones"], [`ui.screen="setup";render()`, "Setup with no zones"]]) { await go(e); await clean(name); }
   check("Remove: real data, nothing left", (await ev(`zones.length`)) === 0);
   check("no script errors", exceptions.length === 0, exceptions.slice(0, 3));

@@ -32,6 +32,9 @@ def band(zone, period, metric, stage):
     tg = num(tkey) if tkey in S else None
     if period == "day":
         lo, hi = [min(mx, max(mn, x)) for x in ATHENA[stage][metric]]
+        # A target outside the assumed stage would be refused as out of order, so Low and High widen to take it in.
+        if tg is not None:
+            lo, hi = min(lo, tg), max(hi, tg)
     else:
         mid = r2((mn + mx) / 2) if tg is None else tg
         lo, hi = r2((mn + mid) / 2), r2((mid + mx) / 2)
@@ -321,16 +324,18 @@ open(f"{root}/snapshot-seed.js", "w", encoding="utf-8").write(f'"use strict";\n/
 import subprocess
 subprocess.run([sys.executable, f"{root}/build-mock.py", root, "snapshot-ui.html", "snapshot-seed.js", "environment-control-mock.html"], check=True)
 
-# Breeding is left out: these checks compare a light reading and light limits, which it has neither of.
+# Breeding has no light reading and no light limits, so it expects none.
 expect = {"zones": {
     "garden": {"temperature": num("sensor.garden_environment_average_temperature"), "humidity": num("sensor.garden_environment_average_humidity"), "vpd": num("sensor.garden_environment_average_vpd"),
                "light": zones[0]["now"]["light"]},
     "veg": {"temperature": num("sensor.veg_environment_air_temp"), "humidity": num("sensor.veg_environment_humidity"), "vpd": num("sensor.veg_environment_vpd"), "light": num("sensor.veg_environment_light")},
-    "nursery": {"temperature": num("sensor.nursery_environment_air_temp"), "humidity": num("sensor.nursery_environment_humidity"), "vpd": num("sensor.nursery_environment_vpd"), "light": num("sensor.nursery_environment_light")}}}
+    "nursery": {"temperature": num("sensor.nursery_environment_air_temp"), "humidity": num("sensor.nursery_environment_humidity"), "vpd": num("sensor.nursery_environment_vpd"), "light": num("sensor.nursery_environment_light")},
+    "breeding": {"temperature": num("sensor.breeding_environment_air_temp"), "humidity": num("sensor.breeding_environment_humidity"), "vpd": num("sensor.breeding_environment_vpd"),
+                 "light": num("sensor.breeding_environment_light") if "sensor.breeding_environment_light" in S else None}}}
 clock = lambda e: S[e]["state"][:5]
 level = S["light.garden_light_controller_overhead"]["attrs"].get("brightness")
 expect["lights"] = {"overhead": None if S["light.garden_light_controller_overhead"]["state"] != "on" or level is None else round(level / 255 * 100)}
-expect["sched"] = {z: {"day": clock(f"input_datetime.{h}_day_time"), "night": clock(f"input_datetime.{h}_night_time"), **limits(z)} for z, h in (("garden", "garden"), ("veg", "veg"), ("nursery", "veg"))}
+expect["sched"] = {z: {"day": clock(f"input_datetime.{h}_day_time"), "night": clock(f"input_datetime.{h}_night_time"), **limits(z)} for z, h in (("garden", "garden"), ("veg", "veg"), ("nursery", "veg"), ("breeding", "breeding"))}
 e = zones[0]["emerson"]; on, off = zones[0]["dayAt"], zones[0]["nightAt"]
 hm = lambda m: f"{int(m) // 60 % 24:02d}:{int(m) % 60:02d}"
 expect["emerson"] = f"Red lights {hm(on - e['morning'])} - {hm(on + e['daylight'])} and {hm(off - e['daylight'])} - {hm(off + e['evening'])}"
