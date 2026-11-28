@@ -226,6 +226,8 @@ test.describe("sensor calibration", () => {
     const next = app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
     for (let i = 0; i < 3; i++) await next.click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    await expect(next).toHaveText("Finish");
+    await next.click();
     await app(frame).locator("#g-calibrate").getByRole("button", { name: "Sensor Calibration" }).click();
     await expect(app(frame).getByRole("button", { name: "Say where Environment board's offset is held." })).toBeVisible();
     await expect(app(frame).getByRole("button", { name: "Confirm" })).toBeDisabled();

@@ -409,7 +409,11 @@ test.describe("Link automations", () => {
     expect(await hostDialogText(page)).toContain("automation.critical_nursery_vpd_high_day");
     await allow(page);
     await expect(toast(frame)).toHaveText("Nursery's automations saved.");
-    /* Back where it was opened from, on the same chip. */
+    /* It stays, with what was saved showing and nothing left to apply; Back goes where it was opened from, on the same chip. */
+    await expect(heading(frame, "Link automations: Nursery")).toBeVisible();
+    await expect(draftBar(frame)).toHaveCount(0);
+    await expect(pick(frame, "Nursery Heat Mat On").getByRole("radio", { name: "Failsafes" })).toBeChecked();
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Automations: Nursery")).toBeVisible();
     await expect(chip(frame, "Failsafes")).toHaveAttribute("aria-pressed", "true");
     const was = before.zones.find((z) => z.id === "nursery")!.automations!, now = (await stored(page)).zones.find((z) => z.id === "nursery")!.automations!;
@@ -479,7 +483,7 @@ test.describe("Link automations", () => {
     expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.critical_garden_vpd_low_night");
   });
 
-  test("from a zone's menu on Setup, it comes back to Setup", async ({ page }) => {
+  test("from a zone's menu on Setup, it stays after applying, and Back comes back to Setup", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Setup");
@@ -490,6 +494,9 @@ test.describe("Link automations", () => {
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
     await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(toast(frame)).toHaveText("Veg's automations saved.");
+    await expect(heading(frame, "Link automations: Veg")).toBeVisible();
+    await expect(pick(frame, "Tent Lights Off").locator(".pickrow")).toHaveAttribute("aria-pressed", "false");
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Setup")).toBeVisible();
   });
 });

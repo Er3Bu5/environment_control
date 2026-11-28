@@ -128,6 +128,9 @@ test.describe("map devices", () => {
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
+    /* Applying stays on the step, with nothing left to apply; Finish goes back to the guide. */
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     const saved = await stored(page);
     expect(saved.devices.find((d) => d.entity === "humidifier.garden_dehumidifier")?.zones).toEqual(["garden", "flower_tent"]);
@@ -147,6 +150,9 @@ test.describe("map devices", () => {
     await row(frame, "Environment board").getByRole("button").first().click();
     for (let i = 0; i < 3; i++) await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    /* Applying stays on the step, with nothing left to apply; Finish goes back to the guide. */
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg" }).click();
@@ -206,6 +212,9 @@ test.describe("map devices", () => {
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await expect.poll(() => hostDialogOpen(page)).toBe(false);
+    /* Applying stays on the step, with nothing left to apply; Finish goes back to the guide. */
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.devices).toBe("done");
@@ -363,6 +372,9 @@ test.describe("map devices", () => {
     await expect(dialog(frame)).toContainText("Environment board name");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
     await allow();
+    /* Applying stays on the step, with nothing left to apply; Finish goes back to the guide. */
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     let saved = await stored(page);
     expect(saved.zones.find((x) => x.id === "flower_tent")?.sensors.map((x) => [x.id, x.name, x.nameSource])).toEqual([["d-board", "Canopy left", "confirmed"]]);
@@ -385,6 +397,8 @@ test.describe("map devices", () => {
     await expect(dialog(frame).locator(".review-row")).toHaveText(["Tent heater entityswitch.spare_plug → light.tent_light"]);
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await allow();
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     saved = await stored(page);
     expect(saved.devices.filter((d) => (d.zones as string[]).includes("flower_tent")).map((d) => [d.entity, d.name, d.type])).toEqual([["light.tent_light", "Tent heater", "Heater"]]);
@@ -408,6 +422,9 @@ test.describe("map devices", () => {
     await next(frame).click();
     await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
+    /* Applying stays on the step, with nothing left to apply; Finish goes back to the guide. */
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await goTo(frame, "Setup");
     const questions = app(frame).locator("section", { hasText: "Questions for you" });
