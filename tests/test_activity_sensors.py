@@ -340,3 +340,46 @@ def test_a_reading_current_across_a_restart_counts_as_reporting_up_to_it() -> No
     # A repeat across a restart is the restart writing every state anew, not force_update.
     assert activity.proves_timed(_rows((0, "20"), (100, "20")), [50]) is False
     assert activity.proves_timed(_rows((0, "20"), (100, "20")), []) is True
+
+
+async def test_readings_stopping_half_a_second_apart_across_a_slice_edge_are_one_row(
+    room, hass, freezer, monkeypatch
+) -> None:
+    monkeypatch.setattr(activity, "SLICE_HOURS", 4 / 3600)
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, *_left())
+    t_gone = await clock.at(5, *_left("unavailable")[:2])
+    await clock.at(0.5, *_left("unavailable")[2:])
+    # A slice starts between the two halves.
+    result = await room(zone="garden", start=t0 - 60, end=t_gone + 0.25 + 4 * 3)
+    assert [(e["when"], e["reading"], e["state"]) for e in result["entries"]] == [(t_gone, "all", "stopped")]
+
+
+async def test_a_stop_at_the_cursor_beside_a_logbook_row_is_taken_once(room, hass, freezer, monkeypatch) -> None:
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (HEATER, "off"), (RIGHT, "19.5"), ("sensor.left_temp", "20.5"))
+    await clock.at(1, (HEATER, "on"))
+    # The cap is met on the first of the three rows at this time; the other two still belong to this page.
+    t_both = await clock.at(1, (HEATER, "off"), (RIGHT, "unavailable"), ("sensor.left_temp", "unavailable"))
+    t_end = await clock.at(1, (HEATER, "on"))
+    await async_wait_recording_done(hass)
+    whole = (await room(zone="garden", start=t0 - 60, end=t_end + 1))["entries"]
+
+    monkeypatch.setattr(activity, "MAX_ENTRIES", 2)
+    first = await room(zone="garden", start=t0 - 60, end=t_end + 1)
+    assert first["more"] is True and first["next_end"] == t_both
+    second = await room(zone="garden", start=t0 - 60, end=first["next_end"])
+    assert [e for e in first["entries"] + second["entries"] if e["kind"] == "sensor"] == [
+        e for e in whole if e["kind"] == "sensor"
+    ]
+    assert [e["when"] for e in first["entries"] + second["entries"]] == [e["when"] for e in whole]
+
+
+async def test_a_reading_silent_across_several_slices_stops_once(room, hass, freezer, monkeypatch) -> None:
+    monkeypatch.setattr(activity, "SLICE_HOURS", 120 / 3600)
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (RIGHT, "19.5"))
+    t_heard = await clock.at(30, (RIGHT, "19.5"))
+    t_end = await clock.at(STALE_S + 15 * 60, (HEATER, "on"))
+    await async_wait_recording_done(hass)
+    assert await _direct(hass, t0 - 60, t_end + 1) == [(t_heard + STALE_S, "temperature", "stopped")]
