@@ -171,7 +171,12 @@ async def test_a_zone_page_through_the_real_logbook(room, hass, hass_ws_client, 
 
 
 def test_the_zone_asks_only_for_its_devices_and_linked_automations_never_its_sensors() -> None:
-    assert activity.zone_entities(ROOM, "garden") == ([HEATER], {ALERT}, {"sensor.left_temp": "Left", HEATER: "Heater"})
+    assert activity.zone_entities(ROOM, "garden") == (
+        [HEATER],
+        {ALERT},
+        {"sensor.left_temp": "Left", HEATER: "Heater"},
+        [activity.Reading("s1", "Left", "temperature", "sensor.left_temp")],
+    )
     assert activity.zone_entities(ROOM, "kitchen") is None
 
 
@@ -196,6 +201,23 @@ def test_a_streak_is_broken_by_another_trigger_or_another_entry_of_its_automatio
     assert runs == [(1, 8, 8, "time"), (1, 6, 6, "time"), (1, 5, 5, "state"), (3, 1, 4, "time")]
     assert [e["kind"] for e in collapse.entries] == ["run", "automation", "run", "run", "run", "device"]
     assert collapse.more is False
+
+
+def test_a_streak_is_broken_by_a_gap_of_more_than_an_hour() -> None:
+    def run(hour, minute):
+        when = hour * 3600 + minute * 60
+        return {"when": when, "entity_id": ALERT, "domain": "automation", "name": "A", "source": "time"}
+
+    collapse = activity.Collapse({HEATER}, {ALERT}, {}, activity.MAX_ENTRIES)
+    assert collapse.feed([run(7, 0), run(7, 2), run(9, 30), run(9, 32)], {}, [])
+    assert [(e["count"], e["first"], e["last"]) for e in collapse.entries] == [
+        (2, 9 * 3600 + 30 * 60, 9 * 3600 + 32 * 60),
+        (2, 7 * 3600, 7 * 3600 + 2 * 60),
+    ]
+    # An hour exactly is still one streak.
+    collapse = activity.Collapse({HEATER}, {ALERT}, {}, activity.MAX_ENTRIES)
+    assert collapse.feed([run(7, 0), run(8, 0)], {}, [])
+    assert [e["count"] for e in collapse.entries] == [2]
 
 
 async def test_a_change_with_no_cause_just_after_home_assistant_starts_is_put_down_to_the_start(
@@ -308,7 +330,7 @@ async def test_a_slow_logbook_gives_a_clear_error(room, monkeypatch) -> None:
     ],
 )
 def test_a_trigger_is_sent_as_its_kind_named_only_for_the_zones_own(source, expected) -> None:
-    _, _, names = activity.zone_entities(ROOM, "garden")
+    _, _, names, _ = activity.zone_entities(ROOM, "garden")
     assert activity.trigger(source, names) == expected
 
 
@@ -435,3 +457,28 @@ async def test_a_read_that_timed_out_holds_its_place_until_its_thread_is_done(ro
     await asyncio.sleep(0.6)
     monkeypatch.setattr(activity, "_read", _slow_read([], 0))
     assert (await _activity(room, **{**msg, "end": msg["end"] - 60}))["success"]
+
+
+async def test_a_failure_before_the_read_starts_leaves_activity_free(room, monkeypatch) -> None:
+    from homeassistant.components.logbook import helpers
+
+    real = helpers.async_determine_event_types
+    monkeypatch.setattr(helpers, "async_determine_event_types", lambda *a: 1 / 0)
+    assert not (await _activity(room, **_day()))["success"]
+    monkeypatch.setattr(helpers, "async_determine_event_types", real)
+    r = await _activity(room, **_day())
+    assert r["success"], r
+
+
+async def test_a_read_that_fails_with_nobody_waiting_is_logged(room, monkeypatch, caplog) -> None:
+    def failing(*_args):
+        time.sleep(0.2)
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(activity, "SLICE_HOURS", 25)
+    monkeypatch.setattr(activity, "QUERY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(activity, "_read", failing)
+    assert (await _activity(room, **_day()))["error"]["code"] == "timeout"
+    await asyncio.sleep(0.4)
+    failed = [r for r in caplog.records if r.name == activity.__name__ and r.levelname == "ERROR"]
+    assert len(failed) == 1 and failed[0].exc_info[0] is RuntimeError

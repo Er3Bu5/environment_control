@@ -133,7 +133,7 @@ async def ws_history(hass: HomeAssistant, connection: websocket_api.ActiveConnec
 )
 @websocket_api.async_response
 async def ws_activity(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """One page of a zone's Activity from the logbook: only the zone's devices and the automations it links."""
+    """One page of a zone's Activity: its devices and linked automations from the logbook, its sensors from history."""
     store = _store(hass)
     if store is None:
         connection.send_error(msg["id"], "not_loaded", "Environment Control isn't set up.")
