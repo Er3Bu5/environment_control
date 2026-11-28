@@ -790,7 +790,7 @@ function notHere(el) {
   ui.guard = { title: el.dataset.rotitle, text: NOT_HERE[el.dataset.roctl](p), ok: "OK" };
   renderModal();
 }
-const zoneList = (list) => list.map((o) => `Zone: ${o.name}`).join(", ");
+const zoneList = (list) => (list.length ? `Zone: ${andList(list.map((o) => o.name))}` : "");
 /* The one rule: a linked zone that shares hardware with its parent is the same space for what that hardware measures or
    does, so the parent's settings for it apply. Any environment sensor brings the targets, any light the day and night.
    A zone sees another's settings only through this link. */
@@ -1231,7 +1231,7 @@ function unplacedNote(z) {
 }
 function deviceDetail(z, d) {
   const others = d.zones.filter((id) => id !== z.id).map((id) => zoneById(id).name);
-  return `<div class="detail"><strong>${esc(d.name)}</strong><span>${esc(posText(placedAt(d, z), z.layout))}.</span><span>${esc(d.state)}${d.type && d.type.toLowerCase() !== d.name.toLowerCase() ? `. ${esc(d.type)}` : ""}</span>${others.length ? `<span class="muted">Shared with ${esc(others.join(" and "))}</span>` : ""}</div>`;
+  return `<div class="detail"><strong>${esc(d.name)}</strong><span>${esc(posText(placedAt(d, z), z.layout))}.</span><span>${esc(d.state)}${d.type && d.type.toLowerCase() !== d.name.toLowerCase() ? `. ${esc(d.type)}` : ""}</span>${others.length ? `<span class="muted">Shared with ${esc(andList(others))}</span>` : ""}</div>`;
 }
 function sensorDetail(z) {
   const v = virtualOf(z).find((x) => x.id === ui.picked);

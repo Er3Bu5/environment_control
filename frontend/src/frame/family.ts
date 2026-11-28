@@ -2,6 +2,8 @@
    family. The parent link is the only way one zone's data may ever show in another, so everything that crosses zones
    asks these. Each takes zones as stored (or as read), so it works the same on a save's copy and on what's shown. */
 
+import { andList } from "./model";
+
 export interface Kin {
   id?: unknown;
   name?: unknown;
@@ -66,7 +68,8 @@ export function familyRuns<T extends Kin>(list: readonly T[]): { root: string; z
   return runs;
 }
 
-const zoneList = (list: readonly Kin[]) => list.map((o) => `Zone: ${nameOf(o)}`).join(", ");
+/* "Zone:" once for the whole list, as the person reads it once per paragraph: "Zone: Nursery and Seedlings". */
+export const zoneList = (list: readonly Kin[]) => (list.length ? `Zone: ${andList(list.map(nameOf))}` : "");
 
 /* A sensor in two zones shows one zone's readings in another, which only the parent link may do, so every zone a sensor
    is in has to be one family. Empty when sharing is allowed, else what to tell the person: and where linking to the
