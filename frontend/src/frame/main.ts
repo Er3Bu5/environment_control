@@ -258,6 +258,12 @@ import {
   autoState,
   autosReported,
   chipViews,
+  linkName,
+  notHereText,
+  parentFailsafeNotice,
+  parentHasAutos,
+  parentLinks,
+  roRow,
   failsafeNotice,
   failsafesOff,
   groupViews,
@@ -280,7 +286,7 @@ import {
   otherZoneText,
   toggleLink,
 } from "./automations";
-import { alertsCard, automationsDialog, failsafeNoticeView, linkPage } from "./automations-view";
+import { alertsCard, automationsDialog, failsafeNoticeView, linkPage, parentFailsafeNoticeView } from "./automations-view";
 import { LIGHT_LINE, RANGES, type Point, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
@@ -3033,6 +3039,7 @@ export class EcApp extends LitElement {
           </button>`
         : nothing}
       ${failsafeNoticeView(failsafeNotice(failsafesOff(z, this.states)), () => this.openAutos(z.id, "failsafe"))}
+      ${this.parentFailsafe(z)}
       ${this.periodBlock(z)}
       <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.noLight(z.id) ? nothing : this.lightCard(z)}</div>
       ${this.historyCard(z)}
@@ -3057,13 +3064,28 @@ export class EcApp extends LitElement {
     </div>`;
   }
 
+  private parentFailsafe(z: Zone) {
+    const p = parentOf(this.zones, z);
+    return p ? parentFailsafeNoticeView(parentFailsafeNotice(p.name, failsafesOff(p, this.states))) : nothing;
+  }
+
   private autosDialog() {
     const a = this.autos, z = a && this.zoneById(a.zoneId);
     if (!a || !z) return nothing;
+    const p = parentOf(this.zones, z);
     return automationsDialog({
       zone: z,
       chip: a.chip,
-      chips: chipViews(z, this.states),
+      chips: chipViews(z, this.states, this.zones),
+      from: p
+        ? { name: p.name, links: parentLinks(this.zones, z, a.chip), starred: parentHasAutos(this.zones, z), hidden: !!a.hideFrom, row: (l) => roRow(l, this.states[l.entity], this.now) }
+        : null,
+      onFromToggle: () => (this.autos = this.autos && { ...this.autos, hideFrom: !this.autos.hideFrom }),
+      /* The one-button dialog Link automations answers with: it never sends, and never takes you to the parent. */
+      onNotHere: (l) => {
+        const st = this.states[l.entity];
+        if (p) this.modal = { kind: "guard", title: linkName(l, st), text: notHereText(p.name), keep: "", go: "OK", only: true, safe: true, action: () => {} };
+      },
       groups: groupViews(z, a.chip, this.states),
       row: (l) => autoRow(l, this.states[l.entity], this.autoCtl[l.entity], this.now),
       repeat: repeatCard(this.room, this.states, a.repeat),
