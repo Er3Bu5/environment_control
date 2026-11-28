@@ -8,6 +8,7 @@
 import type { Catalog, CatalogAutomation, Room } from "./messages";
 import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, MAX_LINK_NAME, type RawConfig, type Zone, readLinks } from "./model";
 import { type HaState, numberOf } from "./readings";
+import { parentOf } from "./family";
 
 /* The Automations page's three chips, and the groups each one holds. */
 export const AUTO_CHIPS = ["alert", "failsafe", "control"] as const;
@@ -43,6 +44,8 @@ export interface AutosPage {
   zoneId: string;
   chip: AutoChip;
   repeat?: string;
+  /* A linked zone's choice to hide its parent's card, kept across chips while the dialog stays open. */
+  hideFrom?: boolean;
 }
 
 /* What a review lists, in the shape main.ts's reviews take. */
@@ -172,6 +175,8 @@ export interface AutoRow {
   locked: boolean;
   sub: string;
   line: AutoLine | null;
+  /* A parent's automation shown in its linked zone: drawn as it is, and switched only in the parent. */
+  ro: boolean;
 }
 export function autoRow(link: AutomationLink, st: HaState | undefined, ctl: AutoCtl | undefined, now: number): AutoRow {
   const state = autoState(st), last = st?.attributes.last_triggered;
@@ -179,7 +184,32 @@ export function autoRow(link: AutomationLink, st: HaState | undefined, ctl: Auto
   /* HA says null for one that never ran. Anything else that isn't a time says nothing, rather than claiming that. */
   const when = ran ? `Last triggered ${ran}.` : last === null ? "Never triggered." : "";
   const sub = [STATE_WORDS[state], when].filter(Boolean).join(" ");
-  return { link, name: linkName(link, st), state, on: state === "on", locked: (state !== "on" && state !== "off") || ctl?.status === "sending", sub, line: autoLine(ctl, st) };
+  return { link, name: linkName(link, st), state, on: state === "on", locked: (state !== "on" && state !== "off") || ctl?.status === "sending", sub, line: autoLine(ctl, st), ro: false };
+}
+/* Nothing from the linked zone is ever sent for it, so it has no command to wait on and nothing to lock. */
+export function roRow(link: AutomationLink, st: HaState | undefined, now: number): AutoRow {
+  return { ...autoRow(link, st, undefined, now), locked: false, line: null, ro: true };
+}
+
+/* A linked zone shows every one of its parent's automations for the chip, after its own, read only. The parent link is
+   the only way one zone's automations show in another. */
+export function parentLinks(zones: readonly Zone[], z: Zone, chip: AutoChip): AutomationLink[] {
+  const p = parentOf(zones, z);
+  return p ? linksOf(p, chip) : [];
+}
+/* Whether the parent has any at all, on any chip: then the asterisk line and the show or hide control are there. */
+export const parentHasAutos = (zones: readonly Zone[], z: Zone): boolean => AUTO_CHIPS.some((c) => parentLinks(zones, z, c).length > 0);
+export const fromParentText = (parent: string) => `These belong to Zone: ${parent} and run devices this zone shares. Edit in ${parent}.`;
+export const starText = (parent: string) => `Zone: ${parent} has automations in this group that also run here.`;
+export const showFromText = (parent: string) => `Show automations from Zone: ${parent}`;
+export const editInText = (parent: string) => `Edit in Zone: ${parent}`;
+/* What a tap on a parent's automation says, as Link automations answers a tap on another zone's: never a way there. */
+export const notHereText = (parent: string) => `This automation is associated to Zone: ${parent}. Please edit it in ${parent}.`;
+/* Plain words on the linked zone's page, with nothing to tap: nothing in a linked zone takes you to its parent. */
+export function parentFailsafeNotice(parent: string, off: { name: string }[]): string | null {
+  if (!off.length) return null;
+  const what = off.length === 1 ? `A failsafe in Zone: ${parent} is off: ${off[0].name}. While it's off,` : `${off.length} failsafes in Zone: ${parent} are off. While they're off,`;
+  return `${what} nothing puts that hardware back. Edit in ${parent}.`;
 }
 
 /* Switching a failsafe off is a safety decision, so it asks first. Switching one on, and alerts and control either way,
@@ -210,11 +240,15 @@ export interface ChipView {
   /* The small count beside the name, and the whole button said in words. */
   count: string;
   label: string;
+  /* The parent has automations on this chip too. The count stays the zone's own. */
+  star: boolean;
 }
-export function chipViews(z: Zone, states: Record<string, HaState>): ChipView[] {
+export function chipViews(z: Zone, states: Record<string, HaState>, zones: readonly Zone[] = []): ChipView[] {
+  const p = parentOf(zones, z);
   return AUTO_CHIPS.map((chip) => {
-    const c = countOf(linksOf(z, chip), states), title = CHIP[chip].title;
-    return { chip, title, count: `${c.on}/${c.total}`, label: `${title}, ${c.total ? `${c.on} of ${c.total} on` : "none linked"}` };
+    const c = countOf(linksOf(z, chip), states), title = CHIP[chip].title, star = !!p && linksOf(p, chip).length > 0;
+    const also = star ? `, and Zone: ${p.name} has some that also run here` : "";
+    return { chip, title, count: `${c.on}/${c.total}`, label: `${title}, ${c.total ? `${c.on} of ${c.total} on` : "none linked"}${also}`, star };
   });
 }
 

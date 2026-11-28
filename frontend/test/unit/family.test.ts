@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { familyOf, familyOrder, linkedOrder, linkedZones, moveWords, parentChoices, sameFamily, sensorRefusal, setParent } from "../../src/frame/family";
+import { familyOf, familyOrder, linkText, linkedOrder, linkedZones, moveWords, parentChoices, sameFamily, sensorRefusal, setParent } from "../../src/frame/family";
 import { sensorShare } from "../../src/frame/mapping";
 import { copyConfig, readZones } from "../../src/frame/model";
 
@@ -95,5 +95,21 @@ describe("sharing a sensor", () => {
     expect(sensorRefusal([Z("veg"), Z("garden"), Z("tent", "garden")], "veg", ["tent"])).toBe(
       "This sensor is already associated to Zone: Tent. Tent is itself linked to Zone: Garden, so it can't be this zone's parent.",
     );
+  });
+});
+
+describe("linkText", () => {
+  const zones = [{ id: "garden", name: "Garden" }, { id: "veg", name: "Veg" }, { id: "nursery", name: "Nursery", parent: "veg" }, { id: "gone", name: "Gone", parent: "nowhere" }];
+
+  it("names a linked zone's parent, and the zones linked to a parent", () => {
+    expect(linkText(zones, zones[2])).toBe("Linked to Zone: Veg");
+    expect(linkText(zones, zones[1])).toBe("Zone: Nursery is linked to this zone");
+    const two = [...zones, { id: "seedlings", name: "Seedlings", parent: "veg" }];
+    expect(linkText(two, two[1])).toBe("Zone: Nursery, Zone: Seedlings are linked to this zone");
+  });
+
+  it("says nothing for a zone on its own, or one linked to a zone that's gone", () => {
+    expect(linkText(zones, zones[0])).toBe("");
+    expect(linkText(zones, zones[3])).toBe("");
   });
 });

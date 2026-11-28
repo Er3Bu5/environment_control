@@ -105,3 +105,10 @@ export function moveWords<T extends Kin>(list: readonly T[], z: T, parent: strin
   const others = linkedZones(list, parent).filter((o) => o.id !== z.id).length;
   return `${name || "This zone"} moves next to ${nameOf(p)}${others ? " and the zones linked to it" : ""} on Overview, in the menu and on Setup.`;
 }
+
+/* What a zone's card, its page and its Setup row say about its link, in the design mock's words. */
+export function linkText<T extends Kin>(list: readonly T[], z: T): string {
+  const p = parentOf(list, z), kids = linkedZones(list, idOf(z));
+  if (p) return `Linked to Zone: ${nameOf(p)}`;
+  return kids.length ? `${zoneList(kids)} ${kids.length === 1 ? "is" : "are"} linked to this zone` : "";
+}
