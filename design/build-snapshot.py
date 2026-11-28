@@ -317,11 +317,12 @@ first_logged = parse(LOGBOOK[0]["when"]) if LOGBOOK else start
 ACTIVITY = {"now": iso(now), "earliest": {z["id"]: iso(min(first_logged, start)) for z in zones}, "entries": entries}
 # Limits as they were (#148), in the shape the fake HA answers history with. A snapshot carries no log of the values
 # stored in the panel, so every zone's limits are known only from when it was read, and the History chart draws them
-# flat at what they are now with the key saying so. A helper's past is used where the snapshot's history holds it.
-# Untested against a real snapshot.
+# flat at what they are now with the key saying so. A helper's past is used where the snapshot holds it: limits.json,
+# one row per change of each limit helper, when the snapshot has one.
+HELPER_PAST = json.load(open(f"{root}/ha-snap/limits.json"))["history"] if os.path.exists(f"{root}/ha-snap/limits.json") else {}
 def recorded(entity):
     out = []
-    for stamp, value in H.get("history", {}).get(entity, []):
+    for stamp, value in HELPER_PAST.get(entity) or H.get("history", {}).get(entity, []):
         try:
             out.append([int(parse(stamp).timestamp()), float(value)])
         except (TypeError, ValueError):
