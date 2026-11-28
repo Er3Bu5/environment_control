@@ -557,8 +557,8 @@ await phone(390, 844);
 
   await tap("[data-sort]");
   check("Sort: sorting says so on the page, and the Sort button gives way to Back in the bar at the foot", (await sorting()) && (await ev(`document.querySelector("#sort-note").textContent`)) === "Sorting the cards: move them with the arrows." && (await ev(`document.activeElement.id`)) === "sort-note" && (await ev(`!document.querySelector("[data-sort]")`)) && same(await bars(), { page: ["Back"], draft: null }), await bars());
-  check("Sort: each card has earlier and later, a zone on its own steps among the zones and families, a card in a family only inside it", same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Veg earlier in its group (off)", "Move Veg later in its group"], ["Move Nursery earlier in its group", "Move Nursery later in its group (off)"]]), await arrowsOf());
-  check("Sort: a family has its own pair, joined to the top of its cards, to move it as one block", same(await blockArrows(), [["Move Veg and Nursery earlier", "Move Veg and Nursery later (off)"]]), await blockArrows());
+  check("Sort: each card has previous and next, a zone on its own steps among the zones and families, a card in a family only inside it", same(await arrowsOf(), [["Move Garden to previous (off)", "Move Garden to next"], ["Move Veg to previous in its group (off)", "Move Veg to next in its group"], ["Move Nursery to previous in its group", "Move Nursery to next in its group (off)"]]), await arrowsOf());
+  check("Sort: a family has its own pair, joined to the top of its cards, to move it as one block", same(await blockArrows(), [["Move Veg and Nursery to previous", "Move Veg and Nursery to next (off)"]]), await blockArrows());
   check("Sort: the arrows draw the up and down chevrons", (await ev(`(()=>{const b=document.querySelectorAll('[data-sortcard="veg"] .btn.move');return b[0].querySelector("path").getAttribute("d")===ICON.up&&b[1].querySelector("path").getAttribute("d")===ICON.down})()`)) === true);
   check("Sort: a card is no button and holds nothing else to press, and the notices with their links are gone", (await ev(`[...document.querySelectorAll("#main .zone-card")].every(c=>c.tagName==="DIV"&&!c.closest("button")&&!c.querySelector("[data-go]")&&c.querySelectorAll("button").length===2) && !document.querySelector("#main .fixlink") && !document.querySelector("#main .notice")`)) === true);
   await tap('[data-sortcard="veg"] h2'); await tap('[data-sortcard="veg"] .rows');
@@ -566,15 +566,15 @@ await phone(390, 844);
 
   await move("nursery", -1);
   check("Sort: a move reorders the cards and saves nothing, and Nursery may come before its parent", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await diskOrder(), order0) && same(await menuItems(), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), [await cardNames(), await diskOrder()]);
-  check("Sort: at its family's start a card can't leave it, so its earlier is off and focus goes to its other arrow", (await focused()) === "Move Nursery later in its group" && same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && same(await blockArrows(), [["Move Nursery and Veg earlier", "Move Nursery and Veg later (off)"]]), [await focused(), await arrowsOf(), await blockArrows()]);
+  check("Sort: at its family's start a card can't leave it, so its previous is off and focus goes to its other arrow", (await focused()) === "Move Nursery to next in its group" && same(await arrowsOf(), [["Move Garden to previous (off)", "Move Garden to next"], ["Move Nursery to previous in its group (off)", "Move Nursery to next in its group"], ["Move Veg to previous in its group", "Move Veg to next in its group (off)"]]) && same(await blockArrows(), [["Move Nursery and Veg to previous", "Move Nursery and Veg to next (off)"]]), [await focused(), await arrowsOf(), await blockArrows()]);
   check("Sort: with the order changed, the bar holds the count, Back, Discard and Review and apply", same(await bars(), { page: null, draft: { count: "1", what: "Overview · Zone order", buttons: ["Back", "Discard", "Review and apply"] } }), await bars());
   check("Sort: and the host is told a draft is open", (await told()) === true);
   await tap('[data-moveblock="veg"][data-by="-1"]');
-  check("Sort: a family moves as one block, past the zone before it, and focus goes to its other arrow at the top", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Nursery and Veg later" && same(await blockArrows(), [["Move Nursery and Veg earlier (off)", "Move Nursery and Veg later"]]), [await cardNames(), await focused()]);
+  check("Sort: a family moves as one block, past the zone before it, and focus goes to its other arrow at the top", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Nursery and Veg to next" && same(await blockArrows(), [["Move Nursery and Veg to previous (off)", "Move Nursery and Veg to next"]]), [await cardNames(), await focused()]);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
-  check("Sort: so it can be pressed again from the keyboard", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await focused()) === "Move Nursery and Veg earlier", [await cardNames(), await focused()]);
+  check("Sort: so it can be pressed again from the keyboard", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await focused()) === "Move Nursery and Veg to previous", [await cardNames(), await focused()]);
   await move("garden", 1);
-  check("Sort: a zone on its own steps past a whole family in one press", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Garden earlier", [await cardNames(), await focused()]);
+  check("Sort: a zone on its own steps past a whole family in one press", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Garden to previous", [await cardNames(), await focused()]);
   const inView = await ev(`(()=>{const c=document.querySelector('[data-sortcard="garden"]'),b=document.activeElement.getBoundingClientRect(),bar=[...document.querySelectorAll("#draftbar, #pagebar")].find(x=>!x.hidden).getBoundingClientRect();return {card:c.getBoundingClientRect().bottom>0&&c.getBoundingClientRect().top<innerHeight,top:b.top,bottom:b.bottom,barTop:bar.top}})()`);
   check("Sort: moved to the foot, the arrow used is in the window and above the bar", inView.card && inView.top >= 0 && inView.bottom <= inView.barTop, inView);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
@@ -615,7 +615,7 @@ await phone(390, 844);
 
   await tap("[data-sort]"); await move("nursery", -1);
   await fakeConfig(`c.zones=c.zones.filter(z=>z.id!=="garden")`);
-  check("Sort: a zone removed elsewhere drops out of the draft, and the rest keep their sorted order", same(await cardNames(), ["Nursery", "Veg"]) && same(await arrowsOf(), [["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && (await bars()).draft?.count === "1", [await cardNames(), await bars()]);
+  check("Sort: a zone removed elsewhere drops out of the draft, and the rest keep their sorted order", same(await cardNames(), ["Nursery", "Veg"]) && same(await arrowsOf(), [["Move Nursery to previous in its group (off)", "Move Nursery to next in its group"], ["Move Veg to previous in its group", "Move Veg to next in its group (off)"]]) && (await bars()).draft?.count === "1", [await cardNames(), await bars()]);
   await tap("[data-dreview]");
   check("Sort: and the review names only the zones there are", (await ev(`[...document.querySelectorAll("#review-items .review-row")].map(r=>r.textContent).join("|")`)) === "Zone orderVeg, Nursery → Nursery, Veg", await ev(`document.querySelector("#review-items")?.textContent`));
   await tap("[data-rback]");
@@ -668,6 +668,13 @@ await phone(390, 844);
   const perRow = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const n={};for(const c of document.querySelectorAll("#main .zone-card")){const t=Math.round(c.getBoundingClientRect().top);n[t]=(n[t]||0)+1}return Math.max(...Object.values(n))})()`); };
   const rows1700 = await perRow(1700), rows2300 = await perRow(2300);
   check("Grid: at 1700px no row of the Overview holds three cards, and at 2300px one does", rows1700 < 3 && rows2300 === 3, { rows1700, rows2300 });
+  /* #119: four across on an ultrawide screen, on the same 640px a card, so it takes at least four zones on their own. */
+  await ev(`["g2","g3","g4"].forEach((id,i)=>zones.push({...JSON.parse(JSON.stringify(zoneById("garden"))),id,name:"Garden "+(i+2),parent:null}));render()`); await sleep(60);
+  const wide = {};
+  for (const w of [1700, 2300, 2560, 3440, 5120]) wide[w] = await perRow(w);
+  const cardW = await ev(`Math.round(document.querySelector("#main .zone-card").getBoundingClientRect().width)`);
+  await ev(`zones.splice(0,zones.length,...zones.filter(z=>!["g2","g3","g4"].includes(z.id)));render()`); await perRow(2300);
+  check("Grid: with four zones on their own, a row holds two at 1700px, three at 2300px and 2560px, and four at 3440px and 5120px, a card never wider than about 700px there", same(wide, { 1700: 2, 2300: 3, 2560: 3, 3440: 4, 5120: 4 }) && cardW >= 640 && cardW <= 700, { wide, cardW });
   const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
   check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
   const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
@@ -1628,7 +1635,7 @@ await tap('[data-mdevice="dehu"]'); await ev(`ui.mapw.step=3;render()`); await e
 check("Share: and taking it out again leaves it in Garden only", (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="dehu").zones.join()`)) === "garden");
 await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="fans"]');
-check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Veg, Nursery may affect the device state." }), await shareAsk());
+check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Veg and Nursery may affect the device state." }), await shareAsk());
 await tap("[data-gkeep]");
 /* A sensor may be in two zones only inside one family, a parent and the zones linked to it: one zone's readings show in
    another only through that link. Garden isn't linked to Veg, so Veg's sensor can't be ticked here. */
@@ -1813,7 +1820,7 @@ await ev(`document.querySelector("[data-addzone]").click()`); await sleep(90); a
 await ev(`document.querySelector('[data-wiz="next"]').click()`); await sleep(90); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(400);
 await mOpen("flower_tent"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="aux"]');
-check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Garden, Veg, Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
+check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Garden, Veg and Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
 await shot("share-ask-three-zones-phone");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
 await shot("share-ask-three-zones-desktop");
@@ -2927,6 +2934,11 @@ let nCalls = (await haCalls()).length;
 /* #111: a tap on what's read only answers in the same dialog Link automations shows, over the Automations dialog. */
 const notHereNow = () => ev(`(()=>{const o=document.querySelector("#modal > .modal.over .dialog")||document.querySelector("#modal .dialog");return o && {role:o.getAttribute("role"),title:o.querySelector("#dlg-title").textContent,text:o.querySelector("#dlg-text").textContent,buttons:[...o.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id,over:!!document.querySelector("#modal > .modal.over")}})()`);
 await ev(`(()=>{window.autosWas=document.querySelector("#modal [data-autosdlg]");const s=document.querySelector("#autos-scroll");s.scrollTop=s.scrollHeight;window.autosTop=s.scrollTop})()`);
+for (const look of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: look === "dark" ? [{ name: "prefers-color-scheme", value: "dark" }] : [] }); await sleep(80);
+  await ev(`document.querySelector("#autos-scroll").scrollTop=window.autosTop`); await shot(`linked-from-card-phone-${look}`);
+}
+await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(60);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
 let nh = await notHereNow();
 check("Linked: tapping a read only switch switches nothing and opens the one-button dialog, titled with its name, over the Automations dialog", same(nh, { role: "alertdialog", title: "Failsafe Veg Fans Auto On", text: "This automation is associated to Zone: Veg. Please edit it in Veg.", buttons: ["OK|btn primary"], focus: "dlg-title", over: true }) && (await haCalls()).length === nCalls && (await onHA(`fakeHA.states["automation.failsafe_veg_fans_auto_on"].state`)) === "on", nh);
@@ -2939,6 +2951,50 @@ await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_au
 check("Linked: Escape closes only that dialog, the Automations dialog staying open", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await tellBack();
 check("Linked: and so does Back", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
+/* #111: what's read only reads as not yours before it's tapped, by one shared look: no accent colour on its icon or switch,
+   controls at --ro-dim, a dashed --ro-surface outline barely off the card, its name in --ro-fg at 4.5:1 on that and its
+   second line at 3:1. */
+const grey = (c) => { const v = (c.match(/[\d.]+/g) || []).slice(0, 3); return v.length === 3 && v[0] === v[1] && v[1] === v[2]; };
+const roTiled = (r, ed) => !!r && !!ed && r.tile === r.roBg && r.tile !== ed.tile && r.rowBorder === "dashed" && ed.rowBorder !== "dashed" && [r.icFill, r.icBg, r.knob, r.swBorder].every(grey) && r.nameRatio >= 4.5 && r.subRatio >= 3;
+const roLook = (sel) => ev(`(()=>{const tok=(n,p)=>{const e=document.createElement("span");e.style[p]="var("+n+")";document.body.append(e);const c=getComputedStyle(e)[p];e.remove();return c};
+  const lum=(c)=>{const v=c.match(/[\\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=0.03928?x/12.92:((x+0.055)/1.055)**2.4});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2]};
+  const bgOf=(e)=>{for(;e;e=e.parentElement){const b=getComputedStyle(e).backgroundColor;if(b&&!/rgba\\(.*, 0\\)|transparent/.test(b))return b}return "rgb(255, 255, 255)"};
+  const ratio=(e)=>{const a=lum(getComputedStyle(e).color),b=lum(bgOf(e));return Math.round((Math.max(a,b)+0.05)/(Math.min(a,b)+0.05)*100)/100};
+  const el=document.querySelector(${JSON.stringify("SEL")});if(!el)return null;const cs=getComputedStyle(el),row=el.closest(".dev"),name=row&&row.querySelector(".dev-name");
+  return {dim:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ro-dim")),op:parseFloat(cs.opacity),cursor:cs.cursor,color:cs.color,bg:cs.backgroundColor,roFg:tok("--ro-fg","color"),roBg:tok("--ro-surface","backgroundColor"),tile:row?getComputedStyle(row).backgroundColor:"",rowBorder:row?getComputedStyle(row).borderTopStyle:"",icFill:row&&row.querySelector(":scope > .ic svg")?getComputedStyle(row.querySelector(":scope > .ic svg")).fill:"",icBg:row&&row.querySelector(":scope > .ic")?getComputedStyle(row.querySelector(":scope > .ic")).backgroundColor:"",
+    knob:row&&row.querySelector(".sw i")?getComputedStyle(row.querySelector(".sw i")).backgroundColor:"",swBorder:row&&row.querySelector(".sw")?getComputedStyle(row.querySelector(".sw")).borderTopColor:"",subRatio:row&&row.querySelector(".dev-sub")?ratio(row.querySelector(".dev-sub")):0,
+    name:name?getComputedStyle(name).color:"",nameRatio:name?ratio(name):0,ratio:ratio(el)}})()`.replace('"SEL"', JSON.stringify(sel)));
+const roDimmed = (r) => !!r && r.dim === 0.45 && r.op === r.dim && r.cursor === "not-allowed";
+const edAuto = await roLook('#modal [data-autorow]:not([data-from]) .sw:not(:disabled)'), roAuto = await roLook('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+const fromText = await ev(`(()=>{const c=document.querySelector("#modal [data-fromzone]"),h=c.querySelector("h3"),p=c.querySelector("p");const own=document.querySelector("#modal [data-autorow]:not([data-from])").closest("section")?.querySelector("h3");return [!!own&&own!==h&&getComputedStyle(h).color===getComputedStyle(own).color&&getComputedStyle(h).opacity==="1",getComputedStyle(p).color===getComputedStyle(document.querySelector("#modal [data-autorow]:not([data-from]) .dev-sub")).color,getComputedStyle(c).opacity]})()`);
+check("Linked: a read only switch in the From card is dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where this zone's own switch isn't; no accent colour on its icon or switch where this zone's own has it, on a dashed near-card outline, second line 3:1; the card's heading and line aren't dimmed", roDimmed(roAuto) && roTiled(roAuto, edAuto) && !grey(edAuto.icFill) && !grey(edAuto.knob) && roAuto.name === roAuto.roFg && roAuto.nameRatio >= 4.5 && !!edAuto && edAuto.op === 1 && edAuto.cursor !== "not-allowed" && edAuto.name !== roAuto.name && same(fromText, [true, true, "1"]), { roAuto, edAuto, fromText });
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+check("Linked: dimmed, it still takes the tap that opens the dialog", ((await notHereNow()) || {}).title === "Failsafe Veg Fans Auto On"); await tap("[data-gkeep]");
+/* #113: the whole tile is the target, and only its switch takes focus. */
+const tileCur = await ev(`[getComputedStyle(document.querySelector('#modal [data-fromzone] [data-autorow] .dev-name')).cursor,getComputedStyle(document.querySelector('#modal [data-autorow]:not([data-from]) .dev-name')).cursor]`);
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .dev-name');
+const nhName = ((await notHereNow()) || {}).title; await tap("[data-gkeep]");
+const fsRow = await ev(`(()=>{const s=document.querySelector('#modal [data-autorow]:not([data-from]) .sw.on[data-auto]:not(:disabled)');return s&&s.closest("[data-autorow]").dataset.autorow})()`);
+await tap(`#modal [data-autorow="${fsRow}"] .dev-name`);
+const fsAsk = await ev(`ui.guard && ui.guard.title`); await ev(`ui.guard=null;renderModal()`); await sleep(40);
+check("Linked: a tap on a tile's name answers as its control does: not here on a read-only row, the failsafe question on an editable failsafe that is on; the cursor says which", nhName === "Failsafe Veg Fans Auto On" && /^Switch off /.test(fsAsk || "") && same(tileCur, ["not-allowed", "pointer"]), { nhName, fsAsk, tileCur });
+await openAutosAt("nursery", "alert");
+const swState = (e) => ev(`(()=>{const s=document.querySelector('#modal [data-autorow="${e}"] .sw');return s?s.getAttribute("aria-checked")+(s.disabled?"-busy":""):""})()`);
+const tgRow = await ev(`(()=>{const s=document.querySelector('#modal [data-autorow]:not([data-from]) .sw[data-auto]:not(:disabled)');return s&&s.closest("[data-autorow]").dataset.autorow})()`);
+const tgWas = await swState(tgRow), tgSeen = [];
+for (let i = 0; i < 2; i++) {
+  await tap(`#modal [data-autorow="${tgRow}"] .dev-name`);
+  if (await ev(`!!ui.guard`)) { await ev(`ui.guard=null;renderModal()`); break; }
+  for (let k = 0; k < 40 && /busy/.test(await swState(tgRow)); k++) await sleep(100);
+  tgSeen.push(await swState(tgRow));
+}
+const flip = tgWas === "true" ? "false" : "true";
+check("Automations: a tap on an editable row's name toggles its switch, and a second tap toggles it back", !!tgRow && same(tgSeen, [flip, tgWas]), { tgRow, tgWas, tgSeen });
+const tabbed = [];
+await ev(`document.querySelector('#modal [data-autorow] .sw').focus()`);
+for (let i = 0; i < 6; i++) { await key("Tab", 9); tabbed.push(await ev(`(()=>{const a=document.activeElement;return a.matches(".dev")?"tile":a.matches(".sw")?"switch":a.tagName})()`)); }
+check("Automations: Tab goes from switch to switch and never stops on a tile", tabbed.includes("switch") && !tabbed.includes("tile"), tabbed);
+await openAutosAt("nursery", "failsafe");
 await tap('#modal [data-fromzone] h3');
 check("Linked: nothing in the card takes you to Veg", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !!ui.autos && !ui.guard`)) === true);
 await ev(`ui.autos=null;renderModal()`);
@@ -2981,6 +3037,12 @@ const modeWas = await ev(`[...document.querySelectorAll('[data-devrow="aux"][dat
 const a3 = await devAsk('[data-devrow="aux"][data-zone="nursery"] label.chip:not(:has(input:checked))');
 check("Linked: tapping a read only switch, dial step or mode chip sends nothing and opens the one-button dialog titled with the device's name, with no toast, staying on Nursery", (await haCalls()).length === nCalls && same([a1, a2, a3], [[await devName("lp-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("lc-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("aux"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true]]) && (await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`)) === modeWas, [a1, a2, a3, (await haCalls()).slice(nCalls)]);
 await tap('[data-devrow="lp-tent"][data-zone="nursery"] .sw'); await both("linked-not-here-device"); await tap("[data-gkeep]");
+const roDev = await roLook('[data-devrow="lp-tent"][data-zone="nursery"] .sw'), roDial = await roLook('[data-devrow="lc-tent"][data-zone="nursery"] .dial'), roChip = await roLook('[data-devrow="aux"][data-zone="nursery"] label.chip');
+await ev(`ui.zone="garden";render()`); await sleep(30);
+const edDev = await roLook('.dev[data-zone="garden"]:not(.ro) .dev-ctl .sw:not(:disabled)');
+await ev(`ui.zone="nursery";render()`); await sleep(30);
+check("Linked: a shared device's switch, dial and mode chips are dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, with no accent colour on its icon or switch, on a dashed near-card outline, second line 3:1, where an unlinked zone's aren't", [roDev, roDial, roChip].every(roDimmed) && roTiled(roDev, edDev) && roDev.name === roDev.roFg && roDev.nameRatio >= 4.5 && !!edDev && edDev.op === 1 && edDev.name !== roDev.name, { roDev, roDial, roChip, edDev });
+check("Linked: dimmed, the device's switch still takes the tap that opens the dialog", (await devAsk('[data-devrow="lp-tent"][data-zone="nursery"] .sw'))[0] === (await devName("lp-tent")));
 await ev(`ui.zone="veg";render()`); await sleep(30);
 const vegTent = await devRow("lp-tent", "veg");
 check("Linked: in Veg the same device is switched as ever, and its line names Nursery", !!vegTent && vegTent.acts > 0 && vegTent.ro.every((x) => !x) && vegTent.sub.includes("Shared with Nursery"), vegTent);
@@ -2998,6 +3060,8 @@ check("Linked: and its red lights are Veg's too", td.red.line === "This zone sha
 const SET_SAYS = (z) => `These settings are Zone: ${z}'s. Please edit them in ${z}.`;
 const setAsk = async (sel) => { await clearToast(); await tap(sel); const d = await notHereNow(), t = await toastNow(), where = await ev(`ui.screen+":"+!!ui.td`); await tap("[data-gkeep]"); return [d && d.title, d && d.text, d && d.buttons.join(), t, where, await ev(`!ui.guard`)]; };
 check("Linked: tapping Nursery's day box opens the one-button dialog, Day and night, with no toast, staying on the page", same(await setAsk("#sro-day"), ["Day and night", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#sro-day"));
+const roBox = await roLook("#sro-day"), edBox = await roLook("#td-targets input:not([type=radio]):not([readonly])");
+check("Linked: a read only day box has the muted box and lower-contrast figures of the shared look, at 4.5:1 or better, not opacity, where an editable box doesn't", !!roBox && roBox.bg === roBox.roBg && roBox.color === roBox.roFg && roBox.op === 1 && roBox.ratio >= 4.5 && roBox.cursor === "not-allowed" && !!edBox && edBox.color !== roBox.color && edBox.bg !== roBox.bg, { roBox, edBox });
 /* Veg uses no red lights in the sample, so for this one check it borrows Garden's, set in Environment Control. */
 await ev(`window.vegEm=[zoneById("veg").emersonMode,zoneById("veg").emerson];Object.assign(zoneById("veg"),{emersonMode:"fixed",emerson:{...zoneById("garden").emerson}});render()`); await sleep(40);
 check("Linked: and a red lights box opens it titled Red lights", same(await setAsk("#s-emerson input"), ["Red lights", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#s-emerson input"));
@@ -3067,7 +3131,7 @@ await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[]})`); await sleep(100)
 await ev(`zoneById("garden").parent=undefined;zoneById("${bench}").parent="veg";askRemoveZone("veg")`); await sleep(40);
 /* Listed in the zone order, where Bench now sits next to Garden, the parent it was made under. */
 const rmRows = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
-check("Linked: several are named together", rmRows === "Linked zonesBench, Nursery are unlinked", rmRows);
+check("Linked: several are named together", rmRows === "Linked zonesBench and Nursery are unlinked", rmRows);
 await both("linked-remove");
 await key("Escape", 27); await ev(`zoneById("${bench}").parent="garden";delete zoneById("garden").parent;render()`);
 /* Removing Bench's parent for real would take Garden, so Bench becomes a parent here instead: Shelf, linked to it. */
