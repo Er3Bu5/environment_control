@@ -31,8 +31,7 @@ export const styles = css`
   /* The page menu's button and the page's heading share the top row: the button at the left, at the foot of the
      heading block, and the heading centred. They're two items in one grid cell, so the button follows the heading's
      height whatever it holds. */
-  .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 12; }
-  .navmenu .menu { left: 0; right: auto; }
+  .zmenu.navmenu { grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 25; }
   .menu [aria-current="page"] { color: var(--primary); font-weight: 500; }
   .navmenu + * { grid-area: 1 / 1; min-height: 36px; padding-inline: 48px; text-align: center; }
   .navmenu + * h1 { line-height: 34px; }
@@ -106,7 +105,7 @@ export const styles = css`
   .btn.burger { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; }
   .btn.burger svg { width: 20px; height: 20px; fill: var(--fg); }
   .btn.burger[aria-expanded="true"] { border-color: var(--primary); }
-  .menu { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
+  .menu { min-width: 220px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 8px 24px #00000029; }
   .menu[hidden] { display: none; }
   .menu button { text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
   .menu button:hover, .menu button:focus-visible { background: var(--tile); outline: none; }
@@ -501,6 +500,9 @@ export const styles = css`
   /* Helper search boxes: a field, and a short list of matches under it. */
   .picker { display: flex; flex-direction: column; gap: 4px; position: relative; }
   .picker .field { max-width: none; }
+  /* A dropped list is placed by droplist.ts, fixed to the window: above cards and the draft bar, under a dialog's layer. */
+  .drop { position: fixed; z-index: 25; box-sizing: border-box; width: max-content; margin: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .drop[hidden] { display: none; }
   .picklist-menu { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 6px 18px #00000026; }
   .picklist-menu li { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
   .picklist-menu li.active, .picklist-menu li:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
