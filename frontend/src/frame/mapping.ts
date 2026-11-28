@@ -4,6 +4,7 @@
    HA's own device class and unit, never by name. Where a device has two candidates for a slot, Setup asks; where it has
    none, the slot is not used. Nothing here is saved: it builds a draft, lists what the draft would change, and applies
    it to a copy of the stored setup that the host then saves, asking you first about anything newly controllable. */
+import { sensorRefusal } from "./family";
 import { MAX_VIRTUAL, VIRTUAL_TYPES, type VirtualType } from "./layout";
 import type { Catalog, CatalogDevice, CatalogEntity, LinkKind, PathKind } from "./messages";
 import type { RawConfig } from "./model";
@@ -268,6 +269,15 @@ export function deviceElsewhere(c: RawConfig, zoneId: string, entity: string): s
 export function sensorElsewhere(c: RawConfig, zoneId: string, id: string): string[] {
   const zones = c.zones.filter((z) => Array.isArray(z.sensors) && z.sensors.some((x) => isObj(x) && x.id === id)).map((z) => z.id);
   return zones.includes(zoneId) ? [] : zoneNames(c, zones);
+}
+/* Ticking a sensor other zones have: inside this zone's family it's asked about (others, in Overview's order), and
+   anywhere else it's refused, since only the parent link may show one zone's readings in another (#91). By the saved
+   setup, as the question goes. */
+export function sensorShare(c: RawConfig, zoneId: string, id: string): { others: string[]; refusal: string } {
+  const others = sensorElsewhere(c, zoneId, id);
+  if (!others.length) return { others, refusal: "" };
+  const holders = c.zones.filter((z) => Array.isArray(z.sensors) && z.sensors.some((x) => isObj(x) && x.id === id)).map((z) => z.id as string);
+  return { others, refusal: sensorRefusal(c.zones, zoneId, holders) };
 }
 
 export interface Issue {

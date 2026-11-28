@@ -44,6 +44,8 @@ export interface Zone {
   sensors: { id: string; placed: boolean }[];
   setup: Partial<Record<SetupStep, StepState>>;
   automations: AutomationLink[];
+  /* The zone it's linked to (#91), null when it isn't. */
+  parent: string | null;
 }
 export interface Device {
   id: string;
@@ -85,7 +87,7 @@ export function readZones(list: unknown[]): Zone[] {
     const sensors = Array.isArray(z.sensors)
       ? z.sensors.filter(isObj).filter((s) => typeof s.id === "string").map((s) => ({ id: s.id as string, placed: Array.isArray(s.pos) }))
       : [];
-    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, history: readHistory(z.history), layout: readLayout(z.layout), sensors, setup, automations: readLinks(z.automations) });
+    out.push({ id: z.id, name: z.name, description: typeof z.description === "string" ? z.description : null, history: readHistory(z.history), layout: readLayout(z.layout), sensors, setup, automations: readLinks(z.automations), parent: typeof z.parent === "string" ? z.parent : null });
   }
   return out;
 }
