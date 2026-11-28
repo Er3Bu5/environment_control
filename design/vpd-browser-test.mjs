@@ -635,11 +635,34 @@ await phone(390, 844);
   const joined = () => ev(`(()=>{const r=(id)=>document.querySelector('#main .zone-card[data-zone="'+id+'"]').getBoundingClientRect(),g=r("garden"),n=r("nursery"),v=r("veg"),t=document.querySelector("#main .linktab"),tr=t.getBoundingClientRect(),cs=(id)=>getComputedStyle(document.querySelector('#main .zone-card[data-zone="'+id+'"]'));return {side:{nv:v.left-n.right,top:v.top-n.top,gn:n.left-g.right},stack:{nv:v.top-n.bottom,left:v.left-n.left,gn:n.top-g.bottom},tab:{label:t.getAttribute("aria-label"),title:t.title,inCard:!!t.closest('[data-zone="nursery"]'),x:tr.left+tr.width/2-n.right,y:tr.top+tr.height/2-n.bottom},corners:{n:[cs("nursery").borderTopLeftRadius,cs("nursery").borderTopRightRadius,cs("nursery").borderBottomLeftRadius,cs("nursery").borderBottomRightRadius],v:[cs("veg").borderTopLeftRadius,cs("veg").borderTopRightRadius,cs("veg").borderBottomLeftRadius,cs("veg").borderBottomRightRadius]},families:document.querySelectorAll("#main .fam").length}})()`);
   await ev(`window.scrollTo(0,0)`);
   let jd = await joined();
-  check("Joined: on a desktop Nursery and Veg sit side by side in one row, touching with no gap, Garden apart by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.side.gn >= 10 && jd.families === 1, jd);
+  check("Joined: on a desktop Nursery and Veg sit side by side, filling a row of their own, touching with no gap, Garden apart above by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.stack.gn >= 10 && jd.side.gn < 0 && jd.families === 1, jd);
   check("Joined: the link tab sits on their seam, and says what's linked to what", jd.tab.label === "Zone: Nursery is linked to Zone: Veg" && jd.tab.title === jd.tab.label && Math.abs(jd.tab.x) <= 2, jd.tab);
   check("Joined: the outer corners are rounded and the inner ones square", same(jd.corners, { n: ["12px", "0px", "12px", "0px"], v: ["0px", "12px", "0px", "12px"] }), jd.corners);
   const badges = await ev(`[...document.querySelectorAll("#main .zone-card")].map(c=>[c.querySelector("h2").textContent,[...c.querySelectorAll(".parentbadge")].map(b=>b.textContent+(b.previousElementSibling&&b.previousElementSibling.tagName==="H2"?" by name":"")).join(),(c.querySelector(".zlinked")||{}).textContent||""])`);
   check("Joined: the parent carries a Parent badge beside its name, whichever place it sits, and the linked card still says what it's linked to", same(badges, [["Garden", "", ""], ["Nursery", "", "Linked to Zone: Veg"], ["Veg", "Parent by name", "Zone: Nursery is linked to this zone"]]), badges);
+  /* The linked line and the combine note sit on the name's line, so a linked or combined card's tracks start level with the rest of its row. */
+  const titleLine = () => ev(`(()=>{const R=(e)=>e&&e.getBoundingClientRect(),hit=(a,b)=>!!(a&&b)&&a.left<b.right-0.5&&b.left<a.right-0.5&&a.top<b.bottom-0.5&&b.top<a.bottom-0.5,vo=(a,b)=>!!(a&&b)&&a.top<b.bottom&&b.top<a.bottom;return [...document.querySelectorAll("#main .zone-card")].map(c=>{const r=R(c),h=R(c.querySelector("h2")),n=R(c.querySelector(".cardnote")),b=R(c.querySelector(".parentbadge"));return {zone:c.dataset.zone,top:Math.round(r.top),track:Math.round(R(c.querySelector(".track")).top),linked:vo(h,R(c.querySelector(".zlinked"))),combined:vo(h,R(c.querySelector(".zcombined"))),inside:[h,n,b].filter(Boolean).every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5),clash:hit(n,h)||hit(n,b)}})})()`);
+  const tl = await titleLine(), tlz = (id) => tl.find((c) => c.zone === id) || {};
+  check("Title line: on a linked card the linked text sits on the name's line, both sides of the link", tlz("nursery").linked && tlz("veg").linked, tl);
+  check("Title line: a card with several sensors says how they combine on the name's line", tlz("garden").combined, tl);
+  /* Three across only once each card gets about 640px, so not on a 1700px screen, where they'd be cramped. */
+  const perRow = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const n={};for(const c of document.querySelectorAll("#main .zone-card")){const t=Math.round(c.getBoundingClientRect().top);n[t]=(n[t]||0)+1}return Math.max(...Object.values(n))})()`); };
+  const rows1700 = await perRow(1700), rows2300 = await perRow(2300);
+  check("Grid: at 1700px no row of the Overview holds three cards, and at 2300px one does", rows1700 < 3 && rows2300 === 3, { rows1700, rows2300 });
+  const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
+  check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
+  const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
+  for (const w of [2300, 1280, 760, 500]) {
+    await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
+    for (const long of [false, true]) {
+      if (long) { await ev(`zones.find(z=>z.id==="veg").name="Veg room with a rather long name for its card";render()`); await sleep(40); }
+      /* A name too long for the line wraps, and the note goes under it, so only then may a card's tracks sit lower. */
+      const t = await titleLine(), bad = t.filter((c) => !c.inside || c.clash || (!long && t.some((o) => o.top === c.top && o.track !== c.track)));
+      check(`Title line: at ${w} px${long ? " with a long name" : ""} nothing on the name's line is cut off or overlapped${long ? "" : ", and cards in a row start their tracks level"}`, bad.length === 0, t);
+    }
+    await ev(`zones.find(z=>z.id==="veg").name=${JSON.stringify(vegName)};render()`);
+  }
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
   const seamAt = await ev(`(()=>{const n=document.querySelector('#main .zone-card[data-zone="nursery"]').getBoundingClientRect();return {x:n.left+n.width/2,y:n.top+40,sx:n.right-0.5,sy:n.top+40}})()`);
   await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: seamAt.x, y: seamAt.y }); await sleep(80);
   check("Joined: a card's own border shows whole on just that card, over the seam it shares", (await ev(`document.elementFromPoint(${seamAt.sx},${seamAt.sy}).closest(".zone-card").dataset.zone`)) === "nursery" && (await ev(`getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderRightColor===getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor && getComputedStyle(document.querySelector('#main .zone-card[data-zone="veg"]')).borderTopColor!==getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor`)) === true);
@@ -1652,7 +1675,7 @@ const overview = await ev(`(()=>{const c=document.querySelector("#main .zone-car
 check("Overview: a zone with several sensors says how they combine", overview.text.includes("Average of 3 sensors"), overview.text);
 check("Overview: light is on the card, without a track", overview.rows === 4 && overview.tracks === 3, overview);
 check("Overview: light shows the zone's combined reading", overview.text.includes(await ev(`fmt("light",zones[0].now.light)`)));
-check("Overview: a one-sensor zone says nothing about combining", !(await ev(`document.querySelectorAll("#main .zone-card")[1].textContent`)).includes("sensors."));
+check("Overview: a one-sensor zone says nothing about combining", (await ev(`document.querySelectorAll("#main .zone-card")[1].querySelector(".zcombined")`)) === null);
 check("Overview: zones count units, not pots", /\d+ units/.test(await ev(`ui.screen="zone";ui.zone=zones[0].id;render();const t=document.querySelector("#main").textContent;ui.screen="overview";render();t`)) && !/\bpots?\b/i.test(await ev(`document.documentElement.innerHTML`)));
 await ev(`zones[0].combine={env:"highest"};render()`); await sleep(40);
 check("Overview: the note names the environment method", (await ev(`document.querySelector("#main .zone-card").textContent`)).includes("Highest of 3 sensors"));
