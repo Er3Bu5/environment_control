@@ -629,7 +629,7 @@ await phone(390, 844);
   const joined = () => ev(`(()=>{const r=(id)=>document.querySelector('#main .zone-card[data-zone="'+id+'"]').getBoundingClientRect(),g=r("garden"),n=r("nursery"),v=r("veg"),t=document.querySelector("#main .linktab"),tr=t.getBoundingClientRect(),cs=(id)=>getComputedStyle(document.querySelector('#main .zone-card[data-zone="'+id+'"]'));return {side:{nv:v.left-n.right,top:v.top-n.top,gn:n.left-g.right},stack:{nv:v.top-n.bottom,left:v.left-n.left,gn:n.top-g.bottom},tab:{label:t.getAttribute("aria-label"),title:t.title,inCard:!!t.closest('[data-zone="nursery"]'),x:tr.left+tr.width/2-n.right,y:tr.top+tr.height/2-n.bottom},corners:{n:[cs("nursery").borderTopLeftRadius,cs("nursery").borderTopRightRadius,cs("nursery").borderBottomLeftRadius,cs("nursery").borderBottomRightRadius],v:[cs("veg").borderTopLeftRadius,cs("veg").borderTopRightRadius,cs("veg").borderBottomLeftRadius,cs("veg").borderBottomRightRadius]},families:document.querySelectorAll("#main .fam").length}})()`);
   await ev(`window.scrollTo(0,0)`);
   let jd = await joined();
-  check("Joined: on a desktop Nursery and Veg sit side by side in one row, touching with no gap, Garden apart by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.side.gn >= 10 && jd.families === 1, jd);
+  check("Joined: on a desktop Nursery and Veg sit side by side, filling a row of their own, touching with no gap, Garden apart above by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.stack.gn >= 10 && jd.side.gn < 0 && jd.families === 1, jd);
   check("Joined: the link tab sits on their seam, and says what's linked to what", jd.tab.label === "Zone: Nursery is linked to Zone: Veg" && jd.tab.title === jd.tab.label && Math.abs(jd.tab.x) <= 2, jd.tab);
   check("Joined: the outer corners are rounded and the inner ones square", same(jd.corners, { n: ["12px", "0px", "12px", "0px"], v: ["0px", "12px", "0px", "12px"] }), jd.corners);
   const badges = await ev(`[...document.querySelectorAll("#main .zone-card")].map(c=>[c.querySelector("h2").textContent,[...c.querySelectorAll(".parentbadge")].map(b=>b.textContent+(b.previousElementSibling&&b.previousElementSibling.tagName==="H2"?" by name":"")).join(),(c.querySelector(".zlinked")||{}).textContent||""])`);
@@ -639,10 +639,14 @@ await phone(390, 844);
   const tl = await titleLine(), tlz = (id) => tl.find((c) => c.zone === id) || {};
   check("Title line: on a linked card the linked text sits on the name's line, both sides of the link", tlz("nursery").linked && tlz("veg").linked, tl);
   check("Title line: a card with several sensors says how they combine on the name's line", tlz("garden").combined, tl);
-  const tl3 = tl, tl3z = (id) => tl3.find((c) => c.zone === id) || {};
+  /* Three across only once each card gets about 640px, so not on a 1700px screen, where they'd be cramped. */
+  const perRow = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const n={};for(const c of document.querySelectorAll("#main .zone-card")){const t=Math.round(c.getBoundingClientRect().top);n[t]=(n[t]||0)+1}return Math.max(...Object.values(n))})()`); };
+  const rows1700 = await perRow(1700), rows2300 = await perRow(2300);
+  check("Grid: at 1700px no row of the Overview holds three cards, and at 2300px one does", rows1700 < 3 && rows2300 === 3, { rows1700, rows2300 });
+  const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
   check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
   const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
-  for (const w of [1280, 760, 500]) {
+  for (const w of [2300, 1280, 760, 500]) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
     for (const long of [false, true]) {
       if (long) { await ev(`zones.find(z=>z.id==="veg").name="Veg room with a rather long name for its card";render()`); await sleep(40); }
