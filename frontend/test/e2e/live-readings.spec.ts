@@ -36,6 +36,8 @@ test.describe("live readings", () => {
     await row(frame, "Two probe board").getByLabel(/^Top temp,/).check();
     for (let i = 0; i < 3; i++) await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(next(frame)).toHaveText("Finish");
+    await next(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await goTo(frame, "Flower tent");
     return frame;
