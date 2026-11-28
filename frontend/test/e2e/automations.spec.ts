@@ -556,7 +556,12 @@ test.describe("Link automations", () => {
     expect(await hostDialogText(page)).toContain("automation.critical_nursery_vpd_high_day");
     await allow(page);
     await expect(toast(frame)).toHaveText("Nursery's automations saved.");
-    /* Back on Setup, where it was opened from; the zone's Automations dialog shows what was saved. */
+    /* It stays, with what was saved showing and nothing left to apply; Back goes to Setup, where it was opened from, and
+       the zone's Automations dialog shows what was saved. */
+    await expect(heading(frame, "Link automations: Nursery")).toBeVisible();
+    await expect(draftBar(frame)).toHaveCount(0);
+    await expect(pick(frame, "Nursery Heat Mat On").getByRole("radio", { name: "Failsafes" })).toBeChecked();
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Setup")).toBeVisible();
     const was = before.zones.find((z) => z.id === "nursery")!.automations!, now = (await stored(page)).zones.find((z) => z.id === "nursery")!.automations!;
     const id = (entity: string, list: Link[]) => list.find((a) => a.entity === entity)?.id;
@@ -608,7 +613,7 @@ test.describe("Link automations", () => {
     expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.critical_garden_vpd_low_night");
   });
 
-  test("is opened by Automations in a zone's menu on Setup, and Back and Apply come back to Setup", async ({ page }) => {
+  test("is opened by Automations in a zone's menu on Setup; Back comes back to Setup, and Apply stays", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Setup");
@@ -625,6 +630,9 @@ test.describe("Link automations", () => {
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
     await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(toast(frame)).toHaveText("Veg's automations saved.");
+    await expect(heading(frame, "Link automations: Veg")).toBeVisible();
+    await expect(pick(frame, "Tent Lights Off").locator(".pickrow")).toHaveAttribute("aria-pressed", "false");
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Setup")).toBeVisible();
   });
 });

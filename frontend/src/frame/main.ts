@@ -852,11 +852,27 @@ export class EcApp extends LitElement {
         this.modalOpener = this.shadowRoot?.activeElement ?? null;
         focus("#dlg-title");
       } else if (!this.modal && before) {
-        if (usable(this.modalOpener)) this.modalOpener.focus({ preventScroll: true });
+        if (usable(this.modalOpener) && this.modalOpener.offsetParent) this.modalOpener.focus({ preventScroll: true });
+        else if (this.appliedFocus && !this.autos) this.focusAfterApply()?.focus({ preventScroll: true });
+        else if (usable(this.modalOpener)) this.modalOpener.focus({ preventScroll: true });
         else if (this.autos) focus("#autos-title");
       }
+      this.appliedFocus = false;
       if (!this.modal) this.classList.remove("dlgkeys");
     }
+  }
+
+  /* A page that stays after applying redraws its bar, so the Review and apply button that opened the review can be gone.
+     Focus goes to the wizard's going-on button in its place, or else the page's heading. */
+  private appliedFocus = false;
+
+  private focusAfterApply(): HTMLElement | null {
+    const root = this.shadowRoot;
+    const next = root?.querySelector("main .wizbar .draft-review:not([disabled])") as HTMLElement | null;
+    if (next) return next;
+    const h = root?.querySelector("main h1") as HTMLElement | null;
+    if (h && !h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1");
+    return h;
   }
 
   /* Leaving drops a draft, so it asks first. */
@@ -1025,15 +1041,18 @@ export class EcApp extends LitElement {
               markStep(c, w.id, "details", "done");
             } else created = addZone(c, w.name, w.desc);
           }),
+        /* Applying stays on the step, with nothing left to apply, so Finish or Cancel leaves (#156). A new zone has no
+           pages to stay on, so it opens its setup guide. */
         after: () => {
-          this.wiz = null;
           if (created) {
+            this.wiz = null;
             this.guide = created;
             this.toast(`${w.name.trim()} created.`);
-          } else {
-            this.toast("Zone details saved.");
-            this.backFromEditor(w.id, w.fromGuide);
+            return;
           }
+          const z = this.zoneById(w.id);
+          this.wiz = z ? { id: z.id, name: z.name, desc: z.description ?? "", fromGuide: w.fromGuide } : null;
+          this.toast("Zone details saved.");
         },
       };
       return;
@@ -1056,6 +1075,7 @@ export class EcApp extends LitElement {
       return;
     }
     this.modal = null;
+    this.appliedFocus = true;
     r.after();
   };
 
@@ -1254,9 +1274,12 @@ export class EcApp extends LitElement {
           applyMap(c, m, sensors, controls);
           markStep(c, m.zoneId, "devices", "done");
         }),
+      /* Applying stays on the step it was applied from (#156), unless Placement sent you: its draft is held for the way
+         back, and what was just added is there to be placed. */
       after: () => {
         this.toast("Mapping saved.");
-        this.mapDone(m.zoneId);
+        if (this.mapToPlace || !this.mapw) return void this.mapDone(m.zoneId);
+        this.mapw = { ...openMap(this.config, m.zoneId), step: this.mapw.step };
       },
     };
   };
@@ -1371,9 +1394,11 @@ export class EcApp extends LitElement {
           applyLayout(c, d);
           markStep(c, d.zoneId, step, "done");
         }),
+      /* Applying stays on the step it was applied from, so the last button reads Finish again (#156). */
       after: () => {
         this.toast(step === "place" ? "Device placement saved." : "Zone layout saved.");
-        this.layDone(d.zoneId);
+        const now = this.lay;
+        if (now) this.lay = { ...openLayout(this.config, now.zoneId, now.flow), step: now.step, pick: now.pick };
       },
     };
   };
@@ -1504,16 +1529,19 @@ export class EcApp extends LitElement {
       busyText: boards ? "Applying and verifying..." : "Saving...",
       apply: () => this.applyLeaf(d),
       refresh: () => (this.leafw ? this.leafChangeList(this.leafw) : []),
+      /* It stays on the page so the result can be read where it was set, the chart's Change link included (#156). The
+         chart's target follows the new offset now, so Back finds the chart's draft as it was with only that moved. */
       after: () => {
         const now = this.leafw, said = boards ? "Leaf temperature offsets saved on the boards." : "Leaf temperature offsets saved.";
-        /* It stays on the page so the result can be read where it was set, unless the chart sent you. */
-        if (now && this.sched) {
-          this.leafw = null;
-          this.toast(this.backToChart() ? `${said} Target moved to stay in the ideal zone.` : said);
-          return;
+        if (!now) return void this.toast(said);
+        let moved = false;
+        if (this.sched) {
+          const leaf = zoneLeaf(this.raw(now.zoneId), this.states);
+          if (leaf !== this.leafBefore) this.setTgt((t) => (moved = followLeaf(t, leaf)));
+          this.leafBefore = leaf;
         }
-        if (now) this.leafw = openLeaf(this.raw(now.zoneId), now.zoneId, this.catalog, this.states, now.fromGuide);
-        this.toast(said);
+        this.leafw = openLeaf(this.raw(now.zoneId), now.zoneId, this.catalog, this.states, now.fromGuide);
+        this.toast(moved ? `${said} Target moved to stay in the ideal zone.` : said);
       },
     };
   };
@@ -1715,9 +1743,13 @@ export class EcApp extends LitElement {
       busyText: onHelpers ? "Applying and verifying..." : "Saving...",
       apply: () => this.applySched(d),
       refresh: () => (this.sched ? this.schedChangeList(this.sched) : []),
+      /* Applying stays here, so what was saved can be read where it was set (#156). Back goes wherever it was opened from. */
       after: () => {
-        const now = this.sched;
-        if (now) this.schedDone(now, true);
+        const now = this.sched, period = this.tgt?.period;
+        if (now) {
+          this.sched = openSched(this.raw(now.zoneId), now.zoneId, this.catalog, this.states, now.fromGuide);
+          this.tgt = { ...this.openTgt(now.zoneId), ...(period ? { period } : {}) };
+        }
         this.toast(onHelpers ? `${z?.name ?? "Zone"} saved, on your helpers too.` : `${z?.name ?? "Zone"} saved.`);
       },
     };
@@ -2083,9 +2115,11 @@ export class EcApp extends LitElement {
       busy: false,
       error: "",
       apply: () => this.save((c) => applyLinks(c, d.zoneId, d.pick)),
+      /* Applying stays here, so what was linked can be read where it was set (#156). */
       after: () => {
         this.toast(SAID.linksSaved(z.name));
-        this.linkDone(d);
+        const now = this.linkw, saved = this.zoneById(d.zoneId);
+        if (now && saved) this.linkw = { ...openLinks(saved, now.from), q: now.q };
       },
     };
   };

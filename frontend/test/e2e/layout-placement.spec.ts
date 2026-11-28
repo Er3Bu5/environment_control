@@ -34,6 +34,10 @@ test.describe("zone layout and placement", () => {
     await expect(dialog(frame)).toContainText("1.2 x 1.2 m");
     await expect(dialog(frame)).toContainText("2.4 x 1.2 m");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* It stays on the step applied, with nothing left to apply, and Finish leaves. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Zone layout: Veg", exact: true })).toBeVisible();
+    await expect(finish(frame)).toHaveText("Finish");
+    await finish(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await expect.poll(async () => (await stored(page)).zones.find((z) => z.id === "veg")?.layout).toEqual({ w: 2.4, d: 1.2, units: 8, rows: 2, cols: 4 });
   });
@@ -54,7 +58,7 @@ test.describe("zone layout and placement", () => {
     expect(last).toBeLessThanOrEqual(top);
   });
 
-  test("finishing or cancelling a setup editor goes back where it was opened: Setup from its menu, the zone's page from a link", async ({ page }) => {
+  test("finishing or cancelling a setup editor goes back where it was opened: Setup from its menu, the zone's page from a link; applying stays", async ({ page }) => {
     const frame = await openFromMenu(page, "Garden", "Zone layout");
     await app(frame).getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
@@ -63,6 +67,9 @@ test.describe("zone layout and placement", () => {
     await app(frame).getByLabel("Description, optional").fill("By the window");
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
     await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Zone details", exact: true })).toBeVisible();
+    await expect(app(frame).getByLabel("Description, optional")).toHaveValue("By the window");
+    await app(frame).getByRole("button", { name: "Finish", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
     await zoneMenu(frame, "View targets");
@@ -135,6 +142,9 @@ test.describe("zone layout and placement", () => {
     await finish(frame).click();
     await expect(dialog(frame).locator(".review-row")).toHaveText(["Unit 2 labelNone → GG4", "Unit 7 labelNone → Blue Dream"]);
     await dialog(frame).getByRole("button", { name: "Apply 2 changes" }).click();
+    await expect(finish(frame)).toHaveText("Finish");
+    await expect(labels.getByLabel("Label for unit 7", { exact: true })).toHaveValue("Blue Dream");
+    await finish(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "garden") as unknown as { layout: { labels?: Record<string, string> } };
     expect(z.layout.labels).toEqual({ 2: "GG4", 7: "Blue Dream" });
@@ -175,6 +185,8 @@ test.describe("zone layout and placement", () => {
     await row("Soil 1").getByLabel("Soil 1 Substrate Pore Water EC, 2.54 mS/cm").check();
     for (let i = 0; i < 3; i++) await finish(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(finish(frame)).toHaveText("Finish");
+    await finish(frame).click();
     await app(frame).getByRole("button", { name: "Device placement", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Device placement: Flower tent", exact: true })).toBeVisible();
 
@@ -252,6 +264,8 @@ test.describe("zone layout and placement", () => {
     await finish(frame).click();
     await expect(dialog(frame)).toContainText("Soil 1 position");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    await expect(finish(frame)).toHaveText("Finish");
+    await finish(frame).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     const z = (await stored(page)).zones.find((x) => x.id === "flower_tent");
     expect(z?.setup?.place).toBe("done");

@@ -325,6 +325,8 @@ test.describe("manual controls", () => {
     await next.click();
     await expect(app(frame).getByRole("dialog")).toContainText("extra modeNone → normal");
     await app(frame).getByRole("dialog").getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* Applying stays on the step; Finish goes back to the zone. */
+    await app(frame).getByRole("button", { name: "Finish", exact: true }).click();
     await expect(controls(frame)).toBeVisible();
     /* Applied, the device goes by the name Home Assistant has for it. */
     const unit = row(frame, "Garden Dehumidifier"), mode = (name: string) => unit.getByRole("radio", { name, exact: true });
@@ -383,6 +385,8 @@ test.describe("manual controls", () => {
     await next.click();
     await expect(app(frame).getByRole("dialog")).toContainText("modes left out of ControlsNone → comfort, sleep");
     await app(frame).getByRole("dialog").getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* Applying stays on the step; Finish goes back to the zone. */
+    await app(frame).getByRole("button", { name: "Finish", exact: true }).click();
     await expect(controls(frame)).toBeVisible();
     const unit = row(frame, "Garden Dehumidifier");
     await expect(unit.locator(".chip")).toHaveText(["Boost", "Eco", "Normal"]);

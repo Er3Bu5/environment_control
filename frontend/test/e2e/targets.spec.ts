@@ -102,6 +102,11 @@ test.describe("targets, day and night", () => {
     await expect(dialog(frame)).toHaveCount(0);
     expect((await sets(page)).map((c) => [c.domain, c.service, c.data])).toEqual([["input_datetime", "set_datetime", { entity_id: "input_datetime.garden_day_time", time: "06:30:00" }]]);
     await expect(app(frame).locator(".toast")).toHaveText("Garden saved, on your helpers too.");
+    /* Applying stays here, with the saved values showing and nothing left to apply; Back goes where it was opened from. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+    await expect(bar(frame)).toHaveCount(0);
+    await expect(app(frame).getByLabel("Lights on", { exact: true })).toHaveValue("06:30");
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
     await expect(app(frame).locator(".period").first()).toContainText("06:30 - 19:00");
@@ -146,6 +151,10 @@ test.describe("targets, day and night", () => {
     await expect(dialog(frame)).toHaveCount(0);
     const z = (await stored(page)).zones.find((x) => x.id === "garden") as Record<string, unknown>;
     expect([z.periodMode, z.lights]).toEqual(["detected", ["light.tent_light"]]);
+    /* Applying stays here, with the saved values showing and nothing left to apply; Back goes where it was opened from. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+    await expect(bar(frame)).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
     await expect(app(frame).locator(".period").first()).toContainText("Lights not reporting");
@@ -220,6 +229,10 @@ test.describe("targets, day and night", () => {
       ["set_value", "input_number.day_lights_garden_min_threshold", 2500],
     ]);
     expect((await zoneOf(page, "garden")).bands.day.temperature[1]).toBe(24.5);
+    /* Applying stays here, with the saved values showing and nothing left to apply; Back goes where it was opened from. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+    await expect(bar(frame)).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
     await zoneMenu(frame, "View targets");
@@ -313,6 +326,10 @@ test.describe("targets, day and night", () => {
     expect(z.bands.day.temperature[2]).toBeNull();
     expect(z.helpers.bands.day.temperature).toEqual({ min: "input_number.garden_day_temperature_min_threshold", max: "input_number.garden_day_temperature_max_threshold" });
     expect(await serviceCalls(page)).toBe(0);
+    /* Applying stays here, with the saved values showing and nothing left to apply; Back goes where it was opened from. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Garden", exact: true })).toBeVisible();
+    await expect(bar(frame)).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Setup", exact: true })).toBeVisible();
     await goTo(frame, "Garden");
     await zoneMenu(frame, "View targets");
@@ -495,6 +512,10 @@ test.describe("targets, day and night", () => {
     await bar(frame).getByRole("button", { name: "Review and apply" }).click();
     await expect(dialog(frame)).toContainText("Applying confirms this step, and Flower tent's readings are judged against these limits from then on.");
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes$/ }).click();
+    /* Applying stays here, with the saved values showing and nothing left to apply; Back goes where it was opened from. */
+    await expect(app(frame).getByRole("heading", { level: 1, name: "Targets, day and night: Flower tent", exact: true })).toBeVisible();
+    await expect(bar(frame)).toHaveCount(0);
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Set up Flower tent", exact: true })).toBeVisible();
     await expect(app(frame).locator("#g-targets .pill.ok")).toHaveText("Done");
     const z = await zoneOf(page, "Flower tent");
