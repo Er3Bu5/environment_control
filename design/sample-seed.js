@@ -187,6 +187,9 @@ const SEED = (() => {
     ...link(["failsafe_veg_fans_auto_on", "failsafe_tent_lights_recovery"], "failsafe"),
     ...link(["tent_lights_on", "tent_lights_off"], "control"),
   ]);
+  /* A few links carry a name of the panel's own, as a person might give them; the rest show Home Assistant's. */
+  const named = { "automation.garden_red_lights_on": "Red lights, morning", "automation.garden_red_lights_off": "Red lights, evening", "automation.tent_lights_off": "Tent lights off" };
+  for (const z of zones.slice(0, 2)) for (const a of z.automations) if (named[a.entity]) a.name = named[a.entity];
   zones[2].automations = numbered([
     ...link(["critical_nursery_temperature_high_day"], "alert_day"),
     ...link(["critical_nursery_temperature_low_night"], "alert_night"),
