@@ -1,8 +1,14 @@
 // Drives the mock in headless Chromium over CDP with real taps and keystrokes. Touches nothing outside the scratchpad.
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { createServer } from "node:net";
 
-const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
+/* MOCK_PORT lets runs in different worktrees go side by side; each run needs its own DevTools port. */
+const port = Number(process.env.MOCK_PORT || 9347);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.log(`Error MOCK_PORT must be a whole number from 1024 to 65535, not "${process.env.MOCK_PORT}"`); process.exit(2); }
+/* A port another run's Chromium already holds would hand this run that browser's DevTools, and the two runs would drive one page. */
+await new Promise((ok) => { const probe = createServer().once("error", () => { console.log(`Error port ${port} is in use: another run may hold it, so pick a free one with MOCK_PORT`); process.exit(2); }).listen(port, "127.0.0.1", () => probe.close(ok)); });
+const dir = process.argv[2], profile = `${dir}/chromium-profile`;
 process.on("uncaughtException", (e) => { console.log("Error", e.message); browser.kill(); process.exit(2); });
 /* CHROMIUM_FLAGS adds flags for one machine, such as --no-sandbox on CI runners where Chromium's own sandbox can't start. */
 const extraFlags = (process.env.CHROMIUM_FLAGS || "").split(" ").filter(Boolean);
@@ -502,7 +508,7 @@ for (const [box, name] of [[HIST_BOX, "History card"], [OPENS_BOX, "Setup's Hist
 }
 await phone(390, 844);
 
-// ---------- Arranging Overview's cards: the stored order of zones, changed through a draft and a review like any other edit
+// ---------- Sorting Overview's cards: the stored order of zones, changed through a draft and a review like any other edit
 {
   const panelEl = `document.querySelector("environment-control-panel")`;
   const cardNames = () => ev(`[...document.querySelectorAll("#main .zone-card h2")].map(h=>h.textContent)`);
@@ -511,117 +517,148 @@ await phone(390, 844);
   const bars = () => ev(`(()=>{const p=document.querySelector("#pagebar"),d=document.querySelector("#draftbar");return {page:p&&!p.hidden?[...p.querySelectorAll("button")].map(b=>b.textContent):null,draft:d.hidden?null:{count:d.querySelector("#draft-count").textContent,what:d.querySelector("#draft-what").textContent,buttons:[...d.querySelectorAll("button")].filter(b=>!b.hidden).map(b=>b.textContent)}}})()`);
   const focused = () => ev(`document.activeElement.getAttribute("aria-label")`);
   const told = () => onHA(`${panelEl}.draftOpen`);
-  const arranging = () => ev(`!!ui.arrange && !!document.querySelector("#main .zone-card.arranging")`);
+  const sorting = () => ev(`!!ui.sort && !!document.querySelector("#main .zone-card.sorting")`);
   const gesture = () => onHA(`${panelEl}.post({type:"back"})`).then(() => sleep(60));
-  const move = (id, by) => tap(`[data-arrangecard="${id}"] [data-by="${by}"]`);
+  const move = (id, by) => tap(`[data-sortcard="${id}"] [data-by="${by}"]`);
+  const blockArrows = () => ev(`[...document.querySelectorAll("#main .fambar")].map(c=>[...c.querySelectorAll(".btn.move")].map(b=>b.getAttribute("aria-label")+(b.disabled?" (off)":"")))`);
   /* Another device's save reaches this one as a config message; a made-up revision stands in, and the stored one is put back after. */
   let fakes = 0;
   const fakeConfig = (js) => onHA(`(()=>{const p=${panelEl},c=JSON.parse(JSON.stringify(p.stored()));${js};p.post({type:"config",...c,revision:c.revision+1000+${++fakes}})})()`).then(() => sleep(80));
   const realConfig = () => onHA(`${panelEl}.post({type:"config",...${panelEl}.stored()})`).then(() => sleep(80));
   await phone(390, 844); await reset();
   const order0 = await diskOrder();
-  check("Arrange: Overview shows the zones in the order they're stored", same(order0, ["Garden", "Veg", "Nursery"]) && same(await cardNames(), order0), [order0, await cardNames()]);
-  const btn = await ev(`(()=>{const b=document.querySelector("[data-arrange]"),n=document.querySelector(".navmenu .burger");if(!b)return null;const r=b.getBoundingClientRect(),q=n.getBoundingClientRect();return {text:b.textContent,cls:b.className,inHead:!!b.closest(".pagehead"),h:r.height,nh:q.height,bottom:r.bottom,nbottom:q.bottom,right:r.right,wrapRight:document.querySelector("#main .wrap").getBoundingClientRect().right}})()`);
-  check("Arrange: Overview's heading has an Arrange button at its right, level with the menu button and as tall, where a zone's More sits", !!btn && btn.text === "Arrange" && btn.cls.split(" ").includes("btn") && btn.inHead && Math.abs(btn.h - btn.nh) < 1 && Math.abs(btn.bottom - btn.nbottom) < 1 && Math.abs(btn.right - btn.wrapRight) < 1, btn);
+  check("Sort: Overview shows the zones in the order they're stored", same(order0, ["Garden", "Veg", "Nursery"]) && same(await cardNames(), order0), [order0, await cardNames()]);
+  const btn = await ev(`(()=>{const b=document.querySelector("[data-sort]"),n=document.querySelector(".navmenu .burger");if(!b)return null;const r=b.getBoundingClientRect(),q=n.getBoundingClientRect();return {text:b.textContent,cls:b.className,inHead:!!b.closest(".pagehead"),h:r.height,nh:q.height,bottom:r.bottom,nbottom:q.bottom,right:r.right,wrapRight:document.querySelector("#main .wrap").getBoundingClientRect().right}})()`);
+  check("Sort: Overview's heading has a Sort button at its right, level with the menu button and as tall, where a zone's More sits", !!btn && btn.text === "Sort" && btn.cls.split(" ").includes("btn") && btn.inHead && Math.abs(btn.h - btn.nh) < 1 && Math.abs(btn.bottom - btn.nbottom) < 1 && Math.abs(btn.right - btn.wrapRight) < 1, btn);
   await fakeConfig(`c.zones=c.zones.slice(0,1)`);
-  check("Arrange: with one zone there's nothing to arrange, so no button", (await ev(`document.querySelectorAll("#main .zone-card").length===1 && !document.querySelector("[data-arrange]")`)) === true);
+  check("Sort: with one zone there's nothing to sort, so no button", (await ev(`document.querySelectorAll("#main .zone-card").length===1 && !document.querySelector("[data-sort]")`)) === true);
   await fakeConfig(`c.zones=c.zones.slice(0,2)`);
-  check("Arrange: with two zones the button is there", (await ev(`!!document.querySelector("[data-arrange]")`)) === true);
+  check("Sort: with two zones the button is there", (await ev(`!!document.querySelector("[data-sort]")`)) === true);
   await realConfig();
 
-  await tap("[data-arrange]");
-  check("Arrange: arranging says so on the page, and the Arrange button gives way to Back in the bar at the foot", (await arranging()) && (await ev(`document.querySelector("#arrange-note").textContent`)) === "Arranging the cards: move them with the arrows." && (await ev(`document.activeElement.id`)) === "arrange-note" && (await ev(`!document.querySelector("[data-arrange]")`)) && same(await bars(), { page: ["Back"], draft: null }), await bars());
-  check("Arrange: each card has up and down, the first card's up and the last card's down off", same(await arrowsOf(), [["Move Garden up (off)", "Move Garden down"], ["Move Veg up", "Move Veg down"], ["Move Nursery up", "Move Nursery down (off)"]]), await arrowsOf());
-  check("Arrange: the arrows draw the up and down chevrons", (await ev(`(()=>{const b=document.querySelectorAll('[data-arrangecard="veg"] .btn.move');return b[0].querySelector("path").getAttribute("d")===ICON.up&&b[1].querySelector("path").getAttribute("d")===ICON.down})()`)) === true);
-  check("Arrange: a card is no button and holds nothing else to press, and the notices with their links are gone", (await ev(`[...document.querySelectorAll("#main .zone-card")].every(c=>c.tagName==="DIV"&&!c.closest("button")&&!c.querySelector("[data-go]")&&c.querySelectorAll("button").length===2) && !document.querySelector("#main .fixlink") && !document.querySelector("#main .notice")`)) === true);
-  await tap('[data-arrangecard="veg"] h2'); await tap('[data-arrangecard="veg"] .rows');
-  check("Arrange: tapping a card opens nothing", (await ev(`ui.screen`)) === "overview" && (await arranging()));
+  await tap("[data-sort]");
+  check("Sort: sorting says so on the page, and the Sort button gives way to Back in the bar at the foot", (await sorting()) && (await ev(`document.querySelector("#sort-note").textContent`)) === "Sorting the cards: move them with the arrows." && (await ev(`document.activeElement.id`)) === "sort-note" && (await ev(`!document.querySelector("[data-sort]")`)) && same(await bars(), { page: ["Back"], draft: null }), await bars());
+  check("Sort: each card has earlier and later, a zone on its own steps among the zones and families, a card in a family only inside it", same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Veg earlier in its group (off)", "Move Veg later in its group"], ["Move Nursery earlier in its group", "Move Nursery later in its group (off)"]]), await arrowsOf());
+  check("Sort: a family has its own pair, joined to the top of its cards, to move it as one block", same(await blockArrows(), [["Move Veg and Nursery earlier", "Move Veg and Nursery later (off)"]]), await blockArrows());
+  check("Sort: the arrows draw the up and down chevrons", (await ev(`(()=>{const b=document.querySelectorAll('[data-sortcard="veg"] .btn.move');return b[0].querySelector("path").getAttribute("d")===ICON.up&&b[1].querySelector("path").getAttribute("d")===ICON.down})()`)) === true);
+  check("Sort: a card is no button and holds nothing else to press, and the notices with their links are gone", (await ev(`[...document.querySelectorAll("#main .zone-card")].every(c=>c.tagName==="DIV"&&!c.closest("button")&&!c.querySelector("[data-go]")&&c.querySelectorAll("button").length===2) && !document.querySelector("#main .fixlink") && !document.querySelector("#main .notice")`)) === true);
+  await tap('[data-sortcard="veg"] h2'); await tap('[data-sortcard="veg"] .rows');
+  check("Sort: tapping a card opens nothing", (await ev(`ui.screen`)) === "overview" && (await sorting()));
 
   await move("nursery", -1);
-  check("Arrange: a move reorders the cards and saves nothing", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await diskOrder(), order0) && same(await menuItems(), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), [await cardNames(), await diskOrder()]);
-  check("Arrange: focus stays on the arrow used, and the moved card's ends follow it", (await focused()) === "Move Nursery up" && same(await arrowsOf(), [["Move Garden up (off)", "Move Garden down"], ["Move Nursery up", "Move Nursery down"], ["Move Veg up", "Move Veg down (off)"]]), [await focused(), await arrowsOf()]);
-  check("Arrange: with the order changed, the bar holds the count, Back, Discard and Review and apply", same(await bars(), { page: null, draft: { count: "1", what: "Overview · Zone order", buttons: ["Back", "Discard", "Review and apply"] } }), await bars());
-  check("Arrange: and the host is told a draft is open", (await told()) === true);
-  await move("nursery", -1);
-  check("Arrange: once a card reaches the top, focus goes to its other arrow", same(await cardNames(), ["Nursery", "Garden", "Veg"]) && (await focused()) === "Move Nursery down", [await cardNames(), await focused()]);
+  check("Sort: a move reorders the cards and saves nothing, and Nursery may come before its parent", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await diskOrder(), order0) && same(await menuItems(), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), [await cardNames(), await diskOrder()]);
+  check("Sort: at its family's start a card can't leave it, so its earlier is off and focus goes to its other arrow", (await focused()) === "Move Nursery later in its group" && same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && same(await blockArrows(), [["Move Nursery and Veg earlier", "Move Nursery and Veg later (off)"]]), [await focused(), await arrowsOf(), await blockArrows()]);
+  check("Sort: with the order changed, the bar holds the count, Back, Discard and Review and apply", same(await bars(), { page: null, draft: { count: "1", what: "Overview · Zone order", buttons: ["Back", "Discard", "Review and apply"] } }), await bars());
+  check("Sort: and the host is told a draft is open", (await told()) === true);
+  await tap('[data-moveblock="veg"][data-by="-1"]');
+  check("Sort: a family moves as one block, past the zone before it, and focus goes to its other arrow at the top", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Nursery and Veg later" && same(await blockArrows(), [["Move Nursery and Veg earlier (off)", "Move Nursery and Veg later"]]), [await cardNames(), await focused()]);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
-  check("Arrange: so it can be pressed again from the keyboard", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await focused()) === "Move Nursery down", [await cardNames(), await focused()]);
+  check("Sort: so it can be pressed again from the keyboard", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await focused()) === "Move Nursery and Veg earlier", [await cardNames(), await focused()]);
+  await move("garden", 1);
+  check("Sort: a zone on its own steps past a whole family in one press", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Garden earlier", [await cardNames(), await focused()]);
+  const inView = await ev(`(()=>{const c=document.querySelector('[data-sortcard="garden"]'),b=document.activeElement.getBoundingClientRect(),bar=[...document.querySelectorAll("#draftbar, #pagebar")].find(x=>!x.hidden).getBoundingClientRect();return {card:c.getBoundingClientRect().bottom>0&&c.getBoundingClientRect().top<innerHeight,top:b.top,bottom:b.bottom,barTop:bar.top}})()`);
+  check("Sort: moved to the foot, the arrow used is in the window and above the bar", inView.card && inView.top >= 0 && inView.bottom <= inView.barTop, inView);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
-  const inView = await ev(`(()=>{const c=document.querySelector('[data-arrangecard="nursery"]'),b=document.activeElement.getBoundingClientRect(),bar=[...document.querySelectorAll("#draftbar, #pagebar")].find(x=>!x.hidden).getBoundingClientRect();return {card:c.getBoundingClientRect().bottom>0&&c.getBoundingClientRect().top<innerHeight,top:b.top,bottom:b.bottom,barTop:bar.top}})()`);
-  check("Arrange: moved to the foot, the arrow used is in the window and above the bar", inView.card && inView.top >= 0 && inView.bottom <= inView.barTop, inView);
-  check("Arrange: back in the stored order, there's nothing to apply", same(await cardNames(), order0) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
-  const phoneFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right||q.right>innerWidth||q.width<40)out.push(b.getAttribute("aria-label"))}}return {out,wide:document.documentElement.scrollWidth>innerWidth}})()`);
-  check("Arrange: at phone width every arrow sits whole inside its card, and nothing runs off the side", phoneFit.out.length === 0 && !phoneFit.wide, phoneFit);
-  await ev(`window.scrollTo(0,0)`); await shot("arrange-phone");
-  await move("veg", 1); await ev(`window.scrollTo(0,0)`); await shot("arrange-phone-moved");
+  await move("nursery", 1);
+  check("Sort: back in the stored order, there's nothing to apply", same(await cardNames(), order0) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
+  const phoneFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card, #main .fambar")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right||q.right>innerWidth||q.width<40)out.push(b.getAttribute("aria-label"))}}return {out,wide:document.documentElement.scrollWidth>innerWidth}})()`);
+  check("Sort: at phone width every arrow sits whole inside its card, and nothing runs off the side", phoneFit.out.length === 0 && !phoneFit.wide, phoneFit);
+  await ev(`window.scrollTo(0,0)`); await shot("sort-phone");
+  await move("veg", 1); await ev(`window.scrollTo(0,0)`); await shot("sort-phone-moved");
 
   await tap("[data-ddiscard]");
-  check("Arrange: Discard puts the stored order back and keeps arranging", same(await cardNames(), order0) && (await arranging()) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
+  check("Sort: Discard puts the stored order back and keeps sorting", same(await cardNames(), order0) && (await sorting()) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
   await move("veg", 1); await tap("[data-dback]");
-  check("Arrange: Back with the order changed asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "You have 1 unsaved change in Overview. Leaving will discard it.", await ev(`document.querySelector("#dlg-text")?.textContent`));
+  check("Sort: Back with the order changed asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "You have 1 unsaved change in Overview. Leaving will discard it.", await ev(`document.querySelector("#dlg-text")?.textContent`));
   await tap("[data-gkeep]");
-  check("Arrange: Keep editing keeps the order and the arranging", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await arranging()));
+  check("Sort: Keep editing keeps the order and the sorting", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await sorting()));
   await tap("[data-dback]"); await tap("[data-gdiscard]");
-  check("Arrange: Discard and continue stops arranging, in the stored order, focus back on Arrange", !(await arranging()) && same(await cardNames(), order0) && (await ev(`document.activeElement.dataset.arrange!==undefined`)) && same(await diskOrder(), order0) && (await told()) === false, [await cardNames(), await ev(`document.activeElement.outerHTML.slice(0,60)`)]);
-  await tap("[data-arrange]"); await tap("[data-arrangeback]");
-  check("Arrange: Back with nothing moved stops arranging without asking", !(await arranging()) && (await ev(`ui.guard`)) === null);
+  check("Sort: Discard and continue stops sorting, in the stored order, focus back on Sort", !(await sorting()) && same(await cardNames(), order0) && (await ev(`document.activeElement.dataset.sort!==undefined`)) && same(await diskOrder(), order0) && (await told()) === false, [await cardNames(), await ev(`document.activeElement.outerHTML.slice(0,60)`)]);
+  await tap("[data-sort]"); await tap("[data-sortback]");
+  check("Sort: Back with nothing moved stops sorting without asking", !(await sorting()) && (await ev(`ui.guard`)) === null);
 
-  await tap("[data-arrange]"); await move("veg", 1); await goTab("Veg");
-  check("Arrange: the page menu asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`ui.screen`)) === "overview");
+  await tap("[data-sort]"); await move("veg", 1); await goTab("Veg");
+  check("Sort: the page menu asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`ui.screen`)) === "overview");
   await tap("[data-gdiscard]");
-  check("Arrange: and discarding goes there, saving nothing", (await ev(`ui.screen==="zone"&&ui.zone==="veg"&&!ui.arrange`)) === true && same(await diskOrder(), order0));
+  check("Sort: and discarding goes there, saving nothing", (await ev(`ui.screen==="zone"&&ui.zone==="veg"&&!ui.sort`)) === true && same(await diskOrder(), order0));
   await goTab("Overview");
-  check("Arrange: back on Overview it isn't arranging", !(await arranging()) && same(await cardNames(), order0));
-  await tap("[data-arrange]"); await tap('[data-zmenu="nav"]'); await gesture();
-  check("Arrange: the back gesture closes the menu first", (await arranging()) === true && (await ev(`document.querySelector("#zmenu-nav").hidden`)) === true);
+  check("Sort: back on Overview it isn't sorting", !(await sorting()) && same(await cardNames(), order0));
+  await tap("[data-sort]"); await tap('[data-zmenu="nav"]'); await gesture();
+  check("Sort: the back gesture closes the menu first", (await sorting()) === true && (await ev(`document.querySelector("#zmenu-nav").hidden`)) === true);
   await gesture();
-  check("Arrange: then, with nothing moved, it stops arranging", !(await arranging()));
-  await tap("[data-arrange]"); await move("veg", 1); await gesture();
-  check("Arrange: with the order changed, the back gesture asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?");
+  check("Sort: then, with nothing moved, it stops sorting", !(await sorting()));
+  await tap("[data-sort]"); await move("veg", 1); await gesture();
+  check("Sort: with the order changed, the back gesture asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?");
   await gesture();
-  check("Arrange: the back gesture again closes that and keeps the order", (await ev(`ui.guard`)) === null && (await arranging()) && same(await cardNames(), ["Garden", "Nursery", "Veg"]));
+  check("Sort: the back gesture again closes that and keeps the order", (await ev(`ui.guard`)) === null && (await sorting()) && same(await cardNames(), ["Garden", "Nursery", "Veg"]));
   await gesture(); await tap("[data-gdiscard]");
-  check("Arrange: and discarding steps out of arranging", !(await arranging()) && same(await cardNames(), order0));
+  check("Sort: and discarding steps out of sorting", !(await sorting()) && same(await cardNames(), order0));
 
-  await tap("[data-arrange]"); await move("nursery", -1);
+  await tap("[data-sort]"); await move("nursery", -1);
   await fakeConfig(`c.zones=c.zones.filter(z=>z.id!=="garden")`);
-  check("Arrange: a zone removed elsewhere drops out of the draft, and the rest keep their arranged order", same(await cardNames(), ["Nursery", "Veg"]) && same(await arrowsOf(), [["Move Nursery up (off)", "Move Nursery down"], ["Move Veg up", "Move Veg down (off)"]]) && (await bars()).draft?.count === "1", [await cardNames(), await bars()]);
+  check("Sort: a zone removed elsewhere drops out of the draft, and the rest keep their sorted order", same(await cardNames(), ["Nursery", "Veg"]) && same(await arrowsOf(), [["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && (await bars()).draft?.count === "1", [await cardNames(), await bars()]);
   await tap("[data-dreview]");
-  check("Arrange: and the review names only the zones there are", (await ev(`[...document.querySelectorAll("#review-items .review-row")].map(r=>r.textContent).join("|")`)) === "Zone orderVeg, Nursery → Nursery, Veg", await ev(`document.querySelector("#review-items")?.textContent`));
+  check("Sort: and the review names only the zones there are", (await ev(`[...document.querySelectorAll("#review-items .review-row")].map(r=>r.textContent).join("|")`)) === "Zone orderVeg, Nursery → Nursery, Veg", await ev(`document.querySelector("#review-items")?.textContent`));
   await tap("[data-rback]");
   await realConfig();
-  check("Arrange: a zone added elsewhere joins the cards being arranged", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await arranging()), await cardNames());
+  check("Sort: a zone added elsewhere joins the cards being sorted", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await sorting()), await cardNames());
   await fakeConfig(`c.zones=c.zones.slice(0,1)`);
-  check("Arrange: down to one zone, arranging stops and nothing is held", !(await arranging()) && (await told()) === false && same(await bars(), { page: null, draft: null }), await bars());
+  check("Sort: down to one zone, sorting stops and nothing is held", !(await sorting()) && (await told()) === false && same(await bars(), { page: null, draft: null }), await bars());
   await realConfig();
 
-  await ev(`window.scrollTo(0,0)`); await tap("[data-arrange]"); await move("nursery", -1); await tap("[data-dreview]");
+  await ev(`window.scrollTo(0,0)`); await tap("[data-sort]"); await move("nursery", -1); await tap("[data-dreview]");
   const rv = await ev(`(()=>({rows:[...document.querySelectorAll("#review-items .review-row")].map(r=>[r.querySelector("strong").textContent,r.querySelector("span").textContent]),text:document.querySelector("#dlg-text").textContent,note:[...document.querySelectorAll("#modal .review-scroll > p.small")].map(p=>p.textContent),apply:document.querySelector("[data-rapply]").textContent}))()`);
-  check("Arrange: the review lists one change, Zone order, as the names before and after", same(rv.rows, [["Zone order", "Garden, Veg, Nursery → Garden, Nursery, Veg"]]) && rv.apply === "Apply 1 change", rv);
-  check("Arrange: and says it's the order on Overview, in the menu and on Setup, on every device", rv.note.includes("This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.") && rv.text.startsWith("This changes only the order zones are listed in."), rv);
+  check("Sort: the review lists one change, Zone order, as the names before and after", same(rv.rows, [["Zone order", "Garden, Veg, Nursery → Garden, Nursery, Veg"]]) && rv.apply === "Apply 1 change", rv);
+  check("Sort: and says it's the order on Overview, in the menu and on Setup, on every device", rv.note.includes("This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.") && rv.text.startsWith("This changes only the order zones are listed in."), rv);
   /* The mock keeps live readings with its zones, so any save of the mock writes them. What a save would write without the
      move is the measure, not what was on disk. */
   const before = await ev(`(()=>{const d=configOf();d.zones.sort((a,b)=>a.id<b.id?-1:1);return JSON.stringify(d)})()`);
-  await shot("arrange-phone-review");
+  await shot("sort-phone-review");
   await tap("[data-rapply]"); await sleep(300);
   const after = await onHA(`(()=>{const d=JSON.parse(fakeHA.disk);d.zones.sort((a,b)=>a.id<b.id?-1:1);delete d.revision;return JSON.stringify(d)})()`);
-  check("Arrange: applying stores the zones in the new order, with nothing else changed and nothing asked by the host", same(await diskOrder(), ["Garden", "Nursery", "Veg"]) && before === after && (await hostDialog()).open === false, await diskOrder());
-  check("Arrange: says so and stops arranging", (await ev(`document.querySelector("#toast").textContent`)) === "Zone order saved." && !(await arranging()) && (await ev(`ui.review`)) === null && (await told()) === false);
-  check("Arrange: Overview and the page menu follow the stored order", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await menuItems(), ["Overview", "Garden", "Nursery", "Veg", "Devices", "Setup"]), [await cardNames(), await menuItems()]);
+  check("Sort: applying stores the zones in the new order, with nothing else changed and nothing asked by the host", same(await diskOrder(), ["Garden", "Nursery", "Veg"]) && before === after && (await hostDialog()).open === false, await diskOrder());
+  check("Sort: says so and stops sorting", (await ev(`document.querySelector("#toast").textContent`)) === "Zone order saved." && !(await sorting()) && (await ev(`ui.review`)) === null && (await told()) === false);
+  check("Sort: Overview and the page menu follow the stored order", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await menuItems(), ["Overview", "Garden", "Nursery", "Veg", "Devices", "Setup"]), [await cardNames(), await menuItems()]);
   await goTab("Setup");
-  check("Arrange: and so do Setup's zone rows", same(await ev(`[...document.querySelectorAll("#main .task > div > strong")].map(t=>t.textContent).filter(n=>["Garden","Veg","Nursery"].includes(n))`), ["Garden", "Nursery", "Veg"]));
+  check("Sort: and so do Setup's zone rows", same(await ev(`[...document.querySelectorAll("#main .task > div > strong")].map(t=>t.textContent).filter(n=>["Garden","Veg","Nursery"].includes(n))`), ["Garden", "Nursery", "Veg"]));
   await goTab("Overview");
 
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await ev(`document.querySelector("#toast").hidden=true`);
-  await tap("[data-arrange]"); await ev(`window.scrollTo(0,0)`); await shot("arrange-desktop");
-  await move("veg", -1); await ev(`window.scrollTo(0,0)`); await shot("arrange-desktop-moved");
-  await tap("[data-dreview]"); await shot("arrange-desktop-review"); await tap("[data-rback]");
-  const deskFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right)out.push(b.getAttribute("aria-label"))}}return out})()`);
-  check("Arrange: on a desktop the arrows sit inside their cards too", deskFit.length === 0, deskFit);
+  await tap("[data-sort]"); await ev(`window.scrollTo(0,0)`); await shot("sort-desktop");
+  await move("veg", -1); await ev(`window.scrollTo(0,0)`); await shot("sort-desktop-moved");
+  await tap("[data-dreview]"); await shot("sort-desktop-review"); await tap("[data-rback]");
+  const deskFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card, #main .fambar")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right)out.push(b.getAttribute("aria-label"))}}return out})()`);
+  check("Sort: on a desktop the arrows sit inside their cards too", deskFit.length === 0, deskFit);
   await tap("[data-dback]"); await tap("[data-gdiscard]");
+  /* A family is drawn as one joined card: Nursery and Veg touch, sharing a seam with the link tab on it, and Garden keeps its gap. */
+  const joined = () => ev(`(()=>{const r=(id)=>document.querySelector('#main .zone-card[data-zone="'+id+'"]').getBoundingClientRect(),g=r("garden"),n=r("nursery"),v=r("veg"),t=document.querySelector("#main .linktab"),tr=t.getBoundingClientRect(),cs=(id)=>getComputedStyle(document.querySelector('#main .zone-card[data-zone="'+id+'"]'));return {side:{nv:v.left-n.right,top:v.top-n.top,gn:n.left-g.right},stack:{nv:v.top-n.bottom,left:v.left-n.left,gn:n.top-g.bottom},tab:{label:t.getAttribute("aria-label"),title:t.title,inCard:!!t.closest('[data-zone="nursery"]'),x:tr.left+tr.width/2-n.right,y:tr.top+tr.height/2-n.bottom},corners:{n:[cs("nursery").borderTopLeftRadius,cs("nursery").borderTopRightRadius,cs("nursery").borderBottomLeftRadius,cs("nursery").borderBottomRightRadius],v:[cs("veg").borderTopLeftRadius,cs("veg").borderTopRightRadius,cs("veg").borderBottomLeftRadius,cs("veg").borderBottomRightRadius]},families:document.querySelectorAll("#main .fam").length}})()`);
+  await ev(`window.scrollTo(0,0)`);
+  let jd = await joined();
+  check("Joined: on a desktop Nursery and Veg sit side by side in one row, touching with no gap, Garden apart by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.side.gn >= 10 && jd.families === 1, jd);
+  check("Joined: the link tab sits on their seam, and says what's linked to what", jd.tab.label === "Zone: Nursery is linked to Zone: Veg" && jd.tab.title === jd.tab.label && Math.abs(jd.tab.x) <= 2, jd.tab);
+  check("Joined: the outer corners are rounded and the inner ones square", same(jd.corners, { n: ["12px", "0px", "12px", "0px"], v: ["0px", "12px", "0px", "12px"] }), jd.corners);
+  const badges = await ev(`[...document.querySelectorAll("#main .zone-card")].map(c=>[c.querySelector("h2").textContent,[...c.querySelectorAll(".parentbadge")].map(b=>b.textContent+(b.previousElementSibling&&b.previousElementSibling.tagName==="H2"?" by name":"")).join(),(c.querySelector(".zlinked")||{}).textContent||""])`);
+  check("Joined: the parent carries a Parent badge beside its name, whichever place it sits, and the linked card still says what it's linked to", same(badges, [["Garden", "", ""], ["Nursery", "", "Linked to Zone: Veg"], ["Veg", "Parent by name", "Zone: Nursery is linked to this zone"]]), badges);
+  const seamAt = await ev(`(()=>{const n=document.querySelector('#main .zone-card[data-zone="nursery"]').getBoundingClientRect();return {x:n.left+n.width/2,y:n.top+40,sx:n.right-0.5,sy:n.top+40}})()`);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: seamAt.x, y: seamAt.y }); await sleep(80);
+  check("Joined: a card's own border shows whole on just that card, over the seam it shares", (await ev(`document.elementFromPoint(${seamAt.sx},${seamAt.sy}).closest(".zone-card").dataset.zone`)) === "nursery" && (await ev(`getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderRightColor===getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor && getComputedStyle(document.querySelector('#main .zone-card[data-zone="veg"]')).borderTopColor!==getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor`)) === true);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
+  await shot("joined-desktop");
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await tap("[data-sort]"); await ev(`window.scrollTo(0,0)`); await shot("joined-sort-desktop-dark");
+  await tap("[data-sortback]"); await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(60);
+  await tap('#main .zone-card[data-zone="nursery"] .rows');
+  check("Joined: each card still opens its own zone", (await ev(`ui.screen==="zone"&&ui.zone==="nursery"`)) === true);
+  await goTab("Overview");
+  await phone(390, 844); await ev(`window.scrollTo(0,0)`); jd = await joined();
+  check("Joined: on a phone they stack, still touching, the seam running across with the tab on it, Garden apart", Math.abs(jd.stack.nv) <= 1 && Math.abs(jd.stack.left) < 1 && jd.stack.gn >= 10 && Math.abs(jd.tab.y) <= 2 && same(jd.corners, { n: ["12px", "12px", "0px", "0px"], v: ["0px", "0px", "12px", "12px"] }), jd);
+  /* An order that splits a family can still arrive, from an older setup: each stray is pulled to just after its family. */
+  await fakeConfig(`const by=(id)=>c.zones.find(z=>z.id===id);c.zones=[by("veg"),by("garden"),by("nursery")]`);
+  check("Joined: a stored order that splits a family is read with the linked zone pulled to just after its parent's family", same(await cardNames(), ["Veg", "Nursery", "Garden"]) && same(await menuItems(), ["Overview", "Veg", "Nursery", "Garden", "Devices", "Setup"]), [await cardNames(), await menuItems()]);
+  await realConfig();
+  check("Sort: nothing the person sees says Arrange", (await ev(`(()=>{const out=[];for(const s of ["overview","setup"]){ui.screen=s;render();out.push(document.body.innerText)}ui.screen="overview";render();document.querySelector("[data-sort]").click();out.push(document.body.innerText);document.querySelector("[data-sortback]").click();return /arrang/i.test(out.join(" ")+document.querySelector("[data-sort]").outerHTML)})()`)) === false);
   /* Later checks count on the seeded order. */
-  check("Arrange: putting the seeded order back for the checks that follow", (await evp(`saveConfig(()=>{const o=["garden","veg","nursery"];zones.sort((a,b)=>o.indexOf(a.id)-o.indexOf(b.id))}).then(r=>{render();return r.ok})`)) === true && same(await diskOrder(), order0));
+  check("Sort: putting the seeded order back for the checks that follow", (await evp(`saveConfig(()=>{const o=["garden","veg","nursery"];zones.sort((a,b)=>o.indexOf(a.id)-o.indexOf(b.id))}).then(r=>{render();return r.ok})`)) === true && same(await diskOrder(), order0));
   await phone(390, 844); await reset();
 }
 
@@ -2590,9 +2627,13 @@ check("Linked: ticked again, nothing is picked until you pick it", same(dl.chips
 await tap('[data-wparent="garden"]');
 await cClick('[data-wiz="next"]');
 check("Linked: the review lists it like the rest of Zone details", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toNot linked → Zone: Garden"), await ev(`document.querySelector("#review-items")?.textContent`));
+const reviewNotes = () => ev(`[...document.querySelectorAll("#modal .review-scroll > p.small")].map(p=>p.textContent).join(" ")`);
+const namesOnDisk = () => onHA(`JSON.parse(fakeHA.disk).zones.map(z=>z.name)`);
+check("Linked: the review says the new zone moves next to its parent, as that shows on every page", (await reviewNotes()).includes("Bench moves next to Garden on Overview, in the menu and on Setup."), await reviewNotes());
 const zonesBefore = await ev(`zones.length`);
 await cClick("[data-rapply]"); await sleep(300);
-const bench = await ev(`zones.at(-1).id`);
+const bench = await ev(`zones.find(z=>z.name==="Bench").id`);
+check("Linked: it's stored at the end of its parent's family, so the family stays together", same(await namesOnDisk(), ["Garden", "Bench", "Veg", "Nursery"]), await namesOnDisk());
 check("Linked: it's created linked to Garden, and nothing else about setting it up changes", (await ev(`zones.length`)) === zonesBefore + 1 && (await diskZone(bench)).parent === "garden" && (await ev(`ui.screen==="setup" && !!ui.guide && ui.guide.id==="${bench}"`)) === true, await diskZone(bench));
 await ev(`ui.guide=null;openWizard("nursery",[0]);render()`); await sleep(40);
 dl = await detailsLinked();
@@ -2606,7 +2647,10 @@ await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wi
 check("Linked: unticking an existing link is reviewed too", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toZone: Garden → Not linked"), await ev(`document.querySelector("#review-items")?.textContent`));
 await cClick("[data-rapply]"); await sleep(300);
 check("Linked: applied, the parent is gone", (await diskZone(bench)).parent === undefined && same((await linkLines()).garden, ""), await diskZone(bench));
-await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await tap('[data-wparent="garden"]'); await cClick('[data-wiz="next"]'); await cClick("[data-rapply]"); await sleep(300);
+check("Linked: unlinked, it stays where it was, on its own", same(await namesOnDisk(), ["Garden", "Bench", "Veg", "Nursery"]), await namesOnDisk());
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await tap('[data-wparent="garden"]'); await cClick('[data-wiz="next"]');
+check("Linked: linked again where it already sits next to its parent, the review says nothing about moving", !(await reviewNotes()).includes("moves next to"), await reviewNotes());
+await cClick("[data-rapply]"); await sleep(300);
 check("Linked: and linked again", (await diskZone(bench)).parent === "garden");
 await setupOnly();
 /* The fake backend refuses what the panel never offers. */
@@ -2794,8 +2838,9 @@ await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.
 check("Linked: but while Bench shares Garden's sensor, removing Garden is refused, naming the sensor", (await toastNow()).includes("Environment left is in both Garden and Bench. Take it out of Bench before removing Garden.") && !!(await diskZone("garden")) && (await ev(`!!zoneById("garden")`)) === true, await toastNow());
 await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[]})`); await sleep(100);
 await ev(`zoneById("garden").parent=undefined;zoneById("${bench}").parent="veg";askRemoveZone("veg")`); await sleep(40);
+/* Listed in the zone order, where Bench now sits next to Garden, the parent it was made under. */
 const rmRows = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
-check("Linked: several are named together", rmRows === "Linked zonesNursery, Bench are unlinked", rmRows);
+check("Linked: several are named together", rmRows === "Linked zonesBench, Nursery are unlinked", rmRows);
 await both("linked-remove");
 await key("Escape", 27); await ev(`zoneById("${bench}").parent="garden";delete zoneById("garden").parent;render()`);
 /* Removing Bench's parent for real would take Garden, so Bench becomes a parent here instead: Shelf, linked to it. */
