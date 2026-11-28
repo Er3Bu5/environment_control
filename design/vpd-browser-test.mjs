@@ -313,10 +313,12 @@ check("Helpers: once typing ends, the page catches up", (await ev(`helpersRedraw
 await key("Escape", 27);
 await open();
 await tap("#vin-temperature-4"); await type("36"); await key("Enter", 13);
-check("Enter commits a value past the chart edge", (await band("temperature", 4)) === 36);
+check("Enter commits a value past where the axis ended", (await band("temperature", 4)) === 36);
 check("Enter closes the keyboard", (await active()) !== "vin-temperature-4");
-check("past the chart edge is not an issue", (await issueText()).length === 0, await issueText());
+check("a value past where the axis ended is not an issue", (await issueText()).length === 0, await issueText());
 check("line stays inside the chart", await ev(`[...document.querySelectorAll("#vwrap line")].every(l=>Number(l.getAttribute("x1"))<=vGeom().W)`));
+/* #159: the axes refit on commit, so a typed value gets room rather than sitting on the chart's edge. */
+check("the axis makes room for it on commit, its line inside the edge", await ev(`(()=>{const g=vGeom(),x=Number(document.querySelector('#vwrap [data-vline="temperature:4"]').getAttribute("x1"));return g.t.hi>36&&x<g.right-g.cw/2})()`), await ev(`vGeom().t`));
 
 const lowWas = await band("temperature", 1);
 await tap("#vin-temperature-1"); await type(""); await ev(`document.querySelector("#vin-temperature-1").value=""`); await key("Enter", 13);
@@ -1518,6 +1520,24 @@ await ev(`ui.leafw=null;ui.vpdw=null;ui.td=null;ui.sched=null;render()`);
 await open();
 check("Chart: mixed offsets say they're an average", (await ev(`document.querySelector("#main").textContent`)).includes("the average of 3 sensors"), await ev(`ui.vpdw.leaf`));
 check("Chart: uses the average of the counted sensors", (await ev(`ui.vpdw.leaf`)) === -0.8, await ev(`ui.vpdw.leaf`));
+// The leaf offset line is in the accent colour, words and button alike, and readable on the card in both themes (#159)
+/* HA's own colours, as the host sends them for its light and dark themes; the attribute alone leaves HA's colours in place. */
+const LEAF_THEMES = { light: { card: "#FFFFFF", fg: "#212121", muted: "#727272" }, dark: { card: "#1C1C1C", fg: "#E1E1E1", muted: "#9B9B9B" } };
+const leafLook = (theme, accent) => ev(`(()=>{const r=document.documentElement;r.dataset.theme="${theme}";r.style.setProperty("--primary","${accent}");Object.entries(${JSON.stringify(LEAF_THEMES[theme])}).forEach(([k,v])=>r.style.setProperty("--"+k,v));
+const rgb=(c)=>{const n=c.match(/[0-9.]+/g).map(Number);return c.startsWith("color(")?n.slice(0,3).map((x)=>x*255):n.slice(0,3)},lin=(v)=>(v/=255)<=0.03928?v/12.92:((v+0.055)/1.055)**2.4,lum=(c)=>{const [a,g,b]=rgb(c);return 0.2126*lin(a)+0.7152*lin(g)+0.0722*lin(b)},ratio=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)};
+const w=document.querySelector("#vleaf"),t=w.querySelector("span"),b=w.querySelector(".vleafbtn"),cs=getComputedStyle,p=document.createElement("i");let card=w,bg;
+while(card&&((bg=cs(card).backgroundColor)==="rgba(0, 0, 0, 0)"||bg==="transparent"))card=card.parentElement;
+p.style.color="var(--primary-text)";w.append(p);const acc=cs(p).color;p.style.color="var(--muted)";const muted=cs(p).color;p.style.color="var(--fg)";const fg=cs(p).color;p.remove();
+const [ar,ag,ab]=rgb(acc),hue=ar>ag+40&&ar>ab+40?"red":ab>ar+40&&ab>ag?"blue":"";
+return {acc,muted,fg,hue,bg,text:cs(t).color,btn:cs(b).color,border:cs(b).borderTopColor,contrast:Math.round(ratio(cs(t).color,bg)*100)/100}})()`);
+const themeBefore = await ev(`[document.documentElement.dataset.theme||"",document.documentElement.style.cssText]`), leafBgs = new Set();
+for (const theme of ["light", "dark"]) for (const [accent, said, hue] of [["#F44336", "red", "red"], ["#03A9F4", "HA's light blue", "blue"]]) {
+  const l = await leafLook(theme, accent); leafBgs.add(l.bg);
+  check(`Chart: the leaf offset words and the Change button's label and outline take the accent text colour, ${said} in ${theme}`, l.text === l.acc && l.btn === l.acc && l.border === l.acc && l.acc !== l.muted && l.acc !== l.fg && l.hue === hue, l);
+  check(`Chart: the leaf offset line is 4.5:1 or better on the card, ${said} in ${theme}`, l.contrast >= 4.5, l);
+}
+check("Chart: the leaf offset colours were judged on both themes' cards", leafBgs.size === 2, [...leafBgs]);
+await ev(`(()=>{const r=document.documentElement,[t,css]=${JSON.stringify(themeBefore)};if(t)r.dataset.theme=t;else delete r.dataset.theme;r.style.cssText=css})()`);
 const targetBefore = await band("vpd", 2);
 await ev(`document.querySelector("[data-calw]").click()`); await sleep(50);
 await ev(`(document.querySelector("[data-lexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(50);
@@ -1545,6 +1565,23 @@ check("Finish: it can be saved", fin.saveOn, fin);
 check("Finish: and it says the Target moved", (await ev(`document.querySelector("#toast").textContent`)).includes("Target moved"), await ev(`document.querySelector("#toast").textContent`));
 await ev(`(document.querySelector("[data-tdexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
 await boardSet([["number.nursery_environment_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
+// The ideal-zone check judges every value a limit may take, not the chart's old 16 to 34 degree, 30 to 90 % grid (#159)
+await ev(`ui.mapw=null;ui.wiz=null;ui.leafw=null;openVpd("nursery");render()`); await sleep(40);
+const idealIssues = async (period, t, h, p) => { await ev(`(()=>{const v=ui.vpdw;v.period="${period}";Object.assign(v.bands["${period}"],{temperature:${JSON.stringify(t)},humidity:${JSON.stringify(h)},vpd:${JSON.stringify(p)}});render()})()`); await sleep(30); return issueText(); };
+const fitsNone = (got) => got.some((x) => x.includes("No conditions fit"));
+/* A narrow range, its VPD worked out at the chart's own offset from the middle of the range so it is sure to fit. */
+const narrowIssues = async (period, t0) => { const p = await ev(`(()=>{const m=${t0}+0.2,l=ui.vpdw.leaf;return [Math.floor(calcVpd(m,61,l)*100)/100,Math.ceil(calcVpd(m,61,l)*100)/100]})()`); return idealIssues(period, [t0 - 2, t0, t0 + 0.2, Math.round((t0 + 0.4) * 10) / 10, t0 + 2], [50, 60, 61, 62, 70], [p[0] - 0.2, p[0], p[0], p[1], p[1] + 0.2]); };
+for (const period of ["day", "night"]) {
+  const cool = await idealIssues(period, [8, 10, 12, 14, 16], [40, 50, 60, 70, 80], [0.2, 0.4, 0.6, 0.8, 1]);
+  check(`Ideal zone: a ${period} range of 10 to 14 degrees, below the old grid, that fits isn't told nothing fits`, cool.length === 0, cool);
+  const coolHigh = await idealIssues(period, [8, 10, 12, 14, 16], [40, 50, 60, 70, 80], [1, 1.2, 1.4, 1.6, 1.8]);
+  check(`Ideal zone: the same ${period} range with a VPD it can't reach is still told nothing fits`, fitsNone(coolHigh), coolHigh);
+  for (const t0 of [12.2, 20.2]) {
+    const narrow = await narrowIssues(period, t0);
+    check(`Ideal zone: a narrow ${period} range that fits, ${t0} to ${Math.round((t0 + 0.4) * 10) / 10} degrees and 60 to 62 %, isn't flagged`, narrow.length === 0, narrow);
+  }
+}
+await ev(`ui.vpdw.period="day";render()`);
 
 // Where a sensor's offset is held is chosen on Sensor Calibration, as the panel has it since #17, not in Device identification
 await ev(`ui.vpdw=null;ui.td=null;ui.sched=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
@@ -2333,6 +2370,81 @@ await ev(`document.activeElement.blur()`);
 const wide = await ev(`({clipped:[...document.querySelectorAll("[data-vin]")].filter(i=>i.scrollWidth>i.clientWidth).map(i=>i.id), size:getComputedStyle(document.querySelector("[data-vin]")).fontSize})`);
 check("desktop: no box clips its number", wide.clipped.length === 0, wide);
 await shot("vpd-desktop");
+/* #159: the selected limit is the one in the accent colour; the others are grey, in every group. */
+const vLook = () => ev(`(()=>{const c=(v)=>{const p=document.createElement("i");p.style.color=v;document.body.appendChild(p);const x=getComputedStyle(p).color;p.remove();return x},prim=c("var(--primary)"),onp=c("var(--on-primary)");return {flags:[...document.querySelectorAll("#vwrap [data-vflag]")].map(g=>({slot:Number(g.dataset.vflag),fill:getComputedStyle(g.querySelector("rect")).fill,text:getComputedStyle(g.querySelector("text")).fill})),accent:[...document.querySelectorAll("#vwrap line, #vwrap path, #vwrap circle")].filter(l=>getComputedStyle(l).stroke===prim).length,prim,onp}})()`);
+for (const k of ["temperature", "humidity", "vpd"]) {
+  await open(); await ev(`ui.vpdw.edit="${k}";ui.vpdw.sel=3;vSync()`);
+  const lk = await vLook(), mine = lk.flags.filter((f) => f.slot === 3), rest = lk.flags.filter((f) => f.slot !== 3);
+  check(`Chart colours, ${k}: the selected label is filled in the accent colour with its text colour, the other three grey, and its line is in the accent`, mine.length === 1 && mine[0].fill === lk.prim && mine[0].text === lk.onp && rest.length === 3 && rest.every((f) => f.fill !== lk.prim && f.text !== lk.onp) && lk.accent >= 1, lk);
+}
+await open(); await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`);
+const lkNone = await vLook();
+check("Chart colours: with nothing selected no label or line is in the accent", lkNone.flags.length === 4 && lkNone.flags.every((f) => f.fill !== lkNone.prim) && lkNone.accent === 0, lkNone);
+await open(); await ev(`ui.vpdw.edit="target";vSync()`);
+check("Chart colours: on Target the circle is drawn in the accent", (await vLook()).accent >= 1, await vLook());
+/* #159: the axes fit the zone's limits. The stakeholder's case first: temperature Min 13, Low 16, High 21, Max 21. */
+const vAxisNow = () => ev(`(()=>{const w=document.querySelector("#vwrap");w.scrollIntoView({block:"center"});const svg=w.querySelector("svg"),r=svg.getBoundingClientRect(),g=vGeom(),sc=r.width/g.W,pos={};for(const l of svg.querySelectorAll("[data-vline]"))pos[l.dataset.vline]=l.tagName==="path"?l.getAttribute("d").length:l.dataset.vline.startsWith("temperature")?Number(l.getAttribute("x1")):Number(l.getAttribute("y1"));return {pos,L:g.L+g.cw/2,R:g.right-g.cw/2,T:g.T+g.ch/2,B:g.bottom-g.ch/2,ticks:[...svg.querySelectorAll("[data-vtick]")].map(t=>Number(t.dataset.vtick)),rh:[...svg.querySelectorAll("text")].filter(t=>t.textContent.endsWith("%")).map(t=>Number(t.textContent.slice(0,-1))),cells:svg.querySelectorAll("g[opacity] > rect").length,left:r.left,top:r.top,sc,band:ui.vpdw.bands[ui.vpdw.period].temperature.slice()}})()`);
+const vPlace = async (temps) => { await ev(`(()=>{const z=zones[0],p=typeof period==="function"?period(z):"day";window.__bandsWas=window.__bandsWas||JSON.stringify(z.bands);z.bands[p].temperature=${JSON.stringify(temps)}})()`); await open(); await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`); };
+const vRestore = () => ev(`(()=>{if(window.__bandsWas)zones[0].bands=JSON.parse(window.__bandsWas);window.__bandsWas=null})()`);
+/* Presses at a chart point (in the chart's own units), moves to another, and reads the axis while still held. */
+const vDrag = async (x0, y0, x1, y1) => {
+  const a = await vAxisNow(), at = (x, y) => ({ x: a.left + x * a.sc, y: a.top + y * a.sc });
+  const p = at(x0, y0), q = at(x1, y1);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1 }); await sleep(40);
+  const down = await vAxisNow();
+  for (let n = 1; n <= 4; n++) { await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x + ((q.x - p.x) * n) / 4, y: p.y + ((q.y - p.y) * n) / 4, button: "left", buttons: 1 }); await sleep(20); }
+  const held = await vAxisNow();
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: q.x, y: q.y, button: "left", clickCount: 1 }); await sleep(80);
+  return { down, held, up: await vAxisNow() };
+};
+await vPlace([13, 16, 18.5, 21, 21]);
+let ax = await vAxisNow(), tp = ax.pos;
+check("Axes, Min 13 Low 16 High 21 Max 21: every temperature line has its own place inside the plot, none on an edge, Min left of Low, High and Max one line", ["temperature:0", "temperature:1", "temperature:3", "temperature:4"].every((id) => tp[id] > ax.L && tp[id] < ax.R) && tp["temperature:0"] < tp["temperature:1"] && tp["temperature:1"] < tp["temperature:3"] && tp["temperature:3"] === tp["temperature:4"], ax);
+check("Axes, Min 13 Low 16 High 21 Max 21: the VPD lines and the Target are on the chart too", [0, 1, 3, 4].every((i) => tp[`vpd:${i}`] > 0) && (await ev(`(()=>{const c=document.querySelector("#vwrap circle"),g=vGeom(),b=ui.vpdw.bands[ui.vpdw.period];return Math.abs(Number(c.getAttribute("cx"))-g.X(b.temperature[2]))<0.01&&Math.abs(Number(c.getAttribute("cy"))-g.Y(b.humidity[2]))<0.01})()`)), ax);
+await shot("vpd-axes-tight-temperature");
+/* Max selected on the shared High/Max line: a press there drags Max, not High. */
+await ev(`ui.vpdw.sel=4;vSync()`); ax = await vAxisNow();
+let dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.pos["temperature:4"] + 2 * (await ev(`vGeom().cw`)), (ax.T + ax.B) / 2);
+check("Grab: with Max selected, a press on the coinciding High/Max line moves Max and leaves High", dr.up.band[4] > 21 && dr.up.band[3] === 21 && (await ev(`ui.vpdw.sel`)) === 4, dr.up.band);
+await vPlace([13, 16, 18.5, 21, 21]); await ev(`ui.vpdw.sel=3;vSync()`); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:3"], (ax.T + ax.B) / 2, ax.pos["temperature:3"] - 2 * (await ev(`vGeom().cw`)), (ax.T + ax.B) / 2);
+check("Grab: with High selected, the same press moves High and leaves Max", dr.up.band[3] < 21 && dr.up.band[4] === 21 && (await ev(`ui.vpdw.sel`)) === 3, dr.up.band);
+await vPlace([13, 16, 18.5, 21, 21]); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.pos["temperature:4"], (ax.T + ax.B) / 2);
+check("Grab: with neither selected, a press on the High/Max line takes the outer one, Max", (await ev(`ui.vpdw.sel`)) === 4, await ev(`ui.vpdw.sel`));
+/* Dragged to the right edge and past it: the axis holds still until release, the line stops at the edge, then the axis makes room. */
+await vPlace([13, 16, 18.5, 21, 21]); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.R + 200, (ax.T + ax.B) / 2);
+const edgeHi = dr.down.ticks.at(-1);
+check("Drag: the axis doesn't change between pressing and letting go, the line stopping at the chart's edge", JSON.stringify(dr.down.ticks) === JSON.stringify(dr.held.ticks) && dr.down.cells === dr.held.cells && Math.abs(dr.held.pos["temperature:4"] - dr.held.R) < 0.5, dr);
+check("Drag: once let go near the edge the axis makes room, so the line has space past it", JSON.stringify(dr.up.ticks) !== JSON.stringify(dr.held.ticks) && dr.up.pos["temperature:4"] < dr.up.R - 1 && dr.up.ticks.at(-1) > edgeHi, [dr.held.ticks, dr.up.ticks, dr.up.band]);
+await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=4;vSync()`); const maxWas = await band("temperature", 4);
+await tap("#vnudge [data-vnudge='1']");
+check("Drag: from there + goes on a step at a time", (await band("temperature", 4)) === maxWas + 0.5, await band("temperature", 4));
+/* Ordinary limits: round labels, and about as many cells as the fixed 16 to 34 by 30 to 90 grid had (19 by 13). */
+await vRestore(); await open(); ax = await vAxisNow();
+const cols = ax.ticks.length, rows = ax.rh.length;
+check("Axes, ordinary limits: whole even temperature labels, humidity in fives, and a grid of about the same number of cells as before", ax.ticks.every((t) => Number.isInteger(t) && t % 2 === 0) && ax.rh.every((r) => r % 5 === 0) && ax.cells >= 19 * 13 && ax.cells <= 26 * 17 && rows >= 13 && rows <= 17, { ticks: ax.ticks, rh: ax.rh, cells: ax.cells });
+await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`); await shot("vpd-axes-ordinary-temperature");
+await ev(`ui.vpdw.edit="humidity";ui.vpdw.sel=3;vSync()`); await shot("vpd-axes-ordinary-humidity");
+const dayTicks = (await vAxisNow()).ticks;
+await ev(`(()=>{const v=ui.vpdw,o=v.period==="day"?"night":"day";v.bands[o].temperature=[8,10,null,14,15];v.bands[o].temperature[2]=v.bands[o].temperature[2]})()`);
+await ev(`document.querySelector("[data-vperiod]:not([aria-pressed=true])").click()`); await sleep(60);
+const nightAx = await vAxisNow();
+check("Axes: switching period refits them to that period's limits", JSON.stringify(nightAx.ticks) !== JSON.stringify(dayTicks) && nightAx.pos["temperature:0"] > nightAx.L, [dayTicks, nightAx.ticks]);
+await open();
+/* The leaf offset the chart is drawn at sits with the chart, at its left, as a button rather than a caption off to the side. */
+const leafSpot = () => ev(`(()=>{const b=document.querySelector("#td-targets [data-calw]");b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect(),t=b.previousElementSibling.getBoundingClientRect(),c=document.querySelector("#td-targets").getBoundingClientRect(),svg=document.querySelector("#vwrap svg").getBoundingClientRect(),g=vGeom(),gridTop=svg.top+(g.T*svg.height)/g.H;return {left:Math.min(t.left,r.left)-c.left,afterText:r.left-t.right<=16||r.top>=t.bottom-1,third:c.width/3,gap:gridTop-r.bottom,h:r.height,name:b.getAttribute("aria-label"),text:b.parentElement.textContent,cls:b.className}})()`);
+for (const w of [1280, 900, 500]) {
+  await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await open(); await sleep(60);
+  const ls = await leafSpot();
+  check(`Leaf offset, ${w}px: the line and its button start at the left of the Targets card, right above the chart's grid, named for what it changes`, ls.left >= 0 && ls.left < ls.third && ls.afterText && ls.gap >= 0 && ls.gap <= 80 && ls.name === "Change the leaf temperature offset" && /^Leaf .*air/.test(ls.text) && ls.cls.split(" ").includes("btn"), ls);
+}
+await phone(500, 900); await open(); await sleep(60);
+check("Leaf offset, phone: the button is at least 40px high to tap", (await leafSpot()).h >= 40, await leafSpot());
+await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await open(); await sleep(60);
 await reset(); await goTab("Garden"); await shot("controls-desktop");
 await openL(); await sleep(60); await shot("leaf-desktop"); await reset();
 // ---------- The history chart

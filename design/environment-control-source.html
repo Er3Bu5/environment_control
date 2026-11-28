@@ -4,9 +4,13 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* The panel's own palettes, generated from the frontend's PALETTES so the two can't drift. */
-:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
+:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --vline: #6E6E6E; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
 :root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
+/* Accent-coloured text. The raw primary on the card is 2.6:1 for HA's light blue and 3.7:1 for a red accent in the light
+   theme, short of the 4.5:1 that text needs, so it is mixed toward the text colour, which keeps HA's usual accents at 4.5:1 or
+   better in either theme. */
+:root { --primary-text: color-mix(in srgb, var(--primary) 60%, var(--fg)); }
 html, body { margin: 0; }
 
 /* The frontend's styles (frontend/src/frame/styles.ts), with :host as the page. */
@@ -310,6 +314,11 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .sensor-opt[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
   .now { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
   .now strong { font-weight: 500; }
+  /* Right above the grid, where the eye already is: the only place that says which leaf offset the chart is drawn at, and the way to change it. */
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
+  @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 220px)); gap: 12px; }
 
   /* Live readings, as the mock draws them: tinted-icon tiles, each reading on a line-and-dot band track. */
@@ -2518,11 +2527,11 @@ const calcVpd = (t, rh, off) => svp(t + off) - (rh / 100) * svp(t);
 /* Athena's Optimal Environment table: veg 0.8-1.0, flower stretch and bulk 1.0-1.2, flower finish 1.2-1.4 kPa. */
 const VZONES = [["--v0", "Under 0.8, outside Athena's ranges"], ["--v1", "0.8 - 1.0, veg"], ["--v2", "1.0 - 1.2, flower stretch and bulk"], ["--v3", "1.2 - 1.4, flower finish"], ["--v0", "Over 1.4, outside Athena's ranges"]];
 const vzone = (v) => v < 0.8 ? 0 : v < 1.0 ? 1 : v < 1.2 ? 2 : v < 1.4 ? 3 : 4;
-const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
+/* The ideal-zone check counts over the grid the chart first had, so axes that follow the limits can't change what it finds. */
 const VNAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD" };
 const VUNIT = { temperature: "°", humidity: "%", vpd: " kPa" };
 const VSNAP = { temperature: 0.5, humidity: 1, vpd: 0.05 };
-/* Wider than the chart: a Max of 36° is a sensible limit even though the axis stops at 34. */
+/* What a limit may be. The chart's axes follow the zone's limits inside these. */
 const VRANGE = { temperature: [0, 50], humidity: [0, 100], vpd: [0, 5] };
 const VDECIMALS = { temperature: 1, humidity: 1, vpd: 2, light: 0 };
 const SLOT_NAME = ["Min", "Low", "Target", "High", "Max"];
@@ -2592,7 +2601,7 @@ function vProblems(b, light = true) {
 function vIssues(v, b) {
   const p = Object.keys(v.bands).find((x) => v.bands[x] === b) || v.period;
   const issues = [...vProblems(b, !noLight(baseZone(v.id))), ...vHelperIssues(v, p, b)];
-  if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
+  if (!idealFits(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
   return issues;
 }
 const vIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" ${i.leaf ? `data-calw="${i.leaf}"` : `data-vfix="${i.edit}"`}${i.slot === undefined ? "" : ` data-vslot="${i.slot}"`}><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
@@ -2604,67 +2613,125 @@ function vIssueBox(v, issues) {
 }
 const vPeriodChanged = (v, p) => { const z = baseZone(v.id), was = z.bands[p]; return differs(v.bands[p].light[0], z.lightLimits[LIGHT_LIMIT[p][0]]) || Object.keys(VNAME).some((k) => v.bands[p][k].some((x, i) => differs(x, was[k][i]))); };
 const vPeriodBad = (v, p) => (p === v.period || vPeriodChanged(v, p)) && vIssues(v, v.bands[p]).length > 0;
-function vGeom() {
-  const cw = 34, ch = 30, L = 38, T = 46, cols = T_MAX - T_MIN + 1, rows = (RH_TOP - RH_LOW) / 5 + 1;
+/* Cells along and up: about as many as the chart's first fixed grid (19 by 13) whatever the limits, so tight limits don't get a few huge cells and wide ones don't get a crowd. A wider span takes a bigger step instead. */
+const VAXIS = { temperature: { steps: [1, 2, 5], cells: [19, 26] }, humidity: { steps: [5, 10], cells: [13, 17] } };
+function vFit(k, vals) {
+  const [floor, ceil] = VRANGE[k], { steps, cells: [fewest, most] } = VAXIS[k], lo0 = Math.min(...vals), hi0 = Math.max(...vals);
+  let out;
+  for (const step of steps) {
+    const room = Math.max(2 * step, 0.1 * (hi0 - lo0)), need = (fewest - 1) * step;
+    let lo = Math.floor((lo0 - room) / step) * step, hi = Math.ceil((hi0 + room) / step) * step;
+    if (hi - lo < need) { lo = Math.min(lo, Math.round(((lo0 + hi0) / 2 - need / 2) / step) * step); hi = Math.max(hi, lo + need); }
+    if (lo < floor) { hi += floor - lo; lo = floor; }
+    if (hi > ceil) { lo = Math.max(floor, lo - (hi - ceil)); hi = ceil; }
+    out = { lo, hi, step, n: Math.round((hi - lo) / step) + 1 };
+    if (out.n <= most) break;
+  }
+  return out;
+}
+/* Every limit gets its own place with room either side, so none sits on the edge on top of another. */
+function vAxes(v, b) {
+  const vals = (k) => b[k].filter((x) => x !== null && Number.isFinite(x)).map((x) => clamp(x, ...VRANGE[k]));
+  const t = vFit("temperature", vals("temperature"));
+  /* A VPD line has to cross the chart, so where it meets the middle temperature counts as a humidity to fit. */
+  const mid = (t.lo + t.hi) / 2, curves = HANDLES.map((i) => b.vpd[i]).filter(Number.isFinite).map((vp) => clamp(rhAt(mid, vp, v.leaf), ...VRANGE.humidity));
+  return { t, rh: vFit("humidity", [...vals("humidity"), ...curves]) };
+}
+function vGeom(v = ui.vpdw, b = v.bands[v.period]) {
+  const { t, rh } = v.held || vAxes(v, b), cw = 34, ch = 30, L = 38, T = 46, cols = t.n, rows = rh.n;
   return {
-    cw, ch, L, T, cols, rows, W: L + cols * cw + 8, H: T + rows * ch + 22, right: L + cols * cw, bottom: T + rows * ch,
-    X: (t) => L + (t - T_MIN) * cw + cw / 2, Y: (rh) => T + ((RH_TOP - rh) / 5) * ch + ch / 2,
-    invX: (px) => (px - L - cw / 2) / cw + T_MIN, invY: (py) => RH_TOP - ((py - T - ch / 2) / ch) * 5,
+    t, rh, cw, ch, L, T, cols, rows, W: L + cols * cw + 8, H: T + rows * ch + 22, right: L + cols * cw, bottom: T + rows * ch,
+    X: (x) => L + ((x - t.lo) / t.step) * cw + cw / 2, Y: (r) => T + ((rh.hi - r) / rh.step) * ch + ch / 2,
+    invX: (px) => ((px - L - cw / 2) / cw) * t.step + t.lo, invY: (py) => rh.hi - ((py - T - ch / 2) / ch) * rh.step,
   };
 }
 const rhAt = (t, vp, leaf) => ((svp(t + leaf) - vp) / svp(t)) * 100;
-function idealCount(v, b) {
-  let n = 0;
-  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 1) for (let t = T_MIN; t <= T_MAX; t += 0.5) {
-    const p = calcVpd(t, rh, v.leaf);
-    if (t >= b.temperature[1] && t <= b.temperature[3] && rh >= b.humidity[1] && rh <= b.humidity[3] && p >= b.vpd[1] && p <= b.vpd[3]) n++;
+/* Judged over everything a limit may be, not the chart's old fixed grid, which wrongly said nothing fits a range outside it.
+   VPD only falls as humidity rises, so at each temperature the humidity ends settle it exactly; temperature goes in its
+   inputs' 0.1 degree steps and takes both its ends, so a range narrower than a chart cell isn't missed. */
+function idealFits(v, b) {
+  const [tMin, tMax] = VRANGE.temperature, [hMin, hMax] = VRANGE.humidity, e = 1e-9;
+  const tLo = Math.max(b.temperature[1], tMin), tHi = Math.min(b.temperature[3], tMax), hLo = Math.max(b.humidity[1], hMin), hHi = Math.min(b.humidity[3], hMax);
+  if (tLo > tHi || hLo > hHi) return false;
+  for (let i = 0, n = Math.ceil((tHi - tLo) * 10 - 1e-6); i <= n; i++) {
+    const t = Math.min(tLo + i / 10, tHi);
+    if (calcVpd(t, hHi, v.leaf) <= b.vpd[3] + e && calcVpd(t, hLo, v.leaf) >= b.vpd[1] - e) return true;
   }
-  return n;
+  return false;
 }
-function chip(x, y, text, on) {
+function chip(x, y, text, on, slot) {
   const w = 52, h = 18, cx = Math.round(x);
-  return `<g pointer-events="none"><rect x="${cx - w / 2}" y="${y}" width="${w}" height="${h}" rx="4" fill="${on ? "var(--vink)" : "var(--primary)"}"/><text x="${cx}" y="${y + 13}" text-anchor="middle" fill="#FFFFFF" style="font-size:11px">${esc(text)}</text></g>`;
+  return `<g pointer-events="none" data-vflag="${slot}"><rect x="${cx - w / 2 + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="${on ? "var(--primary)" : "var(--tile)"}" stroke="${on ? "var(--primary)" : "var(--off)"}"/><text x="${cx}" y="${y + 13}" text-anchor="middle" fill="${on ? "var(--on-primary)" : "var(--muted)"}" style="font-size:11px">${esc(text)}</text></g>`;
 }
+const FLAG_W = 52, FLAG_H = 18;
+/* Where each limit's label sits. Two on one row that would overlap are pushed apart, so equal or close limits can both be read, and pressed. */
+function vFlags(v, b, g) {
+  const k = v.edit, out = {};
+  if (!["temperature", "humidity", "vpd"].includes(k)) return out;
+  const tAt = (x) => clamp(x, g.t.lo, g.t.hi), rhIn = (x) => clamp(x, g.rh.lo, g.rh.hi);
+  for (const i of HANDLES) {
+    const outer = i === 0 || i === 4;
+    if (k === "temperature") out[i] = { x: g.X(tAt(b[k][i])), y: outer ? 2 : 24 };
+    if (k === "humidity") out[i] = { x: g.right - (outer ? 30 : 86), y: g.Y(rhIn(b[k][i])) - 9 };
+    if (k === "vpd") {
+      const vp = b[k][i], off = (c) => rhAt(c, vp, v.leaf) > g.rh.hi || rhAt(c, vp, v.leaf) < g.rh.lo;
+      let c = g.t.lo + Math.round(((g.t.hi - g.t.lo) * { 0: 0.94, 1: 0.78, 3: 0.61, 4: 0.44 }[i]) / (g.t.step / 2)) * (g.t.step / 2);
+      while (c > g.t.lo && off(c)) c -= g.t.step / 2;
+      out[i] = { x: g.X(c), y: g.Y(rhIn(rhAt(c, vp, v.leaf))) - 9 };
+    }
+  }
+  const gap = k === "temperature" ? FLAG_W + 2 : FLAG_H + 2, axis = k === "temperature" ? "x" : "y";
+  if (k !== "vpd") for (const [a, c] of [[0, 4], [1, 3]]) {
+    /* Max is right of Min along the bottom but above it up the side. */
+    const [first, second] = k === "temperature" ? [out[a], out[c]] : [out[c], out[a]];
+    if (second[axis] - first[axis] < gap) { const mid = (first[axis] + second[axis]) / 2; first[axis] = mid - gap / 2; second[axis] = mid + gap / 2; }
+  }
+  if (k === "temperature") for (const [a, c] of [[0, 4], [1, 3]]) { out[a].x = clamp(out[a].x, g.L + FLAG_W / 2, g.right - FLAG_W / 2 - gap); out[c].x = clamp(out[c].x, out[a].x + gap, g.right - FLAG_W / 2); }
+  return out;
+}
+const flagAt = (flags, px, py) => HANDLES.find((i) => flags[i] && Math.abs(px - flags[i].x) <= FLAG_W / 2 && py >= flags[i].y && py <= flags[i].y + FLAG_H);
 function vChartInner(v, b) {
-  const g = vGeom(), { X, Y } = g, showText = window.innerWidth >= 760;
+  const g = vGeom(v, b), { X, Y } = g, showText = window.innerWidth >= 760;
   const edit = v.edit, on = (k) => edit === k;
   let s = "";
-  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 5) {
+  for (let rh = g.rh.hi; rh >= g.rh.lo; rh -= g.rh.step) {
     s += `<text x="${g.L - 6}" y="${Y(rh) + 4}" text-anchor="end" fill="var(--muted)">${rh}%</text>`;
-    for (let t = T_MIN; t <= T_MAX; t++) {
+    for (let t = g.t.lo; t <= g.t.hi; t += g.t.step) {
       const p = calcVpd(t, rh, v.leaf), within = (i, j) => t >= b.temperature[i] && t <= b.temperature[j] && rh >= b.humidity[i] && rh <= b.humidity[j] && p >= b.vpd[i] && p <= b.vpd[j];
       const opacity = within(1, 3) ? 1 : within(0, 4) ? 0.55 : 0.18;
       s += `<g opacity="${opacity}"><rect x="${X(t) - g.cw / 2}" y="${Y(rh) - g.ch / 2}" width="${g.cw - 1}" height="${g.ch - 1}" fill="var(${VZONES[vzone(p)][0]})"/>${showText ? `<text x="${X(t) - 0.5}" y="${Y(rh) + 3.5}" text-anchor="middle" fill="var(--vink)" style="font-size:10px">${p.toFixed(1)}</text>` : ""}</g>`;
     }
   }
-  for (let t = T_MIN; t <= T_MAX; t += 2) s += `<text x="${X(t)}" y="${g.H - 7}" text-anchor="middle" fill="var(--muted)">${t}°</text>`;
+  /* Every other cell is labelled, on multiples of two steps, so the labels stay round numbers. */
+  for (let t = g.t.lo; t <= g.t.hi; t += g.t.step) if ((t / g.t.step) % 2 === 0) s += `<text x="${X(t)}" y="${g.H - 7}" text-anchor="middle" fill="var(--muted)" data-vtick="${t}">${t}°</text>`;
   const stroke = (k, i) => (on(k) ? (v.sel === i ? 4 : 2.5) : 1);
   const faded = (k) => (on(k) ? 1 : 0.3);
-  const ln = (x1, y1, x2, y2, k, i) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--vink)" stroke-width="${stroke(k, i)}" opacity="${faded(k)}"/>`;
-  let flags = "";
+  /* The selected line is drawn last, over any line it coincides with, with a light edge so the accent reads on every cell colour. */
+  const picked = (k, i) => on(k) && v.sel === i, halo = (k, i) => (picked(k, i) ? 8 : 0);
+  const ink = (k, i) => (picked(k, i) ? "var(--primary)" : "var(--vline)");
+  let top = "";
+  const put = (html, k, i) => { if (picked(k, i)) top += html; else s += html; };
+  const ln = (x1, y1, x2, y2, k, i) => put(`${halo(k, i) ? `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#FFFFFF" stroke-width="${halo(k, i)}" opacity="0.7"/>` : ""}<line data-vline="${k}:${i}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ink(k, i)}" stroke-width="${stroke(k, i)}" opacity="${faded(k)}"/>`, k, i);
+  let flags = "", flagTop = "";
   for (const i of HANDLES) {
-    const t = clamp(b.temperature[i], T_MIN, T_MAX), rh = clamp(b.humidity[i], RH_LOW, RH_TOP), vp = b.vpd[i];
-    s += ln(X(t), g.T, X(t), g.bottom, "temperature", i) + ln(g.L, Y(rh), g.right, Y(rh), "humidity", i);
+    const t = clamp(b.temperature[i], g.t.lo, g.t.hi), rh = clamp(b.humidity[i], g.rh.lo, g.rh.hi), vp = b.vpd[i];
+    ln(X(t), g.T, X(t), g.bottom, "temperature", i); ln(g.L, Y(rh), g.right, Y(rh), "humidity", i);
     let d = "", pen = false;
-    for (let c = T_MIN; c <= T_MAX; c += 0.25) {
+    for (let c = g.t.lo; c <= g.t.hi; c += g.t.step / 4) {
       const r = rhAt(c, vp, v.leaf);
-      if (r > RH_TOP || r < RH_LOW) { pen = false; continue; }
+      if (r > g.rh.hi || r < g.rh.lo) { pen = false; continue; }
       d += `${pen ? "L" : "M"}${X(c).toFixed(1)} ${Y(r).toFixed(1)}`; pen = true;
     }
-    if (d) s += `<path d="${d}" fill="none" stroke="var(--vink)" stroke-width="${stroke("vpd", i)}" stroke-dasharray="6 4" opacity="${faded("vpd")}"/>`;
-    const label = `${SLOT_NAME[i]} ${b[on("vpd") ? "vpd" : on("humidity") ? "humidity" : "temperature"][i]}`;
-    if (on("temperature")) flags += chip(clamp(X(t), g.L + 26, g.right - 26), i === 0 || i === 4 ? 2 : 24, label, v.sel === i);
-    if (on("humidity")) flags += chip(g.right - (i === 0 || i === 4 ? 30 : 86), Y(rh) - 9, label, v.sel === i);
-    if (on("vpd")) {
-      let c = { 0: 33, 1: 30, 3: 27, 4: 24 }[i];
-      while (c > T_MIN && (rhAt(c, vp, v.leaf) > RH_TOP || rhAt(c, vp, v.leaf) < RH_LOW)) c -= 0.5;
-      const r = clamp(rhAt(c, vp, v.leaf), RH_LOW, RH_TOP);
-      flags += chip(X(c), Y(r) - 9, label, v.sel === i);
-    }
+    if (d) put(`${halo("vpd", i) ? `<path d="${d}" fill="none" stroke="#FFFFFF" stroke-width="${halo("vpd", i)}" opacity="0.7"/>` : ""}<path data-vline="vpd:${i}" d="${d}" fill="none" stroke="${ink("vpd", i)}" stroke-width="${stroke("vpd", i)}" stroke-dasharray="6 4" opacity="${faded("vpd")}"/>`, "vpd", i);
   }
-  const tx = X(clamp(b.temperature[2], T_MIN, T_MAX)), ty = Y(clamp(b.humidity[2], RH_LOW, RH_TOP)), big = on("target");
-  if (b.temperature[2] !== null) s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="var(--vink)" stroke-width="2.5"/></g>`;
-  return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${flags}</svg>`;
+  const spots = vFlags(v, b, g);
+  for (const i of HANDLES) if (spots[i]) {
+    const html = chip(spots[i].x, spots[i].y, `${SLOT_NAME[i]} ${b[edit][i]}`, v.sel === i, i);
+    if (v.sel === i) flagTop += html; else flags += html;
+  }
+  const tx = X(clamp(b.temperature[2], g.t.lo, g.t.hi)), ty = Y(clamp(b.humidity[2], g.rh.lo, g.rh.hi)), big = on("target");
+  if (b.temperature[2] !== null) s += `<g><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="none" stroke="#FFFFFF" stroke-width="5"/><circle cx="${tx}" cy="${ty}" r="${big ? 15 : 10}" fill="${big ? "#FFFFFF66" : "none"}" stroke="${big ? "var(--primary)" : "var(--vline)"}" stroke-width="2.5"/></g>`;
+  return `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="VPD chart of temperature against humidity">${s}${top}${flags}${flagTop}</svg>`;
 }
 function vReadout(v, b) {
   const z = zoneById(v.id), tp = z && sharesSensor(z) ? parentOf(z) : null;
@@ -2679,21 +2746,40 @@ function placeHandle(b, k, i, val) {
 }
 /* Picks the nearest line on press, then moves it. A line stops at its neighbours, so the order can't break. */
 function vMove(v, b, g, px, py, start) {
-  const t = clamp(g.invX(px), T_MIN, T_MAX), rh = clamp(g.invY(py), RH_LOW, RH_TOP);
-  if (v.edit === "target") {
+  const k = v.edit;
+  if (start) {
+    v.grab = { dx: 0, dy: 0 };
+    const spots = vFlags(v, b, g), hit = flagAt(spots, px, py);
+    /* A press on a label takes that limit where it is, without moving it: a label can sit beside its line when two coincide. */
+    if (hit !== undefined) {
+      v.sel = hit;
+      const val = b[k][hit];
+      v.grab = k === "temperature" ? { dx: g.X(clamp(val, g.t.lo, g.t.hi)) - px, dy: 0 } : k === "humidity" ? { dx: 0, dy: g.Y(clamp(val, g.rh.lo, g.rh.hi)) - py } : { dx: spots[hit].x - px, dy: spots[hit].y + FLAG_H / 2 - py };
+      return;
+    }
+  }
+  px += v.grab ? v.grab.dx : 0; py += v.grab ? v.grab.dy : 0;
+  const t = clamp(g.invX(px), g.t.lo, g.t.hi), rh = clamp(g.invY(py), g.rh.lo, g.rh.hi);
+  if (k === "target") {
     b.temperature[2] = round2(clamp(snapTo(t, VSNAP.temperature), b.temperature[1], b.temperature[3]));
     b.humidity[2] = round2(clamp(snapTo(rh, VSNAP.humidity), b.humidity[1], b.humidity[3]));
     b.vpd[2] = stepped(calcVpd(b.temperature[2], b.humidity[2], v.leaf));
     return;
   }
-  const k = v.edit;
-  const dist = (i) => k === "temperature" ? Math.abs(g.X(b[k][i]) - px) : k === "humidity" ? Math.abs(g.Y(b[k][i]) - py) : Math.abs(g.Y(rhAt(t, b[k][i], v.leaf)) - py);
-  if (start || v.sel === null) v.sel = HANDLES.reduce((a, c) => (dist(c) < dist(a) ? c : a));
+  const dist = (i) => k === "temperature" ? Math.abs(g.X(clamp(b[k][i], g.t.lo, g.t.hi)) - px) : k === "humidity" ? Math.abs(g.Y(clamp(b[k][i], g.rh.lo, g.rh.hi)) - py) : Math.abs(g.Y(rhAt(t, b[k][i], v.leaf)) - py);
+  if (start || v.sel === null) {
+    const near = Math.min(...HANDLES.map(dist)), tied = HANDLES.filter((c) => dist(c) - near < 0.5);
+    /* Coinciding limits, as a High equal to its Max: the one already selected, or else the outer one, the only one of the two free to move outward. */
+    v.sel = tied.includes(v.sel) ? v.sel : (tied.find((c) => c === 0 || c === 4) ?? tied[0]);
+  }
   const raw = k === "temperature" ? t : k === "humidity" ? rh : calcVpd(t, rh, v.leaf);
   placeHandle(b, k, v.sel, snapTo(raw, VSNAP[k]));
 }
 function vPointer(e, start) {
-  const v = ui.vpdw, b = v.bands[v.period], g = vGeom(), wrap = document.querySelector("#vwrap"), r = wrap.querySelector("svg").getBoundingClientRect(), scale = g.W / r.width;
+  const v = ui.vpdw, b = v.bands[v.period];
+  /* The axes hold still from press to release: rescaling under the pointer would run the line away from it. They refit on release. */
+  if (start) v.held = vAxes(v, b);
+  const g = vGeom(v, b), wrap = document.querySelector("#vwrap"), r = wrap.querySelector("svg").getBoundingClientRect(), scale = g.W / r.width;
   vMove(v, b, g, (e.clientX - r.left) * scale, (e.clientY - r.top) * scale, start);
   vSync();
 }
@@ -2790,14 +2876,14 @@ function renderVpd() {
   const own = (html) => (tp ? "" : html);
   return `<section class="card" id="td-targets"><div><h2>Targets</h2><p class="muted small">${tp ? `${esc(tp.name)}'s limits, which ${esc(z.name)}'s readings are judged against.` : `Pick ${esc(z.name)}'s limits on the VPD chart, or type them.`}</p></div>
     ${tp ? `<p class="small" data-sharedline="targets">This zone shares a sensor with Zone: ${esc(tp.name)}, so its targets are ${esc(tp.name)}'s. ${esc(editInAgain(tp))}.</p>` : `<div>${chips(`Where do ${z.name}'s limits come from?`, "limits-src", [["helpers", "My helpers"], ["here", "Set here"]], m.band, "data-mband")}</div>`}
-    <div class="card-head"><div class="seg" role="group" aria-label="Period">${[["day", "Day"], ["night", "Night"]].map(([k, l]) => `<button data-vperiod="${k}" aria-pressed="${v.period === k}">${l}</button>`).join("")}</div>
-      <div class="row"><span class="small muted">${esc(leafText)}</span><button class="fixlink small" data-calw="${z.id}">Change &rsaquo;</button></div></div>
+    <div class="card-head"><div class="seg" role="group" aria-label="Period">${[["day", "Day"], ["night", "Night"]].map(([k, l]) => `<button data-vperiod="${k}" aria-pressed="${v.period === k}">${l}</button>`).join("")}</div></div>
     ${own(`<div><p class="small muted">Does ${esc(z.name)} aim for a target inside its ideal zone?</p><div class="seg" role="group" aria-label="Target"><button data-vtarget="on" aria-pressed="${aim}">Aim for a target</button><button data-vtarget="off" aria-pressed="${!aim}">No target</button></div>${aim ? "" : `<p class="small muted">Only its limits are judged. Nothing aims for a point inside them.</p>`}</div>
     ${pickers}
     <div><p class="small muted">Start from an Athena stage</p><div class="seg" role="group" aria-label="Athena stage">${Object.entries(STAGES).map(([k, s]) => `<button data-vstage="${k}" aria-pressed="${v.stage === k}">${s.label}</button>`).join("")}</div></div>`)}
     <div class="vgrid"><div class="vmain">
       <div class="seg vtabs" role="group" aria-label="What to edit">${tabs.map(([k, l]) => `<button data-vedit="${k}" aria-pressed="${v.edit === k}">${l}</button>`).join("")}</div>
       <div class="now" id="v-now"><strong id="vread">${esc(vReadout(v, b))}</strong>${nudge}</div>
+      <div class="vleaf" id="vleaf"><span class="small">${esc(leafText)}</span><button class="btn vleafbtn" data-calw="${z.id}" aria-label="Change the leaf temperature offset">Change &rsaquo;</button></div>
       <div class="map vchart" id="vwrap"${tp ? ` data-ro ${roData("setting", "Targets", tp)} aria-label="Chart of ${esc(tp.name)}'s limits."` : ` tabindex="0" aria-label="Chart. Use the arrow keys to move the selected value."`}>${vChartInner(v, b)}</div>
       <div class="key">${VZONES.slice(1, 4).map(([c, l]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("")}<span><i style="background:var(--v0)"></i>Outside Athena's ranges</span></div>
     </div>
@@ -4400,7 +4486,7 @@ document.addEventListener("pointerup", (e) => {
 document.addEventListener("pointercancel", () => { if (dialHeld) { const k = dialHeld.key; dialHeld = null; dialDrop(k); } });
 document.addEventListener("pointermove", (e) => { if (ui.vpdw && ui.vpdw.drag) vPointer(e, false); chartPointer(e); });
 document.addEventListener("pointerdown", chartPointer);
-const endDrag = () => { if (ui.vpdw && ui.vpdw.drag) { ui.vpdw.drag = false; render(); } };
+const endDrag = () => { if (ui.vpdw && ui.vpdw.drag) { ui.vpdw.drag = false; ui.vpdw.held = null; render(); } };
 document.addEventListener("pointerup", endDrag);
 document.addEventListener("pointercancel", endDrag);
 document.addEventListener("input", (e) => {
