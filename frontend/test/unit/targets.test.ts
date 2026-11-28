@@ -9,7 +9,7 @@ import {
   fitAxis,
   followLeaf,
   hasTarget,
-  idealCount,
+  idealFits,
   limitHelpers,
   liveBands,
   moveOnChart,
@@ -268,10 +268,22 @@ describe("problems", () => {
   it("says when no conditions fit the ideal zone at this offset, as Athena's flower finish at 1 °C below air", () => {
     const d = open(here());
     applyStage(d, "finish");
-    expect(idealCount(d.bands.day, -1)).toBe(0);
-    expect(idealCount(d.bands.day, 0)).toBeGreaterThan(0);
+    expect(idealFits(d.bands.day, -1)).toBe(false);
+    expect(idealFits(d.bands.day, 0)).toBe(true);
     expect(targetIssues(d, states, catalog, -1)[0]).toEqual({ text: "No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.", calibrate: true });
     expect(texts(d, states, 0)).toEqual([]);
+  });
+
+  it("judges the ideal zone over everything a limit may be, not the chart's old 16 to 34 degree, 30 to 90 % grid", () => {
+    const b = open(here()).bands.day;
+    Object.assign(b, { temperature: [8, 10, 12, 14, 16], humidity: [55, 60, 65, 70, 75], vpd: [0.2, 0.3, 0.4, 0.5, 0.6] });
+    expect(idealFits(b, -1)).toBe(true);
+    b.vpd = [1.1, 1.2, 1.3, 1.4, 1.5];
+    expect(idealFits(b, -1)).toBe(false);
+    /* Narrower than a chart cell, and between the old grid's half degrees. */
+    const v = calcVpd(24.3, 61, -1);
+    Object.assign(b, { temperature: [23, 24.1, null, 24.4, 26], humidity: [55, 60, null, 62, 70], vpd: [v - 0.2, v - 0.02, null, v + 0.02, v + 0.2] });
+    expect(idealFits(b, -1)).toBe(true);
   });
 
   it("asks for at least one helper, in the limit's own unit, used once", () => {

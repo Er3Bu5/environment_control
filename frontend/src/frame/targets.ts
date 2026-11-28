@@ -351,17 +351,19 @@ const flagAt = (flags: Partial<Record<number, { x: number; y: number }>>, px: nu
     const f = flags[i];
     return f && Math.abs(px - f.x) <= FLAG_W / 2 && py >= f.y && py <= f.y + FLAG_H;
   });
-const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
-/* How many conditions sit inside every ideal range at once. None is a conflict: nothing can ever read ideal. */
-export function idealCount(b: PeriodBands, leaf: number): number {
-  let n = 0;
-  const [tl, th, hl, hh, vl, vh] = [b.temperature[1], b.temperature[3], b.humidity[1], b.humidity[3], b.vpd[1], b.vpd[3]].map((x) => x ?? 0);
-  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 1)
-    for (let t = T_MIN; t <= T_MAX; t += 0.5) {
-      const p = calcVpd(t, rh, leaf);
-      if (t >= tl && t <= th && rh >= hl && rh <= hh && p >= vl && p <= vh) n++;
-    }
-  return n;
+/* Whether any condition sits inside every ideal range at once. None is a conflict: nothing can ever read ideal. Judged
+   over everything a limit may be, not the chart's old fixed grid, which wrongly said nothing fits a range outside it.
+   VPD only falls as humidity rises, so at each temperature the humidity ends settle it exactly; temperature goes in its
+   inputs' 0.1 degree steps and takes both its ends, so a range narrower than a chart cell isn't missed. */
+export function idealFits(b: PeriodBands, leaf: number): boolean {
+  const [tMin, tMax] = VRANGE.temperature, [hMin, hMax] = VRANGE.humidity, e = 1e-9, at = (k: BandKey, i: number) => b[k][i] ?? 0;
+  const tLo = Math.max(at("temperature", 1), tMin), tHi = Math.min(at("temperature", 3), tMax), hLo = Math.max(at("humidity", 1), hMin), hHi = Math.min(at("humidity", 3), hMax);
+  if (tLo > tHi || hLo > hHi) return false;
+  for (let i = 0, n = Math.ceil((tHi - tLo) * 10 - 1e-6); i <= n; i++) {
+    const t = Math.min(tLo + i / 10, tHi);
+    if (calcVpd(t, hHi, leaf) <= at("vpd", 3) + e && calcVpd(t, hLo, leaf) >= at("vpd", 1) - e) return true;
+  }
+  return false;
 }
 
 /* A line stops at its neighbours, so dragging can't break the order. With no target, Low and High are neighbours. */
@@ -488,7 +490,7 @@ function periodProblems(d: TargetsDraft, p: Period, states: Record<string, HaSta
     else if (b.light < LIGHT_RANGE.min || b.light > LIGHT_RANGE.max) out.push({ text: `Light limit has to be between ${LIGHT_RANGE.min} and ${LIGHT_RANGE.max.toLocaleString()} lx.`, ...box });
     else if (b.light % LIGHT_RANGE.step) out.push({ text: `Light limit goes in steps of ${LIGHT_RANGE.step} lx.`, ...box });
   }
-  if (!out.length && !idealCount(b, leaf)) out.push({ text: "No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.", calibrate: true });
+  if (!out.length && !idealFits(b, leaf)) out.push({ text: "No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.", calibrate: true });
   return out;
 }
 
