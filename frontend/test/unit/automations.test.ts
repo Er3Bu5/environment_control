@@ -25,7 +25,9 @@ import {
   groupViews,
   groupsOf,
   linkChanges,
+  linkIssue,
   linkList,
+  linkName,
   linkNote,
   linksOf,
   linksToSave,
@@ -42,6 +44,7 @@ import {
   repeatRefused,
   repeatStuck,
   setLinkGroup,
+  setLinkName,
   sharedWith,
   suggestGroup,
   toggleLink,
@@ -437,14 +440,14 @@ describe("Link automations", () => {
   it("names the zone that has one already, and lets it be ticked: saving it here too is the backend's to refuse", () => {
     const d = openLinks(nursery, null);
     const door = linkList(d, zones, catalog, states).rows.find((r) => r.name === "Nursery Door Alert");
-    expect(door).toEqual({ entity: "automation.nursery_door_alert", name: "Nursery Door Alert", sub: "automation.nursery_door_alert, Veg area, linked in Veg", pill: "On", group: null });
+    expect(door).toEqual({ entity: "automation.nursery_door_alert", name: "Nursery Door Alert", sub: "automation.nursery_door_alert, Veg area, linked in Veg", pill: "On", group: null, haName: "Nursery Door Alert", typed: "", issue: "" });
     toggleLink(d, "automation.nursery_door_alert");
     expect(d.pick["automation.nursery_door_alert"]).toBe("control");
   });
 
   it("says where each one is, whether it's on, and the group of one that's ticked", () => {
     const rows = Object.fromEntries(linkList(openLinks(nursery, null), zones, catalog, states).rows.map((r) => [r.entity, r]));
-    expect(rows["automation.nursery_lights_on"]).toEqual({ entity: "automation.nursery_lights_on", name: "Nursery Lights On", sub: "automation.nursery_lights_on", pill: "On", group: "control" });
+    expect(rows["automation.nursery_lights_on"]).toEqual({ entity: "automation.nursery_lights_on", name: "Nursery Lights On", sub: "automation.nursery_lights_on", pill: "On", group: "control", haName: "Nursery Lights On", typed: "", issue: "" });
     expect(rows["automation.nursery_fan_kick"]).toMatchObject({ sub: "automation.nursery_fan_kick, Garden area", pill: "Off", group: null });
   });
 
@@ -517,7 +520,7 @@ describe("saving links", () => {
   ];
 
   it("keeps the id of a link that stays, in its saved place, with its group as picked", () => {
-    expect(linksToSave(had, { "automation.four": "control", "automation.one": "alert_day", "automation.custom": "control" })).toEqual([
+    expect(linksToSave(had, { "automation.four": "control", "automation.one": "alert_day", "automation.custom": "control" }, {})).toEqual([
       { id: "a1", entity: "automation.one", group: "alert_day" },
       { id: "a4", entity: "automation.four", group: "control" },
       { id: "custom", entity: "automation.custom", group: "control" },
@@ -525,27 +528,127 @@ describe("saving links", () => {
   });
 
   it("gives a new link a fresh id past the highest the zone had, never one a removed link had", () => {
-    expect(linksToSave(had, { "automation.one": "alert_day", "automation.new": "control", "automation.newer": "failsafe" })).toEqual([
+    expect(linksToSave(had, { "automation.one": "alert_day", "automation.new": "control", "automation.newer": "failsafe" }, {})).toEqual([
       { id: "a1", entity: "automation.one", group: "alert_day" },
       { id: "a5", entity: "automation.new", group: "control" },
       { id: "a6", entity: "automation.newer", group: "failsafe" },
     ]);
-    expect(linksToSave([], { "automation.x": "control" })).toEqual([{ id: "a1", entity: "automation.x", group: "control" }]);
-    expect(linksToSave([{ id: "a01", entity: "automation.y", group: "control" }, { id: "a2x", entity: "automation.z", group: "control" }], { "automation.x": "control" })).toEqual([
+    expect(linksToSave([], { "automation.x": "control" }, {})).toEqual([{ id: "a1", entity: "automation.x", group: "control" }]);
+    expect(linksToSave([{ id: "a01", entity: "automation.y", group: "control" }, { id: "a2x", entity: "automation.z", group: "control" }], { "automation.x": "control" }, {})).toEqual([
       { id: "a2", entity: "automation.x", group: "control" },
     ]);
   });
 
   it("applies to the zone as it's stored when saving, and stores no list for a zone that links nothing", () => {
     const c = copyConfig([{ id: "veg", name: "Veg", automations: had, extra: 1 }, { id: "garden", name: "Garden" }], []);
-    applyLinks(c, "veg", { "automation.four": "failsafe", "automation.new": "alert_night" });
+    applyLinks(c, "veg", { "automation.four": "failsafe", "automation.new": "alert_night" }, {});
     expect(c.zones[0]).toEqual({ id: "veg", name: "Veg", extra: 1, automations: [{ id: "a4", entity: "automation.four", group: "failsafe" }, { id: "a5", entity: "automation.new", group: "alert_night" }] });
-    applyLinks(c, "veg", {});
+    applyLinks(c, "veg", {}, {});
     expect("automations" in c.zones[0]).toBe(false);
-    applyLinks(c, "garden", { "automation.x": "control" });
+    applyLinks(c, "garden", { "automation.x": "control" }, {});
     expect(c.zones[1].automations).toEqual([{ id: "a1", entity: "automation.x", group: "control" }]);
-    applyLinks(c, "gone", { "automation.x": "control" });
+    applyLinks(c, "gone", { "automation.x": "control" }, {});
     expect(c.zones).toHaveLength(2);
+  });
+});
+
+describe("a link's own name", () => {
+  const named = readZones([
+    {
+      id: "veg",
+      name: "Veg",
+      automations: [
+        { id: "a1", entity: "automation.failsafe_tent_lights_recovery", group: "failsafe", name: "Tent lights back on" },
+        { id: "a2", entity: "automation.tent_lights_on", group: "control" },
+        { id: "a3", entity: "automation.nursery_door_alert", group: "alert_device", name: "" },
+      ],
+    },
+  ])[0];
+  const haStates: Record<string, HaState> = {
+    "automation.failsafe_tent_lights_recovery": auto("on", "Failsafe Tent Lights Recovery"),
+    "automation.tent_lights_on": auto("on", "Tent Lights On"),
+  };
+  const haList: CatalogAutomation[] = [
+    { entity_id: "automation.failsafe_tent_lights_recovery", name: "Failsafe Tent Lights Recovery", state: "on", area: null, last_triggered: null },
+    { entity_id: "automation.tent_lights_on", name: "Tent Lights On", state: "on", area: null, last_triggered: null },
+    { entity_id: "automation.nursery_door_alert", name: "Nursery Door Alert", state: "off", area: null, last_triggered: null },
+  ];
+
+  it("is the panel's name, else Home Assistant's, else the entity id", () => {
+    expect(linkName({ entity: "automation.x", name: "Mine" }, auto("on", "Theirs"))).toBe("Mine");
+    expect(linkName({ entity: "automation.x", name: "  " }, auto("on", "Theirs"))).toBe("Theirs");
+    expect(linkName({ entity: "automation.x" }, auto("on", "Theirs"))).toBe("Theirs");
+    expect(linkName({ entity: "automation.x" }, undefined)).toBe("automation.x");
+  });
+
+  it("is read only when the backend would have stored it", () => {
+    expect(named.automations.map((a) => a.name)).toEqual(["Tent lights back on", undefined, undefined]);
+    expect("name" in named.automations[2]).toBe(false);
+  });
+
+  it("names the row, the failsafe-off question and the notice", () => {
+    const fs = named.automations[0];
+    expect(autoRow(fs, haStates[fs.entity], undefined, Date.now()).name).toBe("Tent lights back on");
+    expect(offQuestion(fs, haStates[fs.entity])?.title).toBe("Switch off Tent lights back on?");
+    expect(failsafeNotice(failsafesOff(named, { ...haStates, [fs.entity]: auto("off", "Failsafe Tent Lights Recovery") }))).toBe(
+      "A failsafe is off: Tent lights back on. While it's off, nothing puts that hardware back.",
+    );
+    expect(autoRow(named.automations[1], haStates["automation.tent_lights_on"], undefined, Date.now()).name).toBe("Tent Lights On");
+  });
+
+  it("shows on a ticked row with Home Assistant's name below it, and not on an unticked one", () => {
+    const d = openLinks(named, null);
+    const row = (e: string) => linkList(d, [named], haList, haStates).rows.find((r) => r.entity === e);
+    expect(row("automation.failsafe_tent_lights_recovery")).toMatchObject({ name: "Tent lights back on", haName: "Failsafe Tent Lights Recovery", typed: "Tent lights back on", sub: "Failsafe Tent Lights Recovery. automation.failsafe_tent_lights_recovery" });
+    toggleLink(d, "automation.failsafe_tent_lights_recovery");
+    expect(row("automation.failsafe_tent_lights_recovery")).toMatchObject({ name: "Failsafe Tent Lights Recovery", typed: "", sub: "automation.failsafe_tent_lights_recovery" });
+  });
+
+  it("lists a rename in the review, from the name it went by to the one it will, and back", () => {
+    const d = openLinks(named, null);
+    setLinkName(d, "automation.tent_lights_on", "  Lights on  ");
+    setLinkName(d, "automation.failsafe_tent_lights_recovery", "");
+    expect(linkChanges(d, haList, haStates)).toEqual([
+      { label: "Name", before: "Tent lights back on", after: "Failsafe Tent Lights Recovery" },
+      { label: "Name", before: "Tent Lights On", after: "Lights on" },
+    ]);
+    toggleLink(d, "automation.nursery_door_alert");
+    toggleLink(d, "automation.tent_lights_on");
+    expect(linkChanges(d, haList, haStates)).toEqual([
+      { label: "Tent Lights On", before: "Control", after: "Not linked" },
+      { label: "Nursery Door Alert", before: "Device alerts", after: "Not linked" },
+      { label: "Name", before: "Tent lights back on", after: "Failsafe Tent Lights Recovery" },
+    ]);
+    const fresh = openLinks(named, null);
+    toggleLink(fresh, "automation.new_one");
+    setLinkName(fresh, "automation.new_one", "New");
+    expect(linkChanges(fresh, haList, {})).toContainEqual({ label: "Name", before: "automation.new_one", after: "New" });
+  });
+
+  it("holds the save back for a name of only spaces or past 100 characters", () => {
+    const d = openLinks(named, null);
+    expect(linkIssue(d, haList, haStates)).toBe("");
+    setLinkName(d, "automation.tent_lights_on", "   ");
+    expect(linkIssue(d, haList, haStates)).toBe("Spaces alone aren't a name. Type one for Tent Lights On, or put Home Assistant's back.");
+    setLinkName(d, "automation.tent_lights_on", "x".repeat(101));
+    expect(linkIssue(d, haList, haStates)).toBe("The name for Tent Lights On is longer than 100 characters.");
+    setLinkName(d, "automation.tent_lights_on", ` ${"x".repeat(100)} `);
+    expect(linkIssue(d, haList, haStates)).toBe("");
+    toggleLink(d, "automation.tent_lights_on");
+    setLinkName(d, "automation.tent_lights_on", "   ");
+    expect(linkIssue(d, haList, haStates)).toBe("");
+  });
+
+  it("is saved trimmed, and left out when there's none rather than stored empty", () => {
+    const had = named.automations;
+    expect(linksToSave(had, { "automation.failsafe_tent_lights_recovery": "failsafe", "automation.tent_lights_on": "control", "automation.new": "alert_day" }, { "automation.failsafe_tent_lights_recovery": "", "automation.tent_lights_on": " On ", "automation.new": "Fresh" })).toEqual([
+      { id: "a1", entity: "automation.failsafe_tent_lights_recovery", group: "failsafe" },
+      { id: "a2", entity: "automation.tent_lights_on", group: "control", name: "On" },
+      { id: "a4", entity: "automation.new", group: "alert_day", name: "Fresh" },
+    ]);
+    const c = copyConfig([{ id: "veg", name: "Veg", automations: had }], []);
+    applyLinks(c, "veg", { "automation.failsafe_tent_lights_recovery": "failsafe" }, { "automation.failsafe_tent_lights_recovery": "Tent lights back on" });
+    expect(c.zones[0].automations).toEqual([{ id: "a1", entity: "automation.failsafe_tent_lights_recovery", group: "failsafe", name: "Tent lights back on" }]);
   });
 });
 

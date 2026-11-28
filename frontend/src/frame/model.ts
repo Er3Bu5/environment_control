@@ -31,7 +31,14 @@ export interface AutomationLink {
   id: string;
   entity: string;
   group: AutomationGroup;
+  /* The panel's own name for it, absent when it goes by Home Assistant's. */
+  name?: string;
 }
+/* As long as a device's name may be, counted as the backend counts it, in UTF-16 units. */
+export const MAX_LINK_NAME = 100;
+/* What the backend stores as a link's name. Anything else it refuses, so a save carries a name only when it passes. */
+export const linkNameOk = (v: unknown): v is string =>
+  typeof v === "string" && v !== "" && v.length <= MAX_LINK_NAME && v === v.trim() && !/[\u0000-\u001f\u007f]/.test(v);
 const LINK_ID = /^[a-z0-9_-]{1,64}$/;
 
 export interface Zone {
@@ -71,7 +78,7 @@ export function readLinks(v: unknown): AutomationLink[] {
   for (const a of Array.isArray(v) ? v : []) {
     if (!isObj(a) || typeof a.id !== "string" || !LINK_ID.test(a.id) || typeof a.entity !== "string" || !AUTOMATION_ID.test(a.entity)) continue;
     if (!AUTOMATION_GROUPS.includes(a.group as AutomationGroup) || out.some((x) => x.id === a.id || x.entity === a.entity)) continue;
-    out.push({ id: a.id, entity: a.entity, group: a.group as AutomationGroup });
+    out.push({ id: a.id, entity: a.entity, group: a.group as AutomationGroup, ...(linkNameOk(a.name) ? { name: a.name } : {}) });
   }
   return out;
 }

@@ -6,7 +6,7 @@
    what's saved, and the helper's value counts only once HA reports it. This only decides what to draw and what a report
    means; the host is what sends, and it checks every request against the setup it fetched itself. */
 import type { Catalog, CatalogAutomation, Room } from "./messages";
-import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type Zone, andList, readLinks } from "./model";
+import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, MAX_LINK_NAME, type RawConfig, type Zone, andList, readLinks } from "./model";
 import { type HaState, numberOf } from "./readings";
 
 /* The Automations page's three chips, and the groups each one holds. */
@@ -97,6 +97,11 @@ export function autoName(entity: string, st: HaState | undefined): string {
   const n = st?.attributes.friendly_name;
   return typeof n === "string" && n.trim() ? n : entity;
 }
+/* The name an automation goes by in the panel. Only a zone's link can carry one of the panel's own, so an automation no
+   zone links is named as Home Assistant names it. */
+export function linkName(link: { entity: string; name?: string }, st: HaState | undefined): string {
+  return link.name?.trim() || autoName(link.entity, st);
+}
 const STATE_WORDS: Record<AutoState, string> = { on: "On.", off: "Off.", unavailable: "Unavailable in Home Assistant.", gone: "Home Assistant doesn't have it any more." };
 
 /* Other zones that link the same automation, by name. An automation belongs to one zone, so Link automations names
@@ -168,7 +173,7 @@ export function autoRow(link: AutomationLink, st: HaState | undefined, ctl: Auto
   /* HA says null for one that never ran. Anything else that isn't a time says nothing, rather than claiming that. */
   const when = ran ? `Last triggered ${ran}.` : last === null ? "Never triggered." : "";
   const sub = [STATE_WORDS[state], when].filter(Boolean).join(" ");
-  return { link, name: autoName(link.entity, st), state, on: state === "on", locked: (state !== "on" && state !== "off") || ctl?.status === "sending", sub, line: autoLine(ctl, st) };
+  return { link, name: linkName(link, st), state, on: state === "on", locked: (state !== "on" && state !== "off") || ctl?.status === "sending", sub, line: autoLine(ctl, st) };
 }
 
 /* Switching a failsafe off is a safety decision, so it asks first. Switching one on, and alerts and control either way,
@@ -176,7 +181,7 @@ export function autoRow(link: AutomationLink, st: HaState | undefined, ctl: Auto
 export function offQuestion(link: AutomationLink, st: HaState | undefined): Question | null {
   if (link.group !== "failsafe" || autoState(st) !== "on") return null;
   return {
-    title: `Switch off ${autoName(link.entity, st)}?`,
+    title: `Switch off ${linkName(link, st)}?`,
     text: "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.",
     keep: "Keep it on",
     go: "Switch off",
@@ -229,7 +234,7 @@ export const emptyText = (chip: AutoChip, zoneName: string) => `No ${CHIP[chip].
 export function failsafesOff(z: Zone, states: Record<string, HaState>): { link: AutomationLink; name: string }[] {
   return linksOf(z, "failsafe")
     .filter((a) => autoState(states[a.entity]) === "off")
-    .map((link) => ({ link, name: autoName(link.entity, states[link.entity]) }));
+    .map((link) => ({ link, name: linkName(link, states[link.entity]) }));
 }
 export function failsafeNotice(off: { name: string }[]): string | null {
   if (!off.length) return null;
@@ -313,13 +318,17 @@ export interface LinkDraft {
   /* By automation: what the zone links as saved, and the draft of it. */
   was: Record<string, AutomationGroup>;
   pick: Record<string, AutomationGroup>;
+  /* By automation: the panel's names as saved, and as typed. Only a ticked one's counts. */
+  wasNames: Record<string, string>;
+  names: Record<string, string>;
   q: string;
   /* The Automations page's chip it was opened from, to go back to; null when opened from Setup. */
   from: AutoChip | null;
 }
 export function openLinks(z: Zone, from: AutoChip | null): LinkDraft {
   const was = Object.fromEntries(z.automations.map((a) => [a.entity, a.group]));
-  return { zoneId: z.id, was, pick: { ...was }, q: "", from };
+  const wasNames = Object.fromEntries(z.automations.flatMap((a) => (a.name ? [[a.entity, a.name]] : [])));
+  return { zoneId: z.id, was, pick: { ...was }, wasNames, names: { ...wasNames }, q: "", from };
 }
 /* Ticked again, one the zone had saved goes back to its own group; a new one starts in the group its name suggests. */
 export function toggleLink(d: LinkDraft, entity: string): void {
@@ -329,10 +338,38 @@ export function toggleLink(d: LinkDraft, entity: string): void {
 export function setLinkGroup(d: LinkDraft, entity: string, group: AutomationGroup): void {
   if (d.pick[entity] !== undefined) d.pick[entity] = group;
 }
+/* Emptied, it's Home Assistant's name again, as the put back button makes it. */
+export function setLinkName(d: LinkDraft, entity: string, typed: string): void {
+  if (typed === "") delete d.names[entity];
+  else d.names[entity] = typed;
+}
+const typedName = (d: LinkDraft, entity: string) => d.names[entity]?.trim() ?? "";
+
+/* A typed name the backend wouldn't store holds the save back and says why, naming the automation as Home Assistant
+   does, since the name typed is the trouble. The box stops at 100, so a longer one has come from somewhere else. */
+export function linkNameIssue(d: LinkDraft, entity: string, haName: string): string {
+  const typed = d.names[entity];
+  if (d.pick[entity] === undefined || typed === undefined) return "";
+  if (!typed.trim()) return `Spaces alone aren't a name. Type one for ${haName}, or put Home Assistant's back.`;
+  if (typed.trim().length > MAX_LINK_NAME) return `The name for ${haName} is longer than ${MAX_LINK_NAME} characters.`;
+  if (/[\u0000-\u001f\u007f]/.test(typed)) return `The name for ${haName} has a character a name can't hold.`;
+  return "";
+}
+export function linkIssue(d: LinkDraft, automations: CatalogAutomation[], states: Record<string, HaState>): string {
+  for (const e of Object.keys(d.pick)) {
+    const why = linkNameIssue(d, e, haNameOf(e, automations, states));
+    if (why) return why;
+  }
+  return "";
+}
 
 export interface LinkRow {
   entity: string;
   name: string;
+  /* Home Assistant's name, the box's hint; and the box as typed, while the row is ticked. */
+  haName: string;
+  typed: string;
+  issue: string;
   sub: string;
   pill: string;
   group: AutomationGroup | null;
@@ -366,21 +403,39 @@ export function linkList(d: LinkDraft, zones: Zone[], automations: CatalogAutoma
   const shown = words.length ? found.slice(0, LINK_FOUND_MAX) : found;
   const rows = shown.map((it) => {
     const shared = sharedWith(zones, d.zoneId, it.entity);
-    const sub = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${andList(shared)}` : ""].filter(Boolean).join(", ");
-    return { entity: it.entity, name: it.name, sub, pill: pillOf(it.state), group: d.pick[it.entity] ?? null };
+    const where = [it.entity, it.area ? `${it.area} area` : "", shared.length ? `linked in ${andList(shared)}` : ""].filter(Boolean).join(", ");
+    /* A name of the panel's own never hides which automation it is: Home Assistant's stays on the line below. */
+    const ticked = d.pick[it.entity] !== undefined, own = ticked ? typedName(d, it.entity) : "";
+    return {
+      entity: it.entity,
+      name: own || it.name,
+      haName: it.name,
+      typed: ticked ? (d.names[it.entity] ?? "") : "",
+      issue: linkNameIssue(d, it.entity, it.name),
+      sub: own ? `${it.name}. ${where}` : where,
+      pill: pillOf(it.state),
+      group: d.pick[it.entity] ?? null,
+    };
   });
   return { rows, more: words.length ? found.length - shown.length : automations.length - shown.filter((it) => it.listed).length };
 }
 
 export const linkLabel = (g: AutomationGroup | undefined) => (g === undefined ? "Not linked" : GROUP[g].title);
 
-/* Every automation whose group differs from what's saved, Not linked included, as the review lists it. */
+const haNameOf = (e: string, automations: CatalogAutomation[], states: Record<string, HaState>) => automations.find((a) => a.entity_id === e)?.name ?? autoName(e, states[e]);
+
+/* Every automation whose group differs from what's saved, Not linked included, then every ticked one whose name does,
+   as the review lists them. A group change names the automation as the zone knows it now. A rename reads from the name
+   it went by to the one it will, Home Assistant's at either end when the panel has none. */
 export function linkChanges(d: LinkDraft, automations: CatalogAutomation[], states: Record<string, HaState>): AutoChange[] {
-  const nameOf = (e: string) => automations.find((a) => a.entity_id === e)?.name ?? autoName(e, states[e]);
   const out: AutoChange[] = [];
   for (const e of new Set([...Object.keys(d.was), ...Object.keys(d.pick)])) {
     const before = linkLabel(d.was[e]), after = linkLabel(d.pick[e]);
-    if (before !== after) out.push({ label: nameOf(e), before, after });
+    if (before !== after) out.push({ label: d.wasNames[e] || haNameOf(e, automations, states), before, after });
+  }
+  for (const e of Object.keys(d.pick)) {
+    const ha = haNameOf(e, automations, states), before = (d.was[e] !== undefined && d.wasNames[e]) || ha, after = typedName(d, e) || ha;
+    if (before !== after) out.push({ label: "Name", before, after });
   }
   return out;
 }
@@ -393,10 +448,12 @@ export function linkNote(d: LinkDraft): string {
 
 /* A link that stays keeps its id, so the frame never names a different automation by an id it used before. A new one
    gets a fresh a<number> past the highest the zone had, never one it had. */
-export function linksToSave(had: AutomationLink[], pick: Record<string, AutomationGroup>): AutomationLink[] {
+export function linksToSave(had: AutomationLink[], pick: Record<string, AutomationGroup>, names: Record<string, string>): AutomationLink[] {
   const used = new Set(had.map((a) => a.id));
   let n = had.reduce((m, a) => Math.max(m, /^a\d+$/.test(a.id) ? Number(a.id.slice(1)) : 0), 0);
-  const kept = had.filter((a) => pick[a.entity] !== undefined).map((a) => ({ id: a.id, entity: a.entity, group: pick[a.entity] }));
+  /* The backend refuses an empty name, so one left empty is no name at all rather than "". */
+  const named = (entity: string) => (names[entity]?.trim() ? { name: names[entity].trim() } : {});
+  const kept = had.filter((a) => pick[a.entity] !== undefined).map((a) => ({ id: a.id, entity: a.entity, group: pick[a.entity], ...named(a.entity) }));
   const fresh = Object.keys(pick)
     .filter((e) => !had.some((a) => a.entity === e))
     .map((entity) => {
@@ -404,16 +461,16 @@ export function linksToSave(had: AutomationLink[], pick: Record<string, Automati
       do id = `a${++n}`;
       while (used.has(id));
       used.add(id);
-      return { id, entity, group: pick[entity] };
+      return { id, entity, group: pick[entity], ...named(entity) };
     });
   return [...kept, ...fresh];
 }
 
 /* Applied to the zone as saved at the moment of saving, so ids come from what's stored, not from when the page opened. */
-export function applyLinks(c: RawConfig, zoneId: string, pick: Record<string, AutomationGroup>): void {
+export function applyLinks(c: RawConfig, zoneId: string, pick: Record<string, AutomationGroup>, names: Record<string, string>): void {
   const z = c.zones.find((x) => x.id === zoneId);
   if (!z) return;
-  const links = linksToSave(readLinks(z.automations), pick);
+  const links = linksToSave(readLinks(z.automations), pick, names);
   if (links.length) z.automations = links;
   else delete z.automations;
 }
