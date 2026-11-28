@@ -2528,7 +2528,6 @@ const calcVpd = (t, rh, off) => svp(t + off) - (rh / 100) * svp(t);
 const VZONES = [["--v0", "Under 0.8, outside Athena's ranges"], ["--v1", "0.8 - 1.0, veg"], ["--v2", "1.0 - 1.2, flower stretch and bulk"], ["--v3", "1.2 - 1.4, flower finish"], ["--v0", "Over 1.4, outside Athena's ranges"]];
 const vzone = (v) => v < 0.8 ? 0 : v < 1.0 ? 1 : v < 1.2 ? 2 : v < 1.4 ? 3 : 4;
 /* The ideal-zone check counts over the grid the chart first had, so axes that follow the limits can't change what it finds. */
-const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
 const VNAME = { temperature: "Temperature", humidity: "Humidity", vpd: "VPD" };
 const VUNIT = { temperature: "°", humidity: "%", vpd: " kPa" };
 const VSNAP = { temperature: 0.5, humidity: 1, vpd: 0.05 };
@@ -2602,7 +2601,7 @@ function vProblems(b, light = true) {
 function vIssues(v, b) {
   const p = Object.keys(v.bands).find((x) => v.bands[x] === b) || v.period;
   const issues = [...vProblems(b, !noLight(baseZone(v.id))), ...vHelperIssues(v, p, b)];
-  if (!idealCount(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
+  if (!idealFits(v, b) && !issues.length) issues.push({ text: `No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.`, leaf: v.id });
   return issues;
 }
 const vIssueHtml = (issues) => issues.map((i) => `<button class="notice fix" ${i.leaf ? `data-calw="${i.leaf}"` : `data-vfix="${i.edit}"`}${i.slot === undefined ? "" : ` data-vslot="${i.slot}"`}><span>${esc(i.text)}</span><span class="fixgo">Fix &rsaquo;</span></button>`).join("");
@@ -2647,13 +2646,18 @@ function vGeom(v = ui.vpdw, b = v.bands[v.period]) {
   };
 }
 const rhAt = (t, vp, leaf) => ((svp(t + leaf) - vp) / svp(t)) * 100;
-function idealCount(v, b) {
-  let n = 0;
-  for (let rh = RH_TOP; rh >= RH_LOW; rh -= 1) for (let t = T_MIN; t <= T_MAX; t += 0.5) {
-    const p = calcVpd(t, rh, v.leaf);
-    if (t >= b.temperature[1] && t <= b.temperature[3] && rh >= b.humidity[1] && rh <= b.humidity[3] && p >= b.vpd[1] && p <= b.vpd[3]) n++;
+/* Judged over everything a limit may be, not the chart's old fixed grid, which wrongly said nothing fits a range outside it.
+   VPD only falls as humidity rises, so at each temperature the humidity ends settle it exactly; temperature goes in its
+   inputs' 0.1 degree steps and takes both its ends, so a range narrower than a chart cell isn't missed. */
+function idealFits(v, b) {
+  const [tMin, tMax] = VRANGE.temperature, [hMin, hMax] = VRANGE.humidity, e = 1e-9;
+  const tLo = Math.max(b.temperature[1], tMin), tHi = Math.min(b.temperature[3], tMax), hLo = Math.max(b.humidity[1], hMin), hHi = Math.min(b.humidity[3], hMax);
+  if (tLo > tHi || hLo > hHi) return false;
+  for (let i = 0, n = Math.ceil((tHi - tLo) * 10 - 1e-6); i <= n; i++) {
+    const t = Math.min(tLo + i / 10, tHi);
+    if (calcVpd(t, hHi, v.leaf) <= b.vpd[3] + e && calcVpd(t, hLo, v.leaf) >= b.vpd[1] - e) return true;
   }
-  return n;
+  return false;
 }
 function chip(x, y, text, on, slot) {
   const w = 52, h = 18, cx = Math.round(x);

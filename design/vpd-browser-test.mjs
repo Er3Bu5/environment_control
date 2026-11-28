@@ -1565,6 +1565,23 @@ check("Finish: it can be saved", fin.saveOn, fin);
 check("Finish: and it says the Target moved", (await ev(`document.querySelector("#toast").textContent`)).includes("Target moved"), await ev(`document.querySelector("#toast").textContent`));
 await ev(`(document.querySelector("[data-tdexit]").click(),document.querySelector("[data-gdiscard]")?.click())`); await sleep(40);
 await boardSet([["number.nursery_environment_leaf_temperature_offset", -1]]); await ev(`leafSends.length=0`);
+// The ideal-zone check judges every value a limit may take, not the chart's old 16 to 34 degree, 30 to 90 % grid (#159)
+await ev(`ui.mapw=null;ui.wiz=null;ui.leafw=null;openVpd("nursery");render()`); await sleep(40);
+const idealIssues = async (period, t, h, p) => { await ev(`(()=>{const v=ui.vpdw;v.period="${period}";Object.assign(v.bands["${period}"],{temperature:${JSON.stringify(t)},humidity:${JSON.stringify(h)},vpd:${JSON.stringify(p)}});render()})()`); await sleep(30); return issueText(); };
+const fitsNone = (got) => got.some((x) => x.includes("No conditions fit"));
+/* A narrow range, its VPD worked out at the chart's own offset from the middle of the range so it is sure to fit. */
+const narrowIssues = async (period, t0) => { const p = await ev(`(()=>{const m=${t0}+0.2,l=ui.vpdw.leaf;return [Math.floor(calcVpd(m,61,l)*100)/100,Math.ceil(calcVpd(m,61,l)*100)/100]})()`); return idealIssues(period, [t0 - 2, t0, t0 + 0.2, Math.round((t0 + 0.4) * 10) / 10, t0 + 2], [50, 60, 61, 62, 70], [p[0] - 0.2, p[0], p[0], p[1], p[1] + 0.2]); };
+for (const period of ["day", "night"]) {
+  const cool = await idealIssues(period, [8, 10, 12, 14, 16], [40, 50, 60, 70, 80], [0.2, 0.4, 0.6, 0.8, 1]);
+  check(`Ideal zone: a ${period} range of 10 to 14 degrees, below the old grid, that fits isn't told nothing fits`, cool.length === 0, cool);
+  const coolHigh = await idealIssues(period, [8, 10, 12, 14, 16], [40, 50, 60, 70, 80], [1, 1.2, 1.4, 1.6, 1.8]);
+  check(`Ideal zone: the same ${period} range with a VPD it can't reach is still told nothing fits`, fitsNone(coolHigh), coolHigh);
+  for (const t0 of [12.2, 20.2]) {
+    const narrow = await narrowIssues(period, t0);
+    check(`Ideal zone: a narrow ${period} range that fits, ${t0} to ${Math.round((t0 + 0.4) * 10) / 10} degrees and 60 to 62 %, isn't flagged`, narrow.length === 0, narrow);
+  }
+}
+await ev(`ui.vpdw.period="day";render()`);
 
 // Where a sensor's offset is held is chosen on Sensor Calibration, as the panel has it since #17, not in Device identification
 await ev(`ui.vpdw=null;ui.td=null;ui.sched=null;ui.screen="setup";render();document.querySelector('[data-mapw="veg"]').click()`); await sleep(50);
