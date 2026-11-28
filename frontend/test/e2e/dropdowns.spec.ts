@@ -72,7 +72,13 @@ test.describe("lists dropped from a control", () => {
     await expect(list).toHaveCount(0);
     expect(await app(frame).evaluate((el) => el.shadowRoot?.activeElement?.getAttribute("role") ?? "")).not.toBe("listbox");
 
-    await search.click();
+    /* Leaving the box and coming straight back leaves the list open. */
+    await search.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForTimeout(300);
+    await expect(list).toBeVisible();
+
     await list.getByRole("option").nth(1).click();
     await expect(list).toHaveCount(0);
   });

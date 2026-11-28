@@ -4150,7 +4150,8 @@ export class EcApp extends LitElement {
     const active = open ? Math.min(this.pickQ?.active ?? -1, items.length - 1) : -1;
     const now = options.find((o) => o.entity === current);
     /* Picking leaves the box, so a phone's keyboard closes and the draft bar comes back. A press on the box opens the
-       list again even while it has focus, since a tap outside closes the list without always taking focus away. */
+       list again even while it has focus, since a tap outside closes the list without always taking focus away. A blur
+       closes it only if focus hasn't come straight back, or leaving and returning quickly would close it just opened. */
     const choose = (v: string) => {
       if (locked) return;
       this.pickQ = null;
@@ -4203,7 +4204,7 @@ export class EcApp extends LitElement {
           @click=${() => !open && this.openPick(id, "")}
           @input=${(e: Event) => this.openPick(id, (e.target as HTMLInputElement).value)}
           @keydown=${key}
-          @blur=${() => setTimeout(() => this.pickQ?.id === id && (this.pickQ = null), 150)}
+          @blur=${() => setTimeout(() => this.pickQ?.id === id && this.shadowRoot?.activeElement?.id !== `${id}-q` && (this.pickQ = null), 150)}
       /></label>
       ${open
         ? html`<ul class="picklist-menu drop" id="${id}-list" tabindex="-1" role="listbox" aria-label=${legend}>
