@@ -172,8 +172,11 @@ import {
   bandsOf,
   fmt,
   healthOf,
+  historyMetrics,
   leafOf,
+  noLightSensor,
   numberOf,
+  opensOn,
   readSensor,
   readState,
   sensorsOf,
@@ -367,7 +370,7 @@ interface HistEntry {
   loading: boolean;
 }
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
-const METRIC_KEYS: Metric[] = ["temperature", "humidity", "vpd", "light"];
+const NO_LIGHT_LIMITS = "No light sensor in this zone, so it has no light limits.";
 /* A graph and a range in words, as the History card's offer and its review say them: Humidity, 72h. */
 const historyWords = (v: HistoryView) => `${METRIC[v.metric].label}, ${RANGES.find((r) => r.hours === v.hours)?.label ?? `${v.hours}h`}`;
 
@@ -1549,7 +1552,7 @@ export class EcApp extends LitElement {
 
   private pageIssues(d: SchedDraft): TargetIssue[] {
     const t = this.tgt;
-    return [...schedIssues(d, this.states, this.catalog), ...(t ? targetIssues(t, this.states, this.catalog, zoneLeaf(this.raw(d.zoneId), this.states)) : [])];
+    return [...schedIssues(d, this.states, this.catalog), ...(t ? targetIssues(t, this.states, this.catalog, zoneLeaf(this.raw(d.zoneId), this.states), !this.noLight(d.zoneId)) : [])];
   }
 
   /* Every problem takes you to its fix: the box or picker, the other period, or Sensor Calibration for the offset. */
@@ -1995,6 +1998,10 @@ export class EcApp extends LitElement {
     return sensorsOf(this.raw(id)).filter((s) => s.kind === "env");
   }
 
+  private noLight(id: string): boolean {
+    return noLightSensor(sensorsOf(this.raw(id)));
+  }
+
   private histWant(id: string, k: Metric, hours: number, buckets: number) {
     const entities = [...new Set(this.envOf(id).flatMap((s) => entitiesFor(s, k)))];
     return entities.length ? { key: `${hours}|${buckets}|${entities.join(",")}`, entities, hours, buckets } : null;
@@ -2002,7 +2009,7 @@ export class EcApp extends LitElement {
 
   private chartWant(id: string) {
     const r = RANGES.find((x) => x.hours === this.range) ?? RANGES[1];
-    return this.histWant(id, this.metric, r.hours, r.buckets);
+    return this.histWant(id, opensOn(this.noLight(id), this.metric), r.hours, r.buckets);
   }
 
   private lightWant(id: string) {
@@ -2055,13 +2062,13 @@ export class EcApp extends LitElement {
   };
 
   private historyCard(z: Zone) {
-    const k = this.metric, R = RANGES.find((x) => x.hours === this.range) ?? RANGES[1];
+    const dark = this.noLight(z.id), k = opensOn(dark, this.metric), R = RANGES.find((x) => x.hours === this.range) ?? RANGES[1];
     const seg = (label: string, items: [string, string][], cur: string, pick: (v: string) => void) =>
       html`<div class="seg" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => pick(v)}>${l}</button>`)}</div>`;
     const head = html`<div class="card-head">
       <h2>History</h2>
       <div class="row segs">
-        ${seg("Metric", METRIC_KEYS.map((m) => [m, METRIC[m].short]), k, (v) => ([this.metric, this.chartAt] = [v as Metric, null]))}
+        ${seg("Metric", historyMetrics(dark).map((m) => [m, METRIC[m].short]), k, (v) => ([this.metric, this.chartAt] = [v as Metric, null]))}
         ${seg("Range", RANGES.map((r) => [String(r.hours), r.label]), String(R.hours), (v) => ([this.range, this.chartAt] = [Number(v), null]))}
       </div>
     </div>`;
@@ -2069,7 +2076,7 @@ export class EcApp extends LitElement {
        coming and going doesn't move the chart. */
     const opens = z.history ?? HISTORY_DEFAULT, showing: HistoryView = { metric: k, hours: R.hours };
     const setDefault =
-      opens.metric === k && opens.hours === R.hours
+      opensOn(dark, opens.metric) === k && opens.hours === R.hours
         ? nothing
         : html`<div class="row"><button class="fixlink" @click=${() => this.historyDefault(z, showing)}>Always open on ${historyWords(showing)} &rsaquo;</button></div>`;
     const want = this.chartWant(z.id), e = want ? this.hist[want.key] : undefined;
@@ -2387,11 +2394,13 @@ export class EcApp extends LitElement {
                   <div class="pillcell">${this.pill(this.readingsOf(z.id).length ? this.stateOf(z, k) : "unset")}</div>
                 </div>`,
               )}
-              <div class="mrow">
-                ${this.ic(...EcApp.LOOKS.light)}
-                <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
-                ${this.lightSpark(z, 34, "lspark")}
-              </div>
+              ${this.noLight(z.id)
+                ? nothing
+                : html`<div class="mrow">
+                    ${this.ic(...EcApp.LOOKS.light)}
+                    <div><div class="t1">Light</div><div class="t2">${fmt("light", light)}<span>lx</span></div></div>
+                    ${this.lightSpark(z, 34, "lspark")}
+                  </div>`}
             </div>
             ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
             <p class="small muted">${this.zoneCounts(z)}</p>
@@ -2756,7 +2765,7 @@ export class EcApp extends LitElement {
         : nothing}
       ${failsafeNoticeView(failsafeNotice(failsafesOff(z, this.states)), () => this.openAutos(z.id, "failsafe"))}
       ${this.periodBlock(z)}
-      <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.lightCard(z)}</div>
+      <div class="tiles">${(["temperature", "humidity", "vpd"] as Metric[]).map((k) => this.tile(z, k))}${this.noLight(z.id) ? nothing : this.lightCard(z)}</div>
       ${this.historyCard(z)}
       <div class="split">${this.zoneMap(z)}${this.controlsCard(z)}</div>`;
   }
@@ -4028,7 +4037,7 @@ export class EcApp extends LitElement {
   /* Targets: where the zone's limits come from, and the limits themselves, on the VPD chart or typed. */
   private targetsCard(d: SchedDraft, t: TargetsDraft, z: Zone) {
     const raw = this.raw(z.id), leaf = zoneLeaf(raw, this.states), b = t.bands[t.period], lock = d.sending, aim = hasTarget(t.bands);
-    const issues = targetIssues(t, this.states, this.catalog, leaf), bad = (k: string, i: number) => issues.some((x) => x.edit === k && x.slot === i);
+    const dark = this.noLight(z.id), issues = targetIssues(t, this.states, this.catalog, leaf, !dark), bad = (k: string, i: number) => issues.some((x) => x.edit === k && x.slot === i);
     const seg = (label: string, items: [string, string][], cur: string, pick: (v: string) => void, cls = "") =>
       html`<div class="seg ${cls}" role="group" aria-label=${label}>${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} ?disabled=${lock} @click=${() => pick(v)}>${l}</button>`)}</div>`;
     /* A box keeps what's typed until it's left. Then the value is kept as typed, and anything it moved is said. */
@@ -4070,6 +4079,7 @@ export class EcApp extends LitElement {
       )}
     </div>`;
     const L = LIGHT_LIMIT[t.period];
+    const noLightLine = html`<p class="small muted" id="vnolight">${NO_LIGHT_LIMITS}</p>`;
     const lightRow = html`<div class="vrow" data-vrow="light">
       <span class="vrow-name">Light lx</span>
       <p class="vnote ${L.column ? "vleft" : ""}" id="vnote-light">${L.column ? "Above this light level, lights are considered on or malfunctioning." : "Below this light level, lights are considered off or malfunctioning."}</p>
@@ -4108,7 +4118,7 @@ export class EcApp extends LitElement {
         ? nothing
         : html`<div class="tdlinks">
             ${BAND_KEYS.map((k) => html`<div class="tdlinks">${(["min", ...(aim ? ["target"] : []), "max"] as ("min" | "target" | "max")[]).map((slot) => picker(bandName(t.period, k, slot)))}</div>`)}
-            <div class="tdlinks">${picker(lightName(t.period))}</div>
+            ${dark ? nothing : html`<div class="tdlinks">${picker(lightName(t.period))}</div>`}
             <p class="small muted">Helpers in the right unit are offered first. A box linked to a helper shows what it holds, and changing it writes there. Anything on Set here is stored in Environment Control, as Low and High always are.</p>
           </div>`;
     const tabs: [string, string][] = [...(aim ? [["target", "Target"] as [string, string]] : []), ["temperature", "Temperature"], ["humidity", "Humidity"], ["vpd", "VPD"]];
@@ -4161,7 +4171,7 @@ export class EcApp extends LitElement {
           </div>
         </div>
         <div class="vside">
-          ${row("temperature", "Temperature °C")}${row("humidity", "Humidity %")}${row("vpd", "VPD kPa")}${lightRow}
+          ${row("temperature", "Temperature °C")}${row("humidity", "Humidity %")}${row("vpd", "VPD kPa")}${dark ? noLightLine : lightRow}
           <p class="small muted">
             Drag on the chart or type a number here. Bright cells are your ideal zone. Faded cells are outside it but not critical. Dark cells are past Min or Max. Light is what your
             sensors read, not the % set on the lights, so it isn't on the chart.
@@ -4185,16 +4195,17 @@ export class EcApp extends LitElement {
   }
 
   private targetsTable(z: Zone) {
-    const raw = this.raw(z.id), b = liveBands(raw, this.states), onHelpers = Object.values(storedLinks(raw)).some(Boolean);
+    const raw = this.raw(z.id), b = liveBands(raw, this.states), onHelpers = Object.values(storedLinks(raw)).some(Boolean), dark = this.noLight(z.id);
     const row = (p: Period, name: string, k: BandKey) => html`<tr><td>${name}<span class="sub">${METRIC[k].unit}</span></td>${b[p][k].map((v) => html`<td>${v === null ? "-" : v}</td>`)}</tr>`;
     const light = (p: Period) => html`<tr><td>Light<span class="sub">lx</span></td>${LIMIT_NAME.map((_, i) => html`<td>${i === LIGHT_LIMIT[p].column ? fmt("light", b[p].light) : "-"}</td>`)}</tr>`;
     const table = (p: Period, title: string) => html`<div class="tbl-wrap">
       <table class="limits">
         <thead><tr><th>${title}</th>${LIMIT_NAME.map((n) => html`<th>${n}</th>`)}</tr></thead>
-        <tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${light(p)}</tbody>
+        <tbody>${row(p, "Temperature", "temperature")}${row(p, "Humidity", "humidity")}${row(p, "VPD", "vpd")}${dark ? nothing : light(p)}</tbody>
       </table>
     </div>`;
     return html`${table("day", "Day")}${table("night", "Night")}
+      ${dark ? html`<p class="small muted" id="t-nolight">${NO_LIGHT_LIMITS}</p>` : nothing}
       <p class="small muted">
         Low to High is the ideal zone. Min and Max are critical.
         ${onHelpers
@@ -4282,7 +4293,7 @@ export class EcApp extends LitElement {
           ? html`<div class="opens">
               <div><h3>History opens on</h3><p class="small muted">The graph and range each zone's History starts on. Kept with the zone, so it's the same on every device.</p></div>
               ${this.zones.map((z) => {
-                const at = z.history ?? HISTORY_DEFAULT;
+                const at = z.history ?? HISTORY_DEFAULT, dark = this.noLight(z.id);
                 const seg = (label: string, items: [string, string][], cur: string, view: (v: string) => HistoryView) =>
                   html`<div class="seg" role="group" aria-label="${z.name}: ${label}">
                     ${items.map(([v, l]) => html`<button aria-pressed=${cur === v ? "true" : "false"} @click=${() => cur !== v && this.historyDefault(z, view(v))}>${l}</button>`)}
@@ -4290,7 +4301,7 @@ export class EcApp extends LitElement {
                 return html`<div class="opens-row">
                   <strong>${z.name}</strong>
                   <div class="row segs">
-                    ${seg("graph", METRIC_KEYS.map((m) => [m, METRIC[m].short]), at.metric, (v) => ({ metric: v as Metric, hours: at.hours }))}
+                    ${seg("graph", historyMetrics(dark).map((m) => [m, METRIC[m].short]), opensOn(dark, at.metric), (v) => ({ metric: v as Metric, hours: at.hours }))}
                     ${seg("range", RANGES.map((r) => [String(r.hours), r.label]), String(at.hours), (v) => ({ metric: at.metric, hours: Number(v) }))}
                   </div>
                 </div>`;

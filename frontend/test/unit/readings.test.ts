@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type HaState, type StoredSensor, ago, calcVpd, combine, healthOf, isDay, leafOf, numberOf, readSensor, zoneReading } from "../../src/frame/readings";
+import { type HaState, type StoredSensor, ago, calcVpd, combine, healthOf, historyMetrics, isDay, leafOf, noLightSensor, numberOf, opensOn, readSensor, zoneReading } from "../../src/frame/readings";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const fresh = new Date(NOW - 10_000).toISOString();
@@ -94,5 +94,23 @@ describe("time", () => {
     expect(ago(fresh, NOW)).toBe("reported 10 seconds ago");
     expect(ago(old, NOW)).toBe("reported 20 minutes ago");
     expect(ago(null, NOW)).toBe("never reported");
+  });
+});
+
+describe("a zone with no light sensor has no light reading, which isn't darkness", () => {
+  const dark = board({ entities: { temperature: "sensor.t", humidity: "sensor.h", vpd: "sensor.v" } });
+  it("is a zone whose sensors map no light entity, not one with no sensors yet or one whose light is only offline", () => {
+    expect(noLightSensor([dark])).toBe(true);
+    expect(noLightSensor([dark, { ...dark, id: "s1", kind: "soil", entities: { moisture: "sensor.m" } }])).toBe(true);
+    expect(noLightSensor([])).toBe(false);
+    expect(noLightSensor([board({ entities: {} })])).toBe(false);
+    expect(noLightSensor([dark, board({ id: "b2" })])).toBe(false);
+    expect(noLightSensor([board()])).toBe(false);
+  });
+
+  it("offers no Light graph, and one set to open on Light opens on Temperature", () => {
+    expect(historyMetrics(true)).toEqual(["temperature", "humidity", "vpd"]);
+    expect(historyMetrics(false)).toEqual(["temperature", "humidity", "vpd", "light"]);
+    expect([opensOn(true, "light"), opensOn(true, "vpd"), opensOn(false, "light")]).toEqual(["temperature", "vpd", "light"]);
   });
 });
