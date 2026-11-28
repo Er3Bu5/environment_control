@@ -953,7 +953,7 @@ function renderOverview() {
   /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. A family moves as one
      block, by its own arrows, and a card in it moves only inside it, so a family is never split. */
   const runs = familyRuns(shown);
-  const arrows = (attr, id, label, first, last, inner = false) => `<div class="arrows">${[[-1, "up", "earlier", first], [1, "down", "later", last]].map(([by, ico, word, off]) => `<button class="btn move${inner ? " inner" : ""}" ${attr}="${id}" data-by="${by}" aria-label="Move ${esc(label)} ${word}${inner ? " in its group" : ""}"${off ? " disabled" : ""}>${icon(ico)}</button>`).join("")}</div>`;
+  const arrows = (attr, id, label, first, last, inner = false) => `<div class="arrows">${[[-1, "up", "to previous", first], [1, "down", "to next", last]].map(([by, ico, word, off]) => `<button class="btn move${inner ? " inner" : ""}" ${attr}="${id}" data-by="${by}" aria-label="Move ${esc(label)} ${word}${inner ? " in its group" : ""}"${off ? " disabled" : ""}>${icon(ico)}</button>`).join("")}</div>`;
   const runOf = (z) => runs.findIndex((r) => r.zones.includes(z));
   const cardArrows = (z) => {
     const r = runs[runOf(z)], j = r.zones.indexOf(z);
