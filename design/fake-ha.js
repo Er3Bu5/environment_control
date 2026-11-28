@@ -11,7 +11,9 @@ class FakeHA {
     this.registry = seed.registry || { entities: {}, areas: {} };
     /* HA's device registry: an entity with no area of its own is in its device's. */
     this.registry.devices = this.registry.devices || {};
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
+    this.activity = seed.activity || { now: new Date().toISOString(), earliest: {}, entries: {} };
+    this.activityCalls = [];
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, activityMs: 300, activity: null, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
     this.calls = [];
     this.saves = [];
     this.panels = new Set();
@@ -129,10 +131,31 @@ class FakeHA {
     if (!msg || typeof msg.type !== "string") this.fail("Bad message");
     if (msg.type === "environment_control/config") return JSON.parse(JSON.stringify(this.config));
     if (msg.type === "environment_control/config/save") return this.save(msg);
+    if (msg.type === "environment_control/activity") return this.activityPage(msg);
     this.fail(`Unknown command ${msg.type}`);
   }
+  /* One zone's activity for one local day, newest first, in the shape the backend's command returns. A real HA takes seconds
+     to read a day from the logbook and can refuse while it's busy or never answer, which the knobs stand in for. It is asked
+     by zone, never by entity, so a frame can only read what a zone holds. */
+  async activityPage(msg) {
+    this.activityCalls.push(JSON.parse(JSON.stringify(msg)));
+    if (Object.keys(msg).some((k) => !["type", "zone", "day"].includes(k))) this.fail("Activity is asked for by zone and day only");
+    if (!this.config.zones.some((z) => z.id === msg.zone)) this.fail(`Zone ${msg.zone} not found`);
+    if (typeof msg.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(msg.day)) this.fail("A day is YYYY-MM-DD");
+    await new Promise((r) => setTimeout(r, this.knobs.activityMs));
+    if (this.knobs.activity === "timeout") return new Promise(() => {});
+    if (this.knobs.activity === "busy") { const e = new Error("Busy reading another request"); e.code = "busy"; throw e; }
+    const [y, m, d] = msg.day.split("-").map(Number), from = new Date(y, m - 1, d).getTime(), now = Date.parse(this.activity.now);
+    const to = Math.min(new Date(y, m - 1, d + 1).getTime(), now);
+    /* A zone added since has no history of its own: it starts today. */
+    const earliest = Date.parse(this.activity.earliest[msg.zone] || "") || new Date(now).setHours(0, 0, 0, 0);
+    const entries = (this.activity.entries[msg.zone] || []).filter((e) => { const t = Date.parse(e.when); return t >= from && t < to && t >= earliest; })
+      .sort((a, b) => Date.parse(b.when) - Date.parse(a.when));
+    const iso = (t) => new Date(t).toISOString();
+    return JSON.parse(JSON.stringify({ zone: msg.zone, start: iso(Math.max(from, earliest)), end: iso(Math.max(to, from)), earliest: iso(earliest), more: from > earliest, next_end: iso(from), entries }));
+  }
   /* The real backend checks every field against a schema. This checks enough to catch a host that forwards junk. */
-  checkConfig(c) {
+  checkConfig(c, before) {
     /* A spot on a zone's map is on the half-steps, from outside the wall on one side to outside it on the other. */
     const spotOk = (p, L) => !!L && Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === "number" && Number.isInteger(x * 2)) && p[0] >= -1 && p[0] <= L.rows && p[1] >= -1 && p[1] <= L.cols;
     const ok = c && Array.isArray(c.zones) && Array.isArray(c.devices) && c.zones.length <= 20 && c.devices.length <= 200;
@@ -166,6 +189,29 @@ class FakeHA {
     }
     const ids = new Set(c.zones.map((z) => z.id));
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
+    /* A linked zone shows what its parent runs, so a parent has to be a plain zone: one level, never itself. The reason
+       is told from the side of the zone whose link just changed. */
+    const moved = (z) => ((before?.zones || []).find((o) => o.id === z.id) || {}).parent !== z.parent;
+    for (const z of [...c.zones].sort((a, b) => moved(b) - moved(a))) {
+      if (z.parent === undefined) continue;
+      const parent = c.zones.find((o) => o.id === z.parent);
+      if (typeof z.parent !== "string" || !parent) this.fail(`${z.id} is linked to a zone that doesn't exist`);
+      if (parent === z) this.fail(`${z.id} can't be linked to itself`);
+      if (c.zones.some((o) => o.parent === z.id)) this.fail(`${z.id} has zones linked to it, so it can't be linked to another`);
+      if (parent.parent !== undefined) this.fail(`${z.id} is linked to a zone that is itself linked to another`);
+    }
+    /* A sensor in two zones shows one zone's readings in another, which only a parent link may do: every zone a sensor is
+       in is one family, a parent and the zones linked to it. Breaking a link a sensor is shared across names the sensor. */
+    const holders = new Map(), root = (z) => z.parent || z.id, linkedBefore = (a, b) => (before?.zones || []).some((z) => (z.id === a.id && z.parent === b.id) || (z.id === b.id && z.parent === a.id));
+    for (const z of c.zones) for (const x of Array.isArray(z.sensors) ? z.sensors : []) if (x && typeof x.id === "string") holders.set(x.id, [...(holders.get(x.id) || []), { z, name: x.name || x.id }]);
+    for (const list of holders.values()) {
+      if (new Set(list.map((h) => root(h.z))).size === 1) continue;
+      for (const a of list) for (const b of list) if (a !== b && linkedBefore(a.z, b.z)) {
+        const child = (before.zones.find((z) => z.id === a.z.id) || {}).parent === b.z.id ? a.z : b.z;
+        this.fail(`${a.name} is in both ${a.z.name} and ${b.z.name}. Take it out of ${child.name} before unlinking it.`);
+      }
+      this.fail("A sensor can only be shared between a zone and the zones linked to it.");
+    }
     const helper = (v) => v === undefined || (typeof v === "string" && /^input_(number|datetime)\.[a-z0-9_]+$/.test(v)) || (v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every(helper));
     for (const z of c.zones) if (z.helpers !== undefined && !helper(z.helpers)) this.fail(`${z.id} links a setting to something that isn't a helper`);
     const flat = (v) => (v === undefined ? [] : typeof v === "string" ? [v] : Object.values(v).flatMap(flat));
@@ -211,8 +257,20 @@ class FakeHA {
   /* Revision-checked, so a save made from a stale copy can't undo someone else's. */
   save(msg) {
     if (msg.revision !== this.config.revision) this.fail("Setup was saved from somewhere else since this was opened. Reopen the panel to see it.");
-    this.checkConfig(msg.config);
+    if (!msg.config || typeof msg.config !== "object") this.checkConfig(msg.config);
     const next = { ...JSON.parse(JSON.stringify(msg.config)), revision: this.config.revision + 1 };
+    /* Removing a parent zone unlinks the zones linked to it, which stay, unless one still has a sensor of the parent's. A
+       parent no setup ever had is still refused. */
+    const kept = new Set((Array.isArray(next.zones) ? next.zones : []).map((z) => z && z.id));
+    const removed = (this.config.zones || []).filter((z) => !kept.has(z.id));
+    for (const z of Array.isArray(next.zones) ? next.zones : []) {
+      const was = z && ((this.config.zones || []).find((o) => o.id === z.id) || {}).parent, gone = z && removed.find((p) => p.id === z.parent || p.id === was);
+      if (!gone) continue;
+      const shared = (gone.sensors || []).find((x) => (Array.isArray(z.sensors) ? z.sensors : []).some((y) => y && y.id === x.id));
+      if (shared) this.fail(`${shared.name || shared.id} is in both ${gone.name} and ${z.name}. Take it out of ${z.name} before removing ${gone.name}.`);
+      delete z.parent;
+    }
+    this.checkConfig(next, this.config);
     this.saves.push({ revision: next.revision, cut: this.knobs.cutPower });
     if (this.knobs.cutPower) {
       /* The power goes before the new file lands, so the old one is what HA finds when it comes back. */

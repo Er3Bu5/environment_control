@@ -57,7 +57,9 @@ await send("Page.enable"); await send("Runtime.enable");
 await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await phone(390, 844);
 /* The page plays Home Assistant: the fake HA and the host element sit on it, and the UI runs in the host's sandboxed frame, as it will in HA. */
-execFileSync("python3", [`${dir}/build-mock.py`, dir, process.env.MOCK_FILE || "environment-control-source.html", process.env.SEED_FILE || "sample-seed.js", "mock-dev.html"]);
+/* SMOKE compares against the snapshot, so on the sample room every reading check fails and reads as a fault in the build. */
+const smoke = process.env.SMOKE;
+execFileSync("python3", [`${dir}/build-mock.py`, dir, process.env.MOCK_FILE || (smoke ? "snapshot-ui.html" : "environment-control-source.html"), process.env.SEED_FILE || (smoke ? "snapshot-seed.js" : "sample-seed.js"), "mock-dev.html"]);
 writeFileSync(`${dir}/mock-page.html`, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${readFileSync(`${dir}/mock-dev.html`, "utf8")}</body></html>`);
 await send("Page.navigate", { url: `file://${dir}/mock-page.html` });
 await sleep(1200);
@@ -88,23 +90,24 @@ if (process.env.SMOKE) {
     check(`${id}: temperature matches HA`, close(n.temperature, w.temperature, 0.06), [n.temperature, w.temperature]);
     check(`${id}: humidity matches HA`, close(n.humidity, w.humidity, 0.1), [n.humidity, w.humidity]);
     check(`${id}: VPD matches HA`, close(n.vpd, w.vpd, 0.012), [n.vpd, w.vpd]);
-    check(`${id}: light matches HA`, close(n.light, w.light, 1), [n.light, w.light]);
+    // A zone with no light sensor has no light reading to compare, only the absence of one.
+    check(`${id}: light matches HA`, w.light === null ? n.light === null : close(n.light, w.light, 1), [n.light, w.light]);
   }
   await go(`ui.screen="overview";render()`); await clean("Overview"); await shot("real-overview");
   check("Overview: every zone with light draws its graph", (await ev(`document.querySelectorAll("#main .zone-card svg.lspark").length`)) === (await ev(`zones.filter(z=>lightLine(z)).length`)));
-  for (const z of ["garden", "veg", "nursery"]) { await go(`ui.screen="zone";ui.zone="${z}";render()`); await clean(z); await shot(`real-${z}`); }
+  for (const z of ["garden", "veg", "nursery", "breeding"]) { await go(`ui.screen="zone";ui.zone="${z}";render()`); await clean(z); await shot(`real-${z}`); }
   for (const [s, name] of [["devices", "Devices"], ["setup", "Setup"]]) { await go(`ui.screen="${s}";render()`); await clean(name); }
   check("Setup: no made-up tasks left", (await ev(`document.querySelectorAll("#main [data-role], #main [data-answer]").length`)) === 0);
-  for (const id of ["garden", "veg", "nursery"]) {
+  for (const id of ["garden", "veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
-    const windows = {};
-    for (const k of ["temperature", "humidity", "vpd", "light"]) for (const h of [6, 24, 72, 168]) {
+    const windows = {}, kinds = ["temperature", "humidity", "vpd", ...(want.zones[id].light === null ? [] : ["light"])];
+    for (const k of kinds) for (const h of [6, 24, 72, 168]) {
       await go(`ui.metric="${k}";ui.range=${h};render()`); await clean(`${id} ${k} ${h}h`);
       const r = await ev(`(()=>{const c=chartNow,x=c.rows[0],s=chartStats(x.line);return {now:fmt("${k}",x.line[c.n].v),tile:fmt("${k}",zoneById("${id}").now.${k}),min:s.min.v,max:s.max.v,n:c.n,note:document.querySelector("#chart-note").textContent}})()`);
       check(`${id} ${k} ${h}h: the chart's Now is the tile's reading`, r.now === r.tile, r);
       windows[`${k}${h}`] = r;
     }
-    for (const k of ["temperature", "humidity", "vpd", "light"]) for (const [a, b] of [[6, 24], [24, 72], [72, 168]]) {
+    for (const k of kinds) for (const [a, b] of [[6, 24], [24, 72], [72, 168]]) {
       const small = windows[`${k}${a}`], big = windows[`${k}${b}`], slack = (big.max - big.min) * 0.02 + 0.01;
       check(`${id} ${k}: ${b}h holds ${a}h's min and max`, big.min <= small.min + slack && big.max >= small.max - slack, [small.min, big.min, small.max, big.max]);
     }
@@ -125,12 +128,15 @@ if (process.env.SMOKE) {
     await go(`document.querySelector("[data-tdexit]").click()`);
     await go(`ui.screen="zone";ui.zone="${id}";render();document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="${id}"]').click()`);
     const rows = await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[...t.querySelectorAll("tr")].pop().textContent)`);
-    check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
+    const dark = want2.dayMin === null && want2.nightMax === null;
+    if (dark) check(`${id} Targets: View targets has no light limits`, !rows.some((r) => r.startsWith("Light")), rows);
+    else check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
     await go(`document.querySelector('[data-tset="${id}"]').click();ui.vpdw.period="day";render()`); await clean(`${id} Targets`);
-    const day = await ev(`document.querySelector("#vin-light-0").value`);
+    const day = await ev(`document.querySelector("#vin-light-0")?.value ?? null`);
     await go(`ui.vpdw.period="night";render()`);
-    const night = await ev(`document.querySelector("#vin-light-0").value`);
-    check(`${id} Targets: the boxes hold HA's light limits`, Number(day) === want2.dayMin && Number(night) === want2.nightMax, [day, night]);
+    const night = await ev(`document.querySelector("#vin-light-0")?.value ?? null`);
+    if (dark) check(`${id} Targets: no light limit boxes`, day === null && night === null, [day, night]);
+    else check(`${id} Targets: the boxes hold HA's light limits`, Number(day) === want2.dayMin && Number(night) === want2.nightMax, [day, night]);
     await go(`document.querySelector("[data-tdexit]").click()`);
   }
   await go(`ui.screen="setup";render();document.querySelector('[data-vpd="garden"]').click()`);
@@ -139,21 +145,24 @@ if (process.env.SMOKE) {
   await go(`ui.screen="setup";render();document.querySelector('[data-vpd="veg"]').click()`);
   check("Schedule: Veg says Nursery shares its helpers", (await ev(`document.querySelector("#s-times").textContent`)).includes("Nursery uses the same helpers"));
   await go(`document.querySelector("[data-tdexit]").click()`);
-  for (const z of ["garden", "veg", "nursery"]) for (const p of ["day", "night"]) {
+  for (const z of ["garden", "veg", "nursery", "breeding"]) for (const p of ["day", "night"]) {
     const r = await ev(`(()=>{openVpd("${z}");const v=ui.vpdw;v.period="${p}";const i=vIssues(v,v.bands["${p}"]).map(x=>x.text);ui.vpdw=null;ui.td=null;ui.sched=null;return i})()`);
     check(`${z} ${p}: limits are valid and something fits`, r.length === 0, r);
   }
-  check("Red lights: Garden's come from its helpers, and Veg and Nursery don't use them", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none"]));
-  check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false]));
-  for (const id of ["veg", "nursery"]) {
+  check("Red lights: Garden's come from its helpers, and Veg, Nursery and Breeding don't use them", JSON.stringify(await ev(`["garden","veg","nursery","breeding"].map(id=>emersonModeOf(zoneById(id)))`)) === JSON.stringify(["helper", "none", "none", "none"]));
+  check("Targets: only Garden has target helpers, so only Garden aims for a target", JSON.stringify(await ev(`["garden","veg","nursery","breeding"].map(id=>hasTarget(zoneById(id).bands))`)) === JSON.stringify([true, false, false, false]));
+  for (const id of ["veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";render()`);
     check(`${id}: no Target tick, and - in its table`, (await ev(`document.querySelectorAll("#main .track .tick").length`)) === 0 && !/null/.test(await ev(`document.querySelector("#main").textContent`)) && (await ev(`(()=>{const d=document.createElement("div");d.innerHTML=targetsTable(zoneById(ui.zone));return d.querySelector("tbody tr").textContent})()`)).includes("-"));
   }
   /* Nothing in the real room is placed yet, so every zone's map says so, and says it's fine. */
-  for (const id of ["garden", "veg", "nursery"]) {
+  for (const id of ["garden", "veg", "nursery", "breeding"]) {
     await go(`ui.screen="zone";ui.zone="${id}";ui.level="all";render()`);
     const n = await ev(`placeable(zoneById("${id}")).length`), note = await ev(`document.querySelector("#unplaced-${id}")?.textContent || ""`);
-    check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
+    const wall = (await ev(`[...document.querySelectorAll("#main .map svg title")].some(t=>t.textContent==="Wall")`)) === true;
+    // Breeding's lights are switched by hand, so it has nothing to control and nothing to place.
+    if (id === "breeding") check(`${id}: a wall round the map, and no devices to name`, n === 0 && wall && note === "", [n, note]);
+    else check(`${id}: a wall round the map, and its ${n} devices named as not on it`, n > 0 && wall && note.startsWith(`${n} device`) && note.includes("They don't need to be"), note);
   }
   const snap = JSON.parse(readFileSync(`${dir}/ha-snap/states.json`, "utf8")), snapIds = Array.isArray(snap) ? snap.map((s) => s.entity_id) : Object.keys(snap);
   /* The automations snapshot brings the alert repeat helper, which the states snapshot may predate. */
@@ -168,13 +177,23 @@ if (process.env.SMOKE) {
     if (id === "garden") { await go(`ui.vpdw.period="day";render();document.querySelector("#map-l-bands-day-temperature-min").scrollIntoView({block:"center"})`); await shot("real-map-links"); }
   }
   /* The real room's automations, grouped as its dashboards group them. */
-  if (autoSnap) for (const id of ["garden", "veg", "nursery"]) for (const page of ["alert", "failsafe", "control"]) {
-    await go(`ui.screen="autos";ui.zone="${id}";ui.autos={zone:"${id}",page:"${page}"};ui.linkw=null;render()`);
-    const rows = await ev(`document.querySelectorAll("[data-autorow]").length`), want = autoSnap.links[id].filter((x) => (page === "alert" ? x.group.startsWith("alert_") : x.group === page)).length;
-    check(`${id}: the ${page} chip lists every one on its dashboard`, rows === want && want > 0, [rows, want]);
-    if (id === "garden" && page === "alert") await shot("real-alerts");
+  /* An automation belongs to one zone, so one the snapshot lists under two (Nursery's shared cards) stays with the first. */
+  const onPage = (x, page) => (page === "alert" ? x.group.startsWith("alert_") : x.group === page);
+  const owner = {};
+  if (autoSnap) for (const id of ["garden", "veg", "nursery", "breeding"]) for (const x of autoSnap.links[id] || []) owner[x.entity] ??= id;
+  if (autoSnap) for (const page of ["alert", "failsafe", "control"]) {
+    const listed = new Set(Object.values(autoSnap.links).flat().filter((x) => onPage(x, page)).map((x) => x.entity));
+    let shown = 0;
+    for (const id of ["garden", "veg", "nursery", "breeding"]) {
+      await go(`ui.autos=null;renderModal();ui.linkw=null;ui.screen="zone";ui.zone="${id}";render();openAutos("${id}","${page}")`);
+      const rows = await ev(`document.querySelectorAll("#modal [data-autorow]").length`), want = (autoSnap.links[id] || []).filter((x) => onPage(x, page) && owner[x.entity] === id).length;
+      shown += rows;
+      check(`${id}: the ${page} chip lists every one on its dashboard`, rows === want, [rows, want]);
+      if (id === "garden" && page === "alert") await shot("real-alerts");
+    }
+    check(`every ${page} on a dashboard is listed, in one zone`, shown === listed.size && listed.size > 0, [shown, listed.size]);
   }
-  await go(`ui.td=null;ui.sched=null;ui.vpdw=null;ui.screen="setup";render()`);
+  await go(`ui.autos=null;renderModal();ui.td=null;ui.sched=null;ui.vpdw=null;ui.screen="setup";render()`);
   await go(`ui.screen="setup";render();document.querySelector('[data-calw="garden"]').click()`); await clean("Sensor Calibration");
   await go(`ui.leafw=null;ui.screen="setup";render()`);
   check("Setup: Sensor Calibration sits before Targets in every zone", (await ev(`["garden","veg","nursery"].every(z=>document.querySelector('[data-calw="'+z+'"]').nextElementSibling.dataset.vpd===z)`)) === true);
@@ -192,7 +211,7 @@ if (process.env.SMOKE) {
   await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`);
   check("Remove: real data, Garden's sensors stay findable", (await ev(`catalog().length`)) > (await ev(`zones.flatMap(z=>z.sensors).length`)));
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview without Garden"], [`ui.screen="devices";render()`, "Devices without Garden"], [`ui.screen="zone";ui.zone="veg";render()`, "Veg without Garden"], [`ui.screen="setup";render()`, "Setup without Garden"]]) { await go(e); await clean(name); }
-  for (const id of ["veg", "nursery"]) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`); }
+  for (const id of await ev(`zones.map(z=>z.id)`)) { await go(`document.querySelector('[data-rmzone="${id}"]').click()`); await go(`(()=>{const i=document.querySelector("#dlg-confirm");if(i){i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))}})();document.querySelector("[data-gdiscard]").click()`); }
   for (const [e, name] of [[`ui.screen="overview";render()`, "Overview with no zones"], [`ui.screen="devices";render()`, "Devices with no zones"], [`ui.screen="setup";render()`, "Setup with no zones"]]) { await go(e); await clean(name); }
   check("Remove: real data, nothing left", (await ev(`zones.length`)) === 0);
   check("no script errors", exceptions.length === 0, exceptions.slice(0, 3));
@@ -380,7 +399,7 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
 /* The pages are in the page menu since #37, so going to one is picking it there. */
 const menuItems = () => ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].map(b=>b.textContent)`);
 const goTab = async (name) => { await ev(`[...document.querySelectorAll("#zmenu-nav [role=menuitem]")].find(b=>b.textContent==="${name}").click()`); await sleep(60); };
-const reset = () => ev(`ui.review=null;ui.guard=null;ui.tview=null;ui.aview=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
+const reset = () => ev(`ui.autos=null;ui.linkw=null;ui.review=null;ui.guard=null;ui.tview=null;ui.aview=null;renderModal();ui.leafw=null;ui.sched=null;ui.td=null;ui.vpdw=null;ui.mapw=null;ui.wiz=null;ui.picked=null;ui.zone="garden";ui.screen="overview";render();window.scrollTo(0,0)`);
 const groupNames = () => ev(`[...document.querySelectorAll("[data-cgroup] .dev-name")].map(e=>e.textContent)`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 await phone(390, 844); await reset(); await goTab("Garden");
@@ -507,6 +526,183 @@ for (const [box, name] of [[HIST_BOX, "History card"], [OPENS_BOX, "Setup's Hist
   check(`Divider, ${name}: across widths, measured where the groups really wrap, the line shows exactly while both sit on one line`, sw.wrong.length === 0 && sw.shown > 0 && sw.wrapped > 0, sw);
 }
 await phone(390, 844);
+
+// ---------- Sorting Overview's cards: the stored order of zones, changed through a draft and a review like any other edit
+{
+  const panelEl = `document.querySelector("environment-control-panel")`;
+  const cardNames = () => ev(`[...document.querySelectorAll("#main .zone-card h2")].map(h=>h.textContent)`);
+  const diskOrder = () => onHA(`JSON.parse(fakeHA.disk).zones.map(z=>z.name)`);
+  const arrowsOf = () => ev(`[...document.querySelectorAll("#main .zone-card")].map(c=>[...c.querySelectorAll(".btn.move")].map(b=>b.getAttribute("aria-label")+(b.disabled?" (off)":"")))`);
+  const bars = () => ev(`(()=>{const p=document.querySelector("#pagebar"),d=document.querySelector("#draftbar");return {page:p&&!p.hidden?[...p.querySelectorAll("button")].map(b=>b.textContent):null,draft:d.hidden?null:{count:d.querySelector("#draft-count").textContent,what:d.querySelector("#draft-what").textContent,buttons:[...d.querySelectorAll("button")].filter(b=>!b.hidden).map(b=>b.textContent)}}})()`);
+  const focused = () => ev(`document.activeElement.getAttribute("aria-label")`);
+  const told = () => onHA(`${panelEl}.draftOpen`);
+  const sorting = () => ev(`!!ui.sort && !!document.querySelector("#main .zone-card.sorting")`);
+  const gesture = () => onHA(`${panelEl}.post({type:"back"})`).then(() => sleep(60));
+  const move = (id, by) => tap(`[data-sortcard="${id}"] [data-by="${by}"]`);
+  const blockArrows = () => ev(`[...document.querySelectorAll("#main .fambar")].map(c=>[...c.querySelectorAll(".btn.move")].map(b=>b.getAttribute("aria-label")+(b.disabled?" (off)":"")))`);
+  /* Another device's save reaches this one as a config message; a made-up revision stands in, and the stored one is put back after. */
+  let fakes = 0;
+  const fakeConfig = (js) => onHA(`(()=>{const p=${panelEl},c=JSON.parse(JSON.stringify(p.stored()));${js};p.post({type:"config",...c,revision:c.revision+1000+${++fakes}})})()`).then(() => sleep(80));
+  const realConfig = () => onHA(`${panelEl}.post({type:"config",...${panelEl}.stored()})`).then(() => sleep(80));
+  await phone(390, 844); await reset();
+  const order0 = await diskOrder();
+  check("Sort: Overview shows the zones in the order they're stored", same(order0, ["Garden", "Veg", "Nursery"]) && same(await cardNames(), order0), [order0, await cardNames()]);
+  const btn = await ev(`(()=>{const b=document.querySelector("[data-sort]"),n=document.querySelector(".navmenu .burger");if(!b)return null;const r=b.getBoundingClientRect(),q=n.getBoundingClientRect();return {text:b.textContent,cls:b.className,inHead:!!b.closest(".pagehead"),h:r.height,nh:q.height,bottom:r.bottom,nbottom:q.bottom,right:r.right,wrapRight:document.querySelector("#main .wrap").getBoundingClientRect().right}})()`);
+  check("Sort: Overview's heading has a Sort button at its right, level with the menu button and as tall, where a zone's More sits", !!btn && btn.text === "Sort" && btn.cls.split(" ").includes("btn") && btn.inHead && Math.abs(btn.h - btn.nh) < 1 && Math.abs(btn.bottom - btn.nbottom) < 1 && Math.abs(btn.right - btn.wrapRight) < 1, btn);
+  await fakeConfig(`c.zones=c.zones.slice(0,1)`);
+  check("Sort: with one zone there's nothing to sort, so no button", (await ev(`document.querySelectorAll("#main .zone-card").length===1 && !document.querySelector("[data-sort]")`)) === true);
+  await fakeConfig(`c.zones=c.zones.slice(0,2)`);
+  check("Sort: with two zones the button is there", (await ev(`!!document.querySelector("[data-sort]")`)) === true);
+  await realConfig();
+
+  await tap("[data-sort]");
+  check("Sort: sorting says so on the page, and the Sort button gives way to Back in the bar at the foot", (await sorting()) && (await ev(`document.querySelector("#sort-note").textContent`)) === "Sorting the cards: move them with the arrows." && (await ev(`document.activeElement.id`)) === "sort-note" && (await ev(`!document.querySelector("[data-sort]")`)) && same(await bars(), { page: ["Back"], draft: null }), await bars());
+  check("Sort: each card has earlier and later, a zone on its own steps among the zones and families, a card in a family only inside it", same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Veg earlier in its group (off)", "Move Veg later in its group"], ["Move Nursery earlier in its group", "Move Nursery later in its group (off)"]]), await arrowsOf());
+  check("Sort: a family has its own pair, joined to the top of its cards, to move it as one block", same(await blockArrows(), [["Move Veg and Nursery earlier", "Move Veg and Nursery later (off)"]]), await blockArrows());
+  check("Sort: the arrows draw the up and down chevrons", (await ev(`(()=>{const b=document.querySelectorAll('[data-sortcard="veg"] .btn.move');return b[0].querySelector("path").getAttribute("d")===ICON.up&&b[1].querySelector("path").getAttribute("d")===ICON.down})()`)) === true);
+  check("Sort: a card is no button and holds nothing else to press, and the notices with their links are gone", (await ev(`[...document.querySelectorAll("#main .zone-card")].every(c=>c.tagName==="DIV"&&!c.closest("button")&&!c.querySelector("[data-go]")&&c.querySelectorAll("button").length===2) && !document.querySelector("#main .fixlink") && !document.querySelector("#main .notice")`)) === true);
+  await tap('[data-sortcard="veg"] h2'); await tap('[data-sortcard="veg"] .rows');
+  check("Sort: tapping a card opens nothing", (await ev(`ui.screen`)) === "overview" && (await sorting()));
+
+  await move("nursery", -1);
+  check("Sort: a move reorders the cards and saves nothing, and Nursery may come before its parent", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await diskOrder(), order0) && same(await menuItems(), ["Overview", "Garden", "Veg", "Nursery", "Devices", "Setup"]), [await cardNames(), await diskOrder()]);
+  check("Sort: at its family's start a card can't leave it, so its earlier is off and focus goes to its other arrow", (await focused()) === "Move Nursery later in its group" && same(await arrowsOf(), [["Move Garden earlier (off)", "Move Garden later"], ["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && same(await blockArrows(), [["Move Nursery and Veg earlier", "Move Nursery and Veg later (off)"]]), [await focused(), await arrowsOf(), await blockArrows()]);
+  check("Sort: with the order changed, the bar holds the count, Back, Discard and Review and apply", same(await bars(), { page: null, draft: { count: "1", what: "Overview · Zone order", buttons: ["Back", "Discard", "Review and apply"] } }), await bars());
+  check("Sort: and the host is told a draft is open", (await told()) === true);
+  await tap('[data-moveblock="veg"][data-by="-1"]');
+  check("Sort: a family moves as one block, past the zone before it, and focus goes to its other arrow at the top", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Nursery and Veg later" && same(await blockArrows(), [["Move Nursery and Veg earlier (off)", "Move Nursery and Veg later"]]), [await cardNames(), await focused()]);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
+  check("Sort: so it can be pressed again from the keyboard", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await focused()) === "Move Nursery and Veg earlier", [await cardNames(), await focused()]);
+  await move("garden", 1);
+  check("Sort: a zone on its own steps past a whole family in one press", same(await cardNames(), ["Nursery", "Veg", "Garden"]) && (await focused()) === "Move Garden earlier", [await cardNames(), await focused()]);
+  const inView = await ev(`(()=>{const c=document.querySelector('[data-sortcard="garden"]'),b=document.activeElement.getBoundingClientRect(),bar=[...document.querySelectorAll("#draftbar, #pagebar")].find(x=>!x.hidden).getBoundingClientRect();return {card:c.getBoundingClientRect().bottom>0&&c.getBoundingClientRect().top<innerHeight,top:b.top,bottom:b.bottom,barTop:bar.top}})()`);
+  check("Sort: moved to the foot, the arrow used is in the window and above the bar", inView.card && inView.top >= 0 && inView.bottom <= inView.barTop, inView);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(120);
+  await move("nursery", 1);
+  check("Sort: back in the stored order, there's nothing to apply", same(await cardNames(), order0) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
+  const phoneFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card, #main .fambar")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right||q.right>innerWidth||q.width<40)out.push(b.getAttribute("aria-label"))}}return {out,wide:document.documentElement.scrollWidth>innerWidth}})()`);
+  check("Sort: at phone width every arrow sits whole inside its card, and nothing runs off the side", phoneFit.out.length === 0 && !phoneFit.wide, phoneFit);
+  await ev(`window.scrollTo(0,0)`); await shot("sort-phone");
+  await move("veg", 1); await ev(`window.scrollTo(0,0)`); await shot("sort-phone-moved");
+
+  await tap("[data-ddiscard]");
+  check("Sort: Discard puts the stored order back and keeps sorting", same(await cardNames(), order0) && (await sorting()) && same(await bars(), { page: ["Back"], draft: null }) && (await told()) === false, [await cardNames(), await bars()]);
+  await move("veg", 1); await tap("[data-dback]");
+  check("Sort: Back with the order changed asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "You have 1 unsaved change in Overview. Leaving will discard it.", await ev(`document.querySelector("#dlg-text")?.textContent`));
+  await tap("[data-gkeep]");
+  check("Sort: Keep editing keeps the order and the sorting", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await sorting()));
+  await tap("[data-dback]"); await tap("[data-gdiscard]");
+  check("Sort: Discard and continue stops sorting, in the stored order, focus back on Sort", !(await sorting()) && same(await cardNames(), order0) && (await ev(`document.activeElement.dataset.sort!==undefined`)) && same(await diskOrder(), order0) && (await told()) === false, [await cardNames(), await ev(`document.activeElement.outerHTML.slice(0,60)`)]);
+  await tap("[data-sort]"); await tap("[data-sortback]");
+  check("Sort: Back with nothing moved stops sorting without asking", !(await sorting()) && (await ev(`ui.guard`)) === null);
+
+  await tap("[data-sort]"); await move("veg", 1); await goTab("Veg");
+  check("Sort: the page menu asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`ui.screen`)) === "overview");
+  await tap("[data-gdiscard]");
+  check("Sort: and discarding goes there, saving nothing", (await ev(`ui.screen==="zone"&&ui.zone==="veg"&&!ui.sort`)) === true && same(await diskOrder(), order0));
+  await goTab("Overview");
+  check("Sort: back on Overview it isn't sorting", !(await sorting()) && same(await cardNames(), order0));
+  await tap("[data-sort]"); await tap('[data-zmenu="nav"]'); await gesture();
+  check("Sort: the back gesture closes the menu first", (await sorting()) === true && (await ev(`document.querySelector("#zmenu-nav").hidden`)) === true);
+  await gesture();
+  check("Sort: then, with nothing moved, it stops sorting", !(await sorting()));
+  await tap("[data-sort]"); await move("veg", 1); await gesture();
+  check("Sort: with the order changed, the back gesture asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?");
+  await gesture();
+  check("Sort: the back gesture again closes that and keeps the order", (await ev(`ui.guard`)) === null && (await sorting()) && same(await cardNames(), ["Garden", "Nursery", "Veg"]));
+  await gesture(); await tap("[data-gdiscard]");
+  check("Sort: and discarding steps out of sorting", !(await sorting()) && same(await cardNames(), order0));
+
+  await tap("[data-sort]"); await move("nursery", -1);
+  await fakeConfig(`c.zones=c.zones.filter(z=>z.id!=="garden")`);
+  check("Sort: a zone removed elsewhere drops out of the draft, and the rest keep their sorted order", same(await cardNames(), ["Nursery", "Veg"]) && same(await arrowsOf(), [["Move Nursery earlier in its group (off)", "Move Nursery later in its group"], ["Move Veg earlier in its group", "Move Veg later in its group (off)"]]) && (await bars()).draft?.count === "1", [await cardNames(), await bars()]);
+  await tap("[data-dreview]");
+  check("Sort: and the review names only the zones there are", (await ev(`[...document.querySelectorAll("#review-items .review-row")].map(r=>r.textContent).join("|")`)) === "Zone orderVeg, Nursery → Nursery, Veg", await ev(`document.querySelector("#review-items")?.textContent`));
+  await tap("[data-rback]");
+  await realConfig();
+  check("Sort: a zone added elsewhere joins the cards being sorted", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && (await sorting()), await cardNames());
+  await fakeConfig(`c.zones=c.zones.slice(0,1)`);
+  check("Sort: down to one zone, sorting stops and nothing is held", !(await sorting()) && (await told()) === false && same(await bars(), { page: null, draft: null }), await bars());
+  await realConfig();
+
+  await ev(`window.scrollTo(0,0)`); await tap("[data-sort]"); await move("nursery", -1); await tap("[data-dreview]");
+  const rv = await ev(`(()=>({rows:[...document.querySelectorAll("#review-items .review-row")].map(r=>[r.querySelector("strong").textContent,r.querySelector("span").textContent]),text:document.querySelector("#dlg-text").textContent,note:[...document.querySelectorAll("#modal .review-scroll > p.small")].map(p=>p.textContent),apply:document.querySelector("[data-rapply]").textContent}))()`);
+  check("Sort: the review lists one change, Zone order, as the names before and after", same(rv.rows, [["Zone order", "Garden, Veg, Nursery → Garden, Nursery, Veg"]]) && rv.apply === "Apply 1 change", rv);
+  check("Sort: and says it's the order on Overview, in the menu and on Setup, on every device", rv.note.includes("This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.") && rv.text.startsWith("This changes only the order zones are listed in."), rv);
+  /* The mock keeps live readings with its zones, so any save of the mock writes them. What a save would write without the
+     move is the measure, not what was on disk. */
+  const before = await ev(`(()=>{const d=configOf();d.zones.sort((a,b)=>a.id<b.id?-1:1);return JSON.stringify(d)})()`);
+  await shot("sort-phone-review");
+  await tap("[data-rapply]"); await sleep(300);
+  const after = await onHA(`(()=>{const d=JSON.parse(fakeHA.disk);d.zones.sort((a,b)=>a.id<b.id?-1:1);delete d.revision;return JSON.stringify(d)})()`);
+  check("Sort: applying stores the zones in the new order, with nothing else changed and nothing asked by the host", same(await diskOrder(), ["Garden", "Nursery", "Veg"]) && before === after && (await hostDialog()).open === false, await diskOrder());
+  check("Sort: says so and stops sorting", (await ev(`document.querySelector("#toast").textContent`)) === "Zone order saved." && !(await sorting()) && (await ev(`ui.review`)) === null && (await told()) === false);
+  check("Sort: Overview and the page menu follow the stored order", same(await cardNames(), ["Garden", "Nursery", "Veg"]) && same(await menuItems(), ["Overview", "Garden", "Nursery", "Veg", "Devices", "Setup"]), [await cardNames(), await menuItems()]);
+  await goTab("Setup");
+  check("Sort: and so do Setup's zone rows", same(await ev(`[...document.querySelectorAll("#main .task > div > strong")].map(t=>t.textContent).filter(n=>["Garden","Veg","Nursery"].includes(n))`), ["Garden", "Nursery", "Veg"]));
+  await goTab("Overview");
+
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await ev(`document.querySelector("#toast").hidden=true`);
+  await tap("[data-sort]"); await ev(`window.scrollTo(0,0)`); await shot("sort-desktop");
+  await move("veg", -1); await ev(`window.scrollTo(0,0)`); await shot("sort-desktop-moved");
+  await tap("[data-dreview]"); await shot("sort-desktop-review"); await tap("[data-rback]");
+  const deskFit = await ev(`(()=>{const out=[];for(const c of document.querySelectorAll("#main .zone-card, #main .fambar")){const r=c.getBoundingClientRect();for(const b of c.querySelectorAll(".btn.move")){const q=b.getBoundingClientRect();if(q.left<r.left||q.right>r.right)out.push(b.getAttribute("aria-label"))}}return out})()`);
+  check("Sort: on a desktop the arrows sit inside their cards too", deskFit.length === 0, deskFit);
+  await tap("[data-dback]"); await tap("[data-gdiscard]");
+  /* A family is drawn as one joined card: Nursery and Veg touch, sharing a seam with the link tab on it, and Garden keeps its gap. */
+  const joined = () => ev(`(()=>{const r=(id)=>document.querySelector('#main .zone-card[data-zone="'+id+'"]').getBoundingClientRect(),g=r("garden"),n=r("nursery"),v=r("veg"),t=document.querySelector("#main .linktab"),tr=t.getBoundingClientRect(),cs=(id)=>getComputedStyle(document.querySelector('#main .zone-card[data-zone="'+id+'"]'));return {side:{nv:v.left-n.right,top:v.top-n.top,gn:n.left-g.right},stack:{nv:v.top-n.bottom,left:v.left-n.left,gn:n.top-g.bottom},tab:{label:t.getAttribute("aria-label"),title:t.title,inCard:!!t.closest('[data-zone="nursery"]'),x:tr.left+tr.width/2-n.right,y:tr.top+tr.height/2-n.bottom},corners:{n:[cs("nursery").borderTopLeftRadius,cs("nursery").borderTopRightRadius,cs("nursery").borderBottomLeftRadius,cs("nursery").borderBottomRightRadius],v:[cs("veg").borderTopLeftRadius,cs("veg").borderTopRightRadius,cs("veg").borderBottomLeftRadius,cs("veg").borderBottomRightRadius]},families:document.querySelectorAll("#main .fam").length}})()`);
+  await ev(`window.scrollTo(0,0)`);
+  let jd = await joined();
+  check("Joined: on a desktop Nursery and Veg sit side by side, filling a row of their own, touching with no gap, Garden apart above by the usual gap", Math.abs(jd.side.nv) <= 1 && Math.abs(jd.side.top) < 1 && jd.stack.gn >= 10 && jd.side.gn < 0 && jd.families === 1, jd);
+  check("Joined: the link tab sits on their seam, and says what's linked to what", jd.tab.label === "Zone: Nursery is linked to Zone: Veg" && jd.tab.title === jd.tab.label && Math.abs(jd.tab.x) <= 2, jd.tab);
+  check("Joined: the outer corners are rounded and the inner ones square", same(jd.corners, { n: ["12px", "0px", "12px", "0px"], v: ["0px", "12px", "0px", "12px"] }), jd.corners);
+  const badges = await ev(`[...document.querySelectorAll("#main .zone-card")].map(c=>[c.querySelector("h2").textContent,[...c.querySelectorAll(".parentbadge")].map(b=>b.textContent+(b.previousElementSibling&&b.previousElementSibling.tagName==="H2"?" by name":"")).join(),(c.querySelector(".zlinked")||{}).textContent||""])`);
+  check("Joined: the parent carries a Parent badge beside its name, whichever place it sits, and the linked card still says what it's linked to", same(badges, [["Garden", "", ""], ["Nursery", "", "Linked to Zone: Veg"], ["Veg", "Parent by name", "Zone: Nursery is linked to this zone"]]), badges);
+  /* The linked line and the combine note sit on the name's line, so a linked or combined card's tracks start level with the rest of its row. */
+  const titleLine = () => ev(`(()=>{const R=(e)=>e&&e.getBoundingClientRect(),hit=(a,b)=>!!(a&&b)&&a.left<b.right-0.5&&b.left<a.right-0.5&&a.top<b.bottom-0.5&&b.top<a.bottom-0.5,vo=(a,b)=>!!(a&&b)&&a.top<b.bottom&&b.top<a.bottom;return [...document.querySelectorAll("#main .zone-card")].map(c=>{const r=R(c),h=R(c.querySelector("h2")),n=R(c.querySelector(".cardnote")),b=R(c.querySelector(".parentbadge"));return {zone:c.dataset.zone,top:Math.round(r.top),track:Math.round(R(c.querySelector(".track")).top),linked:vo(h,R(c.querySelector(".zlinked"))),combined:vo(h,R(c.querySelector(".zcombined"))),inside:[h,n,b].filter(Boolean).every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5),clash:hit(n,h)||hit(n,b)}})})()`);
+  const tl = await titleLine(), tlz = (id) => tl.find((c) => c.zone === id) || {};
+  check("Title line: on a linked card the linked text sits on the name's line, both sides of the link", tlz("nursery").linked && tlz("veg").linked, tl);
+  check("Title line: a card with several sensors says how they combine on the name's line", tlz("garden").combined, tl);
+  /* Three across only once each card gets about 640px, so not on a 1700px screen, where they'd be cramped. */
+  const perRow = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const n={};for(const c of document.querySelectorAll("#main .zone-card")){const t=Math.round(c.getBoundingClientRect().top);n[t]=(n[t]||0)+1}return Math.max(...Object.values(n))})()`); };
+  const rows1700 = await perRow(1700), rows2300 = await perRow(2300);
+  check("Grid: at 1700px no row of the Overview holds three cards, and at 2300px one does", rows1700 < 3 && rows2300 === 3, { rows1700, rows2300 });
+  const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
+  check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
+  const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
+  for (const w of [2300, 1280, 760, 500]) {
+    await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
+    for (const long of [false, true]) {
+      if (long) { await ev(`zones.find(z=>z.id==="veg").name="Veg room with a rather long name for its card";render()`); await sleep(40); }
+      /* A name too long for the line wraps, and the note goes under it, so only then may a card's tracks sit lower. */
+      const t = await titleLine(), bad = t.filter((c) => !c.inside || c.clash || (!long && t.some((o) => o.top === c.top && o.track !== c.track)));
+      check(`Title line: at ${w} px${long ? " with a long name" : ""} nothing on the name's line is cut off or overlapped${long ? "" : ", and cards in a row start their tracks level"}`, bad.length === 0, t);
+    }
+    await ev(`zones.find(z=>z.id==="veg").name=${JSON.stringify(vegName)};render()`);
+  }
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
+  const seamAt = await ev(`(()=>{const n=document.querySelector('#main .zone-card[data-zone="nursery"]').getBoundingClientRect();return {x:n.left+n.width/2,y:n.top+40,sx:n.right-0.5,sy:n.top+40}})()`);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: seamAt.x, y: seamAt.y }); await sleep(80);
+  check("Joined: a card's own border shows whole on just that card, over the seam it shares", (await ev(`document.elementFromPoint(${seamAt.sx},${seamAt.sy}).closest(".zone-card").dataset.zone`)) === "nursery" && (await ev(`getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderRightColor===getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor && getComputedStyle(document.querySelector('#main .zone-card[data-zone="veg"]')).borderTopColor!==getComputedStyle(document.querySelector('#main .zone-card[data-zone="nursery"]')).borderTopColor`)) === true);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
+  await shot("joined-desktop");
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await tap("[data-sort]"); await ev(`window.scrollTo(0,0)`); await shot("joined-sort-desktop-dark");
+  await tap("[data-sortback]"); await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(60);
+  await tap('#main .zone-card[data-zone="nursery"] .rows');
+  check("Joined: each card still opens its own zone", (await ev(`ui.screen==="zone"&&ui.zone==="nursery"`)) === true);
+  await goTab("Overview");
+  await phone(390, 844); await ev(`window.scrollTo(0,0)`); jd = await joined();
+  check("Joined: on a phone they stack, still touching, the seam running across with the tab on it, Garden apart", Math.abs(jd.stack.nv) <= 1 && Math.abs(jd.stack.left) < 1 && jd.stack.gn >= 10 && Math.abs(jd.tab.y) <= 2 && same(jd.corners, { n: ["12px", "12px", "0px", "0px"], v: ["0px", "0px", "12px", "12px"] }), jd);
+  /* An order that splits a family can still arrive, from an older setup: each stray is pulled to just after its family. */
+  await fakeConfig(`const by=(id)=>c.zones.find(z=>z.id===id);c.zones=[by("veg"),by("garden"),by("nursery")]`);
+  check("Joined: a stored order that splits a family is read with the linked zone pulled to just after its parent's family", same(await cardNames(), ["Veg", "Nursery", "Garden"]) && same(await menuItems(), ["Overview", "Veg", "Nursery", "Garden", "Devices", "Setup"]), [await cardNames(), await menuItems()]);
+  await realConfig();
+  check("Sort: nothing the person sees says Arrange", (await ev(`(()=>{const out=[];for(const s of ["overview","setup"]){ui.screen=s;render();out.push(document.body.innerText)}ui.screen="overview";render();document.querySelector("[data-sort]").click();out.push(document.body.innerText);document.querySelector("[data-sortback]").click();return /arrang/i.test(out.join(" ")+document.querySelector("[data-sort]").outerHTML)})()`)) === false);
+  /* Later checks count on the seeded order. */
+  check("Sort: putting the seeded order back for the checks that follow", (await evp(`saveConfig(()=>{const o=["garden","veg","nursery"];zones.sort((a,b)=>o.indexOf(a.id)-o.indexOf(b.id))}).then(r=>{render();return r.ok})`)) === true && same(await diskOrder(), order0));
+  await phone(390, 844); await reset();
+}
 
 // ---------- Confirmation: a device becomes controllable only once a person says yes, in a dialog the frame can't reach
 /* Page scripts can't see into the host's closed shadow root, but the test can, through DevTools, and clicks it as a person would. */
@@ -639,69 +835,162 @@ check("Zone menu: a tap anywhere else closes it", await moreClosed());
 await tap(MORE); await tellBack();
 check("Zone menu: Back closes it, focus back on its button, and stays on the zone", !(await moreOpen()) && (await moreFocused()) && (await ev(`ui.screen==="zone" && ui.zone==="garden"`)) === true);
 await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]');
-check("Zone menu: View targets opens the Targets dialog, and the menu closes", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Targets: Garden" && !(await moreOpen()) && same(await ev(`[...document.querySelectorAll("#modal .dlgbar button")].map(b=>b.textContent)`), ["Close", "Set targets"]));
+check("Zone menu: View targets opens the Targets dialog, and the menu closes", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Targets: Garden" && !(await moreOpen()) && same(await ev(`[...document.querySelectorAll("#modal .dlgfoot button")].map(b=>b.textContent)`), ["Close", "Set targets"]));
 await tap("[data-tclose]");
 check("Zone menu: closing Targets hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
 
-// The Activity design moved off the zone page into the dialog View activity opens
+// The Activity design moved off the zone page into the dialog View activity opens. It reads a day at a time from the host,
+// in the shape the backend's logbook command returns (#133).
 check("Activity: the zone page has no Activity card", (await ev(`[...document.querySelectorAll("#main h2")].some(h=>h.textContent==="Activity") || !!document.querySelector("#main .act, #main [data-activity]")`)) === false);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]');
-const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),note:d.textContent.includes("The panel doesn't have Activity yet: it says it arrives in a release that follows."),rows:[...d.querySelectorAll(".act-row")].length,bar:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent)}})()`);
+/* The fake's entries are fixed NZ times, so the dialog is read in NZ time wherever the suite runs. */
+await send("Emulation.setTimezoneOverride", { timezoneId: "Pacific/Auckland" });
+await onHA(`fakeHA.knobs.activityMs=400;fakeHA.activityCalls=[];window.actAsked=[];if(!window.actHooked){window.actHooked=true;addEventListener("message",(e)=>{if(e.data&&e.data.type==="activity")window.actAsked.push(e.data)})}`);
+const openAct = async (zone = "garden") => { await tap(MORE); await tap(`#zmenu--more [data-viewactivity="${zone}"]`); };
+const actIdle = async () => { for (let n = 0; n < 40 && (await ev(`!!document.querySelector("#act-body .act-loading")`)); n++) await sleep(100); };
+await openAct();
+const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),bar:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent),days:[...d.querySelectorAll(".act-day h3")].map(h=>h.textContent),loading:(d.querySelector(".act-loading")||{}).textContent||"",rows:[...d.querySelectorAll(".act-row")].map(r=>({kind:r.dataset.kind,text:r.querySelector(".act-text").textContent,by:(r.querySelector(".act-by")||{}).textContent||"",un:r.classList.contains("unavail"),day:r.closest(".act-day").dataset.day})),earlier:!!d.querySelector("[data-aearlier]"),end:(d.querySelector("#act-end")||{}).textContent||"",error:(d.querySelector("#act-error span")||{}).textContent||"",retry:!!d.querySelector("[data-aretry]")}})()`);
 let ad = await actDlg();
-check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]) && (await ev(`document.activeElement.id`)) === "dlg-title", ad);
-check("Activity: it holds the design, its chips, its note and its list", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Climate", "Sensors"]) && ad.note && ad.rows === (await ev(`ACTIVITY.garden.length`)) && ad.rows > 0, ad);
+check("Activity: while the day is read it says so, under the heading and chips", ad.loading === "Reading today from Home Assistant..." && ad.days.length === 0, ad.loading);
+await actIdle(); ad = await actDlg();
+check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]), ad && ad.title);
+check("Activity: its chips are All, Devices, Lights, Automations, Climate and Sensors", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Automations", "Climate", "Sensors"]), ad.chips);
 check("Activity: the page behind it can't be reached", (await ev(`document.querySelector("#main").inert`)) === true);
+const actAskedNow = await onHA(`window.actAsked.map(m=>({keys:Object.keys(m).sort(),zone:m.zone,day:m.day}))`), toHA = await onHA(`fakeHA.activityCalls.map(m=>JSON.stringify(m))`);
+check("Activity: the frame asks for a zone and a day, and never names an entity", actAskedNow.length === 1 && same(actAskedNow[0].keys, ["day", "req", "type", "v", "zone"]) && actAskedNow[0].zone === "garden" && actAskedNow[0].day === "2026-11-17" && same(toHA, ['{"type":"environment_control/activity","zone":"garden","day":"2026-11-17"}']), { actAskedNow, toHA });
+check("Activity: today comes first under its own heading, newest first", same(ad.days, ["Today"]) && ad.rows[0].text === "Failsafe Garden Lights Recovery ran 405 times, 00:00 to 13:28", ad.rows.slice(0, 2));
+const rowsLike = (re) => ad.rows.filter((r) => re.test(r.text));
+let hum = rowsLike(/^Critical Garden Humidity Low Day (fired|ran)/);
+check("Activity: a streak of runs is one row with its count and its first and last times, and an alert's streak fired", hum.length === 1 && hum[0].text === "Critical Garden Humidity Low Day fired 790 times, 07:02 to 09:14" && hum[0].by === "When Garden Environment Average Humidity changed" && hum[0].kind === "automation", hum);
+check("Activity: a single run reads ran at, with its trigger in plain words", rowsLike(/^Garden Lights On ran/).length === 1 && rowsLike(/^Garden Lights On ran/)[0].text === "Garden Lights On ran at 07:00" && rowsLike(/^Garden Lights On ran/)[0].by === "At a set time", rowsLike(/^Garden Lights On/));
+check("Activity: a timer's streak says on a timer", ad.rows[0].by === "On a timer", ad.rows[0]);
+check("Activity: an automation switched off by hand is an automation row, by that person", rowsLike(/switched off$/).length === 1 && rowsLike(/switched off$/)[0].text === "Critical Garden Humidity Low Day switched off" && rowsLike(/switched off$/)[0].by === "By Sam" && rowsLike(/switched off$/)[0].kind === "automation", rowsLike(/switched/));
+const un = rowsLike(/went unavailable$/);
+check("Activity: a device going unavailable has its own row style, not on or off", un.length === 1 && un[0].text === "Air conditioner exhaust fan went unavailable" && un[0].un && ad.rows.filter((r) => r.un).length === 1 && (await ev(`getComputedStyle(document.querySelector(".act-row.unavail")).borderLeftStyle`)) === "dashed", un);
+check("Activity: an automation the zone doesn't link is still named as the cause, with its trigger", rowsLike(/^Dehumidifier turned on$/)[0]?.by === "By Day Humidity Upper Limit, when Garden Environment Average Humidity crossed a limit", rowsLike(/^Dehumidifier/));
+check("Activity: Came back online and By a person read as written", rowsLike(/^Air conditioner exhaust fan turned on$/)[0]?.by === "Came back online" && rowsLike(/^Air conditioner turned on$/)[0]?.by === "By Sam", ad.rows.filter((r) => /^Air/.test(r.text)));
+check("Activity: climate and sensor rows stay, worked out from history", rowsLike(/^Humidity above ideal zone at 67\.4%$/).length === 1 && rowsLike(/^Environment under stopped reporting$/).length === 1 && rowsLike(/^Environment under came back$/).length === 1, ad.rows.filter((r) => /climate|sensor/.test(r.kind)));
+// Same second, same cause: one row that opens to show its parts
+const grp = () => ev(`(()=>{const b=document.querySelector('[data-day="2026-11-17"] [data-agroup]');const r=b.closest(".act-row");return {text:b.textContent,exp:b.getAttribute("aria-expanded"),by:r.querySelector(".act-by").textContent,kind:r.dataset.kind,parts:[...r.querySelectorAll(".act-part")].map(p=>p.textContent),groups:document.querySelectorAll('[data-day="2026-11-17"] [data-agroup]').length}})()`);
+let g = await grp();
+check("Activity: lights switched on in the same second by one cause are one row, closed", g.groups === 1 && g.text === "Lights on: 4 devices" && g.exp === "false" && g.parts.length === 0 && g.kind === "lights" && g.by === "By Garden Lights On, at a set time" && rowsLike(/^Overhead lights 1/).length === 0, g);
+await tap('[data-day="2026-11-17"] [data-agroup]'); g = await grp();
+check("Activity: tapping the row opens it to list each device, and keeps focus on it", g.exp === "true" && same(g.parts, ["Overhead light controller turned on", "Overhead lights 1 turned on", "Overhead lights 2 turned on", "Under canopy light controller turned on"]) && (await ev(`!!document.activeElement.dataset.agroup`)) === true, g);
+await tap('[data-day="2026-11-17"] [data-agroup]'); g = await grp();
+check("Activity: tapping it again closes it", g.exp === "false" && g.parts.length === 0, g);
+// Earlier: the day before under its own heading, back to as far as history goes
+check("Activity: Earlier is offered under today while there's more history", ad.earlier && !ad.end, ad);
+await tap("[data-aearlier]"); ad = await actDlg();
+check("Activity: Earlier reads the day before, saying so below what's shown", ad.loading === "Reading yesterday from Home Assistant..." && same(ad.days, ["Today"]) && !ad.earlier, ad.loading);
+await actIdle(); ad = await actDlg();
+hum = ad.rows.filter((r) => r.day === "2026-11-16" && /^Critical Garden Humidity Low Day (fired|ran)/.test(r.text));
+check("Activity: the day before loads beneath, under Yesterday, and its streak of thousands is one row", same(ad.days, ["Today", "Yesterday"]) && hum.length === 1 && hum[0].text === "Critical Garden Humidity Low Day fired 3,961 times, 07:02 to 18:59" && (await ev(`document.activeElement.textContent`)) === "Yesterday", { days: ad.days, hum });
+check("Activity: a restart reads After a restart, its changes grouped, and the run it caused says so", ad.rows.some((r) => r.day === "2026-11-16" && r.text === "3 devices changed" && r.by === "After a restart") && ad.rows.some((r) => r.text === "Failsafe Dehumidifier Mains Auto On ran at 03:12" && r.by === "When Home Assistant started"), ad.rows.filter((r) => r.day === "2026-11-16" && /03:|restart|changed/.test(r.text + r.by)));
+check("Activity: No cause recorded where the log has none", ad.rows.some((r) => r.text === "Heater turned off" && r.by === "No cause recorded"), ad.rows.filter((r) => /Heater/.test(r.text)));
+check("Activity: in the same second, a failsafe credited by the log is its own row beside the schedule's group", ad.rows.some((r) => r.day === "2026-11-16" && r.text === "Lights off: 3 devices" && r.by === "By Garden Lights Off, at a set time") && ad.rows.some((r) => r.day === "2026-11-16" && r.text === "Overhead lights 2 turned off" && r.by === "By Failsafe Garden Lights Recovery, on a timer"), ad.rows.filter((r) => r.day === "2026-11-16" && /off/.test(r.text)));
+await tap("[data-aearlier]"); await actIdle(); ad = await actDlg();
+check("Activity: Earlier stops at the earliest day, and says plainly that history goes no further back", same(ad.days, ["Today", "Yesterday", "Sunday 15 November"]) && !ad.earlier && ad.end === "History goes no further back. Home Assistant keeps it from Sunday 15 November at 09:14." && same((await onHA(`window.actAsked.map(m=>m.day)`)), ["2026-11-17", "2026-11-16", "2026-11-15"]), { days: ad.days, end: ad.end });
+check("Activity: no row is a dehumidifier's mode or a light's brightness: the log can't supply them", ad.rows.length > 30 && ad.rows.every((r) => !/mode|brightness|dimmed|%\s*bright/i.test(r.text + r.by)), ad.rows.filter((r) => /mode|bright/i.test(r.text)));
+check("Activity: times are local and 24 hour", (await ev(`[...document.querySelectorAll("#act-body .act-time")].every(t=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(t.textContent))`)) === true);
 await shot("activity-dialog-phone");
-await tap('#modal [data-activity="lights"]'); ad = await actDlg();
-check("Activity: a chip filters the list in the dialog, and keeps focus", ad.chips.includes("Lights*") && ad.rows === (await ev(`ACTIVITY.garden.filter(a=>a[1]==="lights").length`)) && (await ev(`document.activeElement.dataset.activity`)) === "lights" && (await ev(`ui.screen==="zone"`)) === true, ad);
+// Each filter shows only its kind, across every day read
+for (const [k, label] of [["device", "Devices"], ["lights", "Lights"], ["automation", "Automations"], ["climate", "Climate"], ["sensor", "Sensors"]]) {
+  await tap(`#modal [data-activity="${k}"]`); ad = await actDlg();
+  check(`Activity: ${label} shows only its own kind, and keeps focus`, ad.chips.includes(`${label}*`) && ad.rows.length > 0 && ad.rows.every((r) => r.kind === k) && (await ev(`document.activeElement.dataset.activity`)) === k && same(ad.days, ["Today", "Yesterday", "Sunday 15 November"]), { k, rows: ad.rows.map((r) => r.kind + ":" + r.text) });
+}
+check("Activity: a day with nothing of a kind says so under its heading", (await ev(`(()=>{const d=document.querySelector('[data-day="2026-11-15"]');return !d.querySelector(".act-row") && d.querySelector("p").textContent})()`)) === "Nothing of this kind on this day.");
 await tap('#modal [data-activity="all"]');
+// At phone width the days scroll inside the dialog, and the heading and chips stay put
+const fixed = () => ev(`(()=>{const d=document.querySelector("#modal .dialog"),b=document.querySelector("#act-body");return {h:document.querySelector("#dlg-title").getBoundingClientRect().top,c:d.querySelector(".seg").getBoundingClientRect().top,f:d.querySelector(".dlgfoot").getBoundingClientRect().bottom,scrolls:b.scrollHeight>b.clientHeight+50,dTop:d.scrollTop,vh:innerHeight}})()`);
+const f0 = await fixed(); await ev(`document.querySelector("#act-body").scrollTop=1e6`); await sleep(60); const f1 = await fixed();
+check("Activity: on a phone the list scrolls inside the dialog, with the heading, chips and Close staying put", f0.scrolls && f0.h === f1.h && f0.c === f1.c && f1.dTop === 0 && f1.f <= f1.vh && (await ev(`document.documentElement.scrollWidth<=innerWidth`)) === true, { f0, f1 });
 await tap("[data-aclose]");
-check("Activity: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.aview`)) === true && (await moreFocused()));
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await key("Escape", 27);
+check("Activity: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.aview && !ui.act`)) === true && (await moreFocused()));
+// Busy and too slow: a retry, not a spinner forever
+await onHA(`fakeHA.knobs.activity="busy"`); await openAct(); await actIdle(); ad = await actDlg();
+check("Activity: Home Assistant answering busy shows why, with Try again", ad.error === "Home Assistant was busy and couldn't read today." && ad.retry && ad.days.length === 0, ad.error);
+await onHA(`fakeHA.knobs.activity=null`); await tap("[data-aretry]"); await actIdle(); ad = await actDlg();
+check("Activity: Try again reads the day once Home Assistant can", same(ad.days, ["Today"]) && !ad.retry && ad.rows.length > 5, ad.days);
+await onHA(`fakeHA.knobs.activity="timeout";document.querySelector("environment-control-panel").activityTimeoutMs=500`);
+await tap("[data-aearlier]"); await sleep(900); await actIdle(); ad = await actDlg();
+check("Activity: no answer in time shows a retry under the days already read", ad.error === "Home Assistant took too long to read yesterday." && ad.retry && same(ad.days, ["Today"]) && !ad.earlier, ad.error);
+await onHA(`fakeHA.knobs.activity=null;document.querySelector("environment-control-panel").activityTimeoutMs=20000`); await tap("[data-aretry]"); await actIdle(); ad = await actDlg();
+check("Activity: Try again then reads that day", same(ad.days, ["Today", "Yesterday"]) && !ad.retry, ad.days);
+await tap("[data-aclose]");
+await openAct(); await actIdle(); await ev(`ui.act.open={}`);
+check("Activity: opening it again starts from today", same((await actDlg()).days, ["Today"]));
+await key("Escape", 27);
 check("Activity: Escape shuts it", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
 const actShown = () => ev(`!!ui.aview && !document.querySelector("#modal").hidden && document.querySelector("#dlg-title").textContent==="Activity: Garden"`);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); let actWas = await actShown(); await tellBack();
+await openAct(); let actWas = await actShown(); await tellBack();
 check("Activity: Back shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true && (await ev(`ui.screen==="zone"`)) === true && (await moreFocused()));
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); actWas = await actShown();
+await openAct(); actWas = await actShown();
 await ev(`document.querySelector("#modal").click()`); await sleep(40);
 check("Activity: a tap outside the dialog shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true);
+await goTab("Nursery"); await openAct("nursery"); await actIdle(); ad = await actDlg();
+check("Activity: a zone whose history starts today offers no Earlier, and says so", same(ad.days, ["Today"]) && !ad.earlier && ad.end === "History goes no further back. Home Assistant keeps it from Tuesday 17 November at 00:00." && ad.title === "Activity: Nursery", ad);
+await tap("[data-aclose]"); await goTab("Garden");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await ev(`window.scrollTo(0,0)`);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await shot("activity-dialog-desktop"); await tap("[data-aclose]");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await sleep(150);
+await openAct(); await actIdle(); await tap('[data-day="2026-11-17"] [data-agroup]'); await tap("[data-aearlier]"); await actIdle(); await ev(`document.querySelector("#act-body").scrollTop=0`); await shot("activity-dialog-desktop"); await tap("[data-aclose]");
+await send("Emulation.setEmulatedMedia", { features: [] }); await send("Emulation.setTimezoneOverride", { timezoneId: "" }); await onHA(`fakeHA.knobs.activityMs=300`);
 await phone(390, 844); await reset(); await goTab("Garden");
 await tap(MORE); await tap('#zmenu--more [data-autos="alert"]');
-check("Zone menu: View automations opens Garden's automations on Alerts", (await ev(`ui.screen==="autos" && ui.zone==="garden" && ui.autos.page==="alert"`)) === true);
+/* Since #113 View automations opens a dialog over the zone's page, as View targets and View activity do. */
+const autosDlg = () => ev(`(()=>{const d=document.querySelector("#modal [data-autosdlg]");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#autos-title").textContent,named:d.getAttribute("aria-labelledby"),bar:[...d.querySelectorAll(".dlgfoot button:not([hidden])")].map(b=>b.textContent),shown:!document.querySelector("#modal").hidden,under:document.querySelector("#main").inert&&ui.screen==="zone"&&!!document.querySelector("#main .zone-head, #main h1")&&document.querySelector("#main h1").textContent.includes("Garden")}})()`);
+let adl = await autosDlg();
+check("Zone menu: View automations opens Garden's automations on Alerts in a dialog, the zone's page still under it", (await ev(`ui.zone==="garden" && ui.autos.page==="alert"`)) === true && !!adl && adl.shown && adl.under && adl.role === "dialog" && adl.modal === "true" && adl.named === "autos-title" && adl.title === "Automations: Garden" && (await ev(`document.activeElement.id`)) === "autos-title", adl);
+check("Automations: built as the Targets and Activity dialogs are, its Close in the foot bar inside the dialog", !!adl && same(adl.bar, ["Close"]) && (await ev(`!!document.querySelector("#modal [data-autosdlg] > .dlgfoot [data-uclose]") && document.querySelector("#modal [data-autosdlg]").classList.contains("dialog")`)) === true, adl);
+check("Automations: there's no Automations page left to route to", (await ev(`(()=>{const was=ui.screen;ui.screen="autos";let routed=true;try{render()}catch(e){routed=false}ui.screen=was;render();return routed})()`)) === false && (await ev(`[...document.querySelectorAll("[data-go]")].some(b=>b.dataset.go==="autos")`)) === false);
+await tap("[data-uclose]");
+check("Automations: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.autos && ui.screen==="zone"`)) === true && (await moreFocused()));
+await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await key("Escape", 27);
+check("Automations: Escape shuts it", (await ev(`document.querySelector("#modal").hidden && !ui.autos`)) === true && (await moreFocused()));
+await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await tellBack();
+check("Automations: Back shuts it, staying on the zone", (await ev(`document.querySelector("#modal").hidden && !ui.autos && ui.screen==="zone"`)) === true && (await moreFocused()));
+await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await ev(`document.querySelector("#modal").click()`); await sleep(40);
+check("Automations: a tap outside the dialog shuts it", (await ev(`document.querySelector("#modal").hidden && !ui.autos`)) === true);
 
 // ---------- Automation switches: Home Assistant runs them, and the panel switches them through the host, never assumed
-await ev(`ui.review=null;ui.guard=null;renderModal();ui.screen="zone";ui.zone="garden";ui.autos=null;ui.linkw=null;render()`); await sleep(40);
+await ev(`ui.review=null;ui.guard=null;ui.autos=null;renderModal();ui.screen="zone";ui.zone="garden";ui.linkw=null;render()`); await sleep(40);
 const autoRowOf = (entity, zone = "garden") => ev(`(()=>{const r=document.querySelector('[data-autorow="${entity}"][data-zone="${zone}"]');if(!r)return null;const s=r.querySelector(".sw"),t=r.querySelector(".ctl-status");return {on:s.getAttribute("aria-checked")==="true",disabled:s.disabled,status:t?t.textContent:"",cls:t?t.className:"",text:r.textContent}})()`);
 const diskZone = (id) => onHA(`JSON.parse(fakeHA.disk).zones.find(z=>z.id==="${id}")`);
 const VPD_NIGHT = "automation.critical_garden_vpd_low_night", RED_FS = "automation.failsafe_garden_red_lights_recovery";
+/* Opens the dialog the way a test needs it, over the zone's page. */
+const openAutosAt = async (zone, page) => { await ev(`ui.review=null;ui.guard=null;ui.autos=null;renderModal();ui.linkw=null;ui.screen="zone";ui.zone="${zone}";render();openAutos("${zone}","${page}")`); await sleep(40); };
 check("Automations: the zone page has no Automations card, only the menu's way there", (await ev(`!document.querySelector("#z-autos") && ![...document.querySelectorAll("#main h2")].some(h=>h.textContent==="Automations") && [...document.querySelectorAll("#main [data-autos], #main [data-linkautos], #main [data-autocount]")].every(b=>b.closest(".menu"))`)) === true);
 check("Automations: with every failsafe on, the zone page has no failsafe warning", (await ev(`[...document.querySelectorAll("#main .notice.fix")].some(n=>n.dataset.autos)`)) === false);
 await tap(MORE); await tap('#zmenu--more [data-autos="alert"]');
-const autoChipsNow = () => ev(`(()=>{const g=document.querySelector('#main .seg[aria-label="Automations"]');return g && {role:g.getAttribute("role"),chips:[...g.querySelectorAll("button")].map(b=>[b.firstChild.textContent,b.querySelector(".segn").textContent,b.getAttribute("aria-label"),b.getAttribute("aria-pressed")])}})()`);
-const autoPage = () => ev(`({h1:document.querySelector("#main h1").textContent,sub:document.querySelector("#main h1").nextElementSibling.textContent,about:document.querySelector("#autos-about").textContent,repeat:!!document.querySelector("#alert-repeat"),groups:[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent),rows:document.querySelectorAll("[data-autorow]").length,link:!!document.querySelector('#main .row [data-linkautos]'),focus:document.activeElement.dataset.autopage||""})`);
+const autoChipsNow = () => ev(`(()=>{const g=document.querySelector('#modal .seg[aria-label="Automations"]');return g && {role:g.getAttribute("role"),chips:[...g.querySelectorAll("button")].map(b=>[b.firstChild.textContent,b.querySelector(".segn").textContent,b.getAttribute("aria-label"),b.getAttribute("aria-pressed")])}})()`);
+const autoPage = () => ev(`({h1:document.querySelector("#autos-title").textContent,sub:document.querySelector("#autos-sub").textContent,about:document.querySelector("#autos-about").textContent,repeat:!!document.querySelector("#alert-repeat"),groups:[...document.querySelectorAll("#modal [data-agroup] h3")].map(e=>e.textContent),rows:document.querySelectorAll("#modal [data-autorow]").length,link:document.querySelectorAll("#modal [data-linkautos], #main [data-linkautos]").length,focus:document.activeElement.dataset.autopage||""})`);
 let ap = await autoPage();
-check("Automations: one page, headed Automations: Garden, saying what it's for", ap.h1 === "Automations: Garden" && ap.sub === "Home Assistant runs these. Here you switch them on and off.", ap);
+check("Automations: headed Automations: Garden, saying what it's for", ap.h1 === "Automations: Garden" && ap.sub === "Home Assistant runs these. Here you switch them on and off.", ap);
 check("Automations: chips for Alerts, Failsafes and Control, each counting what's on, in words to a screen reader, with Alerts picked", same(await autoChipsNow(), { role: "group", chips: [["Alerts", "15/16", "Alerts, 15 of 16 on", "true"], ["Failsafes", "3/3", "Failsafes, 3 of 3 on", "false"], ["Control", "4/4", "Control, 4 of 4 on", "false"]] }), await autoChipsNow());
-const segn = await ev(`(()=>{const n=document.querySelector('[data-autopage="alert"] .segn'),b=n.parentElement,c=getComputedStyle(n);return {small:parseFloat(c.fontSize)<parseFloat(getComputedStyle(b).fontSize),muted:c.color===getComputedStyle(document.querySelector(".muted")).color,seg:b.parentElement.classList.contains("seg")}})()`);
+const segn = await ev(`(()=>{const n=document.querySelector('#modal [data-autopage="alert"] .segn'),b=n.parentElement,c=getComputedStyle(n);return {small:parseFloat(c.fontSize)<parseFloat(getComputedStyle(b).fontSize),muted:c.color===getComputedStyle(document.querySelector(".muted")).color,seg:b.parentElement.classList.contains("seg")}})()`);
 check("Automations: the chips are the History card's seg chips, the count small and muted", segn.small && segn.muted && segn.seg, segn);
-check("Automations: Alerts holds its about sentence, the Alert repeat card, its groups and Link automations", ap.about === (await ev(`AUTO_PAGES.alert.about`)) && ap.repeat && same(ap.groups, ["Day alerts", "Night alerts", "Device alerts"]) && ap.link, ap);
-check("Automations: Alerts groups them as the dashboards do, day, night and device", same(await ev(`[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent)`), ["Day alerts", "Night alerts", "Device alerts"]), await ev(`[...document.querySelectorAll("[data-agroup] h2")].map(e=>e.textContent)`));
-check("Automations: an alert named for the day stays where it was put, with the device alerts", (await ev(`document.querySelector('[data-agroup="alert_device"]').textContent`)).includes("Light Controller Overhead Off Day"));
-check("Automations: Garden stays current in the page menu on its Automations page", (await ev(`document.querySelector("#zmenu-nav [aria-current]").textContent`)) === "Garden");
+check("Automations: Alerts holds its about sentence, the Alert repeat card and its groups, and no Link automations", ap.about === (await ev(`AUTO_PAGES.alert.about`)) && ap.repeat && same(ap.groups, ["Day alerts", "Night alerts", "Device alerts"]) && ap.link === 0, ap);
+check("Automations: an alert named for the day stays where it was put, with the device alerts", (await ev(`document.querySelector('#modal [data-agroup="alert_device"]').textContent`)).includes("Light Controller Overhead Off Day"));
 check("Automations: an alert that's off shows off", (await autoRowOf(VPD_NIGHT)).on === false && (await autoRowOf(VPD_NIGHT)).text.includes("Off."), await autoRowOf(VPD_NIGHT));
 check("Automations: a row says when it last triggered, or that it never has", (await autoRowOf("automation.critical_garden_humidity_high_day")).text.includes("Last triggered ") && (await autoRowOf("automation.critical_garden_temperature_low_day")).text.includes("Never triggered."));
+/* Fifty or so automations fit: the heading, chips and foot stay put, and only the rows scroll, inside the dialog. */
+const autosScroll = () => ev(`(()=>{const d=document.querySelector("#modal [data-autosdlg]"),s=document.querySelector("#autos-scroll"),r=(e)=>e.getBoundingClientRect(),c=r(d.querySelector(".seg")),f=r(d.querySelector(".dlgfoot"));const before={chips:c.top,foot:f.top};s.scrollTop=s.scrollHeight;const c2=r(d.querySelector(".seg")),f2=r(d.querySelector(".dlgfoot"));return {scrolls:s.scrollHeight>s.clientHeight+20&&s.scrollTop>0,still:Math.abs(c2.top-before.chips)<1&&Math.abs(f2.top-before.foot)<1,fits:r(d).top>=0&&r(d).bottom<=innerHeight&&f2.bottom<=innerHeight,dlgStill:d.scrollTop===0,page:document.documentElement.scrollWidth<=innerWidth}})()`);
+await ev(`window.keptGarden=zoneById("garden").automations;zoneById("garden").automations=[...keptGarden,...Array.from({length:40},(_,i)=>({id:"x"+i,entity:"automation.critical_garden_vpd_low_night",group:"alert_day"}))];redrawAutosDialog()`); await sleep(40);
+for (const [w, h, name] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+  if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+  await sleep(60); const sc = await autosScroll();
+  check(`Automations ${name}: with 56 automations the rows scroll inside the dialog, the heading, chips and Close staying put on screen`, sc.scrolls && sc.still && sc.fits && sc.dlgStill && sc.page, sc);
+}
+await phone(390, 844);
+await ev(`zoneById("garden").automations=keptGarden;redrawAutosDialog();document.querySelector("#autos-scroll").scrollTop=0`); await sleep(40);
 await shot("autos-alerts-phone");
 let nA = (await haCalls()).length;
 await tap(`[data-autorow="${VPD_NIGHT}"] .sw`);
 let ar = await autoRowOf(VPD_NIGHT);
 check("Automations: a tap is one automation.turn_on on the linked automation, shown as sent", same((await haCalls()).slice(nA), [["automation.turn_on", VPD_NIGHT, null]]) && ar.status.startsWith("Sent") && ar.on === false && ar.disabled, [ar, (await haCalls()).slice(nA)]);
 await sleep(REPORT); ar = await autoRowOf(VPD_NIGHT);
-check("Automations: it moves once HA reports it on, and the count follows", ar.on && ar.status === "" && (await ev(`document.querySelector('[data-agroup="alert_night"] [data-autocount]').textContent`)) === "5 of 5 on", ar);
+check("Automations: it moves once HA reports it on, and the count follows", ar.on && ar.status === "" && (await ev(`document.querySelector('#modal [data-agroup="alert_night"] [data-autocount]').textContent`)) === "5 of 5 on", ar);
 check("Automations: and so does the Alerts chip's, in words too", same((await autoChipsNow()).chips[0], ["Alerts", "16/16", "Alerts, 16 of 16 on", "true"]), (await autoChipsNow()).chips[0]);
 await onHA(`fakeHA.setState("${VPD_NIGHT}","off",{friendly_name:"Critical Garden VPD Low Night"})`); await sleep(80);
-check("Automations: switched off in Home Assistant, the row, its group and its chip all follow", (await autoRowOf(VPD_NIGHT)).on === false && (await ev(`document.querySelector('[data-agroup="alert_night"] [data-autocount]').textContent`)) === "4 of 5 on" && same((await autoChipsNow()).chips[0], ["Alerts", "15/16", "Alerts, 15 of 16 on", "true"]), (await autoChipsNow()).chips[0]);
+check("Automations: switched off in Home Assistant, the row, its group and its chip all follow", (await autoRowOf(VPD_NIGHT)).on === false && (await ev(`document.querySelector('#modal [data-agroup="alert_night"] [data-autocount]').textContent`)) === "4 of 5 on" && same((await autoChipsNow()).chips[0], ["Alerts", "15/16", "Alerts, 15 of 16 on", "true"]), (await autoChipsNow()).chips[0]);
 await onHA(`fakeHA.setState("${VPD_NIGHT}","on",{friendly_name:"Critical Garden VPD Low Night"})`); await sleep(80);
 await tap(`[data-autorow="${VPD_NIGHT}"] .sw`);
 check("Automations: switching an alert off doesn't ask", (await ev(`!!ui.guard`)) === false && (await haCalls()).at(-1)[0] === "automation.turn_off");
@@ -711,56 +1000,62 @@ check("Automations: a switch HA never reports is never shown as done", ar.on ===
 await tap(`[data-autorow="${VPD_NIGHT}"] .sw`); await sleep(REPORT); ar = await autoRowOf(VPD_NIGHT);
 check("Automations: trying again works and clears the warning", ar.on && ar.status === "", ar);
 await tap(`[data-autorow="${VPD_NIGHT}"] .sw`); await sleep(REPORT);
-check("Automations: Back rides in the bar at the foot of the window", (await ev(`(()=>{const b=document.querySelector("#pagebar [data-go=zone]").getBoundingClientRect();return !document.querySelector("#pagebar").hidden&&b.bottom<=innerHeight&&b.bottom>innerHeight-120})()`)) === true);
-await tap('#pagebar [data-go="zone"]');
-check("Automations: and returns to the zone's page", (await ev(`ui.screen==="zone" && ui.zone==="garden" && !ui.autos`)) === true);
-await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await tap('[data-autopage="failsafe"]');
+await tap('#modal [data-autopage="failsafe"]');
 ap = await autoPage();
-check("Automations: Failsafes holds its about sentence, its group and Link automations, with no Alert repeat card", ap.about === (await ev(`AUTO_PAGES.failsafe.about`)) && !ap.repeat && same(ap.groups, ["Failsafes"]) && ap.rows === 3 && ap.link && ap.h1 === "Automations: Garden", ap);
+check("Automations: Failsafes holds its about sentence and its group, with no Alert repeat card and no Link automations", ap.about === (await ev(`AUTO_PAGES.failsafe.about`)) && !ap.repeat && same(ap.groups, ["Failsafes"]) && ap.rows === 3 && ap.link === 0 && ap.h1 === "Automations: Garden", ap);
 check("Automations: the chip picked is pressed, and keeps focus", same((await autoChipsNow()).chips.map((c) => c[3]), ["false", "true", "false"]) && ap.focus === "failsafe", [await autoChipsNow(), ap.focus]);
 nA = (await haCalls()).length;
+/* The question opens over the dialog, which is left as it was: same chip, same scroll, same switch focused. */
+await phone(390, 560);
+await ev(`(()=>{window.autosWas=document.querySelector("#modal [data-autosdlg]");const s=document.querySelector("#autos-scroll");s.scrollTop=s.scrollHeight;window.autosTop=s.scrollTop})()`);
 await tap(`[data-autorow="${RED_FS}"] .sw`);
-check("Automations: switching a failsafe off asks first, and sends nothing yet", (await ev(`ui.guard && ui.guard.title`)) === "Switch off Failsafe Garden Red Lights Recovery?" && (await haCalls()).length === nA, await ev(`ui.guard && ui.guard.title`));
+const overNow = () => ev(`(()=>{const o=document.querySelector("#modal > .modal.over"),d=document.querySelector("#modal [data-autosdlg]");window.autosTop=document.querySelector("#autos-scroll").scrollTop;return {over:!!o&&!!o.querySelector("[role=alertdialog] #dlg-title"),under:!!d&&d===window.autosWas&&d.inert,focus:document.activeElement.id}})()`);
+const ov = await overNow();
+check("Automations: switching a failsafe off asks first, over the dialog, and sends nothing yet", (await ev(`ui.guard && ui.guard.title`)) === "Switch off Failsafe Garden Red Lights Recovery?" && (await haCalls()).length === nA && ov.over && ov.under && ov.focus === "dlg-title", [await ev(`ui.guard && ui.guard.title`), ov]);
 await shot("autos-failsafe-ask-phone");
 await tap("[data-gkeep]");
-check("Automations: Keep it on sends nothing", (await haCalls()).length === nA && (await autoRowOf(RED_FS)).on);
+const backTo = () => ev(`(()=>{const d=document.querySelector("#modal [data-autosdlg]");return {same:d===window.autosWas&&!d.inert,over:!!document.querySelector("#modal > .modal.over"),top:document.querySelector("#autos-scroll").scrollTop,was:window.autosTop,chip:ui.autos.page,focus:document.activeElement.closest("[data-autorow]")?.dataset.autorow||document.activeElement.id}})()`);
+let bt = await backTo();
+check("Automations: Keep it on sends nothing, and goes back to the dialog on Failsafes, scrolled where it was, the switch focused", (await haCalls()).length === nA && (await autoRowOf(RED_FS)).on && bt.same && !bt.over && bt.chip === "failsafe" && bt.top === bt.was && bt.top > 0 && bt.focus === RED_FS, bt);
 await tap(`[data-autorow="${RED_FS}"] .sw`); await tap("[data-gdiscard]"); await sleep(REPORT);
-check("Automations: Switch off sends automation.turn_off, and it shows off once reported", same((await haCalls()).slice(nA), [["automation.turn_off", RED_FS, null]]) && (await autoRowOf(RED_FS)).on === false, (await haCalls()).slice(nA));
-await tap('#pagebar [data-go="zone"]');
+bt = await backTo();
+check("Automations: Switch off sends automation.turn_off, it shows off once reported, and the dialog is still there", same((await haCalls()).slice(nA), [["automation.turn_off", RED_FS, null]]) && (await autoRowOf(RED_FS)).on === false && bt.same && !bt.over && bt.chip === "failsafe", [(await haCalls()).slice(nA), bt]);
+await phone(390, 844);
+await tap("[data-uclose]");
 check("Automations: the zone page then warns that a failsafe is off", (await ev(`document.querySelector('#main .notice.fix[data-autos="failsafe"]').textContent`)).includes("A failsafe is off: Failsafe Garden Red Lights Recovery."));
 await tap('#main .notice.fix[data-autos="failsafe"]');
-check("Automations: and the warning opens the Automations page on Failsafes, which counts it off", (await ev(`ui.screen==="autos" && ui.autos.page==="failsafe" && !!document.querySelector('[data-autorow="${RED_FS}"]') && document.querySelector("#main h1").textContent==="Automations: Garden"`)) === true && same((await autoChipsNow()).chips[1], ["Failsafes", "2/3", "Failsafes, 2 of 3 on", "true"]), await autoChipsNow());
+check("Automations: and the warning opens the dialog on Failsafes, which counts it off, over the zone's page", (await ev(`ui.screen==="zone" && ui.autos.page==="failsafe" && !!document.querySelector('#modal [data-autorow="${RED_FS}"]') && document.querySelector("#autos-title").textContent==="Automations: Garden"`)) === true && same((await autoChipsNow()).chips[1], ["Failsafes", "2/3", "Failsafes, 2 of 3 on", "true"]), await autoChipsNow());
 await tap(`[data-autorow="${RED_FS}"] .sw`);
 check("Automations: switching a failsafe back on doesn't ask", (await ev(`!!ui.guard`)) === false);
 await sleep(REPORT);
 check("Automations: and it's on again", (await autoRowOf(RED_FS)).on === true);
+await tap("[data-uclose]");
+check("Automations: closing it hands focus back to the notice that opened it", (await ev(`document.querySelector("#modal").hidden`)) === true && (await ev(`!!document.activeElement.closest("#main")`)) === true);
 /* An automation belongs to one zone, so a row never names another, even for a setup an earlier release stored with one
    linked in two. */
-await ev(`zoneById("garden").automations.push({id:"a99",entity:"automation.failsafe_veg_fans_auto_on",group:"failsafe"});ui.zone="veg";ui.autos={zone:"veg",page:"failsafe"};render()`); await sleep(30);
+await ev(`zoneById("garden").automations.push({id:"a99",entity:"automation.failsafe_veg_fans_auto_on",group:"failsafe"})`); await openAutosAt("veg", "failsafe");
 check("Automations: a failsafe's row names no other zone", !(await autoRowOf("automation.failsafe_veg_fans_auto_on", "veg")).text.includes("Shared"), await autoRowOf("automation.failsafe_veg_fans_auto_on", "veg"));
 await tap('[data-autorow="automation.failsafe_veg_fans_auto_on"][data-zone="veg"] .sw');
 check("Automations: and switching it off names none either", (await ev(`ui.guard.text`)) === "It's a failsafe: it puts hardware back when something goes wrong. While it's off, Home Assistant won't do that. You can switch it on again here.", await ev(`ui.guard.text`));
 await tap("[data-gkeep]");
-await ev(`zoneById("garden").automations=zoneById("garden").automations.filter(a=>a.id!=="a99");render()`);
-await ev(`ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render()`); await sleep(30);
-await tap('[data-autopage="control"]'); ap = await autoPage();
-check("Automations: Control holds its about sentence, its group and Link automations", ap.about === (await ev(`AUTO_PAGES.control.about`)) && !ap.repeat && same(ap.groups, ["Control"]) && ap.rows === 4 && ap.link, ap);
-await ev(`window.keptAutos=zoneById("nursery").automations;zoneById("nursery").automations=keptAutos.filter(a=>a.group!=="control");ui.zone="nursery";ui.autos={zone:"nursery",page:"control"};render()`); await sleep(30);
-const emptyChip = await ev(`(()=>{const n=document.querySelector("#main .notice.calm");return {chip:[...document.querySelectorAll("[data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.querySelector("strong").textContent,link:!!(n&&n.querySelector('[data-linkautos="nursery"]')),rows:document.querySelectorAll("[data-autorow]").length,linkRow:!!document.querySelector('#main .row [data-linkautos]')}})()`);
-check("Automations: a chip with nothing linked says so, in words too, and offers Link automations", same(emptyChip.chip, ["Alerts, 3 of 3 on|3/3", "Failsafes, 2 of 2 on|2/2", "Control, none linked|0/0"]) && emptyChip.notice === "No control linked to Nursery yet" && emptyChip.link && emptyChip.rows === 0 && !emptyChip.linkRow, emptyChip);
-await ev(`zoneById("nursery").automations=keptAutos;render()`);
+await ev(`zoneById("garden").automations=zoneById("garden").automations.filter(a=>a.id!=="a99")`);
+await openAutosAt("garden", "alert");
+await tap('#modal [data-autopage="control"]'); ap = await autoPage();
+check("Automations: Control holds its about sentence and its group, and no Link automations", ap.about === (await ev(`AUTO_PAGES.control.about`)) && !ap.repeat && same(ap.groups, ["Control"]) && ap.rows === 4 && ap.link === 0, ap);
+await ev(`window.keptAutos=zoneById("nursery").automations;window.keptParent=zoneById("nursery").parent;delete zoneById("nursery").parent;zoneById("nursery").automations=keptAutos.filter(a=>a.group!=="control")`); await openAutosAt("nursery", "control");
+const emptyChip = await ev(`(()=>{const n=document.querySelector("#autos-empty");return {chip:[...document.querySelectorAll("#modal [data-autopage]")].map(b=>b.getAttribute("aria-label")+"|"+b.querySelector(".segn").textContent),notice:n&&n.textContent,acts:n?n.querySelectorAll("button,a,[data-linkautos]").length:-1,rows:document.querySelectorAll("#modal [data-autorow]:not([data-from])").length,link:document.querySelectorAll("#modal [data-linkautos]").length}})()`);
+check("Automations: a chip with nothing linked says so, in words too, and says to link them in Setup, with no way there from here (#111)", same(emptyChip.chip, ["Alerts, 3 of 3 on|3/3", "Failsafes, 2 of 2 on|2/2", "Control, none linked|0/0"]) && emptyChip.notice === "No control linked to Nursery yet.Link automations in Setup." && emptyChip.acts === 0 && emptyChip.rows === 0 && emptyChip.link === 0, emptyChip);
+await ev(`zoneById("nursery").automations=keptAutos;if(keptParent)zoneById("nursery").parent=keptParent`);
 for (const [w, h, name] of [[390, 844, "phone"], [320, 640, "small-phone"], [1280, 900, "desktop"]]) {
   if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
   for (const k of ["alert", "failsafe", "control"]) {
-    await ev(`ui.zone="garden";ui.autos={zone:"garden",page:"${k}"};render();window.scrollTo(0,0)`); await sleep(60);
-    const fit = await ev(`(()=>{const g=document.querySelector('#main .seg[aria-label="Automations"]').getBoundingClientRect(),b=[...document.querySelectorAll("[data-autopage]")].map(x=>x.getBoundingClientRect());return {page:document.documentElement.scrollWidth<=innerWidth,inside:g.left>=0&&g.right<=innerWidth,oneLine:b.every(r=>Math.abs(r.top-b[0].top)<1)}})()`);
-    check(`Automations ${name} ${k}: no sideways scroll, and the chips sit on screen${w === 320 ? "" : ", on one line"}`, fit.page && fit.inside && (fit.oneLine || w === 320), fit);
+    await openAutosAt("garden", k);
+    const fit = await ev(`(()=>{const g=document.querySelector('#modal .seg[aria-label="Automations"]').getBoundingClientRect(),b=[...document.querySelectorAll("#modal [data-autopage]")].map(x=>x.getBoundingClientRect()),d=document.querySelector("#modal [data-autosdlg]").getBoundingClientRect(),f=document.querySelector("#modal [data-uclose]").getBoundingClientRect();return {page:document.documentElement.scrollWidth<=innerWidth,inside:g.left>=d.left&&g.right<=d.right&&d.left>=0&&d.right<=innerWidth,oneLine:b.every(r=>Math.abs(r.top-b[0].top)<1),close:f.bottom<=innerHeight&&f.top>=0,noLink:!document.querySelector("#modal [data-linkautos]")}})()`);
+    check(`Automations ${name} ${k}: no sideways scroll, the chips sit in the dialog${w === 320 ? "" : ", on one line"}, Close on screen, and no Link automations`, fit.page && fit.inside && (fit.oneLine || w === 320) && fit.close && fit.noLink, fit);
     if (w !== 320) await shot(`autos-${k}-${name}`);
   }
 }
 await phone(390, 844);
-await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render();window.scrollTo(0,document.documentElement.scrollHeight)`); await sleep(60);
-check("Automations: scrolled to the end, Link automations clears the bar at the foot", (await ev(`(()=>{const l=document.querySelector('#main .row [data-linkautos]').getBoundingClientRect(),b=document.querySelector("#pagebar").getBoundingClientRect();return l.bottom<=b.top})()`)) === true);
 /* What a compromised UI could try. The host looks the automation up in its own config, so none of these reach HA. */
 nA = (await haCalls()).length;
 const autoRefused = await evp(`Promise.all([ask("automation",{zone:"garden",link:"nope",on:false}),ask("automation",{zone:"veg",link:"a1",on:"off"}),ask("automation",{zone:"nowhere",link:"a1",on:false}),ask("automation",{zone:"garden",on:false})]).then(rs=>rs.map(r=>r.ok))`);
@@ -773,17 +1068,12 @@ check("Automations: an entity or service named by the frame is ignored", same((a
 await sleep(REPORT); await evp(`ask("automation",{zone:"garden",link:"a1",on:true})`); await sleep(REPORT);
 
 // ---------- Linking automations: only Environment Control's record changes, and a new one is allowed in HA's own dialog
-await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('[data-autopage="failsafe"]'); await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
-check("Link: opened from the Automations page, it's Nursery's Link automations", (await ev(`!!ui.linkw && document.querySelector("#main h1").textContent==="Link automations: Nursery"`)) === true);
+/* Since #111 Link automations is reached through Setup only: the Automations dialog is for looking and switching. */
+await reset(); await goTab("Setup"); await tap('[data-zmenu="nursery"]'); await tap('#zmenu-nursery [data-linkautos="nursery"]'); await sleep(300);
+check("Link: it's on a zone's menu on Setup, and opens Nursery's Link automations as a Setup page", (await ev(`!!ui.linkw && ui.linkw.id==="nursery" && ui.screen==="setup" && document.querySelector("#main h1").textContent==="Link automations: Nursery" && document.querySelector("#zmenu-nav [aria-current]").textContent==="Setup"`)) === true, await ev(`[ui.screen, document.querySelector("#main h1").textContent]`));
 await tap("[data-linkback]");
-check("Link: Back comes back to the Automations page, on the chip it was opened from", (await ev(`ui.screen==="autos" && !ui.linkw && ui.autos.zone==="nursery" && ui.autos.page==="failsafe" && document.querySelector('[data-autopage="failsafe"]').getAttribute("aria-pressed")==="true" && document.querySelector("#main h1").textContent==="Automations: Nursery"`)) === true, await ev(`[ui.screen, ui.autos && ui.autos.page]`));
-await goTab("Setup"); await tap('[data-zmenu="nursery"]'); await tap('#zmenu-nursery [data-linkautos="nursery"]'); await sleep(100);
-check("Link: it's still on a zone's menu on Setup", (await ev(`!!ui.linkw && ui.linkw.id==="nursery"`)) === true);
-await tap("[data-linkback]");
-check("Link: and opened from there, Back comes back to Setup", (await ev(`ui.screen==="setup" && !ui.linkw`)) === true);
-await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('[data-autopage="control"]'); await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
+check("Link: Back comes back to Setup", (await ev(`ui.screen==="setup" && !ui.linkw && document.querySelector("#main h1").textContent==="Setup"`)) === true);
+await tap('[data-zmenu="nursery"]'); await tap('#zmenu-nursery [data-linkautos="nursery"]'); await sleep(300);
 const linkListed = await ev(`[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick)`);
 check("Link: suggests what Nursery links and what's named for it, and none of the house's", linkListed.includes("automation.critical_nursery_vpd_high_day") && linkListed.includes("automation.nursery_heat_mat_on") && !linkListed.includes("automation.porch_light_on") && !linkListed.includes("automation.reservoir_refill_reminder"), linkListed);
 check("Link: the rest are a search away", (await ev(`document.querySelector("#link-more").textContent`)).includes("more in Home Assistant"));
@@ -806,9 +1096,12 @@ await tap("[data-rapply]"); await sleep(300);
 dlg = await hostDialog();
 check("Link: a newly linked automation is asked about in HA's own dialog, before anything is saved", dlg.open && dlg.text.includes("automation.critical_nursery_vpd_high_day") && dlg.text.includes("Allow 1 automation") && !(await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day"), dlg.text);
 await sleep(1100); await hostClick("allow"); await sleep(300);
-check("Link: once allowed it's saved in the group its chip picked, and the page comes back to Nursery's automations on Control, where it was opened", (await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day" && a.group === "alert_device") && (await ev(`ui.screen==="autos" && ui.zone==="nursery" && !ui.linkw && ui.autos.page==="control" && document.querySelector('[data-autopage="control"]').getAttribute("aria-pressed")==="true"`)) === true, await ev(`[ui.screen, ui.autos && ui.autos.page]`));
-check("Link: and the Alerts chip counts it", same((await autoChipsNow()).chips[0].slice(0, 3), ["Alerts", "4/4", "Alerts, 4 of 4 on"]), await autoChipsNow());
-check("Link: the toast saying it's saved sits clear of Back", (await ev(`(()=>{const t=document.querySelector("#toast"),b=document.querySelector("#pagebar").getBoundingClientRect(),r=t.getBoundingClientRect();return !t.hidden&&r.bottom<=b.top})()`)) === true, await ev(`[document.querySelector("#toast").getBoundingClientRect().bottom, document.querySelector("#pagebar").getBoundingClientRect().top]`));
+check("Link: once allowed it's saved in the group its chip picked, and it goes back to Setup, where it was opened", (await diskZone("nursery")).automations.some((a) => a.entity === "automation.critical_nursery_vpd_high_day" && a.group === "alert_device") && (await ev(`ui.screen==="setup" && !ui.linkw && document.querySelector("#main h1").textContent==="Setup"`)) === true, await ev(`[ui.screen, !!ui.linkw]`));
+await sleep(250);
+check("Link: the toast saying it's saved drops in at the top of the view", (await ev(`(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect();return !t.hidden&&t.textContent==="Nursery's automations saved."&&r.top>=0&&r.bottom<=innerHeight/4})()`)) === true, await ev(`[document.querySelector("#toast").textContent, document.querySelector("#toast").getBoundingClientRect().top, innerHeight]`));
+await openAutosAt("nursery", "control");
+check("Link: and Nursery's Alerts chip counts it", same((await autoChipsNow()).chips[0].slice(0, 2), ["Alerts", "4/4*"]) && (await autoChipsNow()).chips[0][2].startsWith("Alerts, 4 of 4 on"), await autoChipsNow());
+await ev(`ui.autos=null;renderModal()`);
 const sneakyAuto = evp(`saveConfig(()=>{zoneById("nursery").automations.push({id:"a99",entity:"automation.porch_light_on",group:"failsafe"})}).then(r=>r.ok)`);
 await sleep(300); dlg = await hostDialog();
 check("Link: the dialog names the real automation, and flags a failsafe as one", dlg.text.includes("Porch Light On") && dlg.text.includes("Linked as a failsafe. Once allowed, the panel can switch it off."), dlg.text);
@@ -827,40 +1120,44 @@ check("Link: the backend refuses a setup holding anything but zones, devices and
 check("Remove: a zone's dialog says its automations are unlinked and keep running", (await ev(`removeRows(zoneById("veg")).find(r=>r[0]==="Automations")[1]`)) === "10 unlinked. They keep running in Home Assistant");
 
 // ---------- Alert repeat: one helper for every alert, linked on Setup, changed through a review like any other value
-await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-check("Repeat: the Alerts page shows the room's repeat rate from its helper", (await ev(`document.querySelector("#repeat-in").value`)) === "15");
+await openAutosAt("garden", "alert");
+const repeatReviewBtn = () => ev(`(()=>{const b=document.querySelector("#modal [data-ureview]");return b ? {shown:!b.hidden,off:b.disabled,inFoot:!!b.closest("[data-autosdlg] > .dlgfoot")} : null})()`);
+check("Repeat: the Alerts chip shows the room's repeat rate from its helper", (await ev(`document.querySelector("#repeat-in").value`)) === "15");
+check("Repeat: with nothing typed, the dialog's foot holds only Close", same((await autosDlg()).bar, ["Close"]), (await autosDlg()).bar);
 await ev(`(()=>{const i=document.querySelector("#repeat-in");i.focus();i.value="200";i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(20);
-check("Repeat: a value outside the helper's limits is a problem and stops review", (await ev(`document.querySelector("#repeat-bad").textContent`)).includes("between 0 and 120") && (await saveOff()) === true);
+let rb = await repeatReviewBtn();
+check("Repeat: a value outside the helper's limits is a problem and stops review", (await ev(`document.querySelector("#repeat-bad").textContent`)).includes("between 0 and 120") && rb.shown && rb.off, rb);
 await ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="30";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`); await sleep(20);
-check("Repeat: while it differs from the helper, the draft bar takes over from Back", (await ev(`document.querySelector("#pagebar").hidden && !document.querySelector("#draftbar").hidden`)) === true);
-await tap('[data-autopage="failsafe"]');
-check("Repeat: picking another chip with it unsaved asks first", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "You have 1 unsaved change in Alerts. Leaving will discard it." && (await ev(`ui.autos.page`)) === "alert", await ev(`document.querySelector("#dlg-text")?.textContent`));
+rb = await repeatReviewBtn();
+check("Repeat: while it differs from the helper, Review change sits in the dialog's own foot, and the window's bar stays out of it", rb.shown && !rb.off && rb.inFoot && (await ev(`document.querySelector("#draftbar").hidden`)) === true, rb);
+await tap('#modal [data-autopage="failsafe"]');
+check("Repeat: picking another chip with it unsaved asks first, over the dialog", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "You have 1 unsaved change in Alerts. Leaving will discard it." && (await ev(`ui.autos.page`)) === "alert" && (await ev(`!!document.querySelector("#modal > .modal.over") && document.querySelector("#modal [data-autosdlg]").inert`)) === true, await ev(`document.querySelector("#dlg-text")?.textContent`));
 await tap("[data-gkeep]");
-check("Repeat: Keep editing stays on Alerts with the minutes typed", (await ev(`ui.autos.page==="alert" && document.querySelector("#repeat-in").value==="30" && document.querySelector('[data-autopage="alert"]').getAttribute("aria-pressed")==="true"`)) === true);
-await tap('[data-autopage="failsafe"]'); await tap("[data-gdiscard]");
-check("Repeat: discarding goes to Failsafes, and the draft is gone", (await ev(`ui.autos.page==="failsafe" && ui.autos.repeat===undefined && document.querySelector("#draftbar").hidden && !document.querySelector("#pagebar").hidden && !document.querySelector("#alert-repeat")`)) === true);
-await tap('[data-autopage="alert"]');
+check("Repeat: Keep editing stays on Alerts with the minutes typed", (await ev(`ui.autos.page==="alert" && document.querySelector("#repeat-in").value==="30" && document.querySelector('#modal [data-autopage="alert"]').getAttribute("aria-pressed")==="true"`)) === true);
+await tap('#modal [data-autopage="failsafe"]'); await tap("[data-gdiscard]");
+check("Repeat: discarding goes to Failsafes, and the draft is gone", (await ev(`ui.autos.page==="failsafe" && ui.autos.repeat===undefined && document.querySelector("#draftbar").hidden && !document.querySelector("#alert-repeat") && !document.querySelector("#modal [data-ureview]")`)) === true);
+await tap('#modal [data-autopage="alert"]');
 check("Repeat: and back on Alerts it holds the helper's value again", (await ev(`document.querySelector("#repeat-in").value`)) === "15");
 await ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="30";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`); await sleep(20);
-await tap('#main .row [data-linkautos="garden"]');
-check("Repeat: Link automations asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?");
-await tap("[data-gdiscard]"); await sleep(200); await tap("[data-linkback]");
-check("Repeat: and coming back from it, Alerts holds the helper's value, not the draft discarded", (await ev(`ui.screen==="autos" && ui.autos.page==="alert" && ui.autos.repeat===undefined && document.querySelector("#repeat-in").value==="15" && document.querySelector("#draftbar").hidden`)) === true, await ev(`[ui.autos && ui.autos.repeat, document.querySelector("#repeat-in")?.value]`));
-await ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="30";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`); await sleep(20);
-await tap("[data-dreview]");
-check("Repeat: the review says it changes every alert, not only this zone's", (await ev(`document.querySelector("#dlg-text").textContent`)).includes("every alert in Home Assistant") && (await ev(`document.querySelector("#review-items").textContent`)).includes("15 min") && (await ev(`document.querySelector("#review-items").textContent`)).includes("30 min"), await ev(`document.querySelector("#dlg-text").textContent`));
+await tap("[data-uclose]");
+check("Repeat: closing the dialog asks first too", (await ev(`ui.guard && ui.guard.title`)) === "Discard unsaved changes?" && (await ev(`!!ui.autos`)) === true);
+await tap("[data-gkeep]");
+check("Repeat: and Keep editing leaves the dialog open with the minutes typed", (await ev(`!!ui.autos && !ui.guard && document.querySelector("#repeat-in").value==="30"`)) === true);
+await tap("#modal [data-ureview]");
+check("Repeat: the review opens over the dialog and says it changes every alert, not only this zone's", (await ev(`document.querySelector("#dlg-text").textContent`)).includes("every alert in Home Assistant") && (await ev(`document.querySelector("#review-items").textContent`)).includes("15 min") && (await ev(`document.querySelector("#review-items").textContent`)).includes("30 min") && (await ev(`!!document.querySelector("#modal > .modal.over #review-items")`)) === true, await ev(`document.querySelector("#dlg-text").textContent`));
 nA = (await haCalls()).length;
 await tap("[data-rapply]"); await sleep(REPORT + 300);
 check("Repeat: applied through the host to the helper, and counted once HA reports it", same((await haCalls()).slice(nA).map((c) => c.slice(0, 2)), [["input_number.set_value", "input_number.alert_repeat_rate"]]) && (await onHA(`fakeHA.states["input_number.alert_repeat_rate"].state`)) === "30" && (await ev(`ui.review`)) === null && (await ev(`document.querySelector("#repeat-in").value`)) === "30", (await haCalls()).slice(nA));
 const repeatRefused = await evp(`Promise.all([ask("setting",{name:"alertRepeat",value:500}),ask("setting",{zone:"garden",name:"alertRepeat",value:5}),ask("setting",{name:"alertRepeat",value:2.5})]).then(rs=>rs.map(r=>r.ok))`);
 check("Repeat: the host refuses a value outside the helper's limits or step, and the repeat rate as a zone setting", same(repeatRefused, [false, false, false]), repeatRefused);
-await goTab("Setup");
+await tap("[data-uclose]"); await goTab("Setup");
 check("Setup: the Alerts card shows the linked repeat helper", (await ev(`document.querySelector("#room-alerts").textContent`)).includes("input_number.alert_repeat_rate"));
 await tap("[data-repeatunlink]"); await sleep(250);
 check("Setup: unlinking saves without asking, and the helper stays in HA", (await onHA(`(JSON.parse(fakeHA.disk).room||{}).alertRepeat ?? null`)) === null && (await onHA(`!!fakeHA.states["input_number.alert_repeat_rate"]`)) && (await hostDialog()).open === false);
-await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};render()`); await sleep(30);
-check("Repeat: with nothing linked, the Alerts page says where to link it", (await ev(`document.querySelector("#alert-repeat").textContent`)).includes("Link it on Setup"));
-await goTab("Setup"); await tap("[data-repeatpick]"); await sleep(300);
+await openAutosAt("garden", "alert");
+check("Repeat: with nothing linked, the Alerts chip says where to link it", (await ev(`document.querySelector("#alert-repeat").textContent`)).includes("Link it on Setup"));
+await tap('#alert-repeat [data-go="setup"]');
+check("Repeat: and its Link it on Setup closes the dialog and goes there", (await ev(`!ui.autos && document.querySelector("#modal").hidden && ui.screen==="setup"`)) === true); await tap("[data-repeatpick]"); await sleep(300);
 check("Setup: the picker offers number helpers, the repeat one first", (await ev(`document.querySelector("[data-repeatlink]").dataset.repeatlink`)) === "input_number.alert_repeat_rate");
 await tap('[data-repeatlink="input_number.alert_repeat_rate"]'); await sleep(300); dlg = await hostDialog();
 check("Setup: linking it asks in HA's own dialog, saying every alert follows it", dlg.open && dlg.text.includes("Every alert's repeat rate comes from it."), dlg.text);
@@ -1072,7 +1369,7 @@ check("Appearance: Setup offers Home Assistant, Light and Dark", same(await ev(`
 check("Appearance: Home Assistant is the default", (await lookOn()) === "ha");
 check("Appearance: it takes your HA primary colour, red here", (await primaryNow()) === "rgb(244, 67, 54)", await primaryNow());
 check("Appearance: Add zone follows it too", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`)) === "rgb(244, 67, 54)", await ev(`getComputedStyle(document.querySelector("[data-addzone]")).backgroundColor`));
-check("Appearance: white text on red", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).color`)) === "rgb(255, 255, 255)");
+check("Appearance: dark text on red, since white on it is short of 4.5:1", (await ev(`getComputedStyle(document.querySelector("[data-addzone]")).color`)) === "rgb(17, 17, 17)");
 await ev(`window.scrollTo(0,0)`); await shot("appearance-red-phone");
 await onHA(`setPrimary("")`); await sleep(100);
 check("Appearance: a new primary colour in HA shows straight away", (await primaryNow()) === "rgb(3, 169, 244)", await primaryNow());
@@ -1291,15 +1588,15 @@ check("Ident: applied, the name, extra mode, modes and virtual device are saved,
 await ev(`(()=>{const h=devices.find(d=>d.id==="heater");h.name="Heater";delete h.haName;const d=devices.find(d=>d.id==="dehu");delete d.nudgeMode;delete d.hiddenModes;delete zones[0].virtual;devices.find(d=>d.id==="plug").type=null;ui.mapw=null;render()})()`); await sleep(20);
 
 // ---------- Sharing asks first: something another zone has joins this one only once a person says so
-const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgbar button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
+const shareAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,more:d.querySelector("#dlg-more")?.textContent ?? null,described:d.getAttribute("aria-describedby"),buttons:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent),red:[...d.querySelectorAll(".dlgfoot button")].some(b=>b.classList.contains("danger")),primary:d.querySelector("[data-gdiscard]").className,focus:document.activeElement.id} : null})()`);
 const noAsk = async () => (await shareAsk()) === null && (await ev(`!ui.guard`)) === true;
-const DEHU_ASK = { role: "alertdialog", title: "Add Dehumidifier to Nursery as well?", text: "It's already in Garden. It's one device, so switching it here switches it there too.", buttons: ["Leave it out", "Add to Nursery"], red: false, primary: "draft-review", focus: "dlg-title" };
+const DEHU_ASK = { role: "alertdialog", title: "Dehumidifier", text: "This device is already associated to Zone: Garden. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in both zones. Automations from Garden may affect the device state.", described: "dlg-text dlg-more", buttons: ["Cancel", "Add"], red: false, primary: "btn primary", focus: "dlg-title" };
 await phone(390, 844); await reset(); await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="dehu"]');
-check("Share: ticking a device another zone has asks first, in the panel's own dialog, with its primary button and not the red one", same(await shareAsk(), DEHU_ASK) && (await ev(`!ui.mapw.pickD.dehu`)) === true && (await hostDialog()).open === false, await shareAsk());
+check("Share: ticking a device another zone has asks first, under its name, in two paragraphs, in the panel's own dialog, with its primary button and not the red one", same(await shareAsk(), DEHU_ASK) && (await ev(`!ui.mapw.pickD.dehu`)) === true && (await hostDialog()).open === false, await shareAsk());
 await shot("share-ask-device-phone");
 await tap("[data-gkeep]");
-check("Share: Leave it out leaves the device unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="false" && document.activeElement.dataset.mdevice==="dehu"`)) === true);
+check("Share: Cancel leaves the device unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickD.dehu && document.querySelector('[data-mdevice="dehu"]').getAttribute("aria-pressed")==="false" && document.activeElement.dataset.mdevice==="dehu"`)) === true);
 /* Each way out is taken only once the question is showing, so a row ticked without asking can't pass for one left out. */
 let asked;
 await tap('[data-mdevice="dehu"]'); asked = await shareAsk(); await key("Escape", 27);
@@ -1331,32 +1628,73 @@ await tap('[data-mdevice="dehu"]'); await ev(`ui.mapw.step=3;render()`); await e
 check("Share: and taking it out again leaves it in Garden only", (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="dehu").zones.join()`)) === "garden");
 await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="fans"]');
-check("Share: several zones are named as the panel joins them", (await ev(`document.querySelector("#dlg-title").textContent`)) === "Add Oscillating fans to Garden as well?" && (await ev(`document.querySelector("#dlg-text").textContent`)) === "It's already in Veg and Nursery. It's one device, so switching it here switches it there too." && same((await shareAsk()).buttons, ["Leave it out", "Add to Garden"]), await shareAsk());
+check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Veg, Nursery may affect the device state." }), await shareAsk());
 await tap("[data-gkeep]");
-/* The panel lets one sensor be mapped into two zones, so a sensor asks too. */
+/* A sensor may be in two zones only inside one family, a parent and the zones linked to it: one zone's readings show in
+   another only through that link. Garden isn't linked to Veg, so Veg's sensor can't be ticked here. */
+const sensorNo = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id} : null})()`);
+const themeShots = async (name) => {
+  for (const look of ["light", "dark"]) {
+    await send("Emulation.setEmulatedMedia", { features: look === "dark" ? [{ name: "prefers-color-scheme", value: "dark" }] : [] }); await sleep(150);
+    await shot(`${name}-phone-${look}`); await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); await shot(`${name}-desktop-${look}`); await phone(390, 844); await sleep(80);
+  }
+  await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(100);
+};
 await ev(`ui.mapw.step=1;render()`); await sleep(30);
 await tap('[data-msensor="v-env"]');
-check("Share: ticking a sensor another zone has asks too", same(await shareAsk(), { ...DEHU_ASK, title: "Add Veg environment to Garden as well?", text: "It's already in Veg. It's one sensor, so it reads the same here as there.", buttons: ["Leave it out", "Add to Garden"] }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
+check("Share: a sensor outside this zone's family can't be ticked, and the panel's dialog says how it could be", same(await sensorNo(), { role: "alertdialog", title: "Veg environment", text: "This sensor is already associated to Zone: Veg. If you want a duplicate here, this zone must be linked to Veg. This can be done in the Zone details section of Setup.", buttons: ["OK|btn primary"], focus: "dlg-title" }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await sensorNo());
+await themeShots("sensor-refused");
 await tap("[data-gkeep]");
-check("Share: Leave it out leaves the sensor unticked", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
-await tap('[data-msensor="v-env"]'); await tap("[data-gdiscard]");
-check("Share: Add ticks the sensor in the draft", (await noAsk()) && (await ev(`ui.mapw.pickS["v-env"]===true && document.querySelector('[data-msensor="v-env"]').getAttribute("aria-pressed")==="true"`)) === true);
-await tap('[data-msensor="v-env"]');
-check("Share: unticking it never asks", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+check("Share: OK closes it with the sensor still unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"] && document.activeElement.dataset.msensor==="v-env"`)) === true);
+await tap('[data-msensor="v-env"]'); await key("Escape", 27);
+check("Share: so does Escape", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+await tap('[data-msensor="n-env"]');
+check("Share: a sensor of a linked zone says that zone can't be this one's parent", (await sensorNo())?.text === "This sensor is already associated to Zone: Nursery. Nursery is itself linked to Zone: Veg, so it can't be this zone's parent.", await sensorNo());
+await tap("[data-gkeep]");
 await tap('[data-msensor="g-right"]'); await tap('[data-msensor="g-right"]');
 check("Share: a sensor this zone has saved never asks, unticked and ticked again", (await noAsk()) && (await ev(`ui.mapw.pickS["g-right"]===true`)) === true);
 await tap('[data-msensor="x-pulse"]');
 check("Share: a sensor no zone has never asks", (await noAsk()) && (await ev(`ui.mapw.pickS["x-pulse"]===true`)) === true);
 await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+/* Nursery is linked to Veg, so Veg's sensor asks the sharing question as before. */
+await mOpen("nursery"); await ev(`ui.mapw.step=1;render()`); await sleep(30);
+await tap('[data-msensor="v-env"]');
+check("Share: in the same family, a sensor another zone has asks, as a sensor", same(await shareAsk(), { ...DEHU_ASK, title: "Veg environment", text: "This sensor is already associated to Zone: Veg. Are you sure you want to duplicate it here?", more: "This means that data is in sync in both zones." }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await shareAsk());
+await shot("share-ask-sensor-phone");
+await tap("[data-gkeep]");
+check("Share: Cancel leaves the sensor unticked", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+await tap('[data-msensor="v-env"]'); await tap("[data-gdiscard]");
+check("Share: Add ticks the sensor in the draft", (await noAsk()) && (await ev(`ui.mapw.pickS["v-env"]===true && document.querySelector('[data-msensor="v-env"]').getAttribute("aria-pressed")==="true"`)) === true);
+await tap('[data-msensor="v-env"]');
+check("Share: unticking it never asks", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true);
+await tap('[data-msensor="g-left"]');
+check("Share: a zone that already has a parent says so rather than sending you to Zone details", (await sensorNo())?.text === "This sensor is already associated to Zone: Garden. This zone is already linked to Zone: Veg, and a zone is linked to one other zone only.", await sensorNo());
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+await mOpen("veg"); await ev(`ui.mapw.step=1;render()`); await sleep(30);
+await tap('[data-msensor="g-left"]');
+check("Share: a zone other zones are linked to says it can't be linked to another", (await sensorNo())?.text === "This sensor is already associated to Zone: Garden. Zone: Nursery is linked to this zone, so it can't be linked to another.", await sensorNo());
+await tap("[data-gkeep]");
+await tap('[data-msensor="n-env"]');
+check("Share: a parent taking a linked zone's sensor is the same family, so it asks", same(await shareAsk(), { ...DEHU_ASK, title: "Nursery environment", text: "This sensor is already associated to Zone: Nursery. Are you sure you want to duplicate it here?", more: "This means that data is in sync in both zones." }), await shareAsk());
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
+const crossSensor = await evp(`saveConfig(()=>{zoneById("veg").sensors.push({...zoneById("garden").sensors[0],pos:null})}).then(r=>[r.ok,r.error||""])`);
+check("Share: the backend refuses a sensor shared outside a family", same(crossSensor, [false, "A sensor can only be shared between a zone and the zones linked to it."]) && !(await diskZone("veg")).sensors.some((x) => x.id === "g-left"), crossSensor);
+/* Inside one family the other ways round are allowed: a parent takes a linked zone's sensor, and two zones linked to one parent share the parent's. */
+const familyTries = await onHA(`(()=>{const disk=JSON.parse(fakeHA.disk),z=(c,id)=>c.zones.find(o=>o.id===id),sen=(c,sid)=>({...JSON.parse(JSON.stringify(c.zones.flatMap(o=>o.sensors||[]).find(s=>s.id===sid))),pos:null}),shelf=(c,parent,sid)=>({...JSON.parse(JSON.stringify(z(c,"nursery"))),id:"shelf",name:"Shelf",parent,automations:[],sensors:[sen(c,sid)]});const tryIt=(f)=>{const c=JSON.parse(fakeHA.disk);f(c);try{fakeHA.checkConfig(c,disk);return "ok"}catch(e){return e.message}};return [tryIt((c)=>z(c,"veg").sensors.push(sen(c,"n-env"))),tryIt((c)=>{z(c,"nursery").sensors.push(sen(c,"v-env"));c.zones.push(shelf(c,"veg","v-env"))}),tryIt((c)=>c.zones.push(shelf(c,"garden","n-env")))]})()`);
+check("Share: the backend lets a parent take a linked zone's sensor and two zones linked to one parent share the parent's, and refuses a zone of another family", same(familyTries, ["ok", "ok", "A sensor can only be shared between a zone and the zones linked to it."]), familyTries);
+await ev(`ui.mapw=null;ui.screen="setup";render()`); await sleep(30);
 // ---------- One zone per automation: another zone's are hidden in Link automations, and can't be ticked when shown
 const linkSearch = async (text) => { await ev(`(()=>{const i=document.querySelector("#link-q");i.value=${JSON.stringify(text)};i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await sleep(40); };
 const linkNow = () => ev(`(()=>{const t=document.querySelector("[data-lothers]");return {rows:[...document.querySelectorAll("[data-lpick]")].map(b=>b.dataset.lpick),toggle:t&&{text:t.textContent,pressed:t.getAttribute("aria-pressed"),tag:t.tagName+"."+t.className,near:t.closest(".card")===document.querySelector("#link-q").closest(".card")},hidden:(document.querySelector("#link-hidden")||{}).textContent||null}})()`);
-const okAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgbar button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id} : null})()`);
+const okAsk = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && !document.querySelector("#modal").hidden ? {role:d.getAttribute("role"),title:d.querySelector("#dlg-title").textContent,text:d.querySelector("#dlg-text").textContent,buttons:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id} : null})()`);
 const linkRowOf = (e) => ev(`(()=>{const b=document.querySelector('[data-lpick="${e}"]');return b&&{disabled:b.getAttribute("aria-disabled"),pressed:b.getAttribute("aria-pressed"),tick:b.querySelector(".tick").textContent,sub:b.querySelector(".dev-sub").textContent,focusable:b.tabIndex>=0&&!b.disabled}})()`);
 const TENT_ON = "automation.tent_lights_on", TENT = ["automation.failsafe_tent_lights_recovery", "automation.tent_lights_off", TENT_ON];
+/* Link automations is reached through Setup only (#111). */
+const linkFromSetup = async (id) => { await ev(`ui.autos=null;ui.guard=null;ui.review=null;renderModal();ui.linkw=null;ui.screen="setup";ui.guide=null;render();window.scrollTo(0,0)`); await sleep(30); await tap(`[data-zmenu="${id}"]`); await tap(`#zmenu-${id} [data-linkautos="${id}"]`); await sleep(300); };
 const toggleShots = async (name) => { await shot(`${name}-phone`); await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await shot(`${name}-desktop`); await phone(390, 844); };
-await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"alert"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="nursery"]'); await sleep(300);
+await linkFromSetup("nursery");
 let ln = await linkNow();
 check("One zone: Nursery's suggestions hold none another zone has, so there's no toggle and no count line", ln.toggle === null && ln.hidden === null && !ln.rows.some((e) => TENT.includes(e)) && ln.rows.includes("automation.nursery_heat_mat_on"), ln);
 await linkSearch("tent"); ln = await linkNow();
@@ -1367,7 +1705,7 @@ check("One zone: the toggle on lists them where they fall, pressed and keeping f
 check("One zone: such a row reads as unavailable, has no tick, says which zone has it, and can still be reached", same(await linkRowOf(TENT_ON), { disabled: "true", pressed: "false", tick: "", sub: "In Zone: Veg", focusable: true }), await linkRowOf(TENT_ON));
 await toggleShots("onezone-toggle-on");
 await tap(`[data-lpick="${TENT_ON}"]`);
-check("One zone: tapping it explains in the panel's dialog, with one ordinary OK button, and ticks nothing", same(await okAsk(), { role: "alertdialog", title: "Tent Lights On", text: "This automation is already associated to Zone: Veg. Please remove it before associating it with a new zone.", buttons: ["OK|draft-review"], focus: "dlg-title" }) && (await ev(`ui.linkw.pick["${TENT_ON}"]`)) === undefined, await okAsk());
+check("One zone: tapping it explains in the panel's dialog, with one ordinary OK button, and ticks nothing", same(await okAsk(), { role: "alertdialog", title: "Tent Lights On", text: "This automation is already associated to Zone: Veg. Please remove it before associating it with a new zone.", buttons: ["OK|btn primary"], focus: "dlg-title" }) && (await ev(`ui.linkw.pick["${TENT_ON}"]`)) === undefined, await okAsk());
 await toggleShots("onezone-dialog");
 await tap("[data-gkeep]");
 check("One zone: OK closes it, focus back on the row, with nothing ticked or drafted", (await okAsk()) === null && (await ev(`!ui.guard && document.activeElement.dataset.lpick==="${TENT_ON}" && ui.linkw.pick["${TENT_ON}"]===undefined && linkDraft(ui.linkw).items.length===0`)) === true);
@@ -1388,12 +1726,10 @@ await tap('[data-lpick="automation.nursery_heat_mat_on"]');
 check("One zone: nor does ticking it again", (await okAsk()) === null && (await ev(`ui.linkw.pick["automation.nursery_heat_mat_on"]`)) === "control");
 await tap("[data-linkback]");
 /* Moving one to another zone is two saves: unlinked where it is, then linked in the new zone. */
-await ev(`ui.screen="autos";ui.zone="veg";ui.autos={zone:"veg",page:"control"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="veg"]'); await sleep(300);
+await linkFromSetup("veg");
 await tap(`[data-lpick="${TENT_ON}"]`); await tap("[data-dreview]"); await tap("[data-rapply]"); await sleep(400);
 check("One zone: unlinked in Veg, it's in no zone", (await diskZone("veg")).automations.every((a) => a.entity !== TENT_ON) && (await diskZone("nursery")).automations.every((a) => a.entity !== TENT_ON));
-await ev(`ui.screen="autos";ui.zone="nursery";ui.autos={zone:"nursery",page:"control"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="nursery"]'); await sleep(300); await linkSearch("tent"); ln = await linkNow();
+await linkFromSetup("nursery"); await linkSearch("tent"); ln = await linkNow();
 check("One zone: then Nursery can pick it, the two Veg still has staying hidden", same(ln.rows, [TENT_ON]) && ln.hidden === "2 are hidden because another zone has them." && (await linkRowOf(TENT_ON)).disabled === null, ln);
 await tap(`[data-lpick="${TENT_ON}"]`);
 check("One zone: and ticking it asks nothing in the panel", (await okAsk()) === null && (await ev(`ui.linkw.pick["${TENT_ON}"]`)) === "control");
@@ -1403,14 +1739,29 @@ check("One zone: the host asks about it, as for any automation newly linked to a
 await sleep(1100); await hostClick("allow"); await sleep(400);
 check("One zone: allowed, it's Nursery's alone", (await diskZone("nursery")).automations.some((a) => a.entity === TENT_ON) && (await diskZone("veg")).automations.every((a) => a.entity !== TENT_ON));
 /* Two people editing: one zone's save can still meet another's link to the same automation, and the review shows why. */
-await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"control"};ui.linkw=null;render()`); await sleep(30);
-await tap('#main .row [data-linkautos="garden"]'); await sleep(300); await linkSearch("porch"); await tap('[data-lpick="automation.porch_light_on"]');
+await linkFromSetup("garden"); await linkSearch("porch"); await tap('[data-lpick="automation.porch_light_on"]');
 await ev(`zoneById("veg").automations.push({id:"a99",entity:"automation.porch_light_on",group:"control"})`);
 await tap("[data-dreview]"); await tap("[data-rapply]"); await sleep(300);
 await sleep(1100); await hostClick("allow"); await sleep(400);
 check("One zone: a save the backend refuses for it shows the reason in the review, and stores nothing", (await ev(`document.querySelector("#modal .notice.critical")?.textContent || ""`)).includes("Not saved. An automation can only be linked to one zone.") && (await diskZone("garden")).automations.every((a) => a.entity !== "automation.porch_light_on"), await ev(`document.querySelector("#modal")?.textContent`));
 await ev(`zoneById("veg").automations=zoneById("veg").automations.filter(a=>a.id!=="a99")`);
 await tap("[data-rback]"); await ev(`ui.linkw.pick={...ui.linkw.was}`); await tap("[data-linkback]");
+/* The auxiliary dehumidifier is in all three sample zones, so a fourth zone is made to ask about it, then removed. */
+await ev(`ui.screen="setup";ui.linkw=null;ui.mapw=null;ui.wiz=null;render()`); await sleep(40);
+await ev(`document.querySelector("[data-addzone]").click()`); await sleep(90); await ev(`ui.wiz.name="Flower tent";render()`); await sleep(40);
+await ev(`document.querySelector('[data-wiz="next"]').click()`); await sleep(90); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(400);
+await mOpen("flower_tent"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
+await tap('[data-mdevice="aux"]');
+check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Garden, Veg, Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
+await shot("share-ask-three-zones-phone");
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
+await shot("share-ask-three-zones-desktop");
+await phone(390, 844);
+await tap("[data-gkeep]");
+await ev(`ui.mapw=null;ui.guide=null;ui.screen="setup";render()`); await sleep(40);
+await ev(`document.querySelector('[data-rmzone="flower_tent"]').click()`); await sleep(60);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})();document.querySelector("[data-gdiscard]").click()`); await sleep(400);
+check("Share: the zone made for that question is gone again", (await ev(`!zoneById("flower_tent")`)) === true && !(await diskZone("flower_tent")));
 await reset();
 
 // ---------- Tiles: tracks in one row line up
@@ -1438,7 +1789,7 @@ const overview = await ev(`(()=>{const c=document.querySelector("#main .zone-car
 check("Overview: a zone with several sensors says how they combine", overview.text.includes("Average of 3 sensors"), overview.text);
 check("Overview: light is on the card, without a track", overview.rows === 4 && overview.tracks === 3, overview);
 check("Overview: light shows the zone's combined reading", overview.text.includes(await ev(`fmt("light",zones[0].now.light)`)));
-check("Overview: a one-sensor zone says nothing about combining", !(await ev(`document.querySelectorAll("#main .zone-card")[1].textContent`)).includes("sensors."));
+check("Overview: a one-sensor zone says nothing about combining", (await ev(`document.querySelectorAll("#main .zone-card")[1].querySelector(".zcombined")`)) === null);
 check("Overview: zones count units, not pots", /\d+ units/.test(await ev(`ui.screen="zone";ui.zone=zones[0].id;render();const t=document.querySelector("#main").textContent;ui.screen="overview";render();t`)) && !/\bpots?\b/i.test(await ev(`document.documentElement.innerHTML`)));
 await ev(`zones[0].combine={env:"highest"};render()`); await sleep(40);
 check("Overview: the note names the environment method", (await ev(`document.querySelector("#main .zone-card").textContent`)).includes("Highest of 3 sensors"));
@@ -1451,6 +1802,39 @@ check("Overview: the light graph covers 4 hours in 49 points, like the zone's li
 await ev(`window.__keep=zones[1].sensors.map(s=>s.avg);zones[1].sensors.forEach(s=>{if(s.kind==="env")s.avg=false});render()`); await sleep(40);
 check("Overview: a zone with no light reading draws no light graph", (await ev(`document.querySelectorAll("#main .zone-card")[1].querySelectorAll("svg.lspark").length`)) === 0);
 await ev(`zones[1].sensors.forEach((s,i)=>{s.avg=window.__keep[i]});render()`);
+
+// ---------- A zone with no light sensor at all (#130): its sensors map no light entity, the shape the real-room build
+// gives such a zone. No light sensor is not darkness, so no light value is drawn, while an offline one still says no data.
+const zeroLx = (t) => /(^|[^\d,.])0 lx/.test(t);
+const NL = `zones[1]`;
+await ev(`window.__nl={lux:${NL}.sensors.map(s=>s.lux),limits:{...${NL}.lightLimits},history:${NL}.history};${NL}.sensors.forEach(s=>{if(s.kind==="env")s.lux=null});${NL}.lightLimits={dayMin:null,nightMax:null};${NL}.history={metric:"light",hours:24};refreshReadings();ui.screen="overview";render()`); await sleep(60);
+const nlCard = await ev(`(()=>{const c=document.querySelectorAll("#main .zone-card")[1];return {text:c.textContent,rows:c.querySelectorAll(".mrow").length,spark:c.querySelectorAll("svg.lspark").length,lux:c.querySelectorAll(".lux").length,now:${NL}.now.light}})()`);
+check("No light sensor: Overview draws no light row or line, and no lux on the day strip", nlCard.rows === 3 && nlCard.spark === 0 && nlCard.lux === 0 && !/\blx\b/.test(nlCard.text) && nlCard.now === null, nlCard);
+check("No light sensor: the day strip still says lights on or off", /Lights (on|off)/.test(nlCard.text), nlCard.text);
+const litCard = await ev(`(()=>{const c=document.querySelectorAll("#main .zone-card")[0];return {rows:c.querySelectorAll(".mrow").length,spark:c.querySelectorAll("svg.lspark").length}})()`);
+check("No light sensor: a zone with light keeps its light row and line", litCard.rows === 4 && litCard.spark === 1, litCard);
+check("No light sensor: Overview shows 0 lx nowhere for it", !zeroLx(nlCard.text), nlCard.text);
+await ev(`document.querySelectorAll("#main .zone-card")[1].click()`); await sleep(120);
+const nlZone = await ev(`(()=>{const m=document.querySelector("#main"),t=[...m.querySelectorAll(".tiles > .tile")].map(e=>e.getBoundingClientRect());return {text:m.textContent,lcards:m.querySelectorAll(".tiles .lcard, svg.lline").length,tiles:t.length,cols:t.map(r=>[Math.round(r.left),Math.round(r.width)]),chip:m.querySelectorAll('[data-metric="light"]').length,metric:ui.metric,chart:!!m.querySelector("#chart svg")}})()`);
+const litCols = await ev(`(()=>{const was=ui.zone;ui.zone=zones[0].id;render();const c=[...document.querySelectorAll("#main .tiles > .tile")].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.left),Math.round(r.width)]});ui.zone=was;render();return c})()`);
+check("No light sensor: the zone page has no light card, and its other tiles sit where a lit zone's do", nlZone.lcards === 0 && nlZone.tiles === 3 && JSON.stringify(nlZone.cols) === JSON.stringify(litCols), [nlZone.cols, litCols]);
+check("No light sensor: History offers no Light chip, and a zone set to open on Light opens on Temperature", nlZone.chip === 0 && nlZone.metric === "temperature" && nlZone.chart, nlZone);
+check("No light sensor: the zone page and History show 0 lx nowhere", !zeroLx(nlZone.text), nlZone.text.match(/.{30}0 lx.{10}/)?.[0]);
+check("No light sensor: its sensors list no light entity", (await ev(`envOf(${NL}).every(s=>!deviceEntities(s).some(e=>e[2]==="illuminance"))`)) === true && (await ev(`envOf(zones[0]).every(s=>deviceEntities(s).some(e=>e[2]==="illuminance"))`)) === true);
+await ev(`document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="'+${NL}.id+'"]').click()`); await sleep(80);
+const nlView = await ev(`(()=>({text:document.querySelector("#main").textContent,rows:[...document.querySelectorAll(".tbl-wrap tr")].map(r=>r.textContent).filter(t=>t.startsWith("Light")).length,line:!!document.querySelector("#t-nolight")}))()`);
+check("No light sensor: View targets has no light rows, and says why", nlView.rows === 0 && nlView.line && !zeroLx(nlView.text), nlView.rows);
+await ev(`document.querySelector('[data-tset="'+${NL}.id+'"]').click()`); await sleep(80);
+const nlEdit = await ev(`(()=>({text:document.querySelector("#main").textContent,box:document.querySelectorAll("#vin-light-0").length,line:!!document.querySelector("#vnolight"),issue:/Light limit/.test(document.querySelector("#main").textContent)}))()`);
+check("No light sensor: Targets has no light limit box, says why, and raises no light problem", nlEdit.box === 0 && nlEdit.line && !nlEdit.issue && !zeroLx(nlEdit.text), nlEdit);
+await ev(`document.querySelector("[data-tdexit]").click()`); await sleep(60);
+await ev(`ui.screen="setup";render()`); await sleep(40);
+check("No light sensor: History opens on offers it no Light, and shows it opening on Temperature", (await ev(`document.querySelectorAll('.opens-row [data-opens="'+${NL}.id+'"][data-ometric="light"]').length===0&&document.querySelector('.opens-row [data-opens="'+${NL}.id+'"][data-ometric="temperature"]').getAttribute("aria-pressed")==="true"&&document.querySelectorAll('.opens-row [data-opens="'+zones[0].id+'"][data-ometric="light"]').length===1`)) === true);
+// An offline light sensor still exists: the card stays and says no data.
+await ev(`${NL}.sensors.forEach((s,i)=>{s.lux=window.__nl.lux[i]});window.__nl.t=${NL}.sensors.map(s=>s.t);${NL}.sensors.forEach(s=>{if(s.kind==="env")s.t=null});refreshReadings();ui.screen="zone";ui.zone=${NL}.id;ui.metric="temperature";render()`); await sleep(80);
+const offZone = await ev(`(()=>{const l=document.querySelector("#main .tiles .lcard");return {card:l?l.textContent:null,chip:document.querySelectorAll('#main [data-metric="light"]').length,text:document.querySelector("#main").textContent}})()`);
+check("Offline light sensor: the zone keeps its light card, showing no data rather than 0", offZone.card !== null && offZone.card.includes("--") && offZone.chip === 1 && !zeroLx(offZone.text), offZone.card);
+await ev(`${NL}.sensors.forEach((s,i)=>{s.t=window.__nl.t[i]});${NL}.lightLimits=window.__nl.limits;${NL}.history=window.__nl.history;refreshReadings();ui.screen="overview";render()`); await sleep(60);
 await shot("overview-light-graph");
 await phone(800, 1200); await sleep(60); await shot("overview-light-graph-foldable"); await phone(390, 844);
 
@@ -1756,8 +2140,17 @@ await tap("#lin-g-right"); await sleep(420);
 check("Bar: gets out of the way of the keyboard", (await ev(`getComputedStyle(document.querySelector("#draftbar")).display`)) === "none");
 await key("Enter", 13); await sleep(120);
 check("Bar: comes back after", (await ev(`getComputedStyle(document.querySelector("#draftbar")).display`)) !== "none", await ev(`document.body.className`));
-await ev(`toast("Testing the toast")`); await sleep(40);
-check("Bar: the toast clears it", (await ev(`document.querySelector("#toast").getBoundingClientRect().bottom<=document.querySelector("#draftbar").getBoundingClientRect().top`)) === true);
+await ev(`toast("Testing the toast")`); await sleep(300);
+const toastBox = `(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect(),b=document.querySelector("#draftbar").getBoundingClientRect(),pe=t.style.pointerEvents;t.style.pointerEvents="auto";const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);t.style.pointerEvents=pe;return {shown:!t.hidden,top:r.top,bottom:r.bottom,h:innerHeight,clear:r.bottom<=b.top,onTop:!!hit&&t.contains(hit)}})()`;
+let tb = await ev(toastBox);
+check("Bar: the toast drops in at the top of the view, nowhere near the bar", tb.shown && tb.top >= 0 && tb.bottom <= tb.h / 4 && tb.clear && tb.onTop, tb);
+await tap("[data-dreview]"); await sleep(150); await ev(`toast("Testing the toast over a dialog")`); await sleep(300); tb = await ev(toastBox);
+check("Bar: and it shows over an open dialog", (await ev(`!document.querySelector("#modal").hidden`)) && tb.shown && tb.top >= 0 && tb.onTop, tb);
+check("Bar: a tap where the toast lies goes through to the page under it", (await ev(`(()=>{const t=document.querySelector("#toast"),r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !t.hidden&&!!hit&&!t.contains(hit)})()`)) === true);
+check("Bar: the toast is a quiet surface, not the inverted ink", (await ev(`(()=>{const c=getComputedStyle(document.querySelector("#toast")),b=getComputedStyle(document.body);return c.backgroundColor!==b.color&&c.color!==b.backgroundColor})()`)) === true);
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); await ev(`toast("Testing the toast still")`);
+check("Bar: with reduced motion the toast appears without sliding", (await ev(`getComputedStyle(document.querySelector("#toast")).animationName`)) === "none");
+await send("Emulation.setEmulatedMedia", { features: [] });
 await ev(`ui.review=null;ui.guard=null;ui.leafw=null;render()`);
 await send("Emulation.setTouchEmulationEnabled", { enabled: false });
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -1844,6 +2237,24 @@ for (const [w, h] of [[390, 844], [320, 640]]) {
   check(`Chart ${w}px: no sideways scroll on 7d`, await ev(`document.documentElement.scrollWidth<=innerWidth`), await ev(`document.documentElement.scrollWidth`));
 }
 await phone(390, 844); await ev(`ui.range=24;ui.metric="vpd";render();document.querySelector("#chart").scrollIntoView({block:"start"})`); await shot("chart-phone");
+/* The stakeholder, #104: the plot sits evenly in the card, with no more room left of the axis numbers than they need. */
+const chartInsets = () => ev(`(()=>{const svg=document.querySelector("#chart svg"),card=svg.closest(".card"),cs=getComputedStyle(card),cr=card.getBoundingClientRect();
+  const inL=cr.left+parseFloat(cs.paddingLeft)+parseFloat(cs.borderLeftWidth),inR=cr.right-parseFloat(cs.paddingRight)-parseFloat(cs.borderRightWidth);
+  const box=(els)=>{let l=1e9,r=-1e9;for(const e of els){const b=e.getBoundingClientRect();if(!b.width&&!b.height)continue;l=Math.min(l,b.left);r=Math.max(r,b.right);}return {l,r};};
+  const all=box(svg.querySelectorAll(":scope > *:not(#chart-hover)"));chartAt(0);const h0=box(svg.querySelectorAll("#chart-hover *"));chartAt(chartNow.n);const h1=box(svg.querySelectorAll("#chart-hover *"));chartAt(null);
+  return {left:+(all.l-inL).toFixed(1),right:+(inR-all.r).toFixed(1),hoverL:+(h0.l-inL).toFixed(1),hoverR:+(inR-h1.r).toFixed(1)};})()`);
+for (const [w, h, mobile] of [[1280, 900, false], [500, 900, true]]) {
+  await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile }); await reset(); await goTab("Garden");
+  for (const k of ["temperature", "humidity", "vpd", "light"]) for (const r of [6, 24, 72, 168]) {
+    await ev(`ui.metric="${k}";ui.range=${r};render()`); await sleep(40);
+    const m = await chartInsets();
+    check(`Chart ${w}px ${k} ${r}h: as much room left of the axis numbers as right of the plot`, Math.abs(m.left - m.right) <= 2 && m.left >= 0 && m.right >= 0 && m.left <= 8, m);
+    check(`Chart ${w}px ${k} ${r}h: the hover line and dots stay inside the card at both ends`, m.hoverL >= 0 && m.hoverR >= 0, m);
+  }
+}
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await reset(); await goTab("Garden");
+await ev(`ui.metric="temperature";ui.range=24;render();document.querySelector("#chart").closest(".card").scrollIntoView({block:"start"})`); await shot("chart-history-desktop");
+await phone(390, 844);
 
 // ---------- Lights in Controls
 await reset(); await goTab("Garden");
@@ -1939,12 +2350,15 @@ await clickIt("[data-gkeep]"); await goTab("Overview");
 check("Leaving: so does a tab", (await ev(`!!ui.guard`)) === true);
 await clickIt("[data-gdiscard]");
 check("Leaving: discarding leaves it unsaved", (await ev(`!ui.sched && zoneById("garden").emerson.morning===5`)) === true);
-await ev(`zoneById("nursery").periodMode="fixed";zoneById("nursery").dayAt=16*60;render()`);
+/* A linked zone that shares its parent's lights takes the parent's schedule read only, so these run on Nursery unlinked. */
+await ev(`zoneById("nursery").parent=undefined;zoneById("nursery").periodMode="fixed";zoneById("nursery").dayAt=16*60;render()`);
 await schedOpen("nursery");
 check("Sched: Set here shares with nobody", (await ev(`document.querySelector("#s-times").textContent`)).includes("Stored in Environment Control") && !(await ev(`document.querySelector("#s-times").textContent`)).includes("same helpers"));
 await setBox("day", "15:30"); const sentFixed = await schedSent(); await clickIt("[data-dreview]"); await clickIt("[data-rapply]"); await sleep(40);
 check("Sched: Set here saves at once and sends nothing", (await schedSent()) === sentFixed && (await ev(`zoneById("nursery").dayAt`)) === 15.5 * 60 && (await ev(`zoneById("veg").dayAt`)) === 16 * 60, [await schedSent(), sentFixed, await ev(`[zoneById("nursery").dayAt,zoneById("veg").dayAt,ui.review&&ui.review.errors]`)]);
-await ev(`zoneById("nursery").periodMode=undefined;zoneById("nursery").dayAt=16*60;zoneById("garden").periodMode="detected";zoneById("garden").lights=["switch.tent_lights"];render()`);
+await ev(`zoneById("nursery").periodMode=undefined;zoneById("nursery").dayAt=16*60`); await evp(`saveConfig(()=>{zoneById("nursery").parent="veg"})`);
+check("Sched: Nursery is linked to Veg again, on disk too", (await diskZone("nursery")).parent === "veg" && (await ev(`sharesLights(zoneById("nursery"))`)) === true);
+await ev(`zoneById("garden").periodMode="detected";zoneById("garden").lights=["switch.tent_lights"];render()`);
 await schedOpen("garden");
 check("Sched: Detected has no times to set, and its switches are picked right there", (await ev(`!document.querySelector("#sin-day") && document.querySelector("#s-times").textContent.includes("no times to set") && document.querySelector('[data-mlight="switch.tent_lights"]').getAttribute("aria-pressed")==="true"`)) === true);
 check("Sched: but its Emerson effect still works", (await ev(`!!document.querySelector("#sin-morning")`)) === true && !/NaN|undefined/.test(await ev(`document.querySelector("#main").textContent`)));
@@ -2061,9 +2475,11 @@ const pick = async (sel, value) => { await ev(`pickHelper(document.querySelector
 const opts = (sel) => ev(`helperOptions(document.querySelector("#${sel}").dataset.hq)`);
 const fixText = () => ev(`document.querySelector("#td-issues")?.textContent || ""`);
 const mapNextOff = () => ev(`!!topDraft().blocked`);
-await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
+/* Nursery shares Veg's lights, so its lights helpers are Veg's and read only there: those pickers are tried on Veg. */
+await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
 const onOpts = await opts("map-onHelper");
 check("Picker: lights on lists every time helper HA has, not names built from the zone", onOpts.includes("input_datetime.reservoir_refill_time") && onOpts.includes("input_datetime.garden_day_time") && !onOpts.includes("input_datetime.last_reservoir_refill"), onOpts);
+await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 check("Picker: limit pickers only show once the zone uses its helpers", (await ev(`!!document.querySelector("[data-mlink^='bands']")`)) === false);
 await clickIt('[data-mband="helpers"]');
 const tmin = "map-l-bands-day-temperature-min", nT = "input_number.nursery_day_temperature_min_threshold";
@@ -2088,10 +2504,6 @@ check("Picker: a problem on the other period is still caught", (await fixText())
 await clickIt("#td-issues [data-tdfix]");
 check("Picker: and its Fix opens Night on that box", (await ev(`ui.vpdw.period`)) === "night" && (await active()) === "map-l-bands-night-vpd-min");
 await pick("map-l-bands-night-vpd-min", "input_number.nursery_night_vpd_min_threshold");
-await clickIt('[data-mem="helper"]');
-await pick("map-l-morning", "input_number.emerson_effect_morning_extension");
-check("Picker: red lights from helpers need all three", (await fixText()).includes("Red lights: pick all three helpers."), await fixText());
-await clickIt('[data-mem="none"]');
 check("Picker: with every problem fixed, Next is on", (await mapNextOff()) === false, await fixText());
 await ev(`openReview()`); await sleep(40);
 const linkReview = await modalText();
@@ -2106,13 +2518,15 @@ check("Picker: once allowed, exactly the picked links are on disk", savedLinks.l
 check("Picker: Targets now treats them as on your helper", (await ev(`settingLink(zoneById("nursery"),"bands.day.temperature.min")`)) === nT && (await ev(`settingLink(zoneById("nursery"),"bands.day.humidity.min")`)) === undefined);
 await haSet([[nT, 17.5]]);
 check("Picker: and the zone reads what the helper holds", (await ev(`zoneById("nursery").bands.day.temperature[0]`)) === 17.5, await ev(`zoneById("nursery").bands.day.temperature`));
-await reset(); await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
+await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
 await pick("map-onHelper", "input_datetime.reservoir_refill_time");
 check("Picker: changing only which helper holds lights on is a change to review", (await ev(`tdDraft(ui.td).items.length`)) > 0 && (await ev(`document.querySelector("#draftbar").hidden`)) === false);
 await ev(`openReview()`); await sleep(40);
 check("Picker: and the review names both helpers", /Lights on helper.*input_datetime\.veg_day_time \(16:00\).*input_datetime\.reservoir_refill_time \(09:00\)/.test(await modalText()), await modalText());
 await reset(); await ev(`ui.screen="setup";openTd("veg");ui.vpdw.period="day";render()`); await sleep(150);
 await clickIt('[data-mem="helper"]');
+await pick("map-l-morning", "input_number.emerson_effect_morning_extension");
+check("Picker: red lights from helpers need all three", (await fixText()).includes("Red lights: pick all three helpers."), await fixText());
 for (const [k, e] of [["morning", "morning_extension"], ["daylight", "daylight_time"], ["evening", "evening_extension"]]) await pick(`map-l-${k}`, `input_number.emerson_effect_${e}`);
 await ev(`openReview()`); await sleep(40); await clickIt("[data-rapply]"); await sleep(400);
 check("Picker: a helper another zone already links isn't asked about again", (await hostDialog()).open === false);
@@ -2172,6 +2586,8 @@ check("No target: relinking asks again, then reads the helper, with the rest mid
 await reset();
 
 // ---------- Red lights: from a helper, set here, detected, or not used
+/* Nursery shares Veg's lights, which makes its red lights Veg's and read only, so these run on Nursery unlinked. */
+await evp(`saveConfig(()=>{delete zoneById("nursery").parent})`); await sleep(100);
 await ev(`ui.screen="setup";openTd("nursery");ui.vpdw.period="day";render()`); await sleep(150);
 const emModes = () => ev(`[...document.querySelectorAll("[data-mem]")].map(b=>b.dataset.mem)`);
 check("Red lights: four sources, like day and night", JSON.stringify(await emModes()) === JSON.stringify(["none", "helper", "fixed", "detected"]) && (await ev(`document.querySelector('[data-mem="none"]').checked`)) === true, await emModes());
@@ -2211,6 +2627,8 @@ check("Red lights: Garden is still on its helpers", (await ev(`document.querySel
 const emBad = await evp(`saveConfig(()=>{const z=zoneById("nursery");z.emersonMode="fixed";z.emerson={morning:90,daylight:10,evening:5}}).then(r=>[r.ok,r.error])`);
 const redBad = await evp(`saveConfig(()=>{zoneById("nursery").redLights=["lock.front_door"]}).then(r=>[r.ok,r.error])`);
 check("Red lights: the backend refuses an extension past 59 minutes and a switch that isn't on or off", emBad[0] === false && emBad[1].includes("outside 0 to 59") && redBad[0] === false && redBad[1].includes("isn't an on or off entity"), [emBad, redBad]);
+await evp(`saveConfig(()=>{zoneById("nursery").parent="veg"})`); await sleep(100);
+check("Red lights: Nursery is linked to Veg again", (await diskZone("nursery")).parent === "veg");
 await reset();
 
 // ---------- Placement: devices too, optional, between the units and the wall if wanted
@@ -2335,34 +2753,352 @@ const placeOdd = await evp(`saveConfig(()=>{devices.find(x=>x.id==="intake").pla
 check("Placement: the backend refuses a spot off the map, between half-steps, or in a zone the device isn't in", placeOut[0] === false && placeOut[1].includes("outside garden's map") && placeOdd[0] === false && placeWrong[0] === false && placeWrong[1].includes("isn't in"), [placeOut, placeOdd, placeWrong]);
 await reset();
 
+// ---------- Linked zones: a zone linked to a parent shows what it shares with the parent read only, and never goes there
+{
+const both = async (name) => {
+  await ev(`(()=>{const t=document.querySelector("#toast");if(t)t.hidden=true})()`);
+  for (const look of ["light", "dark"]) {
+    await send("Emulation.setEmulatedMedia", { features: look === "dark" ? [{ name: "prefers-color-scheme", value: "dark" }] : [] }); await sleep(80);
+    await shot(`${name}-phone-${look}`); await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60); await shot(`${name}-desktop-${look}`); await phone(390, 844); await sleep(60);
+  }
+  await send("Emulation.setEmulatedMedia", { features: [] }); await sleep(60);
+};
+const toastNow = () => ev(`(()=>{const t=document.querySelector("#toast");return t && !t.hidden ? t.textContent : ""})()`);
+const clearToast = () => ev(`(()=>{const t=document.querySelector("#toast");if(t){t.hidden=true;t.textContent=""}})()`);
+await phone(390, 844); await reset(); await setupOnly();
+/* Who says what under a zone's name. */
+const linkLines = () => ev(`(()=>{const out={};for(const id of ["garden","veg","nursery"]){ui.screen="zone";ui.zone=id;render();out[id]=document.querySelector("#main .pagehead .zlinked")?.textContent||""}ui.screen="overview";render();out.overview=[...document.querySelectorAll("#main .zone-card")].map(c=>c.querySelector(".zlinked")?.textContent||"");ui.screen="setup";render();out.setup=[...document.querySelectorAll("#main .task")].filter(t=>t.querySelector("[data-zmenu]")).map(t=>t.querySelector(".zlinked")?.textContent||"");return out})()`);
+let ll = await linkLines();
+check("Linked: under the name, on its page, its Overview card and its Setup row, Nursery says it's linked to Veg, and Veg names Nursery", same(ll, { garden: "", veg: "Zone: Nursery is linked to this zone", nursery: "Linked to Zone: Veg", overview: ["", "Zone: Nursery is linked to this zone", "Linked to Zone: Veg"], setup: ["", "Zone: Nursery is linked to this zone", "Linked to Zone: Veg"] }), ll);
+await both("linked-overview");
+/* Zone details: a tick box, then the parent from radio chips, never a select. A linked zone isn't offered as a parent. */
+const detailsLinked = () => ev(`(()=>{const box=document.querySelector("#wiz-linked"),t=document.querySelector("#wiz-linkme"),f=box&&box.querySelector("fieldset.chips");return {tick:t?t.checked:null,tickLabel:t?t.closest("label").textContent:null,chips:f?[...f.querySelectorAll("label.chip")].map(l=>l.textContent+(l.querySelector("input").checked?"*":"")):null,legend:f?f.querySelector("legend").textContent:null,line:box?box.textContent.replace(/\\s+/g," ").trim():"",selects:document.querySelectorAll("select").length,next:document.querySelector('[data-wiz="next"]').disabled,fix:document.querySelector("#wiz-parent-fix")?.textContent||""}})()`);
+await ev(`openNewZone();render()`); await sleep(40); await tap("#wiz-name"); await type("Bench");
+let dl = await detailsLinked();
+check("Linked: Add zone's first step has the tick box, unticked, and no parent choice yet", dl.tick === false && dl.tickLabel === "This is a linked zone" && dl.chips === null && dl.next === false && dl.line.endsWith("A linked zone is part of the same space as its parent. What it shares with the parent is set in the parent."), dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: ticking it shows the parent as radio chips, every zone that isn't itself linked, in Overview's order, and Next waits for one", dl.tick === true && same(dl.chips, ["Zone: Garden", "Zone: Veg"]) && dl.legend === "Linked to" && dl.selects === 0 && dl.next === true && dl.fix === "Pick the zone it's linked to ›" && (await ev(`document.activeElement.id`)) === "wiz-linkme", dl);
+await both("linked-details-add");
+await tap("#wiz-parent-fix");
+check("Linked: the bar's prompt lands on the choice", (await ev(`document.activeElement.id`)) === "wiz-linked");
+await tap('[data-wparent="garden"]'); dl = await detailsLinked();
+check("Linked: picking one opens Next, focus staying on the chip", same(dl.chips, ["Zone: Garden*", "Zone: Veg"]) && dl.next === false && dl.fix === "" && (await ev(`document.activeElement.matches('[data-wparent="garden"]')`)) === true, dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: unticking clears the parent", dl.tick === false && dl.chips === null && (await ev(`ui.wiz.parent`)) === "" && dl.next === false, dl);
+await tap("#wiz-linkme"); dl = await detailsLinked();
+check("Linked: ticked again, nothing is picked until you pick it", same(dl.chips, ["Zone: Garden", "Zone: Veg"]) && dl.next === true, dl);
+await tap('[data-wparent="garden"]');
+await cClick('[data-wiz="next"]');
+check("Linked: the review lists it like the rest of Zone details", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toNot linked → Zone: Garden"), await ev(`document.querySelector("#review-items")?.textContent`));
+const reviewNotes = () => ev(`[...document.querySelectorAll("#modal .review-scroll > p.small")].map(p=>p.textContent).join(" ")`);
+const namesOnDisk = () => onHA(`JSON.parse(fakeHA.disk).zones.map(z=>z.name)`);
+check("Linked: the review says the new zone moves next to its parent, as that shows on every page", (await reviewNotes()).includes("Bench moves next to Garden on Overview, in the menu and on Setup."), await reviewNotes());
+const zonesBefore = await ev(`zones.length`);
+await cClick("[data-rapply]"); await sleep(300);
+const bench = await ev(`zones.find(z=>z.name==="Bench").id`);
+check("Linked: it's stored at the end of its parent's family, so the family stays together", same(await namesOnDisk(), ["Garden", "Bench", "Veg", "Nursery"]), await namesOnDisk());
+check("Linked: it's created linked to Garden, and nothing else about setting it up changes", (await ev(`zones.length`)) === zonesBefore + 1 && (await diskZone(bench)).parent === "garden" && (await ev(`ui.screen==="setup" && !!ui.guide && ui.guide.id==="${bench}"`)) === true, await diskZone(bench));
+await ev(`ui.guide=null;openWizard("nursery",[0]);render()`); await sleep(40);
+dl = await detailsLinked();
+check("Linked: opened later, Zone details has the same controls, Nursery's ticked with Veg picked, and Bench, itself linked, not offered", dl.tick === true && same(dl.chips, ["Zone: Garden", "Zone: Veg*"]) && dl.next === false, dl);
+await both("linked-details-nursery");
+await ev(`openWizard("veg",[0]);render()`); await sleep(40); dl = await detailsLinked();
+check("Linked: a zone with zones linked to it says so in place of the tick box", dl.tick === null && dl.chips === null && dl.line === "Zone: Nursery is linked to this zone, so it can't be linked to another.", dl);
+await ev(`openWizard("garden",[0]);render()`); await sleep(40); dl = await detailsLinked();
+check("Linked: Garden, a parent itself now, says so too", dl.tick === null && dl.line === "Zone: Bench is linked to this zone, so it can't be linked to another.", dl);
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await cClick('[data-wiz="next"]');
+check("Linked: unticking an existing link is reviewed too", (await ev(`document.querySelector("#review-items").textContent`)).includes("Linked toZone: Garden → Not linked"), await ev(`document.querySelector("#review-items")?.textContent`));
+await cClick("[data-rapply]"); await sleep(300);
+check("Linked: applied, the parent is gone", (await diskZone(bench)).parent === undefined && same((await linkLines()).garden, ""), await diskZone(bench));
+check("Linked: unlinked, it stays where it was, on its own", same(await namesOnDisk(), ["Garden", "Bench", "Veg", "Nursery"]), await namesOnDisk());
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await tap('[data-wparent="garden"]'); await cClick('[data-wiz="next"]');
+check("Linked: linked again where it already sits next to its parent, the review says nothing about moving", !(await reviewNotes()).includes("moves next to"), await reviewNotes());
+await cClick("[data-rapply]"); await sleep(300);
+check("Linked: and linked again", (await diskZone(bench)).parent === "garden");
+await setupOnly();
+/* The fake backend refuses what the panel never offers. */
+const linkSave = (change) => evp(`saveConfig(()=>{${change}}).then(r=>[r.ok,r.error||""])`);
+const refusedLinks = [
+  await linkSave(`zoneById("garden").parent="garden"`),
+  await linkSave(`zoneById("${bench}").parent="nursery"`),
+  await linkSave(`zoneById("veg").parent="garden"`),
+  await linkSave(`zoneById("${bench}").parent="attic"`),
+];
+check("Linked: the backend refuses a zone linked to itself, a second level, a parent for a zone that has linked zones, and a parent that doesn't exist", same(refusedLinks.map((r) => r[0]), [false, false, false, false]) && refusedLinks[0][1].includes("can't be linked to itself") && refusedLinks[1][1].includes("itself linked to another") && refusedLinks[2][1].includes("has zones linked to it") && refusedLinks[3][1].includes("doesn't exist") && (await diskZone("garden")).parent === undefined && (await diskZone("veg")).parent === undefined && (await diskZone(bench)).parent === "garden", refusedLinks);
+/* The parent's automations, read only, on each chip. */
+const fromCard = () => ev(`(()=>{const c=document.querySelector("#modal [data-fromzone]");return c && {head:c.querySelector("h3").textContent,hint:c.querySelector("p").textContent,rows:[...c.querySelectorAll("[data-autorow]")].map(r=>r.dataset.autorow),sw:[...c.querySelectorAll(".sw")].map(b=>[b.getAttribute("aria-disabled"),b.title,b.disabled,b.tabIndex>=0,!!b.dataset.auto]),links:c.querySelectorAll("a,[data-go],[data-zone] button:not(.sw)").length,last:c===[...document.querySelectorAll("#modal section.card")].at(-1)}})()`);
+for (const page of ["alert", "failsafe", "control"]) {
+  await openAutosAt("nursery", page);
+  const fc = await fromCard(), want = await ev(`autosOf(zoneById("veg"),"${page}").map(a=>a.entity)`);
+  check(`Linked: Nursery's ${page} chip ends with a From Zone: Veg card holding Veg's, in Veg's order, each switch read only`, !!fc && fc.head === "From Zone: Veg" && fc.hint === "These belong to Zone: Veg and run devices this zone shares. Edit in Veg." && same(fc.rows, want) && want.length > 0 && fc.sw.every((x) => same(x, ["true", "Edit in Zone: Veg", false, true, false])) && fc.links === 0 && fc.last, [fc, want]);
+  check(`Linked: and no Link automations in the dialog on ${page}, linked zone or not`, (await ev(`!document.querySelector("#modal [data-linkautos]") && !document.querySelector("#main [data-linkautos]")`)) === true);
+  await both(`linked-autos-${page}`);
+}
+/* #111: a chip whose group holds the parent's automations carries an asterisk after its own count, said in words too. */
+const starNow = () => ev(`({chips:[...document.querySelectorAll('#modal [data-autopage]')].map(b=>{const s=b.querySelector(".segn .star");return [b.dataset.autopage,b.querySelector(".segn").textContent,s?s.getAttribute("aria-hidden"):"",b.getAttribute("aria-label")]}),line:document.querySelector("#autos-star")?.textContent||"",lineIn:!!document.querySelector("#modal .autoshead #autos-star")})`);
+const ownN = await ev(`["alert","failsafe","control"].map(p=>autosOf(zoneById("nursery"),p).length)`), vegN = await ev(`["alert","failsafe","control"].map(p=>autosOf(zoneById("veg"),p).length)`);
+let st = await starNow();
+const starWant = (vn) => ["alert", "failsafe", "control"].map((k, i) => { const t = { alert: "Alerts", failsafe: "Failsafes", control: "Control" }[k], n = ownN[i]; return [k, `${n}/${n}${vn[i] ? "*" : ""}`, vn[i] ? "true" : "", `${t}, ${n ? `${n} of ${n} on` : "none linked"}${vn[i] ? ", and Zone: Veg has some that also run here" : ""}`]; });
+check("Linked: the chips count Nursery's own automations, an asterisk after the count on each group holding Veg's, in words to a screen reader", same(st.chips, starWant(vegN)) && vegN.every((n) => n > 0), [st, ownN, vegN]);
+check("Linked: one line by the chips says what the asterisk means", st.line === "* Zone: Veg has automations in this group that also run here." && st.lineIn, st);
+await ev(`window.keptVeg=zoneById("veg").automations;zoneById("veg").automations=keptVeg.filter(a=>AUTO_GROUPS[a.group][0]!=="control")`); await openAutosAt("nursery", "alert");
+st = await starNow();
+check("Linked: a group with none of Veg's gets no asterisk", same(st.chips, starWant([vegN[0], vegN[1], 0])), st);
+await ev(`zoneById("veg").automations=keptVeg`);
+await openAutosAt("garden", "alert"); st = await starNow();
+check("Linked: a zone linked to none has no asterisk and no line", st.chips.every((c) => !c[1].includes("*") && !c[2]) && st.line === "", st);
+/* #111: a tick box shows or hides the From card, as Show automations in other zones does in Link automations. */
+const fromOpt = () => ev(`(()=>{const b=document.querySelector("#modal [data-ufrom]");return {box:b&&[b.tagName,b.className,b.textContent,b.getAttribute("aria-pressed")],card:!!document.querySelector("#modal [data-fromzone]"),stars:document.querySelectorAll("#modal [data-autopage] .star").length,line:!!document.querySelector("#autos-star"),focus:document.activeElement.hasAttribute("data-ufrom")}})()`);
+check("Linked: a zone linked to none has no Show automations tick box", (await fromOpt()).box === null);
+await openAutosAt("nursery", "failsafe");
+let fo = await fromOpt();
+check("Linked: Nursery's dialog has a Show automations from Zone: Veg tick box, the same control as Link automations', on, with the card shown", same(fo.box, ["BUTTON", "chip", "Show automations from Zone: Veg", "true"]) && fo.card, fo);
+await tap("#modal [data-ufrom]"); fo = await fromOpt();
+check("Linked: ticking it off hides the From card, keeps the asterisks and their line, and keeps focus", same(fo.box.slice(3), ["false"]) && !fo.card && fo.stars === 3 && fo.line && fo.focus, fo);
+await tap('#modal [data-autopage="alert"]');
+check("Linked: it stays hidden on another chip", (await fromOpt()).card === false);
+await tap("#modal [data-ufrom]");
+check("Linked: and ticking it again shows it", (await fromOpt()).card === true && same((await fromOpt()).box.slice(3), ["true"]));
+await tap("#modal [data-ufrom]"); await tap("[data-uclose]"); await openAutosAt("nursery", "failsafe");
+check("Linked: opened again, it's on, as Show automations in other zones starts off each time Link automations opens", (await fromOpt()).card === true);
+await openAutosAt("nursery", "failsafe"); await clearToast();
+let nCalls = (await haCalls()).length;
+/* #111: a tap on what's read only answers in the same dialog Link automations shows, over the Automations dialog. */
+const notHereNow = () => ev(`(()=>{const o=document.querySelector("#modal > .modal.over .dialog")||document.querySelector("#modal .dialog");return o && {role:o.getAttribute("role"),title:o.querySelector("#dlg-title").textContent,text:o.querySelector("#dlg-text").textContent,buttons:[...o.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id,over:!!document.querySelector("#modal > .modal.over")}})()`);
+await ev(`(()=>{window.autosWas=document.querySelector("#modal [data-autosdlg]");const s=document.querySelector("#autos-scroll");s.scrollTop=s.scrollHeight;window.autosTop=s.scrollTop})()`);
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+let nh = await notHereNow();
+check("Linked: tapping a read only switch switches nothing and opens the one-button dialog, titled with its name, over the Automations dialog", same(nh, { role: "alertdialog", title: "Failsafe Veg Fans Auto On", text: "This automation is associated to Zone: Veg. Please edit it in Veg.", buttons: ["OK|btn primary"], focus: "dlg-title", over: true }) && (await haCalls()).length === nCalls && (await onHA(`fakeHA.states["automation.failsafe_veg_fans_auto_on"].state`)) === "on", nh);
+check("Linked: and raises no toast, and goes nowhere", (await toastNow()) === "" && (await ev(`ui.screen==="zone" && ui.zone==="nursery" && ui.autos.zone==="nursery"`)) === true, await toastNow());
+await both("linked-not-here-auto");
+await ev(`window.autosTop=document.querySelector("#autos-scroll").scrollTop`);
+await tap("[data-gkeep]"); bt = await backTo();
+check("Linked: OK closes it, back to the Automations dialog on its chip, where it was scrolled, the switch focused", bt.same && !bt.over && bt.chip === "failsafe" && bt.top === bt.was && bt.focus === "automation.failsafe_veg_fans_auto_on" && (await ev(`!ui.guard`)) === true, bt);
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await key("Escape", 27);
+check("Linked: Escape closes only that dialog, the Automations dialog staying open", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await tellBack();
+check("Linked: and so does Back", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
+await tap('#modal [data-fromzone] h3');
+check("Linked: nothing in the card takes you to Veg", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !!ui.autos && !ui.guard`)) === true);
+await ev(`ui.autos=null;renderModal()`);
+/* The parent's failsafe off shows on the linked zone's page, as plain text. */
+await onHA(`fakeHA.setState("automation.failsafe_veg_fans_auto_on","off",{})`); await sleep(120);
+await ev(`ui.screen="zone";ui.zone="nursery";ui.autos=null;render();window.scrollTo(0,0)`); await sleep(40);
+const pfs = () => ev(`(()=>{const n=document.querySelector("#parent-failsafe");return n && {text:n.textContent,tag:n.tagName,acts:n.querySelectorAll("button,a").length+(n.matches("button,a,[data-autos]")?1:0)}})()`);
+let pf = await pfs();
+check("Linked: Veg's failsafe off shows on Nursery's page, as a plain notice", same(pf, { text: "A failsafe in Zone: Veg is off: Failsafe Veg Fans Auto On. While it's off, nothing puts that hardware back. Edit in Veg.", tag: "DIV", acts: 0 }), pf);
+await both("linked-zone-failsafe-off");
+await tap("#parent-failsafe");
+check("Linked: tapping it opens nothing", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !ui.autos`)) === true);
+await onHA(`fakeHA.setState("automation.failsafe_tent_lights_recovery","off",{})`); await sleep(120); await ev(`render()`); await sleep(30);
+check("Linked: several are counted", (await pfs()).text === "2 failsafes in Zone: Veg are off. While they're off, nothing puts that hardware back. Edit in Veg.", await pfs());
+check("Linked: Veg's own page keeps its own notice, which opens its Automations page", (await ev(`ui.zone="veg";render();!document.querySelector("#parent-failsafe") && !!document.querySelector('#main .notice.fix[data-autos="failsafe"]')`)) === true);
+for (const e of ["automation.failsafe_veg_fans_auto_on", "automation.failsafe_tent_lights_recovery"]) await onHA(`fakeHA.setState("${e}","on",{})`);
+await sleep(120);
+check("Linked: back on, the notice goes", (await ev(`ui.zone="nursery";render();!document.querySelector("#parent-failsafe")`)) === true);
+/* Nursery shares Veg's lights, so its day strip is Veg's whatever Nursery's own stored times say. */
+await ev(`zoneById("nursery").dayAt=13*60;ui.screen="zone";ui.zone="nursery";render()`); await sleep(30);
+const nStrip = await ev(`[document.querySelector("#main .strip").getAttribute("aria-label"),document.querySelector("#main .period-top .muted").textContent]`);
+await ev(`zoneById("nursery").dayAt=16*60;render()`);
+check("Linked: Nursery's day strip shows Veg's times, not its own", nStrip[0].startsWith("Lights on 16:00 to 10:00") && nStrip[1].startsWith("16:00 - 10:00"), nStrip);
+/* Controls: every device Veg also has is read only in Nursery, and switchable in Veg and in Garden, which isn't linked. */
+const devRow = (id, zone) => ev(`(()=>{const r=document.querySelector('[data-devrow="${id}"][data-zone="${zone}"]');return r && {sub:r.querySelector(".dev-sub").textContent,ro:[...r.querySelectorAll("button,input")].filter(x=>!x.matches(".fixlink")).map(x=>x.getAttribute("aria-disabled")==="true"||x.disabled),acts:r.querySelectorAll("[data-dev],[data-dialin],[data-dialstep],[data-dial]").length,title:r.querySelector(".sw").title}})()`);
+await ev(`ui.screen="zone";ui.zone="nursery";render()`); await sleep(40);
+const nDevs = await ev(`devices.filter(d=>d.ctl&&d.zones.includes("nursery")).map(d=>d.id)`);
+const roRows = [];
+for (const id of nDevs) roRows.push([id, await devRow(id, "nursery")]);
+check("Linked: every device Nursery shares with Veg says it runs on Veg's automations, and every control on it is read only", nDevs.length > 0 && roRows.every(([, r]) => !!r && r.sub.includes("Runs on Zone: Veg's automations. Edit in Veg.") && !r.sub.includes("Shared with") && r.ro.every(Boolean) && r.acts === 0 && r.title === "Edit in Zone: Veg"), roRows);
+await ev(`document.querySelector('[data-devrow="lp-tent"][data-zone="nursery"]').scrollIntoView({block:"center"})`); await both("linked-controls");
+nCalls = (await haCalls()).length; await clearToast();
+/* #111: each answers in the one-button dialog titled with the device's name, never a toast. */
+const devAsk = async (sel) => { await tap(sel); const d = await notHereNow(), t = await toastNow(), where = await ev(`ui.screen+":"+ui.zone`); await tap("[data-gkeep]"); return [d && d.title, d && d.text, d && d.buttons.join(), t, where, await ev(`!ui.guard && document.querySelector("#modal").hidden`)]; };
+const devName = (id) => ev(`devices.find(d=>d.id==="${id}").name`);
+const DEV_SAYS = "This device runs on Zone: Veg's automations. Please control it in Veg.";
+const a1 = await devAsk('[data-devrow="lp-tent"][data-zone="nursery"] .sw');
+const a2 = await devAsk('[data-devrow="lc-tent"][data-zone="nursery"] .dial-steps button:last-child');
+const modeWas = await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`);
+const a3 = await devAsk('[data-devrow="aux"][data-zone="nursery"] label.chip:not(:has(input:checked))');
+check("Linked: tapping a read only switch, dial step or mode chip sends nothing and opens the one-button dialog titled with the device's name, with no toast, staying on Nursery", (await haCalls()).length === nCalls && same([a1, a2, a3], [[await devName("lp-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("lc-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("aux"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true]]) && (await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`)) === modeWas, [a1, a2, a3, (await haCalls()).slice(nCalls)]);
+await tap('[data-devrow="lp-tent"][data-zone="nursery"] .sw'); await both("linked-not-here-device"); await tap("[data-gkeep]");
+await ev(`ui.zone="veg";render()`); await sleep(30);
+const vegTent = await devRow("lp-tent", "veg");
+check("Linked: in Veg the same device is switched as ever, and its line names Nursery", !!vegTent && vegTent.acts > 0 && vegTent.ro.every((x) => !x) && vegTent.sub.includes("Shared with Nursery"), vegTent);
+await ev(`ui.zone="garden";render()`); await sleep(30);
+const gardenAux = await devRow("aux", "garden");
+check("Linked: Garden isn't linked, so a device it shares with both stays switchable there", !!gardenAux && gardenAux.acts > 0 && gardenAux.ro.every((x) => !x) && !gardenAux.sub.includes("Runs on"), gardenAux);
+check("Linked: a zone that isn't linked to one shows none of it: only the line naming the zone linked to it, no parent notice, no From card", (await ev(`(()=>{ui.screen="zone";ui.zone="garden";render();const a=document.querySelector("#main .pagehead .zlinked")?.textContent==="Zone: Bench is linked to this zone"&&!document.querySelector("#parent-failsafe");openAutos("garden","failsafe");const b=!document.querySelector("[data-fromzone]")&&!!document.querySelector("#modal [data-autosdlg]");ui.autos=null;renderModal();return a&&b})()`)) === true);
+/* Targets, day and night: Nursery shares Veg's lights, so its day and night and red lights are Veg's; its own sensor keeps its targets its own. */
+await ev(`openTd("nursery");render();window.scrollTo(0,0)`); await sleep(80);
+const tdNow = () => ev(`(()=>{const sec=(id)=>{const s=document.querySelector(id);return {line:s.querySelector("[data-sharedline]")?.textContent||"",chips:s.querySelectorAll("fieldset.chips").length,boxes:[...s.querySelectorAll("input:not([type=radio])")].map(i=>[i.disabled||i.readOnly,i.title,!!i.dataset.sin])}};const t=document.querySelector("#td-targets");return {times:sec("#s-times"),red:sec("#s-emerson"),targets:{line:t.querySelector("[data-sharedline]")?.textContent||"",src:!!t.querySelector('[name="limits-src"]'),stages:t.querySelectorAll("[data-vstage]").length,boxes:[...t.querySelectorAll(".vcell input")].map(i=>i.disabled||i.readOnly),ro:t.querySelector("#vwrap").hasAttribute("data-ro")},bar:[...document.querySelectorAll("#pagebar button")].map(b=>b.textContent),draft:tdDraft(ui.td).items.length}})()`);
+let td = await tdNow();
+check("Linked: sharing Veg's lights, Nursery's day and night shows Veg's, read only, under one line, with no source to choose", td.times.line === "This zone shares Zone: Veg's lights, so its day and night are Veg's. Edit in Veg." && td.times.chips === 0 && td.times.boxes.length === 2 && td.times.boxes.every((b) => same(b, [true, "Edit in Zone: Veg", false])) && (await ev(`document.querySelector("#sro-day").value+"-"+document.querySelector("#sro-night").value`)) === (await ev(`hhmm(zoneById("veg").dayAt)+"-"+hhmm(zoneById("veg").nightAt)`)), td.times);
+check("Linked: and its red lights are Veg's too", td.red.line === "This zone shares Zone: Veg's lights, so its red lights are Veg's. Edit in Veg." && td.red.chips === 0 && td.red.boxes.every((b) => b[0]), td.red);
+/* #111: a tap on a read only box answers in the one-button dialog, titled with the setting, never a toast. */
+const SET_SAYS = (z) => `These settings are Zone: ${z}'s. Please edit them in ${z}.`;
+const setAsk = async (sel) => { await clearToast(); await tap(sel); const d = await notHereNow(), t = await toastNow(), where = await ev(`ui.screen+":"+!!ui.td`); await tap("[data-gkeep]"); return [d && d.title, d && d.text, d && d.buttons.join(), t, where, await ev(`!ui.guard`)]; };
+check("Linked: tapping Nursery's day box opens the one-button dialog, Day and night, with no toast, staying on the page", same(await setAsk("#sro-day"), ["Day and night", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#sro-day"));
+/* Veg uses no red lights in the sample, so for this one check it borrows Garden's, set in Environment Control. */
+await ev(`window.vegEm=[zoneById("veg").emersonMode,zoneById("veg").emerson];Object.assign(zoneById("veg"),{emersonMode:"fixed",emerson:{...zoneById("garden").emerson}});render()`); await sleep(40);
+check("Linked: and a red lights box opens it titled Red lights", same(await setAsk("#s-emerson input"), ["Red lights", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#s-emerson input"));
+await ev(`Object.assign(zoneById("veg"),{emersonMode:vegEm[0],emerson:vegEm[1]});if(vegEm[0]===undefined)delete zoneById("veg").emersonMode;if(vegEm[1]===undefined)delete zoneById("veg").emerson;render()`); await sleep(40);
+check("Linked: Nursery's own sensor keeps its targets its own, editable as in any zone", td.targets.line === "" && td.targets.src && td.targets.stages === 4 && td.targets.boxes.every((d) => !d) && !td.targets.ro, td.targets);
+check("Linked: with nothing changed there's nothing to review, and nothing read only can be", td.draft === 0, td);
+await both("linked-targets-nursery");
+/* A linked zone that shares an environment sensor with its parent: Bench, made above, takes one of Garden's. */
+const gardenLeft = await ev(`JSON.stringify(zoneById("garden").sensors.find(s=>s.id==="g-left"))`);
+await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[{...JSON.parse(${JSON.stringify(gardenLeft)}),pos:null}]})`); await sleep(100);
+check("Linked: it shares Garden's left environment sensor", (await diskZone(bench)).sensors.some((s) => s.id === "g-left"));
+await ev(`ui.guide=null;ui.screen="zone";ui.zone="${bench}";ui.metric="temperature";ui.range=24;render();window.scrollTo(0,0)`); await sleep(80);
+const benchTile = await ev(`(()=>{const t=[...document.querySelectorAll("#main .tile")].find(x=>x.querySelector(".name").textContent==="Temperature");return {range:[...t.querySelectorAll(".range b")].map(b=>b.textContent),pill:t.querySelector(".pill")?.textContent||"",bands:document.querySelectorAll('#chart rect[fill="var(--band)"]').length}})()`);
+const gardenRange = await ev(`zoneById("garden").bands[period(zoneById("${bench}"))].temperature.map(v=>v===null?"-":String(v))`);
+check("Linked: its tiles judge its readings against Garden's targets, and its History draws Garden's bands", same(benchTile.range, gardenRange) && benchTile.pill !== "No targets yet" && benchTile.bands > 0, [benchTile, gardenRange]);
+const benchCard = await ev(`(()=>{ui.screen="overview";render();const c=[...document.querySelectorAll("#main .zone-card")].find(x=>x.querySelector("h2").textContent==="Bench");const r=c.querySelector(".mrow");return {unset:!!r.querySelector(".track.unset"),pill:r.querySelector(".pillcell").textContent,own:bandState(zoneById("${bench}"),"temperature")}})()`);
+check("Linked: its Overview card judges it against Garden's targets too", !benchCard.unset && benchCard.pill !== "" && !/No targets/.test(benchCard.pill) && benchCard.own !== "unset", benchCard);
+await ev(`ui.screen="zone";ui.zone="${bench}";render();window.scrollTo(0,0)`); await sleep(40);
+await tap(MORE); await tap(`#zmenu--more [data-viewtargets="${bench}"]`); await sleep(60);
+const tv = await ev(`(()=>{const d=document.querySelector("#modal .dialog");return {line:d.querySelector("#t-shared")?.textContent||"",set:!!d.querySelector("[data-tset]"),editin:d.querySelector("#t-editin")?.textContent||"",editTag:d.querySelector("#t-editin")?.tagName||"",first:d.querySelector("tbody td:nth-child(2)").textContent}})()`);
+check("Linked: View targets shows Garden's, says why under the tables, and has plain text in place of Set targets", tv.line === "This zone shares a sensor with Zone: Garden, so its targets are Garden's. Edit in Garden." && !tv.set && tv.editin === "Edit in Zone: Garden" && tv.editTag === "SPAN" && tv.first === String(await ev(`zoneById("garden").bands.day.temperature[0]`)), tv);
+await both("linked-view-targets-bench");
+await tap("[data-tclose]");
+await ev(`openTd("${bench}");render();window.scrollTo(0,0)`); await sleep(80);
+td = await tdNow();
+check("Linked: on Targets, day and night the whole Targets card is Garden's, read only: no source choice, no Athena stages, boxes disabled, the chart not draggable", td.targets.line === "This zone shares a sensor with Zone: Garden, so its targets are Garden's. Edit in Garden." && !td.targets.src && td.targets.stages === 0 && td.targets.boxes.length > 0 && td.targets.boxes.every(Boolean) && td.targets.ro && (await ev(`[...document.querySelectorAll("#td-targets .vcell input")].every(i=>i.title==="Edit in Zone: Garden"&&!i.dataset.vin)`)) === true, td.targets);
+check("Linked: tapping one of Garden's target boxes opens the one-button dialog, Targets, with no toast", same(await setAsk("#td-targets .vcell input"), ["Targets", SET_SAYS("Garden"), "OK|btn primary", "", "setup:true", true]), await setAsk("#td-targets .vcell input"));
+check("Linked: and so does a tap on the chart", same(await setAsk("#vwrap"), ["Targets", SET_SAYS("Garden"), "OK|btn primary", "", "setup:true", true]), await setAsk("#vwrap"));
+check("Linked: it shares no lights, so its day and night are its own", td.times.line === "" && td.times.chips === 1, td.times);
+await ev(`document.querySelector("#td-targets").scrollIntoView()`); await both("linked-targets-bench");
+const benchBands = await ev(`JSON.stringify(ui.vpdw.bands)`);
+const chartAt = await ev(`(()=>{const r=document.querySelector("#vwrap svg").getBoundingClientRect();return {x:r.left+r.width*0.3,y:r.top+r.height*0.5}})()`);
+for (const type of ["mousePressed", "mouseMoved", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: chartAt.x + (type === "mouseMoved" ? 40 : 0), y: chartAt.y, button: "left", clickCount: 1 });
+await sleep(80);
+nCalls = (await haCalls()).length;
+check("Linked: dragging the chart moves nothing, so there's nothing to review or send", (await ev(`JSON.stringify(ui.vpdw.bands)`)) === benchBands && (await ev(`tdDraft(ui.td).items.length`)) === 0 && !(await ev(`ui.vpdw.drag`)), await ev(`tdDraft(ui.td).items`));
+/* A press on the read only chart is a tap like any other, so it answers in the one-button dialog (#111). */
+check("Linked: and the press answers in the one-button dialog, Targets", (await ev(`ui.guard && ui.guard.title`)) === "Targets" && (await ev(`ui.guard.ok`)) === "OK", await ev(`ui.guard && ui.guard.title`));
+await tap("[data-gkeep]");
+await ev(`ui.td=null;ui.sched=null;ui.vpdw=null;render()`);
+check("Linked: and nothing read only was sent or saved", (await haCalls()).length === nCalls && same((await diskZone(bench)).bands, await ev(`zoneById("${bench}").bands`)));
+/* Given Garden's lights too, Bench has nothing of its own left on the page: the foot bar is Back, and Confirm while the step is open. */
+await evp(`saveConfig(()=>{devices.filter(d=>d.type==="Light"&&d.zones.includes("garden")).forEach(d=>d.zones.push("${bench}"))})`); await sleep(100);
+await ev(`openTd("${bench}");render();window.scrollTo(0,0)`); await sleep(80);
+const bare = () => ev(`(()=>{const page=document.querySelector("#pagebar");return {shares:sharesLights(zoneById("${bench}"))&&sharesSensor(zoneById("${bench}")),editable:[...document.querySelectorAll("#main input,#main select,#main textarea,#main fieldset.chips,#main [data-vstage],#main [data-dreview]")].filter(e=>!e.disabled&&!e.readOnly&&!e.closest("#pagebar")).map(e=>e.id||e.outerHTML.slice(0,60)),bar:[...page.querySelectorAll("button")].filter(b=>!b.hidden).map(b=>b.textContent),pageHidden:page.hidden,draft:document.querySelector("#draftbar").hidden,intro:document.querySelector("#td-intro").textContent,note:document.querySelector("#confirm-note")?.textContent||"",issues:(document.querySelector("#s-issues").textContent+document.querySelector("#td-issues").textContent).trim()}})()`);
+let fb = await bare();
+check("Linked: sharing Garden's lights and a sensor, nothing on Targets, day and night can be edited, and the foot bar has only Back, with Confirm as for any zone", fb.shares && fb.editable.length === 0 && same(fb.bar, ["Back", "Confirm"]) && !fb.pageHidden && fb.draft && fb.issues === "" && fb.intro === "Everything on this page is Zone: Garden's, so there's nothing to change here. Edit in Garden." && fb.note === "Not confirmed yet. There's nothing to set here, so Confirm once you've looked.", fb);
+await both("linked-targets-all-parent");
+await cClick("[data-confirmstep]"); await sleep(300);
+await ev(`openTd("${bench}");render()`); await sleep(80);
+fb = await bare();
+check("Linked: confirmed and opened again, it's Back alone", same(fb.bar, ["Back"]) && fb.note === "" && fb.draft && (await ev(`stepOpen(zoneById("${bench}"),"targets")`)) === false, fb);
+await ev(`ui.td=null;ui.sched=null;ui.vpdw=null;render()`);
+await evp(`saveConfig(()=>{devices.forEach(d=>{if(d.type==="Light")d.zones=d.zones.filter(x=>x!=="${bench}")})})`); await sleep(100);
+/* Bench shares Garden's sensor, so neither unlinking it nor removing Garden can leave that sensor in two families. */
+await ev(`openWizard("${bench}",[0]);render()`); await sleep(40); await tap("#wiz-linkme"); await cClick('[data-wiz="next"]'); await cClick("[data-rapply]"); await sleep(300);
+const unlinkNo = await ev(`document.querySelector("#modal .notice.critical")?.textContent||""`);
+check("Linked: unlinking a zone that shares its parent's sensor is refused, naming the sensor to take out first", unlinkNo.includes("Not saved. Environment left is in both Garden and Bench. Take it out of Bench before unlinking it.") && (await diskZone(bench)).parent === "garden", unlinkNo);
+await cClick("[data-rback]"); await ev(`ui.review=null;ui.wiz=null;renderModal();render()`);
+/* Removing a parent unlinks its zones, which stay. The Remove dialog says so first. */
+await ev(`askRemoveZone("garden")`); await sleep(40);
+const rmRow = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
+check("Linked: removing a parent lists its linked zones as unlinked", rmRow === "Linked zonesBench is unlinked", rmRow);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await cClick("[data-gdiscard]"); await sleep(300);
+check("Linked: but while Bench shares Garden's sensor, removing Garden is refused, naming the sensor", (await toastNow()).includes("Environment left is in both Garden and Bench. Take it out of Bench before removing Garden.") && !!(await diskZone("garden")) && (await ev(`!!zoneById("garden")`)) === true, await toastNow());
+await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[]})`); await sleep(100);
+await ev(`zoneById("garden").parent=undefined;zoneById("${bench}").parent="veg";askRemoveZone("veg")`); await sleep(40);
+/* Listed in the zone order, where Bench now sits next to Garden, the parent it was made under. */
+const rmRows = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
+check("Linked: several are named together", rmRows === "Linked zonesBench, Nursery are unlinked", rmRows);
+await both("linked-remove");
+await key("Escape", 27); await ev(`zoneById("${bench}").parent="garden";delete zoneById("garden").parent;render()`);
+/* Removing Bench's parent for real would take Garden, so Bench becomes a parent here instead: Shelf, linked to it. */
+await evp(`saveConfig(()=>{zoneById("${bench}").parent=undefined;delete zoneById("${bench}").parent;zones.push({...JSON.parse(JSON.stringify(zoneById("${bench}"))),id:"shelf",name:"Shelf",sensors:[],parent:"${bench}"})})`); await sleep(100);
+check("Linked: Shelf is stored linked to Bench", (await diskZone("shelf")).parent === bench, await diskZone("shelf"));
+await ev(`askRemoveZone("${bench}")`); await sleep(40);
+await ev(`(()=>{const i=document.querySelector("#dlg-confirm");i.value=ui.guard.confirm;i.dispatchEvent(new Event("input",{bubbles:true}))})()`); await cClick("[data-gdiscard]"); await sleep(300);
+check("Linked: removed, Bench is gone and Shelf stays, unlinked, and shows none of it: no line, no parent notice, no From card", !(await diskZone(bench)) && !!(await diskZone("shelf")) && (await diskZone("shelf")).parent === undefined && (await ev(`(()=>{ui.screen="zone";ui.zone="shelf";render();const a=!document.querySelector("#main .zlinked")&&!document.querySelector("#parent-failsafe");openAutos("shelf","control");const b=!document.querySelector("[data-fromzone]")&&!!document.querySelector("#modal [data-autosdlg]");ui.autos=null;renderModal();return a&&b})()`)) === true, await diskZone("shelf"));
+/* Straight against the fake, then put back: a save that drops Veg unlinks Nursery, which stays. */
+const lone = await onHA(`(()=>{const keep={config:fakeHA.config,disk:fakeHA.disk,saves:fakeHA.saves.length};try{const c=JSON.parse(fakeHA.disk);fakeHA.save({revision:fakeHA.config.revision,config:{zones:c.zones.filter(z=>z.id!=="veg"),devices:c.devices.map(d=>({...d,zones:d.zones.filter(z=>z!=="veg")})).map(d=>{if(d.place)delete d.place.veg;return d}),room:c.room}});const n=JSON.parse(fakeHA.disk).zones.find(z=>z.id==="nursery");return [true,!!n&&n.parent===undefined]}catch(e){return [false,e.message]}finally{fakeHA.config=keep.config;fakeHA.disk=keep.disk;fakeHA.saves.length=keep.saves}})()`);
+check("Linked: the backend itself unlinks the zones of a parent removed in the same save", same(lone, [true, true]), lone);
+await evp(`saveConfig(()=>{zones.splice(zones.findIndex((z)=>z.id==="shelf"),1)})`); await sleep(100);
+check("Linked: and the sample room is as it was, Nursery still linked to Veg", same(await ev(`zones.map(z=>z.id+":"+(z.parent||""))`), ["garden:", "veg:", "nursery:veg"]) && same(await onHA(`JSON.parse(fakeHA.disk).zones.map(z=>z.id)`), ["garden", "veg", "nursery"]), await ev(`zones.map(z=>z.id+":"+(z.parent||""))`));
+}
+await reset(); await setupOnly();
+
 // ---------- Dialogs: a dialog's buttons are its own foot, and the bar pinned to the window is for pages
-const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&m.querySelector(".dialog"),b=d&&d.querySelector(".dlgbar"),t=d&&d.querySelector("#dlg-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:r.bottom-q.bottom<2,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].classList.contains("draft-discard")&&(bs.length<2||bs[1].classList.contains("draft-review"))}})()`);
+/* The dialog on top: a question asked from the Automations dialog sits over it. */
+const dlgFit = () => ev(`(()=>{const m=document.querySelector("#modal"),d=m&&!m.hidden&&(m.querySelector(":scope > .modal.over .dialog")||m.querySelector(".dialog")),b=d&&d.querySelector(".dlgfoot"),t=d&&d.querySelector("#dlg-title, #autos-title");if(!b)return null;const r=d.getBoundingClientRect(),q=b.getBoundingClientRect(),h=t.getBoundingClientRect(),bs=[...b.querySelectorAll("button:not([hidden])")],k=bs.map(x=>x.getBoundingClientRect());return {title:t.textContent,inside:k.every(x=>x.left>=r.left-0.5&&x.right<=r.right+0.5&&x.top>=r.top-0.5&&x.bottom<=r.bottom+0.5),last:d.lastElementChild===b,foot:Math.abs(r.bottom-q.bottom-parseFloat(getComputedStyle(d).paddingBottom)-parseFloat(getComputedStyle(d).borderBottomWidth))<1.5,bg:getComputedStyle(b).backgroundColor,dbg:getComputedStyle(d).backgroundColor,position:getComputedStyle(b).position,onScreen:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,titleShown:h.top>=r.top&&h.bottom<=r.bottom,buttons:bs.map(x=>x.textContent),leaveFirst:bs[0].className==="btn"&&(bs.length<2||["btn primary","btn danger"].includes(bs[1].className))}})()`);
 const dlgOk = (f) => !!f && f.inside && f.last && f.foot && f.position === "static" && f.onScreen && f.titleShown && f.leaveFirst;
+/* WCAG contrast, the page's own primary colour, and computed styles, for the colour checks on dialogs and the foot bar. */
+const LOOK_JS = `const rgb=(c)=>c.match(/[0-9.]+/g).slice(0,3).map(Number),lin=(v)=>(v/=255)<=0.03928?v/12.92:((v+0.055)/1.055)**2.4,lum=(c)=>{const [r,g,b]=rgb(c);return 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b)},ratio=(a,b)=>{const x=lum(a),y=lum(b);return Math.round((Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)*100)/100},cs=(e)=>getComputedStyle(e),prim=(()=>{const i=document.createElement("i");i.style.color="var(--primary)";document.body.append(i);const c=cs(i).color;i.remove();return c})();`;
+const dlgLook = () => ev(`(()=>{${LOOK_JS}const d=document.querySelector("#modal > .modal.over .dialog")||document.querySelector("#modal .dialog"),f=d&&d.querySelector(".dlgfoot");if(!f)return null;const bs=[...f.querySelectorAll("button:not([hidden])")],go=bs.length>1?bs.at(-1):null,leave=bs[0],fb=cs(d).backgroundColor;return {divider:cs(f).borderTopStyle!=="none"&&parseFloat(cs(f).borderTopWidth)>0,red:!!go&&go.classList.contains("danger"),goBg:go&&cs(go).backgroundColor,prim,goText:go&&ratio(cs(go).color,cs(go).backgroundColor),leaveText:ratio(cs(leave).color,fb),leaveBorder:cs(leave).borderTopColor!==fb}})()`);
+const dlgLookOk = (l) => !!l && l.divider && l.leaveBorder && l.leaveText >= 4.5 && (!l.goBg || l.red || (l.goBg === l.prim && l.goText >= 4.5));
+const barLook = () => ev(`(()=>{${LOOK_JS}const b=[...document.querySelectorAll(".draftbar")].find(e=>!e.hidden&&e.getBoundingClientRect().height>0);if(!b)return null;const bg=cs(b).backgroundColor,body=cs(document.body),go=b.querySelector(".draft-review"),n=b.querySelector(".draft-count");return {bg,fg:body.color,page:body.backgroundColor,prim,goBg:go&&cs(go).backgroundColor,goText:go&&ratio(cs(go).color,cs(go).backgroundColor),text:ratio(cs(b).color,bg),plain:[...b.querySelectorAll(".draft-discard")].map(p=>ratio(cs(p).color,bg)),count:n&&ratio(cs(n).color,cs(n).backgroundColor),edge:cs(b).boxShadow.includes("0px 0px 0px 1px")}})()`);
+const withAccent = (c) => ev(`(()=>{const r=document.documentElement;window.__acc=[r.style.getPropertyValue("--primary"),r.style.getPropertyValue("--on-primary")];r.style.setProperty("--primary","${c}");r.style.setProperty("--on-primary",onColor("${c}"))})()`);
+const restoreAccent = () => ev(`(()=>{const r=document.documentElement,a=window.__acc||["",""];[["--primary",a[0]],["--on-primary",a[1]]].forEach(([k,v])=>v?r.style.setProperty(k,v):r.style.removeProperty(k))})()`);
 /* 45 minutes, a value the helper doesn't hold at any point in the suite, so typing it is always a draft. */
 const typeRepeat = (v) => ev(`(()=>{const i=document.querySelector("#repeat-in");i.value="${v}";i.dispatchEvent(new Event("input",{bubbles:true}));i.blur()})()`);
 const DIALOGS = [
   ["targets", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]'); }, "[data-tclose]"],
   ["activity", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); }, "[data-aclose]"],
-  ["discard", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await tap('[data-autopage="failsafe"]'); }, "[data-gkeep]"],
-  ["review", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await tap("[data-dreview]"); }, "[data-rback]"],
-  ["failsafe-off", async () => { await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"failsafe"};ui.linkw=null;render()`); await tap('[data-autorow="automation.failsafe_garden_lights_recovery"] .sw'); }, "[data-gkeep]"],
+  ["automations", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); }, "[data-uclose]"],
+  ["automations-linked", async () => { await goTab("Nursery"); await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await tap('#modal [data-autopage="failsafe"]'); }, "[data-uclose]"],
+  ["discard", async () => { await openAutosAt("garden", "alert"); await typeRepeat(45); await tap('#modal [data-autopage="failsafe"]'); }, "[data-gkeep]"],
+  ["review", async () => { await openAutosAt("garden", "alert"); await typeRepeat(45); await tap("#modal [data-ureview]"); }, "[data-rback]"],
+  ["failsafe-off", async () => { await openAutosAt("garden", "failsafe"); await tap('[data-autorow="automation.failsafe_garden_lights_recovery"] .sw'); }, "[data-gkeep]"],
   ["share", async () => { await mOpen("nursery"); await ev(`ui.mapw.step=2;render()`); await tap('[data-mdevice="dehu"]'); }, "[data-gkeep]"],
   ["remove", async () => { await setupNow(); await tap('[data-zmenu="veg"]'); await cClick('[data-rmzone="veg"]'); }, "[data-gkeep]"],
 ];
-for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
-  for (const [name, openIt, closeSel] of DIALOGS) {
-    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
-    await reset(); await openIt(); await sleep(80);
-    const f = await dlgFit();
-    check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
-    await shot(`dialog-${name}-${size}`);
-    await tap(closeSel); await ev(`ui.mapw=null;if(ui.autos)ui.autos.repeat=undefined;render()`);
+for (const theme of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+  for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+    for (const [name, openIt, closeSel] of DIALOGS) {
+      if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+      await reset(); await openIt(); await sleep(80);
+      const f = await dlgFit();
+      if (theme === "light") check(`Dialogs ${size}, ${name}: its buttons sit inside its box, as its foot, the leaving one first, and the whole dialog on screen`, dlgOk(f), f);
+      check(`Dialogs ${size}, ${name}, ${theme}: its foot has no strip of its own, on the dialog's own background`, !!f && f.bg === f.dbg, f);
+      const l = await dlgLook();
+      check(`Dialogs ${size}, ${name}, ${theme}: a divider above its buttons, the leaving one outlined, the going-on one in the accent colour or red, each readable at 4.5:1`, dlgLookOk(l), l);
+      if (name === "review" && size === "desktop") {
+        await withAccent("#F44336"); const r = await dlgLook(); await restoreAccent();
+        check(`Dialogs, review, ${theme}: with a red accent its going-on button is red with readable text`, dlgLookOk(r) && r.goBg === "rgb(244, 67, 54)", r);
+      }
+      await shot(`dialog-${name}-${size}${theme === "dark" ? "-dark" : ""}`);
+      await tap(closeSel); await ev(`ui.mapw=null;ui.autos=null;ui.guard=null;ui.review=null;renderModal();render()`);
+    }
   }
 }
+await send("Emulation.setEmulatedMedia", { features: [] });
 await phone(390, 844); await reset();
-await ev(`ui.screen="autos";ui.zone="garden";ui.autos={zone:"garden",page:"alert"};ui.linkw=null;render()`); await typeRepeat(45); await sleep(40);
+
+// ---------- The bar pinned to the foot of the window: its own grey in both themes, the going-on button in the accent colour
+const BARS = [
+  ["wizard", async () => { await ev(`ui.screen="setup";openWizard("garden",[1,2]);render();window.scrollTo(0,0)`); await sleep(60); }],
+  ["draft", async () => { await linkFromSetup("garden"); await tap('[data-lpick]:not([aria-disabled="true"])'); await sleep(60); }],
+];
+const barOk = (b) => !!b && b.bg !== b.fg && b.bg !== b.page && b.edge && b.text >= 4.5 && b.plain.length > 0 && b.plain.every((x) => x >= 4.5) && (b.count === null || b.count >= 4.5) && b.goBg === b.prim && b.goText >= 4.5;
+for (const theme of ["light", "dark"]) {
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+  for (const [w, h, size] of [[390, 844, "phone"], [1280, 900, "desktop"]]) {
+    if (w === 1280) await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); else await phone(w, h);
+    for (const [name, openIt] of BARS) {
+      await reset(); await openIt();
+      const b = await barLook();
+      check(`Foot bar ${size}, ${name}, ${theme}: a grey of its own, not the inverted colours, its text, count and plain buttons readable, the going-on button in the accent colour`, barOk(b), b);
+      await withAccent("#F44336"); const r = await barLook(); await restoreAccent();
+      check(`Foot bar ${size}, ${name}, ${theme}: with a red accent the going-on button is red with readable text`, barOk(r) && r.goBg === "rgb(244, 67, 54)", r);
+      await shot(`bar-${name}-${size}${theme === "dark" ? "-dark" : ""}`);
+      await ev(`if(ui.linkw)ui.linkw.pick={...ui.linkw.was};render()`);
+    }
+    await reset(); await openAutosAt("garden", "alert"); await sleep(20);
+    await shot(`autos-head-${size}${theme === "dark" ? "-dark" : ""}`);
+  }
+}
+await ev(`ui.autos=null;renderModal()`);
+await send("Emulation.setEmulatedMedia", { features: [] });
+await phone(390, 844); await reset();
+await linkFromSetup("garden"); await tap('[data-lpick]:not([aria-disabled="true"])'); await sleep(40);
 check("Dialogs: a page with a draft keeps its bar pinned to the foot of the window", (await ev(`(()=>{const b=document.querySelector("#draftbar"),r=b.getBoundingClientRect();return !b.hidden&&getComputedStyle(b).position==="fixed"&&r.bottom<=innerHeight&&r.bottom>innerHeight-40})()`)) === true);
-await ev(`ui.autos.repeat=undefined;render()`);
+await ev(`ui.linkw.pick={...ui.linkw.was};ui.linkw=null;render()`);
 /* A long review, longer than any window: thirty changes, drawn by the review dialog itself. */
 for (const [w, h, size] of [[390, 844, "phone"], [844, 390, "landscape"]]) {
   await phone(w, h); await reset();
@@ -2434,7 +3170,7 @@ await cClick("[data-gkeep]");
 for (const [w, h, name] of [[390, Math.round(844 * (1 - KEYBOARD.portrait)), "phone"], [844, Math.round(390 * (1 - KEYBOARD.landscape)), "landscape"]]) {
   await phone(390, 844); await setupNow(); await askRemove("garden"); await tap("#dlg-confirm");
   await phone(w, h); await sleep(150);
-  const k = await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),bs=[...document.querySelectorAll("#modal .dlgbar button")],vis=(e)=>{const r=e.getBoundingClientRect();let ok=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;for(let p=e.parentElement;p&&ok;p=p.parentElement){if(getComputedStyle(p).overflowY==="visible")continue;const q=p.getBoundingClientRect();ok=r.top>=q.top-1&&r.bottom<=q.bottom+1}return ok},reach=(e)=>{e.scrollIntoView({block:"nearest"});return vis(e)},out={focused:document.activeElement===i,both:vis(i)&&bs.every(vis)};out.buttons=bs.every(reach);out.box=reach(i);return out})()`);
+  const k = await ev(`(()=>{const i=document.querySelector("#dlg-confirm"),bs=[...document.querySelectorAll("#modal .dlgfoot button")],vis=(e)=>{const r=e.getBoundingClientRect();let ok=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;for(let p=e.parentElement;p&&ok;p=p.parentElement){if(getComputedStyle(p).overflowY==="visible")continue;const q=p.getBoundingClientRect();ok=r.top>=q.top-1&&r.bottom<=q.bottom+1}return ok},reach=(e)=>{e.scrollIntoView({block:"nearest"});return vis(e)},out={focused:document.activeElement===i,both:vis(i)&&bs.every(vis)};out.buttons=bs.every(reach);out.box=reach(i);return out})()`);
   check(`Remove, keyboard up ${name}: the box and the buttons are both reachable${name === "phone" ? ", and in view together" : ""}`, k.focused && k.box && k.buttons && (name !== "phone" || k.both), k);
   await shot(`remove-dialog-keyboard-${name}`);
   await key("Escape", 27); await sleep(40);
