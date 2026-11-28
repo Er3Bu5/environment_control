@@ -297,6 +297,8 @@ interface Guard {
   kind: "guard";
   title: string;
   text: string;
+  /* A second paragraph of the question itself, before any rows. */
+  more?: string;
   rows?: [string, string][];
   note?: string;
   confirm?: string;
@@ -1077,7 +1079,7 @@ export class EcApp extends LitElement {
         d.sensors[s.id] = seedSlots(s);
       });
     const others = sensorElsewhere(this.config, z.id, s.id);
-    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, others), add);
     else add();
   }
 
@@ -1087,7 +1089,7 @@ export class EcApp extends LitElement {
     if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
     const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
     const others = deviceElsewhere(this.config, z.id, c.entity);
-    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("device", c.name, others), add);
     else add();
   }
 
@@ -4334,10 +4336,11 @@ export class EcApp extends LitElement {
     if (m.kind === "guard") {
       const blocked = !!m.confirm && this.confirmText !== m.confirm;
       return html`<div class="modal">
-        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby=${m.more ? "dlg-text dlg-more" : "dlg-text"}>
           <h2 id="dlg-title" tabindex="-1">${m.title}</h2>
           <div class="review-scroll">
             <p class="muted" id="dlg-text">${m.text}</p>
+            ${m.more ? html`<p class="muted" id="dlg-more">${m.more}</p>` : nothing}
             ${m.rows?.length
               ? html`<div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
                   ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}`

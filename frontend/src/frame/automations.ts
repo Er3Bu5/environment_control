@@ -6,7 +6,7 @@
    what's saved, and the helper's value counts only once HA reports it. This only decides what to draw and what a report
    means; the host is what sends, and it checks every request against the setup it fetched itself. */
 import type { Catalog, CatalogAutomation, Room } from "./messages";
-import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type Zone, readLinks } from "./model";
+import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type RawConfig, type Zone, andList, readLinks } from "./model";
 import { type HaState, numberOf } from "./readings";
 
 /* The Automations page's three chips, and the groups each one holds. */
@@ -59,8 +59,6 @@ export interface Question {
   go: string;
 }
 
-/* Zone names joined as the panel joins them everywhere else. */
-export const andList = (names: string[]) => names.join(" and ");
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* Only a suggestion. Names follow no rule Home Assistant enforces, and a dashboard can keep an alert named ..._day with
