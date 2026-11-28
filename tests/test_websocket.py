@@ -333,11 +333,11 @@ async def test_a_setup_stored_before_linked_zones_loads_and_saves_as_before(
     assert hass_storage[DOMAIN]["data"] == {**stored, "revision": 5}
 
 
-async def test_a_setup_stored_with_a_sensor_in_two_unlinked_zones_loads_and_cannot_be_saved_as_it_is(
+async def test_a_setup_stored_with_a_sensor_in_two_unlinked_zones_saves_as_it_is_and_can_be_taken_apart(
     hass, hass_ws_client, hass_storage, sample_unlinked
 ) -> None:
-    """Pins today's behaviour: before linked zones any two zones could share a sensor, and there is no migration. The
-    panel shows the setup, and a save asks for the sensor to come out of one zone or the zones to be linked."""
+    """Before linked zones any two zones could share a sensor, and there is no migration. Such a share is let through
+    while it only shrinks, so the panel can save the setup and take the sensor out of a zone; growing it is refused."""
     room = _share_veg_sensor({"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]})
     for z in room["zones"]:
         z.pop("parent", None)
@@ -347,12 +347,22 @@ async def test_a_setup_stored_with_a_sensor_in_two_unlinked_zones_loads_and_cann
     r = await _send(client, type=f"{DOMAIN}/config")
     assert r["success"] and r["result"] == stored
     r = await _save(client, 4, room)
-    assert (
-        not r["success"]
-        and r["error"]["message"] == "A sensor can only be shared between a zone and the zones linked to it."
+    assert r["success"] and r["result"] == {**stored, "revision": 5}
+    grown = copy.deepcopy(room)
+    garden = next(z for z in grown["zones"] if z["id"] == "garden")
+    garden["sensors"].append(copy.deepcopy(next(z for z in grown["zones"] if z["id"] == "veg")["sensors"][0]))
+    r = await _save(client, 5, grown)
+    assert not r["success"] and r["error"]["message"] == (
+        "Veg environment is in Zone: Garden, Veg and Nursery. "
+        "A sensor can only be shared between a zone and the zones linked to it."
     )
+    taken_apart = copy.deepcopy(room)
+    nursery = next(z for z in taken_apart["zones"] if z["id"] == "nursery")
+    nursery["sensors"] = nursery["sensors"][:-1]
+    r = await _save(client, 5, taken_apart)
+    assert r["success"]
     await hass.async_block_till_done()
-    assert hass_storage[DOMAIN]["data"] == stored
+    assert hass_storage[DOMAIN]["data"] == {**taken_apart, "revision": 6}
 
 
 async def test_two_saves_at_one_revision_keep_one_and_refuse_the_other(hass, hass_storage) -> None:

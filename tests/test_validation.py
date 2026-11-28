@@ -563,17 +563,20 @@ LINK_CASES = {
         lambda c: _zone(c, "veg").update(parent="garden"),
         "veg has zones linked to it, so it can't be linked to another",
     ),
-    "a sensor in two plain zones": (lambda c: _zone(c, "garden")["sensors"].append(_sensor(c, "veg", "v-env")), SHARED),
+    "a sensor in two plain zones": (
+        lambda c: _zone(c, "garden")["sensors"].append(_sensor(c, "veg", "v-env")),
+        f"Veg environment is in Zone: Garden and Veg. {SHARED}",
+    ),
     "a linked zone's sensor in an unrelated zone": (
         lambda c: _zone(c, "garden")["sensors"].append(_sensor(c, "nursery", "n-env")),
-        SHARED,
+        f"Nursery environment is in Zone: Garden and Nursery. {SHARED}",
     ),
     "a sensor shared by zones linked to different parents": (
         lambda c: (
             _zone(c, "nursery")["sensors"].append(_sensor(c, "garden", "g-left")),
             _bench(c, "garden", ("garden", "g-left")),
         ),
-        SHARED,
+        f"Environment left is in Zone: Garden, Nursery and Bench. {SHARED}",
     ),
     "a zone name that isn't text": (
         lambda c: _zone(c, "garden").update(name=5),
@@ -656,6 +659,74 @@ def test_unlinking_a_zone_that_shares_nothing_is_allowed(sample_config) -> None:
     validate_config(c, before)
     _zone(c, "nursery")["parent"] = "garden"
     validate_config(c, before)
+
+
+def test_a_sensor_shared_by_a_family_and_an_unrelated_zone_is_not_an_unlinking(sample_config) -> None:
+    """The Veg and Nursery link stays: only Garden is new, so the refusal names the three zones, not an unlinking."""
+    before = _sharing(sample_config)
+    c = copy.deepcopy(before)
+    _zone(c, "garden")["sensors"].append(_sensor(c, "veg", "v-env"))
+    why = f"Veg environment is in Zone: Garden, Veg and Nursery. {SHARED}"
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, before)
+
+
+def _stored_before_the_rule(sample_config):
+    """A setup saved before linked zones existed: Veg's sensor in all three zones, none of them linked."""
+    c = _room(sample_config)
+    del _zone(c, "nursery")["parent"]
+    for zid in ("garden", "nursery"):
+        _zone(c, zid)["sensors"].append(_sensor(c, "veg", "v-env"))
+    return c
+
+
+def _drop(c, zid, sid):
+    c = copy.deepcopy(c)
+    _zone(c, zid)["sensors"] = [s for s in _zone(c, zid)["sensors"] if s["id"] != sid]
+    return c
+
+
+def test_a_stored_share_in_three_unrelated_zones_can_be_taken_apart_one_zone_at_a_time(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    once = _drop(stored, "nursery", "v-env")
+    validate_config(once, stored)
+    validate_config(_drop(once, "garden", "v-env"), once)
+
+
+def test_a_stored_share_saved_as_it_is_with_something_else_changed_is_allowed(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    c = copy.deepcopy(stored)
+    _zone(c, "garden")["name"] = "Flower"
+    validate_config(c, stored)
+
+
+def test_a_stored_share_may_not_grow(sample_config) -> None:
+    stored = _stored_before_the_rule(sample_config)
+    c = copy.deepcopy(stored)
+    _bench(c, None, ("veg", "v-env"))
+    why = f"Veg environment is in Zone: Garden, Veg, Nursery and Bench. {SHARED}"
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, stored)
+
+
+def test_a_stored_share_may_not_lose_a_link_it_had(sample_config) -> None:
+    """Shrinking means no zone joins and no linked pair in it comes apart: unlinking Nursery is a new illegal pair."""
+    stored = _room(sample_config)
+    for zid in ("garden", "nursery"):
+        _zone(stored, zid)["sensors"].append(_sensor(stored, "veg", "v-env"))
+    c = copy.deepcopy(stored)
+    del _zone(c, "nursery")["parent"]
+    why = "Veg environment is in both Veg and Nursery. Take it out of Nursery before unlinking it."
+    with pytest.raises(InvalidConfig, match=f"^{re.escape(why)}$"):
+        validate_config(c, stored)
+
+
+def test_two_stored_illegal_pairs_can_each_be_taken_apart_on_its_own(sample_config) -> None:
+    stored = _room(sample_config)
+    del _zone(stored, "nursery")["parent"]
+    _zone(stored, "garden")["sensors"] += [_sensor(stored, "veg", "v-env"), _sensor(stored, "nursery", "n-env")]
+    validate_config(_drop(stored, "garden", "v-env"), stored)
+    validate_config(_drop(stored, "nursery", "n-env"), stored)
 
 
 def test_a_bad_zone_name_is_refused_before_a_removal_message_can_carry_it(sample_config) -> None:

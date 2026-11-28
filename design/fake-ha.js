@@ -205,15 +205,23 @@ class FakeHA {
     }
     /* A sensor in two zones shows one zone's readings in another, which only a parent link may do: every zone a sensor is
        in is one family, a parent and the zones linked to it. Breaking a link a sensor is shared across names the sensor. */
-    const holders = new Map(), root = (z) => z.parent || z.id, linkedBefore = (a, b) => (before?.zones || []).some((z) => (z.id === a.id && z.parent === b.id) || (z.id === b.id && z.parent === a.id));
+    const holders = new Map(), held = new Map(), was = new Map((before?.zones || []).map((z) => [z.id, z.parent]));
+    for (const z of before?.zones || []) for (const x of Array.isArray(z.sensors) ? z.sensors : []) if (x && typeof x.id === "string") held.set(x.id, new Set([...(held.get(x.id) || []), z.id]));
     for (const z of c.zones) for (const x of Array.isArray(z.sensors) ? z.sensors : []) if (x && typeof x.id === "string") holders.set(x.id, [...(holders.get(x.id) || []), { z, name: x.name || x.id }]);
-    for (const list of holders.values()) {
+    const root = (z) => z.parent || z.id, rootBefore = (id) => was.get(id) || id, named = (z) => z.name || z.id;
+    for (const [sid, list] of holders) {
       if (new Set(list.map((h) => root(h.z))).size === 1) continue;
-      for (const a of list) for (const b of list) if (a !== b && linkedBefore(a.z, b.z)) {
-        const child = (before.zones.find((z) => z.id === a.z.id) || {}).parent === b.z.id ? a.z : b.z;
-        this.fail(`${a.name} is in both ${a.z.name} and ${b.z.name}. Take it out of ${child.name} before unlinking it.`);
+      /* A setup stored before this rule can hold a sensor in several unrelated zones, and the panel saves one zone at a
+         time, so such a share is let through while it only shrinks: no zone joins it and no linked pair in it comes apart. */
+      const had = held.get(sid) || new Set();
+      if (list.every((h) => had.has(h.z.id)) && list.every((a) => list.every((b) => root(a.z) === root(b.z) || rootBefore(a.z.id) !== rootBefore(b.z.id)))) continue;
+      /* A link this save leaves in place isn't being broken, so that pair isn't what the save got wrong. */
+      for (const a of list) for (const b of list) {
+        const [child, other] = was.get(a.z.id) === b.z.id ? [a.z, b.z] : [b.z, a.z];
+        if (a !== b && was.get(child.id) === other.id && child.parent !== other.id) this.fail(`${a.name} is in both ${named(a.z)} and ${named(b.z)}. Take it out of ${named(child)} before unlinking it.`);
       }
-      this.fail("A sensor can only be shared between a zone and the zones linked to it.");
+      const zones = [...new Set(list.map((h) => h.z))].map(named);
+      this.fail(`${list[0].name} is in Zone: ${zones.length === 1 ? zones[0] : `${zones.slice(0, -1).join(", ")} and ${zones.at(-1)}`}. A sensor can only be shared between a zone and the zones linked to it.`);
     }
     const helper = (v) => v === undefined || (typeof v === "string" && /^input_(number|datetime)\.[a-z0-9_]+$/.test(v)) || (v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every(helper));
     for (const z of c.zones) if (z.helpers !== undefined && !helper(z.helpers)) this.fail(`${z.id} links a setting to something that isn't a helper`);

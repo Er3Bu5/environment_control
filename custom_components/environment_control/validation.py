@@ -282,6 +282,12 @@ def _zone_name(z: dict[str, Any]) -> str:
     return z.get("name") or z["id"]
 
 
+def _zone_list(zones: list[dict[str, Any]]) -> str:
+    """The zones as one sentence, written as the panel names zones: "Zone: X" the first time, the bare name after."""
+    names = [_zone_name(z) for z in zones]
+    return "Zone: " + (names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}")
+
+
 def _check_zone_name(z: dict[str, Any]) -> None:
     """A zone's name goes into refusals, so it is held to a link's name: short text with no control characters."""
     name = z.get("name")
@@ -322,23 +328,53 @@ def _check_parents(zones: list[dict[str, Any]], before: list[dict[str, Any]]) ->
 def _check_shared_sensors(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
     """A sensor in two zones shows one zone's readings in another, which only a parent link may do."""
     was = {z.get("id"): z.get("parent") for z in before if isinstance(z, dict)}
+    held: dict[Any, set[Any]] = {}
+    for z in before:
+        for x in z.get("sensors") if isinstance(z.get("sensors"), list) else []:
+            if isinstance(x, dict) and isinstance(x.get("id"), str):
+                held.setdefault(x["id"], set()).add(z.get("id"))
     holders: dict[str, list[tuple[dict[str, Any], str]]] = {}
     for z in zones:
         for x in z.get("sensors") or []:
             holders.setdefault(x["id"], []).append((z, x.get("name") or x["id"]))
-    for found in holders.values():
-        if len({z.get("parent") or z["id"] for z, _ in found}) == 1:
+
+    def family(z: dict[str, Any]) -> Any:
+        return z.get("parent") or z["id"]
+
+    def family_before(zid: str) -> Any:
+        return was.get(zid) or zid
+
+    for sid, found in holders.items():
+        if len({family(z) for z, _ in found}) == 1:
+            continue
+        # A setup stored before this rule can hold a sensor in several unrelated zones, and the panel saves one zone at
+        # a time, so such a share is let through while it only shrinks: no zone joins it and no linked pair in it
+        # comes apart. Refusing it outright would leave a sensor in three unrelated zones impossible to repair.
+        if {z["id"] for z, _ in found} <= held.get(sid, set()) and all(
+            family_before(a["id"]) != family_before(b["id"])
+            for a, _ in found
+            for b, _ in found
+            if family(a) != family(b)
+        ):
             continue
         # The zone stops sharing only by taking the shared sensor out first, so breaking the link is refused by name.
+        # A link this save leaves in place isn't being broken, so that pair isn't what the save got wrong.
         for i, (a, sensor) in enumerate(found):
             for j, (b, _) in enumerate(found):
-                if i != j and (was.get(a["id"]) == b["id"] or was.get(b["id"]) == a["id"]):
-                    child = a if was.get(a["id"]) == b["id"] else b
+                child, other = (a, b) if was.get(a["id"]) == b["id"] else (b, a)
+                if i != j and was.get(child["id"]) == other["id"] and child.get("parent") != other["id"]:
                     _fail(
                         f"{sensor} is in both {_zone_name(a)} and {_zone_name(b)}. "
                         f"Take it out of {_zone_name(child)} before unlinking it."
                     )
-        _fail("A sensor can only be shared between a zone and the zones linked to it.")
+        named: list[dict[str, Any]] = []
+        for z, _ in found:
+            if not any(z is n for n in named):
+                named.append(z)
+        _fail(
+            f"{found[0][1]} is in {_zone_list(named)}. "
+            "A sensor can only be shared between a zone and the zones linked to it."
+        )
 
 
 def unlink_removed_parents(before: dict[str, Any], c: Any) -> Any:
