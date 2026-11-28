@@ -6,6 +6,7 @@ import { LitElement, type PropertyValues, html, nothing, svg, type TemplateResul
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
+import { inOrder, moveZone, orderZones } from "./sort";
 import {
   type Catalog,
   type CatalogDevice,
@@ -309,6 +310,8 @@ interface Guard {
 interface Review {
   kind: "review";
   changes: Change[];
+  /* What the changes reach, when that isn't simply a zone's own settings. */
+  affects?: string;
   note: string;
   busy: boolean;
   error: string;
@@ -412,6 +415,7 @@ export class EcApp extends LitElement {
     ctl: { state: true },
     ctlDrag: { state: true },
     autos: { state: true },
+    sorting: { state: true },
     linkw: { state: true },
     autoCtl: { state: true },
     repeatPick: { state: true },
@@ -476,6 +480,8 @@ export class EcApp extends LitElement {
   /* A zone's Automations page while it's open, Link automations while it's open, and what each automation's switch is
      waiting for or last heard, by automation. */
   declare private autos: AutosPage | null;
+  /* Sort on Overview while it's open: the order as it's been moved so far, by zone id. */
+  declare private sorting: { order: string[] } | null;
   declare private linkw: LinkDraft | null;
   declare private autoCtl: Record<string, AutoCtl>;
   private linkBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
@@ -525,6 +531,7 @@ export class EcApp extends LitElement {
     this.ctl = {};
     this.ctlDrag = {};
     this.autos = null;
+    this.sorting = null;
     this.linkw = null;
     this.autoCtl = {};
     this.repeatPick = false;
@@ -761,6 +768,7 @@ export class EcApp extends LitElement {
   }
 
   private get draftCount(): number {
+    if (this.sortOn) return this.sortChangeList().length;
     if (this.wiz) return this.wizChanges(this.wiz).length;
     /* Opened from Device placement, it holds that draft underneath, and leaving loses both. */
     if (this.mapw) return this.mapChangeList(this.mapw).length + (this.mapToPlace ? layoutChanges(this.mapToPlace.draft, this.config).length : 0);
@@ -790,7 +798,7 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos");
+    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos" || this.sortOn);
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
@@ -829,7 +837,7 @@ export class EcApp extends LitElement {
   private guarded(action: () => void, count?: number): void {
     const n = count ?? this.draftCount;
     if (!n) return action();
-    const zone = (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || (this.sched && this.zoneById(this.sched.zoneId)?.name) || (this.linkw && this.zoneById(this.linkw.zoneId)?.name) || (this.autos && this.zoneById(this.autos.zoneId)?.name) || "this zone";
+    const zone = (this.sortOn && "Overview") || (this.wiz && (this.zoneById(this.wiz.id)?.name ?? this.wiz.name.trim())) || (this.mapw && this.zoneById(this.mapw.zoneId)?.name) || (this.lay && this.zoneById(this.lay.zoneId)?.name) || (this.leafw && this.zoneById(this.leafw.zoneId)?.name) || (this.sched && this.zoneById(this.sched.zoneId)?.name) || (this.linkw && this.zoneById(this.linkw.zoneId)?.name) || (this.autos && this.zoneById(this.autos.zoneId)?.name) || "this zone";
     this.modal = {
       kind: "guard",
       title: "Discard unsaved changes?",
@@ -858,6 +866,7 @@ export class EcApp extends LitElement {
     this.zoneId = zoneId;
     this.menu = null;
     this.chartAt = null;
+    if (screen !== "overview") this.sorting = null;
     /* The Automations page's chip and its alert repeat draft go with it. Come back to by Back, it opens on Alerts. */
     if (screen !== "autos") this.autos = null;
     else if (this.autos?.zoneId !== zoneId && zoneId) this.autos = { zoneId, chip: "alert" };
@@ -866,7 +875,7 @@ export class EcApp extends LitElement {
 
   /* Whether Back has anything to do here. The host is told, because the back gesture reaches it and not the frame. */
   private get canGoBack(): boolean {
-    return !!(this.modal || this.menu || this.wiz || this.mapw || this.lay || this.leafw || this.sched || this.linkw || this.autos || this.guide || this.trail.length);
+    return !!(this.modal || this.menu || this.sortOn || this.wiz || this.mapw || this.lay || this.leafw || this.sched || this.linkw || this.autos || this.guide || this.trail.length);
   }
 
   /* One step back, whatever is in front: a dialog or a menu closes, an editor does what its own Back or Cancel does,
@@ -874,6 +883,7 @@ export class EcApp extends LitElement {
   private back(): void {
     if (this.modal) return void this.closeModal();
     if (this.menu) return void (this.menu = null);
+    if (this.sortOn) return void this.sortBack();
     if (this.wiz) return void this.cancelWizard();
     if (this.mapw) return void this.mapBack();
     if (this.lay) return void this.layBack();
@@ -896,6 +906,7 @@ export class EcApp extends LitElement {
       this.tgt = null;
       this.linkw = null;
       this.guide = null;
+      this.sorting = null;
       this.go(screen, zoneId);
     });
   }
@@ -1890,6 +1901,68 @@ export class EcApp extends LitElement {
     else void this.sendAuto(z, a, autoState(st) !== "on");
   }
 
+  /* Sort on Overview. The order is a draft until it's applied, as every other edit is, and saving it reorders the stored
+     zones, which is the order they're shown in everywhere. It ends by itself if Overview is left or fewer than two zones
+     are left to sort. */
+  private get sortOn(): boolean {
+    return !!this.sorting && this.screen === "overview" && this.zones.length >= 2;
+  }
+
+  private get sortedZones(): Zone[] {
+    return this.sortOn && this.sorting ? inOrder(this.zones, this.sorting.order) : this.zones;
+  }
+
+  private sortChangeList(): Change[] {
+    const was = this.zones, now = this.sortedZones, names = (list: Zone[]) => list.map((z) => z.name).join(", ");
+    return now.some((z, i) => z.id !== was[i]?.id) ? [{ label: "Zone order", before: names(was), after: names(now) }] : [];
+  }
+
+  private startSort = (): void => {
+    this.sorting = { order: this.zones.map((z) => z.id) };
+    void this.updateComplete.then(() => (this.shadowRoot?.querySelector("#sort-note") as HTMLElement | null)?.focus());
+  };
+
+  private moveCard(id: string, by: -1 | 1): void {
+    if (!this.sorting) return;
+    this.sorting = { order: moveZone(this.sortedZones.map((z) => z.id), id, by) };
+    /* Focus stays on the arrow used, so it can be pressed again, or on the other one once the card has reached the end. */
+    void this.updateComplete.then(() => {
+      const arrow = (b: number) => this.shadowRoot?.querySelector(`[data-move="${CSS.escape(id)}"][data-by="${b}"]`) as HTMLButtonElement | null;
+      const used = arrow(by);
+      (used?.disabled ? arrow(-by) : used)?.focus({ preventScroll: true });
+      used?.closest(".zone-card")?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  private sortDiscard = (): void => {
+    if (this.sorting) this.sorting = { order: this.zones.map((z) => z.id) };
+  };
+
+  private sortBack = (): void => this.guarded(() => this.leaveSort());
+
+  private leaveSort(): void {
+    this.sorting = null;
+    void this.updateComplete.then(() => (this.shadowRoot?.querySelector("[data-sort]") as HTMLElement | null)?.focus());
+  }
+
+  private sortReview = (): void => {
+    const changes = this.sortChangeList(), order = this.sortedZones.map((z) => z.id);
+    if (!changes.length) return;
+    this.modal = {
+      kind: "review",
+      changes,
+      affects: "This changes only the order zones are listed in.",
+      note: "This is the order zones are shown in on Overview, in the menu and on Setup, on every device. Nothing in Home Assistant changes.",
+      busy: false,
+      error: "",
+      apply: () => this.save((c) => orderZones(c, order)),
+      after: () => {
+        this.toast("Zone order saved.");
+        this.leaveSort();
+      },
+    };
+  };
+
   private repeatChangeList() {
     return this.autos ? repeatChanges(this.room, this.states, this.autos.repeat) : [];
   }
@@ -2423,16 +2496,29 @@ export class EcApp extends LitElement {
           </div>`
         : nothing;
     const judgedAny = this.zones.some((z) => this.judged(z) && this.readingsOf(z.id).length);
-    return html`<div><h1>Overview</h1></div>${issues.length
-        ? html`${group(issues.filter((x) => x.state.startsWith("crit")), "Critical", "critical")}${group(issues.filter((x) => !x.state.startsWith("crit")), "Outside ideal zone", "")}`
-        : judgedAny
-          ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
-          : nothing}
+    const sorting = this.sortOn, shown = this.sortedZones;
+    const head = html`<div class="pagehead">
+      <div><h1>Overview</h1>${sorting ? html`<p class="muted small" id="sort-note" tabindex="-1">Sorting the cards: move them with the arrows.</p>` : nothing}</div>
+      ${this.zones.length >= 2 && !sorting ? html`<button class="btn headbtn" data-sort @click=${this.startSort}>Sort</button>` : nothing}
+    </div>`;
+    const arrows = (z: Zone, i: number) =>
+      html`<div class="arrows">${([[-1, "up", "to previous", i === 0], [1, "down", "to next", i === shown.length - 1]] as const).map(
+        ([by, look, word, off]) => html`<button class="btn move" data-move=${z.id} data-by=${by} aria-label="Move ${z.name} ${word}" ?disabled=${off} @click=${() => this.moveCard(z.id, by)}>${icon(look)}</button>`,
+      )}</div>`;
+    /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. */
+    const card = (z: Zone, body: TemplateResult) => (sorting ? html`<div class="card zone-card sorting" data-sortcard=${z.id}>${body}</div>` : html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>${body}</button>`);
+    return html`${head}${sorting
+        ? nothing
+        : issues.length
+          ? html`${group(issues.filter((x) => x.state.startsWith("crit")), "Critical", "critical")}${group(issues.filter((x) => !x.state.startsWith("crit")), "Outside ideal zone", "")}`
+          : judgedAny
+            ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
+            : nothing}
       <div class="cards">
-        ${this.zones.map((z) => {
+        ${repeat(shown, (z) => z.id, (z, i) => {
           const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
-          return html`<button class="card zone-card" @click=${() => this.go("zone", z.id)}>
-            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}</div>
+          return card(z, html`
+            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
             ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
             <div class="rows">
               ${METRICS.map(
@@ -2452,8 +2538,7 @@ export class EcApp extends LitElement {
                   </div>`}
             </div>
             ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
-            <p class="small muted">${this.zoneCounts(z)}</p>
-          </button>`;
+            <p class="small muted">${this.zoneCounts(z)}</p>`);
         })}
       </div>`;
   }
@@ -3794,9 +3879,11 @@ export class EcApp extends LitElement {
      hasn't been confirmed, until something differs from what's saved, and then the count, Discard and Review and apply
      beside Back. */
   private draftBar() {
-    if (this.screen !== "setup" && this.screen !== "autos") return nothing;
-    let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
-    if (this.leafw) {
+    if (this.screen !== "setup" && this.screen !== "autos" && !this.sortOn) return nothing;
+    let bar: { zoneId: string; where?: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
+    if (this.sortOn) {
+      bar = { zoneId: "", where: "Overview", changes: this.sortChangeList(), issue: undefined, sending: false, back: this.sortBack, discard: this.sortDiscard, review: this.sortReview, confirm: null };
+    } else if (this.leafw) {
       const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId), z = this.zoneById(d.zoneId);
       const open = !!z && d.seeded && sensors.length > 0 && (z.setup.calibrate === "todo" || z.setup.calibrate === "later");
       bar = { zoneId: d.zoneId, changes: this.leafChangeList(d), issue: leafIssues(d, sensors, homesBy)[0]?.text, sending: d.sending, back: this.leafExit, discard: this.leafDiscard, review: this.leafReview, confirm: open ? this.leafConfirm : null };
@@ -3824,7 +3911,7 @@ export class EcApp extends LitElement {
       </div>`;
     return html`<div class="draftbar" role="region" aria-label="Unsaved changes" ?inert=${!!this.modal} ?data-blocked=${!!blocked}>
       <span class="draft-count">${n}</span>
-      <span class="draft-text"><strong>${n === 1 ? `${z?.name ?? ""} · ${bar.changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
+      <span class="draft-text"><strong>${n === 1 ? `${bar.where ?? z?.name ?? ""} · ${bar.changes[0].label}` : `${n} unsaved changes`}</strong><span class="draft-why"> · ${blocked || "nothing changes until you apply"}</span></span>
       ${back}
       <button class="draft-discard" ?disabled=${bar.sending} @click=${bar.discard}>Discard</button>
       <button class="draft-review" ?disabled=${!!blocked || bar.sending} @click=${bar.review}>Review and apply</button>
@@ -4430,7 +4517,7 @@ export class EcApp extends LitElement {
     return html`<div class="modal">
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
         <h2 id="dlg-title" tabindex="-1">Review changes</h2>
-        <p class="muted small" id="dlg-text">Confirm each value before applying.</p>
+        <p class="muted small" id="dlg-text">${m.affects ? `${m.affects} ` : ""}Confirm each value before applying.</p>
         <div class="review-scroll">
           <div class="review-list">
             ${m.changes.map(
