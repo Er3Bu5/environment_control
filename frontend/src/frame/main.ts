@@ -403,6 +403,7 @@ export class EcApp extends LitElement {
     modal: { state: true },
     menu: { state: true },
     toastText: { state: true },
+    toastLeaving: { state: true },
     confirmText: { state: true },
     ctl: { state: true },
     ctlDrag: { state: true },
@@ -455,6 +456,7 @@ export class EcApp extends LitElement {
   declare private modal: Guard | Review | TargetsView | ActivityView | null;
   declare private menu: string | null;
   declare private toastText: string;
+  declare private toastLeaving: boolean;
   declare private confirmText: string;
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
@@ -506,6 +508,7 @@ export class EcApp extends LitElement {
     this.modal = null;
     this.menu = null;
     this.toastText = "";
+    this.toastLeaving = false;
     this.confirmText = "";
     this.ctl = {};
     this.ctlDrag = {};
@@ -705,8 +708,13 @@ export class EcApp extends LitElement {
 
   private toast(text: string): void {
     this.toastText = text;
+    this.toastLeaving = false;
     clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => (this.toastText = ""), 2800);
+    this.toastTimer = setTimeout(() => {
+      this.toastLeaving = true;
+      // With reduced motion there is no slide to wait for.
+      this.toastTimer = setTimeout(() => { this.toastText = ""; this.toastLeaving = false; }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200);
+    }, 2800);
   }
 
   /* Drafts. Zone details is the only one so far: what it would change, worked out against what's saved. */
@@ -4393,7 +4401,7 @@ export class EcApp extends LitElement {
       autos: () => this.autosScreen(),
     };
     return html`<main ?inert=${!!this.modal}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
-      ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
+      ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast ${this.toastLeaving ? "leaving" : ""}" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
   }
 }
 

@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
 } as const;
 
 export const styles = css`
@@ -136,7 +136,13 @@ export const styles = css`
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
   .review-row b { font-weight: 500; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
+  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus.
+     Taps go through it: it can lie over the heading's buttons for a moment and must not swallow them. */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; pointer-events: none; animation: toast-in .2s ease-out; }
+  .toast.leaving { animation: toast-out .2s ease-in forwards; }
+  @keyframes toast-in { from { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @keyframes toast-out { to { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @media (prefers-reduced-motion: reduce) { .toast, .toast.leaving { animation: none; } }
 
   .combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
   .inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
@@ -359,7 +365,6 @@ export const styles = css`
   /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
   .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
   :host(.drafting) main { padding-bottom: 96px; }
-  :host(.drafting) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   :host(.typing) .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
   .draft-text { flex: 1; min-width: 0; font-size: 14px; }
@@ -385,7 +390,6 @@ export const styles = css`
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     :host(.drafting) main { padding-bottom: 136px; }
-    :host(.drafting) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* History, as the mock draws it. The chart scrolls the page vertically under a finger and reads a point sideways. */
