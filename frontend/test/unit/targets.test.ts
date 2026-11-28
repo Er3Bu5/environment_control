@@ -187,6 +187,18 @@ describe("problems", () => {
     expect(texts(h)).toEqual(["Light limit goes in steps of 10 lx."]);
   });
 
+  it("leaves out the light limits of a zone with no light sensor, set here or on a helper, so they can't stop a save", () => {
+    const h = open(here());
+    h.bands.day.light = 2005;
+    h.bands.night.light = 20000;
+    expect(texts(h)).toEqual(["Light limit goes in steps of 10 lx.", "Night has a value to fix."]);
+    expect(targetIssues(h, states, catalog, LEAF, false)).toEqual([]);
+    const d = open();
+    d.links["light.dayMin"] = "input_number.gone";
+    expect(texts(d)).toEqual([expect.stringContaining("input_number.gone isn't in Home Assistant")]);
+    expect(targetIssues(d, states, catalog, LEAF, false)).toEqual([]);
+  });
+
   it("says when no conditions fit the ideal zone at this offset, as Athena's flower finish at 1 °C below air", () => {
     const d = open(here());
     applyStage(d, "finish");

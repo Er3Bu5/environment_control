@@ -354,7 +354,7 @@ export function followLeaf(d: TargetsDraft, leaf: number): boolean {
 
 const linked = (d: TargetsDraft, n: string) => (linksInUse(d).includes(n) ? d.links[n] : "");
 
-function periodProblems(d: TargetsDraft, p: Period, states: Record<string, HaState>, catalog: Catalog | null, leaf: number): TargetIssue[] {
+function periodProblems(d: TargetsDraft, p: Period, states: Record<string, HaState>, catalog: Catalog | null, leaf: number, light: boolean): TargetIssue[] {
   const b = d.bands[p], out: TargetIssue[] = [];
   for (const k of BAND_KEYS) {
     const [lo, hi] = VRANGE[k], v = b[k], box = (i: number) => ({ target: `vin-${k}-${i}`, edit: k, slot: i });
@@ -375,20 +375,23 @@ function periodProblems(d: TargetsDraft, p: Period, states: Record<string, HaSta
     return false;
   };
   for (const k of BAND_KEYS) for (const slot of Object.keys(SLOTS) as Slot[]) fits(bandName(p, k, slot), b[k][SLOTS[slot]], `${VNAME[k]} ${SLOT_NAME[SLOTS[slot]]}`, { target: `vin-${k}-${SLOTS[slot]}`, edit: k, slot: SLOTS[slot] });
-  const light = { target: "vin-light-0", edit: "light" as const, slot: 0 };
-  if (linked(d, lightName(p))) fits(lightName(p), b.light, "Light limit", light);
-  else if (b.light < LIGHT_RANGE.min || b.light > LIGHT_RANGE.max) out.push({ text: `Light limit has to be between ${LIGHT_RANGE.min} and ${LIGHT_RANGE.max.toLocaleString()} lx.`, ...light });
-  else if (b.light % LIGHT_RANGE.step) out.push({ text: `Light limit goes in steps of ${LIGHT_RANGE.step} lx.`, ...light });
+  const box = { target: "vin-light-0", edit: "light" as const, slot: 0 };
+  if (light) {
+    if (linked(d, lightName(p))) fits(lightName(p), b.light, "Light limit", box);
+    else if (b.light < LIGHT_RANGE.min || b.light > LIGHT_RANGE.max) out.push({ text: `Light limit has to be between ${LIGHT_RANGE.min} and ${LIGHT_RANGE.max.toLocaleString()} lx.`, ...box });
+    else if (b.light % LIGHT_RANGE.step) out.push({ text: `Light limit goes in steps of ${LIGHT_RANGE.step} lx.`, ...box });
+  }
   if (!out.length && !idealCount(b, leaf)) out.push({ text: "No conditions fit all of your ideal zone at this leaf temperature offset. Change the offset or widen a limit.", calibrate: true });
   return out;
 }
 
 /* Everything that stops a review. Both periods count, since both are judged by: the one on show lists its problems,
-   and the other says it has one, with a way there. */
-export function targetIssues(d: TargetsDraft, states: Record<string, HaState>, catalog: Catalog | null, leaf: number): TargetIssue[] {
+   and the other says it has one, with a way there. A zone with no light sensor has no light limits to show, so they
+   can't be what stops it. */
+export function targetIssues(d: TargetsDraft, states: Record<string, HaState>, catalog: Catalog | null, leaf: number, light = true): TargetIssue[] {
   const out: TargetIssue[] = [];
   if (d.source === "helpers") {
-    const used = linksInUse(d), seen: Record<string, string> = {};
+    const used = linksInUse(d).filter((n) => light || linkKind(n) !== "light"), seen: Record<string, string> = {};
     if (!used.length) out.push({ text: "Link at least one limit to a helper, or choose Set here.", target: linkTarget(bandName(d.period, "temperature", "min")) });
     for (const n of used) {
       const e = d.links[n], kind = linkKind(n), u = helperUnit(e, states, catalog), target = linkTarget(n), switchTo = place(n).p === d.period ? undefined : place(n).p;
@@ -399,8 +402,8 @@ export function targetIssues(d: TargetsDraft, states: Record<string, HaState>, c
       else seen[e] = n;
     }
   }
-  out.push(...periodProblems(d, d.period, states, catalog, leaf));
-  const other = PERIODS.find(([p]) => p !== d.period && periodProblems(d, p, states, catalog, leaf).length);
+  out.push(...periodProblems(d, d.period, states, catalog, leaf, light));
+  const other = PERIODS.find(([p]) => p !== d.period && periodProblems(d, p, states, catalog, leaf, light).length);
   if (other) out.push({ text: `${other[1]} has a value to fix.`, switchTo: other[0] });
   return out;
 }

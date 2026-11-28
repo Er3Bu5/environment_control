@@ -174,6 +174,20 @@ export function sensorsOf(z: Record<string, unknown> | undefined): StoredSensor[
     }));
 }
 
+/* No light sensor is not darkness: a zone whose sensors map no light entity has no light reading at all, so nothing
+   about light is drawn or judged for it. A light sensor that's offline is different and still shows as no data, and a
+   zone with no sensors yet keeps its empty light card beside its other empty tiles, as does one whose sensors map
+   nothing yet, which says nothing about what they can read. */
+export function noLightSensor(sensors: StoredSensor[]): boolean {
+  const env = sensors.filter((s) => s.kind === "env" && Object.keys(s.entities).length);
+  return env.length > 0 && !env.some((s) => !!s.entities.light);
+}
+
+/* The graphs a zone's History offers, and the one it opens on: a zone set to open on Light has no Light graph once it
+   has no light sensor, so it opens on Temperature. */
+export const historyMetrics = (noLight: boolean): Metric[] => (["temperature", "humidity", "vpd", "light"] as Metric[]).filter((k) => k !== "light" || !noLight);
+export const opensOn = (noLight: boolean, k: Metric): Metric => (historyMetrics(noLight).includes(k) ? k : "temperature");
+
 /* A zone's limits for one period and metric: Min, Low, Target, High, Max, as stored. */
 export function bandsOf(z: Record<string, unknown> | undefined, period: "day" | "night", k: Metric): (number | null)[] | null {
   const b = isObj(z?.bands) && isObj(z.bands[period]) ? (z.bands[period] as Record<string, unknown>)[k] : null;
