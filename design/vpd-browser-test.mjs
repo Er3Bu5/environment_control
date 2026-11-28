@@ -88,7 +88,8 @@ if (process.env.SMOKE) {
     check(`${id}: temperature matches HA`, close(n.temperature, w.temperature, 0.06), [n.temperature, w.temperature]);
     check(`${id}: humidity matches HA`, close(n.humidity, w.humidity, 0.1), [n.humidity, w.humidity]);
     check(`${id}: VPD matches HA`, close(n.vpd, w.vpd, 0.012), [n.vpd, w.vpd]);
-    check(`${id}: light matches HA`, close(n.light, w.light, 1), [n.light, w.light]);
+    // A zone with no light sensor has no light reading to compare, only the absence of one.
+    check(`${id}: light matches HA`, w.light === null ? n.light === null : close(n.light, w.light, 1), [n.light, w.light]);
   }
   await go(`ui.screen="overview";render()`); await clean("Overview"); await shot("real-overview");
   check("Overview: every zone with light draws its graph", (await ev(`document.querySelectorAll("#main .zone-card svg.lspark").length`)) === (await ev(`zones.filter(z=>lightLine(z)).length`)));
@@ -125,12 +126,15 @@ if (process.env.SMOKE) {
     await go(`document.querySelector("[data-tdexit]").click()`);
     await go(`ui.screen="zone";ui.zone="${id}";render();document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="${id}"]').click()`);
     const rows = await ev(`[...document.querySelectorAll(".tbl-wrap")].map((t)=>[...t.querySelectorAll("tr")].pop().textContent)`);
-    check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
+    const dark = want2.dayMin === null && want2.nightMax === null;
+    if (dark) check(`${id} Targets: View targets has no light limits`, !rows.some((r) => r.startsWith("Light")), rows);
+    else check(`${id} Targets: View targets holds HA's light limits`, rows[0] === `Lightlx${want2.dayMin.toLocaleString("en-NZ")}` && rows[1] === `Lightlx${want2.nightMax.toLocaleString("en-NZ")}`, rows);
     await go(`document.querySelector('[data-tset="${id}"]').click();ui.vpdw.period="day";render()`); await clean(`${id} Targets`);
-    const day = await ev(`document.querySelector("#vin-light-0").value`);
+    const day = await ev(`document.querySelector("#vin-light-0")?.value ?? null`);
     await go(`ui.vpdw.period="night";render()`);
-    const night = await ev(`document.querySelector("#vin-light-0").value`);
-    check(`${id} Targets: the boxes hold HA's light limits`, Number(day) === want2.dayMin && Number(night) === want2.nightMax, [day, night]);
+    const night = await ev(`document.querySelector("#vin-light-0")?.value ?? null`);
+    if (dark) check(`${id} Targets: no light limit boxes`, day === null && night === null, [day, night]);
+    else check(`${id} Targets: the boxes hold HA's light limits`, Number(day) === want2.dayMin && Number(night) === want2.nightMax, [day, night]);
     await go(`document.querySelector("[data-tdexit]").click()`);
   }
   await go(`ui.screen="setup";render();document.querySelector('[data-vpd="garden"]').click()`);
@@ -1665,6 +1669,39 @@ check("Overview: the light graph covers 4 hours in 49 points, like the zone's li
 await ev(`window.__keep=zones[1].sensors.map(s=>s.avg);zones[1].sensors.forEach(s=>{if(s.kind==="env")s.avg=false});render()`); await sleep(40);
 check("Overview: a zone with no light reading draws no light graph", (await ev(`document.querySelectorAll("#main .zone-card")[1].querySelectorAll("svg.lspark").length`)) === 0);
 await ev(`zones[1].sensors.forEach((s,i)=>{s.avg=window.__keep[i]});render()`);
+
+// ---------- A zone with no light sensor at all (#130): its sensors map no light entity, the shape the real-room build
+// gives such a zone. No light sensor is not darkness, so no light value is drawn, while an offline one still says no data.
+const zeroLx = (t) => /(^|[^\d,.])0 lx/.test(t);
+const NL = `zones[1]`;
+await ev(`window.__nl={lux:${NL}.sensors.map(s=>s.lux),limits:{...${NL}.lightLimits},history:${NL}.history};${NL}.sensors.forEach(s=>{if(s.kind==="env")s.lux=null});${NL}.lightLimits={dayMin:null,nightMax:null};${NL}.history={metric:"light",hours:24};refreshReadings();ui.screen="overview";render()`); await sleep(60);
+const nlCard = await ev(`(()=>{const c=document.querySelectorAll("#main .zone-card")[1];return {text:c.textContent,rows:c.querySelectorAll(".mrow").length,spark:c.querySelectorAll("svg.lspark").length,lux:c.querySelectorAll(".lux").length,now:${NL}.now.light}})()`);
+check("No light sensor: Overview draws no light row or line, and no lux on the day strip", nlCard.rows === 3 && nlCard.spark === 0 && nlCard.lux === 0 && !/\blx\b/.test(nlCard.text) && nlCard.now === null, nlCard);
+check("No light sensor: the day strip still says lights on or off", /Lights (on|off)/.test(nlCard.text), nlCard.text);
+const litCard = await ev(`(()=>{const c=document.querySelectorAll("#main .zone-card")[0];return {rows:c.querySelectorAll(".mrow").length,spark:c.querySelectorAll("svg.lspark").length}})()`);
+check("No light sensor: a zone with light keeps its light row and line", litCard.rows === 4 && litCard.spark === 1, litCard);
+check("No light sensor: Overview shows 0 lx nowhere for it", !zeroLx(nlCard.text), nlCard.text);
+await ev(`document.querySelectorAll("#main .zone-card")[1].click()`); await sleep(120);
+const nlZone = await ev(`(()=>{const m=document.querySelector("#main"),t=[...m.querySelectorAll(".tiles > .tile")].map(e=>e.getBoundingClientRect());return {text:m.textContent,lcards:m.querySelectorAll(".tiles .lcard, svg.lline").length,tiles:t.length,cols:t.map(r=>[Math.round(r.left),Math.round(r.width)]),chip:m.querySelectorAll('[data-metric="light"]').length,metric:ui.metric,chart:!!m.querySelector("#chart svg")}})()`);
+const litCols = await ev(`(()=>{const was=ui.zone;ui.zone=zones[0].id;render();const c=[...document.querySelectorAll("#main .tiles > .tile")].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.left),Math.round(r.width)]});ui.zone=was;render();return c})()`);
+check("No light sensor: the zone page has no light card, and its other tiles sit where a lit zone's do", nlZone.lcards === 0 && nlZone.tiles === 3 && JSON.stringify(nlZone.cols) === JSON.stringify(litCols), [nlZone.cols, litCols]);
+check("No light sensor: History offers no Light chip, and a zone set to open on Light opens on Temperature", nlZone.chip === 0 && nlZone.metric === "temperature" && nlZone.chart, nlZone);
+check("No light sensor: the zone page and History show 0 lx nowhere", !zeroLx(nlZone.text), nlZone.text.match(/.{30}0 lx.{10}/)?.[0]);
+check("No light sensor: its sensors list no light entity", (await ev(`envOf(${NL}).every(s=>!deviceEntities(s).some(e=>e[2]==="illuminance"))`)) === true && (await ev(`envOf(zones[0]).every(s=>deviceEntities(s).some(e=>e[2]==="illuminance"))`)) === true);
+await ev(`document.querySelector('[data-zmenu="-more"]').click();document.querySelector('[data-viewtargets="'+${NL}.id+'"]').click()`); await sleep(80);
+const nlView = await ev(`(()=>({text:document.querySelector("#main").textContent,rows:[...document.querySelectorAll(".tbl-wrap tr")].map(r=>r.textContent).filter(t=>t.startsWith("Light")).length,line:!!document.querySelector("#t-nolight")}))()`);
+check("No light sensor: View targets has no light rows, and says why", nlView.rows === 0 && nlView.line && !zeroLx(nlView.text), nlView.rows);
+await ev(`document.querySelector('[data-tset="'+${NL}.id+'"]').click()`); await sleep(80);
+const nlEdit = await ev(`(()=>({text:document.querySelector("#main").textContent,box:document.querySelectorAll("#vin-light-0").length,line:!!document.querySelector("#vnolight"),issue:/Light limit/.test(document.querySelector("#main").textContent)}))()`);
+check("No light sensor: Targets has no light limit box, says why, and raises no light problem", nlEdit.box === 0 && nlEdit.line && !nlEdit.issue && !zeroLx(nlEdit.text), nlEdit);
+await ev(`document.querySelector("[data-tdexit]").click()`); await sleep(60);
+await ev(`ui.screen="setup";render()`); await sleep(40);
+check("No light sensor: History opens on offers it no Light, and shows it opening on Temperature", (await ev(`document.querySelectorAll('.opens-row [data-opens="'+${NL}.id+'"][data-ometric="light"]').length===0&&document.querySelector('.opens-row [data-opens="'+${NL}.id+'"][data-ometric="temperature"]').getAttribute("aria-pressed")==="true"&&document.querySelectorAll('.opens-row [data-opens="'+zones[0].id+'"][data-ometric="light"]').length===1`)) === true);
+// An offline light sensor still exists: the card stays and says no data.
+await ev(`${NL}.sensors.forEach((s,i)=>{s.lux=window.__nl.lux[i]});window.__nl.t=${NL}.sensors.map(s=>s.t);${NL}.sensors.forEach(s=>{if(s.kind==="env")s.t=null});refreshReadings();ui.screen="zone";ui.zone=${NL}.id;ui.metric="temperature";render()`); await sleep(80);
+const offZone = await ev(`(()=>{const l=document.querySelector("#main .tiles .lcard");return {card:l?l.textContent:null,chip:document.querySelectorAll('#main [data-metric="light"]').length,text:document.querySelector("#main").textContent}})()`);
+check("Offline light sensor: the zone keeps its light card, showing no data rather than 0", offZone.card !== null && offZone.card.includes("--") && offZone.chip === 1 && !zeroLx(offZone.text), offZone.card);
+await ev(`${NL}.sensors.forEach((s,i)=>{s.t=window.__nl.t[i]});${NL}.lightLimits=window.__nl.limits;${NL}.history=window.__nl.history;refreshReadings();ui.screen="overview";render()`); await sleep(60);
 await shot("overview-light-graph");
 await phone(800, 1200); await sleep(60); await shot("overview-light-graph-foldable"); await phone(390, 844);
 
