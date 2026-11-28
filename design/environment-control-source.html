@@ -690,7 +690,7 @@ function sensorRefusal(z, holders) {
   if (kids.length) return `${said} ${zoneList(kids)} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.`;
   if (p) return `${said} This zone is already linked to Zone: ${p.name}, and a zone is linked to one other zone only.`;
   if (tp) return `${said} Zone: ${target.name} is itself linked to Zone: ${tp.name}, so it can't be this zone's parent.`;
-  return `${said} If you really want it here, make Zone: ${target.name} this zone's parent in Zone details.`;
+  return `${said} If you want a duplicate here, this zone must be linked to ${target.name}. This can be done in the Zone details section of Setup.`;
 }
 function linkLine(z, cls = "small muted") {
   const p = parentOf(z), kids = linkedZones(z);

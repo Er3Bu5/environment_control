@@ -1466,7 +1466,7 @@ const themeShots = async (name) => {
 };
 await ev(`ui.mapw.step=1;render()`); await sleep(30);
 await tap('[data-msensor="v-env"]');
-check("Share: a sensor outside this zone's family can't be ticked, and the panel's dialog says how it could be", same(await sensorNo(), { role: "alertdialog", title: "Veg environment", text: "This sensor is already associated to Zone: Veg. If you really want it here, make Zone: Veg this zone's parent in Zone details.", buttons: ["OK|btn primary"], focus: "dlg-title" }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await sensorNo());
+check("Share: a sensor outside this zone's family can't be ticked, and the panel's dialog says how it could be", same(await sensorNo(), { role: "alertdialog", title: "Veg environment", text: "This sensor is already associated to Zone: Veg. If you want a duplicate here, this zone must be linked to Veg. This can be done in the Zone details section of Setup.", buttons: ["OK|btn primary"], focus: "dlg-title" }) && (await ev(`!ui.mapw.pickS["v-env"]`)) === true, await sensorNo());
 await themeShots("sensor-refused");
 await tap("[data-gkeep]");
 check("Share: OK closes it with the sensor still unticked, focus back on its row", (await noAsk()) && (await ev(`!ui.mapw.pickS["v-env"] && document.activeElement.dataset.msensor==="v-env"`)) === true);
