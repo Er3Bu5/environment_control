@@ -278,9 +278,9 @@ describe("counts", () => {
 
   it("gives each chip its count, and says it in words for a screen reader", () => {
     expect(chipViews(garden, states)).toEqual([
-      { chip: "alert", title: "Alerts", count: "1/3", label: "Alerts, 1 of 3 on" },
-      { chip: "failsafe", title: "Failsafes", count: "1/2", label: "Failsafes, 1 of 2 on" },
-      { chip: "control", title: "Control", count: "0/0", label: "Control, none linked" },
+      { chip: "alert", title: "Alerts", count: "1/3", label: "Alerts, 1 of 3 on", star: false },
+      { chip: "failsafe", title: "Failsafes", count: "1/2", label: "Failsafes, 1 of 2 on", star: false },
+      { chip: "control", title: "Control", count: "0/0", label: "Control, none linked", star: false },
     ]);
   });
 

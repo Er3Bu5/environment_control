@@ -69,7 +69,7 @@ export function effectiveZone(zones: readonly Raw[], devices: readonly Raw[], z:
 
 /* A tap on anything read only that a linked zone shows from its parent answers in a one-button dialog: never a toast,
    and never a way to the parent. */
-export const notHereText = {
+export const notHereWords = {
   device: (p: string) => `This device runs on Zone: ${p}'s automations. Please control it in ${p}.`,
   setting: (p: string) => `These settings are Zone: ${p}'s. Please edit them in ${p}.`,
 };
