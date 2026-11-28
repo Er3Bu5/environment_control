@@ -33,6 +33,33 @@ test.describe("overview layout", () => {
       return tops.filter((t) => t === tops[0]).length;
     });
 
+  test("one card across below two at 520px each, two up to three at 640px each, four on an ultrawide window", async ({ page }) => {
+    const frame = await zones(page, 5);
+    for (const [width, across] of [[700, 1], [900, 1], [1000, 1], [1100, 2], [1280, 2], [2300, 3], [3440, 4]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(() => firstRow(frame), { message: `${width}px wide` }).toBe(across);
+    }
+  });
+
+  test("one across, a card stops at 700px and sits in the middle", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    const frame = await zones(page, 3);
+    const grid = (await app(frame).locator(".cards:has(> .zone-card)").boundingBox())!, card = (await cards(frame).first().boundingBox())!;
+    expect(card.width).toBeLessThanOrEqual(700.5);
+    expect(card.width).toBeGreaterThan(650);
+    expect(Math.abs(card.x - grid.x - (grid.x + grid.width - card.x - card.width))).toBeLessThanOrEqual(1);
+  });
+
+  test("two across, a reading's track is never shorter than 150px", async ({ page }) => {
+    const frame = await zones(page, 3);
+    for (let width = 1100; width <= 1900; width += 200) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(() => firstRow(frame), { message: `${width}px wide` }).toBe(2);
+      const track = (await cards(frame).first().locator(".mrow .track").first().boundingBox())!;
+      expect(track.width, `${width}px wide`).toBeGreaterThanOrEqual(150);
+    }
+  });
+
   /* Sensor states as HA would hold them, updated just now. The page declares fakeHA with const: reached as an expression. */
   const setStates = (page: Page, states: Record<string, string>) =>
     page.evaluate(`(() => {

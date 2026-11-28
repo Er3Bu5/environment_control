@@ -55,6 +55,17 @@ export const styles = css`
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+  /* Zone cards go three across only once each gets 640px: narrower, the tracks and state chips are cramped. Below that a
+     column is kept wider than a third, so the row holds two. The Overview's width is let out only on a screen wide enough
+     for three; under it the page keeps the width every other page has. Four go across on the same 640px, so the width is
+     let out again only on an ultrawide screen with room for four (#119). Two go across only once each gets 520px:
+     narrower, a card's tracks get too short to read (#119). */
+  .cards.zones { container-type: inline-size; grid-template-columns: repeat(auto-fit, minmax(max(min(520px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
+  /* One across, a card stops at about the widest it gets two across, so the step down from two is a modest change in its
+     size rather than a doubling. A phone is narrower than that, so there it still fills the width. */
+  @container (max-width: 1051.98px) { .cards.zones > .zone-card { width: 100%; max-width: 700px; justify-self: center; } }
+  @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
+  @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
   /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.

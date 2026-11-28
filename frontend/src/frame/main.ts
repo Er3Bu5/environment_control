@@ -2394,7 +2394,7 @@ export class EcApp extends LitElement {
         : judgedAny
           ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
           : nothing}
-      <div class="cards">
+      <div class="cards zones">
         ${this.zones.map((z) => {
           const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
           /* A linked zone's line joins the combine note here, with its Parent badge after the name, once zones link (#91). */
