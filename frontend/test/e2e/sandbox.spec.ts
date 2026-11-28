@@ -23,18 +23,18 @@ test.describe("sandbox", () => {
     expect(sandboxes).toEqual(["allow-scripts"]);
   });
 
-  test("the frame can't reach HA's page, storage, cookies or the network, and an injected script doesn't run", async ({ page }) => {
+  test("the frame can't reach HA's page, storage, cookies or the network, and an injected script doesn't run", async ({ page, baseURL }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
-    const escaped = await frame.evaluate(async () => {
+    const escaped = await frame.evaluate(async (base) => {
       const r: Record<string, string> = { origin: self.origin };
       try { void parent.document.title; r.parent = "read"; } catch { r.parent = "blocked"; }
       try { void localStorage.length; r.storage = "read"; } catch { r.storage = "blocked"; }
       try { void document.cookie; r.cookie = "read"; } catch { r.cookie = "blocked"; }
-      try { await fetch("http://127.0.0.1:4173/frontend/test/e2e/page.html"); r.fetch = "sent"; } catch { r.fetch = "blocked"; }
+      try { await fetch(`${base}/frontend/test/e2e/page.html`); r.fetch = "sent"; } catch { r.fetch = "blocked"; }
       r.socket = await new Promise<string>((done) => {
         try {
-          const ws = new WebSocket("ws://127.0.0.1:4173/");
+          const ws = new WebSocket(`${base.replace(/^http/, "ws")}/`);
           ws.onopen = () => done("open");
           ws.onerror = () => done("blocked");
           setTimeout(() => done("blocked"), 1500);
@@ -46,7 +46,7 @@ test.describe("sandbox", () => {
       await new Promise((ok) => setTimeout(ok, 50));
       r.script = (window as unknown as { __injected?: number }).__injected ? "ran" : "blocked";
       return r;
-    });
+    }, String(baseURL));
     expect(escaped).toEqual({ origin: "null", parent: "blocked", storage: "blocked", cookie: "blocked", fetch: "blocked", socket: "blocked", script: "blocked" });
   });
 
