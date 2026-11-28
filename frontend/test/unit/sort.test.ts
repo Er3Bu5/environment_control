@@ -5,6 +5,24 @@ import { inOrder, moveZone, orderZones } from "../../src/frame/sort";
 
 const order = ["garden", "nursery", "veg"];
 
+describe("moveZone with linked zones", () => {
+  const zones = [{ id: "garden" }, { id: "veg" }, { id: "nursery", parent: "veg" }, { id: "seedlings", parent: "veg" }, { id: "tent" }];
+  const all = zones.map((z) => z.id);
+
+  it("steps a zone in a family only inside it, so the family is never split", () => {
+    expect(moveZone(all, "nursery", -1, zones)).toEqual(["garden", "nursery", "veg", "seedlings", "tent"]);
+    expect(moveZone(all, "seedlings", 1, zones)).toEqual(all);
+    expect(moveZone(all, "veg", -1, zones)).toEqual(all);
+    expect(moveZone(all, "veg", 1, zones)).toEqual(["garden", "nursery", "veg", "seedlings", "tent"]);
+  });
+
+  it("steps a zone on its own past a whole family in one press", () => {
+    expect(moveZone(all, "garden", 1, zones)).toEqual(["veg", "nursery", "seedlings", "garden", "tent"]);
+    expect(moveZone(all, "tent", -1, zones)).toEqual(["garden", "tent", "veg", "nursery", "seedlings"]);
+    expect(moveZone(all, "tent", 1, zones)).toEqual(all);
+  });
+});
+
 describe("moveZone", () => {
   it("steps a zone one place towards the start or the end", () => {
     expect(moveZone(order, "nursery", -1)).toEqual(["nursery", "garden", "veg"]);

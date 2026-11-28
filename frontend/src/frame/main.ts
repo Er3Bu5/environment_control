@@ -6,6 +6,7 @@ import { LitElement, type PropertyValues, html, nothing, svg, type TemplateResul
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { icon } from "./icons";
+import { familyOrder, linkedZones, moveWords, parentChoices, setParent } from "./family";
 import { inOrder, moveZone, orderZones } from "./sort";
 import {
   type Catalog,
@@ -79,7 +80,7 @@ import {
   removeVirtual,
   seedSlots,
   sensorCandidates,
-  sensorElsewhere,
+  sensorShare,
   sensorTarget,
   shownName,
   swapControl,
@@ -298,6 +299,9 @@ interface Wizard {
   name: string;
   desc: string;
   fromGuide: boolean;
+  /* The tick box, kept apart from the parent so ticking it shows the choice before one is made. */
+  linked: boolean;
+  parent: string;
 }
 interface Guard {
   kind: "guard";
@@ -612,7 +616,7 @@ export class EcApp extends LitElement {
     if (e.source !== parent) return;
     const m = readHostMessage(e.data);
     if (!m) return;
-    if (m.type === "init" || m.type === "config") this.stored = { revision: m.revision, zones: m.zones, devices: m.devices, ...(m.room ? { room: m.room } : {}) };
+    if (m.type === "init" || m.type === "config") this.stored = { revision: m.revision, zones: familyOrder(m.zones), devices: m.devices, ...(m.room ? { room: m.room } : {}) };
     if (m.type === "init" || m.type === "states") {
       const next: Record<string, HaState> = m.type === "init" ? {} : { ...this.states };
       for (const [e, raw] of Object.entries(m.states)) {
@@ -749,8 +753,9 @@ export class EcApp extends LitElement {
     if (!this.stored) return { type: "result", req: 0, ok: false, error: "Home Assistant hasn't answered yet." };
     const c = copyConfig(this.stored.zones, this.stored.devices, this.stored.room);
     change(c);
+    c.zones = familyOrder(c.zones);
     const r = await this.ask("save", { base: this.stored.revision, config: c });
-    if (r.ok && r.stored) this.stored = r.stored;
+    if (r.ok && r.stored) this.stored = { ...r.stored, zones: familyOrder(r.stored.zones) };
     return r;
   }
 
@@ -771,6 +776,8 @@ export class EcApp extends LitElement {
     const add = (label: string, before: string, after: string) => before !== after && out.push({ label, before, after });
     add("Zone name", z ? z.name : "New zone", w.name.trim());
     add("Description", z?.description || "None", w.desc.trim() || "None");
+    const linkWords = (id: string | null | undefined) => (id && this.zoneById(id) ? `Zone: ${this.zoneById(id)?.name}` : "Not linked");
+    add("Linked to", linkWords(z?.parent), linkWords(w.linked ? w.parent : ""));
     return out;
   }
 
@@ -990,7 +997,7 @@ export class EcApp extends LitElement {
       this.leafw = null;
       this.sched = null;
       this.tgt = null;
-      this.wiz = { id: null, name: "", desc: "", fromGuide: false };
+      this.wiz = { id: null, name: "", desc: "", fromGuide: false, linked: false, parent: "" };
       this.go("setup");
     });
   };
@@ -1011,7 +1018,7 @@ export class EcApp extends LitElement {
     const z = this.zoneById(id);
     if (!z) return;
     this.editBack = { screen: this.screen, zoneId: this.zoneId };
-    this.wiz = { id, name: z.name, desc: z.description ?? "", fromGuide };
+    this.wiz = { id, name: z.name, desc: z.description ?? "", fromGuide, linked: !!z.parent, parent: z.parent ?? "" };
     this.menu = null;
     this.go("setup");
   }
@@ -1026,14 +1033,15 @@ export class EcApp extends LitElement {
 
   private finishWizard = (): void => {
     const w = this.wiz;
-    if (!w || zoneNameIssue(w.name, this.zones, w.id)) return;
-    const changes = this.wizChanges(w);
+    if (!w || zoneNameIssue(w.name, this.zones, w.id) || this.parentIssue(w)) return;
+    const changes = this.wizChanges(w), parent = w.linked ? w.parent : "";
+    const self = this.zoneById(w.id) ?? { id: "", name: "", parent: null }, moving = moveWords(this.zones, self, parent, w.name.trim());
     if (changes.length) {
       let created = "";
       this.modal = {
         kind: "review",
         changes,
-        note: w.id ? "This only changes Environment Control. Nothing in Home Assistant changes." : "It starts at 1.2 x 1.2 m with 4 units until you set its layout. Nothing in Home Assistant changes.",
+        note: [moving, w.id ? "This only changes Environment Control. Nothing in Home Assistant changes." : "It starts at 1.2 x 1.2 m with 4 units until you set its layout. Nothing in Home Assistant changes."].filter(Boolean).join(" "),
         busy: false,
         error: "",
         apply: () =>
@@ -1042,6 +1050,7 @@ export class EcApp extends LitElement {
               setDetails(c, w.id, w.name, w.desc);
               markStep(c, w.id, "details", "done");
             } else created = addZone(c, w.name, w.desc);
+            setParent(c, w.id ?? created, parent);
           }),
         /* Applying stays on the step, with nothing left to apply, so Finish or Cancel leaves (#156). A new zone has no
            pages to stay on, so it opens its setup guide. */
@@ -1053,7 +1062,7 @@ export class EcApp extends LitElement {
             return;
           }
           const z = this.zoneById(w.id);
-          this.wiz = z ? { id: z.id, name: z.name, desc: z.description ?? "", fromGuide: w.fromGuide } : null;
+          this.wiz = z ? { id: z.id, name: z.name, desc: z.description ?? "", fromGuide: w.fromGuide, linked: !!z.parent, parent: z.parent ?? "" } : null;
           this.toast("Zone details saved.");
         },
       };
@@ -1153,8 +1162,10 @@ export class EcApp extends LitElement {
         d.cls[s.id] = s.detected;
         d.sensors[s.id] = seedSlots(s);
       });
-    const others = sensorElsewhere(this.config, z.id, s.id);
-    if (others.length) this.askShare(shareAsk("sensor", s.name, others), add);
+    const { others, refusal } = sensorShare(this.config, z.id, s.id);
+    /* Explains and asks nothing, and never takes you to Zone details: the link is made there on purpose or not at all. */
+    if (refusal) this.modal = { kind: "guard", title: s.name, text: refusal, keep: "", go: "OK", only: true, safe: true, action: () => {} };
+    else if (others.length) this.askShare(shareAsk("sensor", s.name, others), add);
     else add();
   }
 
@@ -1857,6 +1868,7 @@ export class EcApp extends LitElement {
     const inZone = this.devices.filter((d) => d.zones.includes(id));
     const alone = inZone.filter((d) => d.zones.length === 1), shared = inZone.filter((d) => d.zones.length > 1);
     const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name);
+    const kids = linkedZones(this.zones, id);
     const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${andList(others)}` : ""].filter(Boolean).join(", ");
     const rows: [string, string][] = [
       ["Layout", z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}` : ""],
@@ -1864,6 +1876,7 @@ export class EcApp extends LitElement {
       ["Devices", devicesWord],
       ["Targets", "Day and night values kept here"],
       removeRow(z),
+      ["Linked zones", kids.length ? `${andList(kids.map((o) => o.name))} ${kids.length === 1 ? "is" : "are"} unlinked` : ""],
     ];
     this.confirmText = "";
     this.modal = {
@@ -1977,7 +1990,7 @@ export class EcApp extends LitElement {
 
   private moveCard(id: string, by: -1 | 1): void {
     if (!this.sorting) return;
-    this.sorting = { order: moveZone(this.sortedZones.map((z) => z.id), id, by) };
+    this.sorting = { order: moveZone(this.sortedZones.map((z) => z.id), id, by, this.zones) };
     /* Focus stays on the arrow used, so it can be pressed again, or on the other one once the card has reached the end. */
     void this.updateComplete.then(() => {
       const arrow = (b: number) => this.shadowRoot?.querySelector(`[data-move="${CSS.escape(id)}"][data-by="${b}"]`) as HTMLButtonElement | null;
@@ -3169,7 +3182,7 @@ export class EcApp extends LitElement {
   }
 
   private wizard(w: Wizard) {
-    const issue = zoneNameIssue(w.name, this.zones, w.id), typed = !!w.name.trim();
+    const issue = zoneNameIssue(w.name, this.zones, w.id), typed = !!w.name.trim(), pick = this.parentIssue(w);
     const changes = this.wizChanges(w).length;
     /* A name that can't be used is said under its box as well as in the bar: on a touch screen the bar is out of the
        way while the box is typed in, which is exactly when the name goes wrong. */
@@ -3199,6 +3212,7 @@ export class EcApp extends LitElement {
             .value=${w.desc}
             @input=${(e: Event) => (this.wiz = { ...w, desc: (e.target as HTMLTextAreaElement).value })}
           ></textarea></label>
+        ${this.linkedBox(w)}
         ${w.id ? nothing : html`<p class="small muted">Size and units come later, after its devices are mapped.</p>`}
         ${this.wizBar({
           label: "Page buttons",
@@ -3206,11 +3220,40 @@ export class EcApp extends LitElement {
           onBack: this.cancelWizard,
           next: changes ? "Review and apply" : "Finish",
           onNext: this.finishWizard,
-          blocked: !!issue,
+          blocked: !!issue || !!pick,
           changes,
-          fix: issue ? html`<button class="fixlink" @click=${() => (this.shadowRoot?.querySelector("#wiz-name") as HTMLElement | null)?.focus()}>${issue} &rsaquo;</button>` : nothing,
+          fix: issue
+            ? html`<button class="fixlink" @click=${() => (this.shadowRoot?.querySelector("#wiz-name") as HTMLElement | null)?.focus()}>${issue} &rsaquo;</button>`
+            : pick
+              ? html`<button class="fixlink" @click=${() => (this.shadowRoot?.querySelector("#wiz-linked input[type=radio]") as HTMLElement | null)?.focus()}>${pick} &rsaquo;</button>`
+              : nothing,
         })}
       </section>`;
+  }
+
+  /* Ticked, a linked zone needs its parent before it can go on. */
+  private parentIssue(w: Wizard): string {
+    return w.linked && !w.parent ? "Pick the zone it's linked to" : "";
+  }
+
+  /* One level only (#91): a zone with zones linked to it can't be given a parent, so it says which instead of offering
+     a box that would be refused. */
+  private linkedBox(w: Wizard) {
+    const kids = w.id ? linkedZones(this.zones, w.id) : [];
+    if (kids.length)
+      return html`<p class="small" id="wiz-linked">${kids.map((o) => `Zone: ${o.name}`).join(", ")} ${kids.length === 1 ? "is" : "are"} linked to this zone, so it can't be linked to another.</p>`;
+    return html`<div id="wiz-linked">
+      <label class="inavg"
+        ><input type="checkbox" id="wiz-linkme" .checked=${live(w.linked)} @change=${(e: Event) => {
+          const on = (e.target as HTMLInputElement).checked;
+          this.wiz = { ...w, linked: on, parent: on ? w.parent : "" };
+        }} />This is a linked zone</label
+      >
+      ${w.linked
+        ? this.chips("Linked to", "wiz-parent", parentChoices(this.zones, w.id).map((o) => ({ value: o.id, label: `Zone: ${o.name}` })), w.parent, (v) => (this.wiz = { ...w, parent: v }))
+        : nothing}
+      <p class="small muted">A linked zone is part of the same space as its parent. What it shares with the parent is set in the parent.</p>
+    </div>`;
   }
 
   /* A step that can't be done yet says why rather than offering a button that does nothing. */

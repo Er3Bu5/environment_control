@@ -99,8 +99,9 @@ test.describe("sort", () => {
   test("Discard puts the order back, and leaving with a draft asks first", async ({ page }) => {
     const frame = await startSort(page);
     const before = await stored(page);
+    /* Nursery is linked to Veg, so Garden steps past the pair in one press rather than splitting them (#91). */
     await move(frame, "Garden", "next").click();
-    await expect.poll(() => cards(frame)).toEqual(["Veg", "Garden", "Nursery"]);
+    await expect.poll(() => cards(frame)).toEqual(["Veg", "Nursery", "Garden"]);
     await bar(frame).getByRole("button", { name: "Discard" }).click();
     await expect.poll(() => cards(frame)).toEqual(NAMES);
     await expect(bar(frame)).toHaveCount(0);
@@ -134,9 +135,7 @@ test.describe("sort", () => {
     await page.keyboard.press("Tab");
     await expect(move(frame, "Garden", "next")).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect.poll(() => cards(frame)).toEqual(["Veg", "Garden", "Nursery"]);
-    await expect(move(frame, "Garden", "next")).toBeFocused();
-    await page.keyboard.press("Space");
+    /* Nursery is linked to Veg, so Garden steps past the pair in one press (#91). */
     await expect.poll(() => cards(frame)).toEqual(["Veg", "Nursery", "Garden"]);
     /* At the end its next is off, so focus moves to its previous rather than being lost. */
     await expect(move(frame, "Garden", "next")).toBeDisabled();
