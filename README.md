@@ -46,7 +46,7 @@ The board also works out VPD and keeps the leaf temperature offset the panel set
 
 Sensors that report only when their value changes (most Zigbee and Bluetooth sensors, and cloud
 sensors) aren't supported as zone sensors for now: they show as stale whenever their value holds
-steady. A setting for the stale rule is planned. Devices (plugs, lights, dehumidifiers) aren't
+steady. Devices (plugs, lights, dehumidifiers) aren't
 affected.
 
 ## Install
