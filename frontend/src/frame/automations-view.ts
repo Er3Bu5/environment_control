@@ -1,4 +1,4 @@
-/* The Automations pages, drawn as the design mock draws them: a zone's Automations page with its three chips, Link
+/* The Automations views, drawn as the design mock draws them: a zone's Automations dialog with its three chips, Link
    automations, Setup's Alerts card and the zone page's notice that a failsafe is off. Each function only draws what
    it's handed and calls back on a tap; main.ts holds the state, the foot bars and the dialogs. Rows reuse the markup
    of a Controls row and of Device identification's pick rows, so they need no styles of their own. Names, areas and
@@ -15,10 +15,31 @@ export type Chips = (legend: string, name: string, options: { value: string; lab
 
 export const linkTarget = (entity: string) => `lk-${entity.replace(/[^A-Za-z0-9_-]/g, "_")}`;
 
+/* A pointer tap on a row's tile is a tap on its switch, which stays the one control a keyboard reaches, so the tile
+   takes no focus or role. A tap on the switch itself is left alone, and so is a drag, which selects text: the selection
+   inside the panel's shadow root isn't always reported by the time the click lands, so the pointer's travel decides. */
+let downAt: { x: number; y: number } | null = null;
+function tileDown(e: PointerEvent): void {
+  downAt = { x: e.clientX, y: e.clientY };
+}
+function tileTap(e: MouseEvent): void {
+  const tile = e.currentTarget as HTMLElement, root = tile.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+  const dragged = !!downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4;
+  downAt = null;
+  if (dragged || (e.target as Element).closest("button, input, a, label")) return;
+  if (String((root.getSelection ? root.getSelection() : getSelection()) ?? "")) return;
+  const sw = tile.querySelector<HTMLButtonElement>(".sw");
+  /* Focused as a tap on it would be, so a question it raises hands focus back to it. */
+  if (sw && !sw.disabled) {
+    sw.focus({ preventScroll: true });
+    sw.click();
+  }
+}
+
 /* An automation's row, as a Controls row is drawn: its icon lit while HA reports it on, what HA reports and when it
    last ran, the switch, and under it what a tap is waiting for or why it wasn't sent. */
 export function autoRowView(r: AutoRow, mark: AutoIcon, icon: DrawIcon, onTap: (link: AutomationLink) => void) {
-  return html`<div class="dev" data-auto=${r.link.entity}>
+  return html`<div class="dev" data-auto=${r.link.entity} @pointerdown=${tileDown} @click=${tileTap}>
     <span class="ic" style="--c:${r.on ? "var(--primary)" : "var(--off)"}">${icon(mark)}</span>
     <div class="dev-text">
       <div class="dev-name">${r.name}</div>
@@ -35,20 +56,20 @@ export function autoRowView(r: AutoRow, mark: AutoIcon, icon: DrawIcon, onTap: (
 export function repeatCardView(card: RepeatCard, onType: (typed: string) => void, onLinkOnSetup: () => void) {
   if (card.kind === "unlinked")
     return html`<section class="card" id="alert-repeat">
-      <h2>Alert repeat</h2>
+      <h3>Alert repeat</h3>
       <p class="small muted">How often an alert may buzz your phone comes from one Home Assistant helper shared by every alert. Link it on Setup to change it here.</p>
       <button class="fixlink" @click=${onLinkOnSetup}>Link it on Setup &rsaquo;</button>
     </section>`;
   if (card.kind === "missing")
     return html`<section class="card" id="alert-repeat">
-      <h2>Alert repeat</h2>
+      <h3>Alert repeat</h3>
       <p class="small muted">Home Assistant doesn't have ${card.entity} right now, so it can't be changed.</p>
     </section>`;
   /* Text with a number keyboard, as every typed number on the panel is: a number box drops what it can't parse
      without a word, and the problem line says why instead. */
   const whole = !card.limits || Number.isInteger(card.limits.step);
   return html`<section class="card" id="alert-repeat">
-    <h2>Alert repeat</h2>
+    <h3>Alert repeat</h3>
     <p class="small muted">While an alert stays breached, it buzzes your phone at most once every this many minutes, and 0 buzzes on every update. One helper sets it for every alert in Home Assistant, irrigation and power included.</p>
     <label class="field" for="repeat-in"
       >Minutes between buzzes<input
@@ -69,7 +90,7 @@ export function repeatCardView(card: RepeatCard, onType: (typed: string) => void
   </section>`;
 }
 
-export interface AutomationsPageView {
+export interface AutomationsDialogView {
   zone: Zone;
   chip: AutoChip;
   chips: ChipView[];
@@ -77,46 +98,61 @@ export interface AutomationsPageView {
   row: (link: AutomationLink) => AutoRow;
   /* The Alert repeat card, drawn on the Alerts chip only. */
   repeat: RepeatCard;
+  /* Whether the repeat draft holds a change, which shows Review change in the foot. */
+  repeatChanged: boolean;
+  /* Set while a question is open over the dialog, which stays as it was underneath, dimmed. */
+  covered: boolean;
   icon: DrawIcon;
   onChip: (chip: AutoChip) => void;
   onTap: (link: AutomationLink) => void;
-  onLink: () => void;
   onRepeat: (typed: string) => void;
   onLinkOnSetup: () => void;
+  onReview: () => void;
+  onClose: () => void;
 }
 
-/* One page per zone: the chips with what's on in each, the picked chip's about sentence, on Alerts the repeat card,
-   then a card per group that links anything, or a notice that the chip links nothing yet. The page's own action sits
-   at the right of its heading, as the zone page's menu does, so it's found in the same place whatever the chip; Back
-   rides in main.ts's bar at the foot of the window. */
-export function automationsPage(o: AutomationsPageView) {
-  const mark = CHIP[o.chip].icon;
-  return html`<div class="pagehead">
-      <div>
-        <h1>Automations: ${o.zone.name}</h1>
-        <p class="muted small">Home Assistant runs these. Here you switch them on and off.</p>
+/* One dialog per zone over its page, as View targets and View activity are: the chips with what's on in each, the
+   picked chip's about sentence, on Alerts the repeat card, then a card per group that links anything, or a notice that
+   the chip links nothing yet. The heading and chips stay put and the rows scroll, since a zone can hold fifty or so.
+   Changing what's linked is done on Setup, so nothing here leads there. A linked zone's card from its parent goes
+   after the groups, inside the scroll. */
+export function automationsDialog(o: AutomationsDialogView) {
+  const mark = CHIP[o.chip].icon, canRepeat = o.chip === "alert" && o.repeat.kind === "ready";
+  return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && o.onClose()}>
+    <div class="dialog wide autosdlg" data-autosdlg=${o.zone.id} role="dialog" aria-modal="true" aria-labelledby="autos-title" aria-describedby="autos-sub" ?inert=${o.covered}>
+      <div class="autoshead">
+        <h2 id="autos-title" tabindex="-1">Automations: ${o.zone.name}</h2>
+        <p class="muted small" id="autos-sub">Home Assistant runs these. Here you switch them on and off.</p>
+        <div class="seg" role="group" aria-label="Automations">
+          ${o.chips.map(
+            (c) => html`<button aria-pressed=${c.chip === o.chip ? "true" : "false"} aria-label=${c.label} @click=${() => c.chip !== o.chip && o.onChip(c.chip)}>
+              ${c.title} <small class="muted">${c.count}</small>
+            </button>`,
+          )}
+        </div>
       </div>
-      <button class="btn" @click=${o.onLink}>Link automations</button>
+      <div class="review-scroll" id="autos-scroll">
+        <p class="muted small" id="autos-about">${CHIP[o.chip].about}</p>
+        ${o.chip === "alert" ? repeatCardView(o.repeat, o.onRepeat, o.onLinkOnSetup) : nothing}
+        ${o.groups.length
+          ? o.groups.map(
+              (g) => html`<section class="card" data-agroup=${g.group}>
+                <div class="card-head"><h3>${g.title}</h3><span class="small muted">${g.count}</span></div>
+                <div class="devs">${repeat(g.links, (a) => a.id, (a) => autoRowView(o.row(a), mark, o.icon, o.onTap))}</div>
+              </section>`,
+            )
+          : html`<div class="notice calm" id="autos-empty">
+              <strong>${emptyText(o.chip, `Zone: ${o.zone.name}`)}.</strong><span>Link automations in Setup.</span>
+            </div>`}
+      </div>
+      <div class="dlgfoot">
+        <button class="btn" @click=${o.onClose}>Close</button>
+        ${canRepeat
+          ? html`<button class="btn primary" ?hidden=${!o.repeatChanged} ?disabled=${o.repeat.kind === "ready" && !!o.repeat.problem} @click=${o.onReview}>Review change</button>`
+          : nothing}
+      </div>
     </div>
-    <div class="seg" role="group" aria-label="Automations">
-      ${o.chips.map(
-        (c) => html`<button aria-pressed=${c.chip === o.chip ? "true" : "false"} aria-label=${c.label} @click=${() => c.chip !== o.chip && o.onChip(c.chip)}>
-          ${c.title} <small class="muted">${c.count}</small>
-        </button>`,
-      )}
-    </div>
-    <p class="muted small">${CHIP[o.chip].about}</p>
-    ${o.chip === "alert" ? repeatCardView(o.repeat, o.onRepeat, o.onLinkOnSetup) : nothing}
-    ${o.groups.length
-      ? o.groups.map(
-          (g) => html`<section class="card" data-agroup=${g.group}>
-            <div class="card-head"><h2>${g.title}</h2><span class="small muted">${g.count}</span></div>
-            <div class="devs">${repeat(g.links, (a) => a.id, (a) => autoRowView(o.row(a), mark, o.icon, o.onTap))}</div>
-          </section>`,
-        )
-      : html`<div class="notice calm">
-          <strong>${emptyText(o.chip, o.zone.name)}</strong><button class="fixlink" @click=${o.onLink}>Link automations &rsaquo;</button>
-        </div>`}`;
+  </div>`;
 }
 
 export interface LinkPageView {
@@ -218,7 +254,7 @@ export function alertsCard(o: AlertsCardView) {
   </section>`;
 }
 
-/* Near the top of the zone page while any failsafe is off. It opens the Automations page on Failsafes. */
+/* Near the top of the zone page while any failsafe is off. It opens the Automations dialog on Failsafes. */
 export function failsafeNoticeView(text: string | null, onOpen: () => void) {
   return text ? html`<button class="notice fix" @click=${onOpen}><span>${text}</span><span class="fixgo">Failsafes &rsaquo;</span></button>` : nothing;
 }

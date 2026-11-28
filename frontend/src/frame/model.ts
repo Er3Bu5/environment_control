@@ -214,16 +214,20 @@ export function removeZone(c: RawConfig, id: string): void {
 export interface ShareAsk {
   title: string;
   text: string;
+  more: string;
   keep: string;
   go: string;
 }
-export function shareAsk(kind: "device" | "sensor", name: string, zone: string, others: string[]): ShareAsk {
-  const where = others.join(" and ");
-  const text = {
-    device: `It's already in ${where}. It's one device, so switching it here switches it there too.`,
-    sensor: `It's already in ${where}. It's one sensor, so its readings count there and here.`,
-  }[kind];
-  return { title: `Add ${name} to ${zone} as well?`, text, keep: "Leave it out", go: `Add to ${zone}` };
+/* Bare names in a sentence read as one does, "Garden, Nursery and Veg"; a labelled list keeps its commas (#115). */
+export const andList = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+/* Others come in the order Overview shows the zones. "Zone: X" is said once per paragraph, then the bare name (#115). */
+export function shareAsk(kind: "device" | "sensor", name: string, others: string[]): ShareAsk {
+  const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
+  const more =
+    kind === "device"
+      ? `This means that controls are in sync in ${all}. Automations from ${andList(others)} may affect the device state.`
+      : `This means that data is in sync in ${all}.`;
+  return { title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
 }
 
 /* HA can't tell how some devices are connected, ESPHome boards above all, so Setup asks and keeps the answer, marked as

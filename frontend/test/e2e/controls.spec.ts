@@ -40,6 +40,13 @@ test.describe("manual controls", () => {
     expect(await serviceCalls(page)).toBe(0);
   });
 
+  test("a shared device names its other zones in Overview's order, whatever order it was added to them in", async ({ page }) => {
+    const frame = await openZone(page);
+    /* The rename shows the change has been heard; the heater now lists its zones backwards. */
+    await page.evaluate(`(() => { fakeHA.knobs.restartMs = 50; const c = JSON.parse(fakeHA.disk); c.zones.find((z) => z.id === "veg").name = "Veg tent"; c.devices.find((d) => d.entity === "switch.heater_mains").zones = ["nursery", "veg", "garden"]; fakeHA.disk = JSON.stringify(c); fakeHA.restart(); })()`);
+    await expect(row(frame, "Heater")).toContainText("Shared with Veg tent and Nursery.");
+  });
+
   test("a tap is shown as sent, and the switch moves only once the device reports it", async ({ page }) => {
     const frame = await openZone(page);
     await page.evaluate("fakeHA.knobs.reportMs = 1500");
