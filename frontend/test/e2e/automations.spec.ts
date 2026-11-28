@@ -524,7 +524,9 @@ test.describe("Link automations", () => {
     /* Every entity id holds an a, so one letter matches all 44. */
     await search.fill("a");
     await expect(app(frame).locator("#link-list .pickwrap")).toHaveCount(10);
-    await expect(app(frame).locator("#link-more")).toHaveText("34 more match. Type more of the name to narrow them down.");
+    /* 17 of them are other zones', hidden and counted apart: see one-zone-automation.spec.ts. */
+    await expect(app(frame).locator("#link-more")).toHaveText("17 more match. Type more of the name to narrow them down.");
+    await expect(app(frame).locator("#link-hidden")).toHaveText("17 are hidden because another zone has them.");
     await search.fill("nothing like this");
     await expect(app(frame).locator("#link-list")).toContainText("No automation matches.");
   });
@@ -554,7 +556,12 @@ test.describe("Link automations", () => {
     expect(await hostDialogText(page)).toContain("automation.critical_nursery_vpd_high_day");
     await allow(page);
     await expect(toast(frame)).toHaveText("Nursery's automations saved.");
-    /* Back on Setup, where it was opened from; the zone's Automations dialog shows what was saved. */
+    /* It stays, with what was saved showing and nothing left to apply; Back goes to Setup, where it was opened from, and
+       the zone's Automations dialog shows what was saved. */
+    await expect(heading(frame, "Link automations: Nursery")).toBeVisible();
+    await expect(draftBar(frame)).toHaveCount(0);
+    await expect(pick(frame, "Nursery Heat Mat On").getByRole("radio", { name: "Failsafes" })).toBeChecked();
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Setup")).toBeVisible();
     const was = before.zones.find((z) => z.id === "nursery")!.automations!, now = (await stored(page)).zones.find((z) => z.id === "nursery")!.automations!;
     const id = (entity: string, list: Link[]) => list.find((a) => a.entity === entity)?.id;
@@ -587,26 +594,6 @@ test.describe("Link automations", () => {
     await expect(draftBar(frame)).toContainText("Nursery · Porch Light On");
   });
 
-  test("an automation another zone has says so, and saving it here too is refused with the reason", async ({ page }) => {
-    const frame = await openLinks(page, "Garden");
-    await app(frame).getByRole("searchbox", { name: "Search Home Assistant" }).fill("tent lights on");
-    const tent = pick(frame, "Tent Lights On");
-    await expect(tent.locator(".dev-sub")).toHaveText("automation.tent_lights_on, Veg area, linked in Veg");
-    await tent.locator(".pickrow").click();
-    /* No question here: an automation can't be shared, so it's the save that says no. */
-    await expect(app(frame).getByRole("alertdialog")).toHaveCount(0);
-    await expect(tent.locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
-    await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
-    await expect(review(frame).locator(".review-row")).toHaveText(["Tent Lights OnNot linked → Control"]);
-    const before = await stored(page);
-    await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    /* Home Assistant's own question comes first, for anything newly linked; the backend's refusal after it. */
-    await allow(page);
-    await expect(review(frame).getByRole("alert")).toContainText("An automation can only be linked to one zone.");
-    expect((await stored(page)).revision).toBe(before.revision);
-    expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.tent_lights_on");
-  });
-
   test("a linked automation Home Assistant no longer lists keeps its row, so it can still be unlinked", async ({ page }) => {
     await page.goto(PAGE);
     await page.evaluate(`(() => { delete fakeHA.registry.entities["automation.critical_garden_vpd_low_night"]; delete fakeHA.states["automation.critical_garden_vpd_low_night"]; fakeHA.publish(); })()`);
@@ -626,7 +613,7 @@ test.describe("Link automations", () => {
     expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.critical_garden_vpd_low_night");
   });
 
-  test("is opened by Automations in a zone's menu on Setup, and Back and Apply come back to Setup", async ({ page }) => {
+  test("is opened by Automations in a zone's menu on Setup; Back comes back to Setup, and Apply stays", async ({ page }) => {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Setup");
@@ -643,6 +630,9 @@ test.describe("Link automations", () => {
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
     await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(toast(frame)).toHaveText("Veg's automations saved.");
+    await expect(heading(frame, "Link automations: Veg")).toBeVisible();
+    await expect(pick(frame, "Tent Lights Off").locator(".pickrow")).toHaveAttribute("aria-pressed", "false");
+    await app(frame).getByRole("button", { name: "Back", exact: true }).click();
     await expect(heading(frame, "Setup")).toBeVisible();
   });
 });

@@ -6,7 +6,7 @@
 import { html, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { type AutoChip, type AutoIcon, type AutoRow, CHIP, type ChipView, GROUP, type GroupView, type LinkRow, type RepeatCard, emptyText } from "./automations";
+import { type AutoChip, type AutoIcon, type AutoRow, CHIP, type ChipView, GROUP, type GroupView, type LinkListView, type LinkRow, type RepeatCard, emptyText, hiddenWords } from "./automations";
 import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, MAX_LINK_NAME, type Zone } from "./model";
 
 /* Drawing helpers main.ts owns, handed in rather than copied: an icon by name, and its radio chips. */
@@ -158,13 +158,15 @@ export function automationsDialog(o: AutomationsDialogView) {
 export interface LinkPageView {
   zone: Zone;
   /* null until Home Assistant's list is in hand; error says why there's none at all. */
-  list: { rows: LinkRow[]; more: number } | null;
+  list: LinkListView | null;
   error: string | null;
   q: string;
+  others: boolean;
   chips: Chips;
   onRetry: () => void;
   onQuery: (q: string) => void;
   onTick: (row: LinkRow) => void;
+  onOthers: () => void;
   onGroup: (entity: string, group: AutomationGroup) => void;
   onName: (entity: string, typed: string) => void;
   resetIcon: unknown;
@@ -182,6 +184,15 @@ export const linkNameTarget = (entity: string) => `lname-${entity.replace(/[^A-Z
 /* A picked row opens to its group, chosen with radio chips, as a picked device opens to what it is, and to a name of
    the panel's own, as long as a device's may be. Left empty it goes by Home Assistant's, shown as the hint. */
 function linkRowView(r: LinkRow, o: LinkPageView) {
+  /* Another zone's reads as unavailable but stays focusable and tappable, so a tap can say why it can't be ticked. */
+  if (r.other !== null)
+    return html`<div class="pickwrap" id=${linkTarget(r.entity)}>
+      <button class="pickrow" aria-pressed="false" aria-disabled="true" @click=${() => o.onTick(r)}>
+        <span class="tick"></span>
+        <span class="pick-text"><strong>${r.name}</strong><span class="dev-sub">${r.sub}</span></span>
+        <span class="pill plain">${r.pill}</span>
+      </button>
+    </div>`;
   const picked = r.group !== null;
   return html`<div class="pickwrap" id=${linkTarget(r.entity)}>
     <button class="pickrow" aria-pressed=${picked ? "true" : "false"} @click=${() => o.onTick(r)}>
@@ -232,7 +243,7 @@ export function linkPage(o: LinkPageView) {
           ? html`<div class="notice"><span>${o.error}</span><button class="btn" @click=${o.onRetry}>Try again</button></div>`
           : html`<p class="muted">Reading Home Assistant's automations.</p>`}
       </section>`;
-  const { rows, more } = o.list;
+  const { rows, more, elsewhere, hidden } = o.list;
   return html`${head}<section class="card">
       <label class="field" for="link-q"
         >Search Home Assistant<input
@@ -245,8 +256,12 @@ export function linkPage(o: LinkPageView) {
           .value=${live(o.q)}
           @input=${(e: Event) => o.onQuery((e.target as HTMLInputElement).value)}
       /></label>
+      ${elsewhere
+        ? html`<div class="linkopts" id="link-others"><button class="chip" aria-pressed=${o.others ? "true" : "false"} @click=${o.onOthers}>Show automations in other zones</button></div>`
+        : nothing}
       <div class="picklist" id="link-list">
         ${rows.length ? repeat(rows, (r) => r.entity, (r) => linkRowView(r, o)) : html`<p class="muted small">No automation matches.</p>`}
+        ${hidden ? html`<p class="small muted" id="link-hidden">${hiddenWords(hidden)}</p>` : nothing}
         ${more
           ? html`<p class="small muted" id="link-more">${o.q.trim() ? `${more} more match. Type more of the name to narrow them down.` : `${more} more in Home Assistant. Search to find them.`}</p>`
           : nothing}
