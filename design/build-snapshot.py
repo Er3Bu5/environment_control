@@ -147,7 +147,6 @@ devices = [
     board("b-left", "Garden Environment Left", ["garden"]), board("b-right", "Garden Environment Right", ["garden"]),
     board("b-veg", "Veg Environment", ["veg"]), board("b-nursery", "Nursery Environment", ["nursery"]),
     board("b-breeding", "Breeding Environment", ["breeding"]),
-    {"id": "pulse", "name": "Pulse Pro", "type": "Sensor", "integration": "pulselabs", "family": "Pulse", "link": "wifi", "source": "detected", "path": "Cloud", "hub": "", "zones": ["veg"], "state": "Online"},
     {"id": "vpd", "name": "Garden environment average VPD", "type": "Calculated", "integration": "template", "family": "Template", "link": "derived", "source": "detected", "path": "Local", "hub": "", "zones": ["garden"], "state": "Online"},
 ]
 def ha_state(entity):
