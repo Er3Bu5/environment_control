@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0", "ro-fg": "#727272", "ro-surface": "#FCFCFC", "ro-dim": ".45" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D", "ro-fg": "#9B9B9B", "ro-surface": "#1F1F1F", "ro-dim": ".45" },
 } as const;
 
 export const styles = css`
@@ -310,6 +310,18 @@ export const styles = css`
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
   .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to (#91, #111). It has to read
+     as not yours to switch at a glance, so it loses the accent colour as well as brightness: an outline barely off the
+     card, text kept at 4.5:1 on it, and controls in greys. On or off still shows by the knob's side and its line. */
+  .ro .dev-name { color: var(--ro-fg); }
+  .dev.ro { background: var(--ro-surface); border: 1px dashed var(--off); padding: 9px; cursor: not-allowed; }
+  .ro > .ic { background: color-mix(in srgb, var(--off) 20%, transparent); }
+  .ro > .ic svg { fill: var(--ro-fg); }
+  .sw[data-roctl], .dial:has([data-roctl]), .chip:has(input[data-roctl]) { opacity: var(--ro-dim); cursor: not-allowed; }
+  .dial:has([data-roctl]), .chip:has(input[data-roctl]) { filter: grayscale(1); }
+  .sw[data-roctl], .sw.on[data-roctl], .sw[data-roctl]:hover { border-color: var(--off); }
+  .sw[data-roctl] i, .sw.on[data-roctl] i { background: var(--off); }
+  .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
   .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 32px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
@@ -493,6 +505,10 @@ export const styles = css`
   .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#91). A muted box and text rather than
+     opacity, which would take the figures under 4.5:1. */
+  input[data-roctl]:read-only { background: var(--ro-surface); color: var(--ro-fg); border-style: dashed; cursor: not-allowed; }
+  .vchart[data-roctl] { cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
