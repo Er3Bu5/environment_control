@@ -524,7 +524,9 @@ test.describe("Link automations", () => {
     /* Every entity id holds an a, so one letter matches all 44. */
     await search.fill("a");
     await expect(app(frame).locator("#link-list .pickwrap")).toHaveCount(10);
-    await expect(app(frame).locator("#link-more")).toHaveText("34 more match. Type more of the name to narrow them down.");
+    /* 17 of them are other zones', hidden and counted apart: see one-zone-automation.spec.ts. */
+    await expect(app(frame).locator("#link-more")).toHaveText("17 more match. Type more of the name to narrow them down.");
+    await expect(app(frame).locator("#link-hidden")).toHaveText("17 are hidden because another zone has them.");
     await search.fill("nothing like this");
     await expect(app(frame).locator("#link-list")).toContainText("No automation matches.");
   });
@@ -585,26 +587,6 @@ test.describe("Link automations", () => {
     await review(frame).getByRole("button", { name: "Back to editing" }).click();
     await expect(heading(frame, "Link automations: Nursery")).toBeVisible();
     await expect(draftBar(frame)).toContainText("Nursery · Porch Light On");
-  });
-
-  test("an automation another zone has says so, and saving it here too is refused with the reason", async ({ page }) => {
-    const frame = await openLinks(page, "Garden");
-    await app(frame).getByRole("searchbox", { name: "Search Home Assistant" }).fill("tent lights on");
-    const tent = pick(frame, "Tent Lights On");
-    await expect(tent.locator(".dev-sub")).toHaveText("automation.tent_lights_on, Veg area, linked in Veg");
-    await tent.locator(".pickrow").click();
-    /* No question here: an automation can't be shared, so it's the save that says no. */
-    await expect(app(frame).getByRole("alertdialog")).toHaveCount(0);
-    await expect(tent.locator(".pickrow")).toHaveAttribute("aria-pressed", "true");
-    await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
-    await expect(review(frame).locator(".review-row")).toHaveText(["Tent Lights OnNot linked → Control"]);
-    const before = await stored(page);
-    await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
-    /* Home Assistant's own question comes first, for anything newly linked; the backend's refusal after it. */
-    await allow(page);
-    await expect(review(frame).getByRole("alert")).toContainText("An automation can only be linked to one zone.");
-    expect((await stored(page)).revision).toBe(before.revision);
-    expect((await stored(page)).zones.find((z) => z.id === "garden")!.automations!.map((a) => a.entity)).not.toContain("automation.tent_lights_on");
   });
 
   test("a linked automation Home Assistant no longer lists keeps its row, so it can still be unlinked", async ({ page }) => {

@@ -274,6 +274,7 @@ import {
   repeatStuck,
   repeatValue,
   setLinkGroup,
+  otherZoneText,
   toggleLink,
 } from "./automations";
 import { alertsCard, automationsDialog, failsafeNoticeView, linkPage } from "./automations-view";
@@ -309,6 +310,8 @@ interface Guard {
   go: string;
   /* Going on loses nothing, so its button is the usual one and not the red one. */
   safe?: boolean;
+  /* It explains and asks nothing: one button, go, which only closes it. */
+  only?: boolean;
   action: () => void;
 }
 interface Review {
@@ -2054,10 +2057,17 @@ export class EcApp extends LitElement {
 
   private linkDiscard = (): void => {
     const d = this.linkw, z = d && this.zoneById(d.zoneId);
-    if (d && z) this.linkw = { ...openLinks(z, d.from), q: d.q };
+    if (d && z) this.linkw = { ...openLinks(z, d.from), q: d.q, others: d.others };
   };
 
+  /* Another zone's can't be ticked: a tap says so. One ticked before another window linked it elsewhere still unticks,
+     as the mock does; left ticked, its save is refused with the backend's reason. */
   private tickLink(r: LinkRow): void {
+    const d = this.linkw;
+    if (r.other !== null && d && d.pick[r.entity] === undefined) {
+      this.modal = { kind: "guard", title: r.name, text: otherZoneText(r.other), keep: "", go: "OK", only: true, safe: true, action: () => {} };
+      return;
+    }
     this.setLink((x) => toggleLink(x, r.entity));
   }
 
@@ -2981,8 +2991,10 @@ export class EcApp extends LitElement {
       list: this.catalog ? linkList(d, this.zones, this.catalog.automations, this.states) : null,
       error: this.catalogError,
       q: d.q,
+      others: d.others,
       chips: (legend, name, options, current, pick) => this.chips(legend, name, options, current, pick),
       onRetry: this.askCatalog,
+      onOthers: () => this.setLink((x) => (x.others = !x.others)),
       onQuery: (q) => this.setLink((x) => (x.q = q)),
       onTick: (r) => this.tickLink(r),
       onGroup: (entity, group) => this.setLink((x) => setLinkGroup(x, entity, group)),
@@ -4506,8 +4518,10 @@ export class EcApp extends LitElement {
               /></label>`
             : nothing}
           <div class="dlgfoot">
-            <button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
-            <button class="btn ${m.safe ? "primary" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>
+            ${m.only
+              ? html`<button class="btn primary" @click=${() => this.closeModal()}>${m.go}</button>`
+              : html`<button class="btn" @click=${() => this.closeModal()}>${m.keep}</button>
+                  <button class="btn ${m.safe ? "primary" : "danger"}" ?disabled=${blocked} @click=${this.guardGo}>${m.go}</button>`}
           </div>
         </div>
       </div>`;
