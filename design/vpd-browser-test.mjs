@@ -675,6 +675,11 @@ await phone(390, 844);
   const cardW = await ev(`Math.round(document.querySelector("#main .zone-card").getBoundingClientRect().width)`);
   await ev(`zones.splice(0,zones.length,...zones.filter(z=>!["g2","g3","g4"].includes(z.id)));render()`); await perRow(2300);
   check("Grid: with four zones on their own, a row holds two at 1700px, three at 2300px and 2560px, and four at 3440px and 5120px, a card never wider than about 700px there", same(wide, { 1700: 2, 2300: 3, 2560: 3, 3440: 4, 5120: 4 }) && cardW >= 640 && cardW <= 700, { wide, cardW });
+  /* #119: at two across, Garden is pushed onto a row of its own by the Nursery and Veg family after it, so it takes the whole row. */
+  const lone = async () => ev(`(()=>{const g=document.querySelector("#main .cards.zones").getBoundingClientRect(),c=document.querySelector('#main .zone-card[data-zone="garden"]').getBoundingClientRect();return [Math.round(c.width),Math.round(g.width)]})()`);
+  const lone2300 = await lone(); await perRow(1280); const lone1280 = await lone();
+  check("Grid: at two across a zone a family pushes onto a row of its own is as wide as the row, and at three across it isn't stretched", lone1280[0] === lone1280[1] && lone2300[0] < lone2300[1] / 2, { lone1280, lone2300 });
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await ev(`window.scrollTo(0,0)`); await shot("lone-stretch-desktop-dark"); await send("Emulation.setEmulatedMedia", { features: [] }); await perRow(2300);
   const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
   check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
   const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
