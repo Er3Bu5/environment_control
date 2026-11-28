@@ -582,6 +582,12 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .picklist-menu li.active, .picklist-menu li:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
   .picklist-menu li[aria-selected="true"] { font-weight: 500; }
   .picker > p { margin: 0; overflow-wrap: anywhere; }
+  /* A list dropped from a control lies over the page (#160): fixed to the window and placed from its control by placeDrop,
+     so no card or dialog with its own scroll cuts it off, and nothing under it moves when it opens or closes. Above the
+     foot bar, under a dialog's own layer when it isn't in one. */
+  .drop { position: fixed; z-index: 25; box-sizing: border-box; width: max-content; margin: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .drop[hidden] { display: none; }
+  .picklist.drop { gap: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 6px 18px #00000026; }
 
   .virt-head { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
   .pickwrap.virt { border-style: dashed; }
@@ -2143,11 +2149,12 @@ function repeatList() {
   const list = helperCatalog.filter((h) => h.entity.startsWith("input_number.") && h.entity !== room.alertRepeat).sort((p, q) => Number(/repeat/.test(q.entity)) - Number(/repeat/.test(p.entity)));
   return list.map((h) => `<button class="pickrow" data-repeatlink="${esc(h.entity)}"><span class="pick-text"><strong>${esc(h.attributes.friendly_name || h.entity)}</strong><span class="dev-sub">${esc(h.entity)}</span></span><span class="pill plain">${esc(h.state)} ${esc(h.attributes.unit_of_measurement || "")}</span></button>`).join("") || `<p class="muted small">Home Assistant has no number helpers to link.</p>`;
 }
+const repeatDrop = () => (ui.repeatPick ? `<div class="picklist drop" id="repeat-list" tabindex="-1" role="group" aria-label="Number helpers">${repeatList()}</div>` : "");
 function alertsCard() {
   const e = room.alertRepeat, st = e && haStates[e], unit = st && st.attributes && st.attributes.unit_of_measurement ? ` ${st.attributes.unit_of_measurement}` : "";
-  const linked = e ? `<div class="task"><div><strong>Alert repeat</strong><p class="small muted">${st ? `${esc(st.state)}${esc(unit)}.` : "Home Assistant doesn't have it right now."} On your helper, ${esc(e)}. Change it on any zone's Automations page, under Alerts.</p></div><div class="row"><button class="btn" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link another</button><button class="btn" data-repeatunlink>Unlink</button></div></div>`
-    : `<div class="row"><button class="btn primary" data-repeatpick aria-expanded="${!!ui.repeatPick}">Link a helper</button></div>`;
-  return `<section class="card" id="room-alerts"><div><h2>Alerts</h2><p class="small muted">How often an alert may buzz your phone comes from one number helper shared by every alert in Home Assistant, so it's linked here, for the whole room, rather than per zone.</p></div>${linked}${ui.repeatPick ? `<div class="picklist" id="repeat-list">${repeatList()}</div>` : ""}</section>`;
+  const linked = e ? `<div class="task"><div><strong>Alert repeat</strong><p class="small muted">${st ? `${esc(st.state)}${esc(unit)}.` : "Home Assistant doesn't have it right now."} On your helper, ${esc(e)}. Change it on any zone's Automations page, under Alerts.</p></div><div class="row"><button class="btn" data-repeatpick aria-expanded="${!!ui.repeatPick}" aria-controls="repeat-list">Link another</button>${repeatDrop()}<button class="btn" data-repeatunlink>Unlink</button></div></div>`
+    : `<div class="row"><button class="btn primary" data-repeatpick aria-expanded="${!!ui.repeatPick}" aria-controls="repeat-list">Link a helper</button>${repeatDrop()}</div>`;
+  return `<section class="card" id="room-alerts"><div><h2>Alerts</h2><p class="small muted">How often an alert may buzz your phone comes from one number helper shared by every alert in Home Assistant, so it's linked here, for the whole room, rather than per zone.</p></div>${linked}</section>`;
 }
 
 /* Mapping: what Home Assistant has, as the integration would report it. A sensor is one physical device, and its entities are matched by device class. */
@@ -2261,8 +2268,9 @@ function deviceMapRow(m, z, d) {
   const pill = on && !role ? '<span class="pill high">What is it?</span>' : d.zones.includes(z.id) ? '<span class="pill plain">Suggested</span>' : "";
   const entity = m.swap[d.id] || d.entity, q = (m.swapQ[d.id] || "").trim().toLowerCase();
   const found = q ? swapCandidates(m, d).filter((o) => `${o.entity} ${o.name}`.toLowerCase().includes(q)).slice(0, 8) : [];
-  const swap = `<div class="field"><label for="swap-${d.id}">Home Assistant entity</label><input id="swap-${d.id}" data-mswapq="${d.id}" type="search" placeholder="Search to move it to another entity" autocomplete="off" value="${esc(m.swapQ[d.id] || "")}">
-    ${found.length ? `<div class="picklist">${found.map((o) => `<button class="pickrow" data-mswap="${d.id}" data-entity="${esc(o.entity)}"><span class="pick-text"><strong>${esc(o.name)}</strong><span class="dev-sub">${esc(o.entity)}</span></span></button>`).join("")}</div>` : q ? '<span class="small muted">Nothing matches.</span>' : ""}
+  const open = !!q && m.swapOpen === d.id;
+  const swap = `<div class="field"><label for="swap-${d.id}">Home Assistant entity</label><input id="swap-${d.id}" data-mswapq="${d.id}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="${open}" aria-controls="swap-${d.id}-list" placeholder="Search to move it to another entity" autocomplete="off" value="${esc(m.swapQ[d.id] || "")}">
+    ${q ? `<ul class="picklist-menu drop" id="swap-${d.id}-list" tabindex="-1" role="listbox" aria-label="Home Assistant entity"${open ? "" : " hidden"}>${found.map((o, i) => `<li id="swap-${d.id}-o${i}" role="option" aria-selected="false" data-mswap="${d.id}" data-entity="${esc(o.entity)}"><span>${esc(o.name)}</span><span class="eid">${esc(o.entity)}</span></li>`).join("")}${found.length ? "" : '<li class="muted small" role="presentation">Nothing matches.</li>'}</ul>` : ""}
     <span class="small muted">On ${esc(entity)}.</span></div>`;
   const takes = d.ctl === "humidifier", v = takes ? deviceView(d) : null, extra = (m.extra[d.id] || "").trim(), hidden = m.hide[d.id] || [];
   const allModes = takes ? inNameOrder([...new Set([...v.modes, ...(extra ? [extra] : []), ...hidden])]) : [];
@@ -2386,7 +2394,7 @@ function linkSelect(m, key, label, opts = {}) {
   const items = [...(showNone ? [{ value: "", text: none, sub: "Stored in Environment Control" }] : []), ...matches.map((h) => ({ value: h.entity, text: (h.attributes || {}).friendly_name || h.entity, sub: `${h.entity}, ${h.state}${helperUnit(h) ? ` ${helperUnit(h)}` : ""}` }))];
   const active = open ? Math.min(helperQ.active ?? -1, items.length - 1) : -1;
   if (!all.length && !none) return `<div id="${id}-box"><p class="small muted">${esc(label)}: Home Assistant has no helper of the right kind yet.</p></div>`;
-  const list = open ? `<ul class="picklist-menu" id="${id}-list" role="listbox" aria-label="${esc(label)}">${items.map((it, i) => `<li id="${id}-o${i}" role="option" data-hval="${esc(it.value)}" data-hkey="${esc(key)}" aria-selected="${it.value === cur}"${i === active ? ' class="active"' : ""}><span>${esc(it.text)}</span><span class="eid">${esc(it.sub)}</span></li>`).join("")}${items.length ? "" : '<li class="muted small" role="presentation">Nothing matches.</li>'}</ul>` : "";
+  const list = open ? `<ul class="picklist-menu drop" id="${id}-list" tabindex="-1" role="listbox" aria-label="${esc(label)}">${items.map((it, i) => `<li id="${id}-o${i}" role="option" data-hval="${esc(it.value)}" data-hkey="${esc(key)}" aria-selected="${it.value === cur}"${i === active ? ' class="active"' : ""}><span>${esc(it.text)}</span><span class="eid">${esc(it.sub)}</span></li>`).join("")}${items.length ? "" : '<li class="muted small" role="presentation">Nothing matches.</li>'}</ul>` : "";
   return `<div id="${id}-box" class="picker"><label class="field" for="${id}">${esc(label)}<input id="${id}" type="text" role="combobox" data-hq="${esc(key)}" data-value="${esc(cur)}" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-expanded="${open}" aria-controls="${id}-list" aria-autocomplete="list"${active >= 0 ? ` aria-activedescendant="${id}-o${active}"` : ""}${opts.aria ? ` aria-label="${esc(opts.aria)}"` : ""} placeholder="${cur ? "Search to change it" : "Search your helpers"}" value="${esc(q)}"></label>${list}
     <p class="small${cur ? "" : " muted"}">${cur ? `Linked: <strong>${esc(helperText(cur))}</strong>` : esc(none || (helperCatalog ? "None picked yet" : "Loading helpers"))}</p></div>`;
 }
@@ -2397,6 +2405,7 @@ function redrawPicker(key) {
   input.closest(".picker").outerHTML = linkSelect(ui.td.m, key, said.label, said.opts);
   const again = document.querySelector(`[data-hq="${CSS.escape(key)}"]`);
   if (again && focused) { again.focus({ preventScroll: true }); try { again.setSelectionRange(at, at); } catch { /* not a text box */ } }
+  placeDrop();
 }
 /* Picking applies as a change of that link would, and leaves the box, so a phone's keyboard closes and the draft bar comes back. */
 function pickHelper(key, value) {
@@ -4026,6 +4035,7 @@ function render() {
   headsWatch.disconnect(); headsWidth = 0;
   const zoneGrid = $("#main .cards.zones");
   if (zoneGrid) { levelHeads(); headsWatch.observe(zoneGrid); }
+  placeDrop();
 }
 /* When a card's linked line or combine note doesn't fit beside its name it wraps under it, and that card's tracks would
    start lower than its neighbour's: the two halves of a joined card stop lining up. So every head in a row takes the
@@ -4067,7 +4077,7 @@ function closeMenus(refocus) {
   }
 }
 function openMenu(btn) {
-  closeMenus();
+  closeMenus(); closeDrop();
   const m = document.getElementById(btn.getAttribute("aria-controls"));
   m.hidden = false; m.classList.remove("up"); btn.setAttribute("aria-expanded", "true");
   /* The last zone sits near the foot of the page, so its menu opens upwards when there's no room below. */
@@ -4175,7 +4185,7 @@ document.addEventListener("click", (e) => {
     $("#link-others").innerHTML = linkOthers(lw, z); $("#link-list").innerHTML = linkList(lw, z); refocusSel("[data-lothers]");
     return;
   }
-  if (q("[data-repeatpick]")) { ui.repeatPick = !ui.repeatPick; render(); if (ui.repeatPick) jumpTo("room-alerts"); return; }
+  if (q("[data-repeatpick]")) { const open = !ui.repeatPick; closeDrop(); ui.repeatPick = open; render(); if (open) jumpTo("room-alerts"); refocusSel("[data-repeatpick]"); placeDrop(); return; }
   if ((el = q("[data-repeatlink]"))) { const ent = el.dataset.repeatlink; saveConfig(() => { room.alertRepeat = ent; }).then((r) => { if (r.ok) ui.repeatPick = false; toast(r.ok ? "Alert repeat linked." : `Not saved. ${r.error}`); render(); }); return; }
   if (q("[data-repeatunlink]")) { saveConfig(() => { delete room.alertRepeat; }).then((r) => { toast(r.ok ? "Alert repeat unlinked. Your helper stays as it is." : `Not saved. ${r.error}`); render(); }); return; }
   if (q("[data-sort]")) { ui.sort = { order: zones.map((z) => z.id) }; render(); refocus("sort-note"); return; }
@@ -4459,14 +4469,85 @@ document.addEventListener("pointerdown", (e) => {
   const opt = e.target.closest && e.target.closest("[data-hval]");
   if (opt && ui.td) { e.preventDefault(); pickHelper(opt.dataset.hkey, opt.dataset.hval); }
 });
-document.addEventListener("focusin", (e) => { const k = e.target.dataset && e.target.dataset.hq; if (k && ui.td && (!helperQ || helperQ.key !== k)) { helperQ = { key: k, q: "", active: -1 }; redrawPicker(k); } });
-document.addEventListener("focusout", (e) => { const k = e.target.dataset && e.target.dataset.hq; if (k) setTimeout(() => { if (helperQ && helperQ.key === k && document.activeElement !== document.querySelector(`[data-hq="${CSS.escape(k)}"]`)) { helperQ = null; redrawPicker(k); } }, 150); });
+/* Every list that drops from a control goes through here (#160), so they all behave alike: one open at a time, laid over
+   the page from its control, closed by a press outside, Escape, leaving by Tab, or a choice. It's fixed to the window
+   and placed from its control's box after each render, scroll and resize, because a card or dialog with its own scroll
+   would cut off a list laid out inside it, and a list in the flow pushed the line under its box down the page. */
+const openDropList = () => document.querySelector(".drop:not([hidden])");
+const dropControl = (list) => (list ? document.querySelector(`[aria-controls="${CSS.escape(list.id)}"]`) : null);
+function closeDrop(refocus) {
+  helperQ = null; ui.repeatPick = false; if (ui.mapw) ui.mapw.swapOpen = null;
+  const list = openDropList(); if (!list) return;
+  const ctl = dropControl(list); list.hidden = true;
+  if (ctl) { ctl.setAttribute("aria-expanded", "false"); ctl.removeAttribute("aria-activedescendant"); if (refocus) ctl.focus({ preventScroll: true }); }
+}
+/* The visible part of the window, so with a phone's keyboard up the list stays above it. */
+function dropView() {
+  const vv = window.visualViewport;
+  return { top: vv ? vv.offsetTop : 0, h: vv ? Math.min(vv.height, innerHeight) : innerHeight, w: document.documentElement.clientWidth };
+}
+/* A list that scrolls is a Tab stop of its own in Chromium, which would hold it open with focus on nothing, so each list
+   is kept out of the Tab order (tabindex -1). */
+function placeDrop(scrolled) {
+  const list = openDropList(), ctl = dropControl(list); if (!list) return;
+  const r = ctl && ctl.getBoundingClientRect(), v = dropView();
+  /* A list whose control has gone can't be placed. One scrolled out of view closes; a keyboard sliding up only moves it,
+     since the browser brings the box back into view straight after. */
+  if (!r || !r.width) { closeDrop(); return; }
+  if (scrolled && (r.bottom < v.top || r.top > v.top + v.h)) { closeDrop(); return; }
+  list.style.minWidth = `${Math.min(r.width, v.w - 16)}px`; list.style.maxWidth = `${v.w - 16}px`;
+  const row = list.querySelector("li, button"), rowH = row ? row.offsetHeight : 40, full = list.scrollHeight + list.offsetHeight - list.clientHeight + 1;
+  const below = v.top + v.h - r.bottom - 8, above = r.top - v.top - 8, cap = Math.max(v.h * 0.4, rowH * 4 + 10);
+  const up = below < Math.min(full, cap) && above > below, h = Math.max(Math.min(full, cap, up ? above : below), Math.min(full, rowH + 10));
+  list.style.maxHeight = `${h}px`;
+  list.style.top = `${up ? r.top - 4 - Math.min(full, h) : r.bottom + 4}px`;
+  list.style.left = `${Math.max(8, Math.min(r.left, v.w - 8 - list.offsetWidth))}px`;
+  list.classList.toggle("up", up);
+}
+addEventListener("scroll", (e) => { if (e.target !== openDropList()) placeDrop(true); }, true);
+addEventListener("resize", () => placeDrop());
+if (window.visualViewport) { visualViewport.addEventListener("resize", () => placeDrop()); visualViewport.addEventListener("scroll", () => placeDrop()); }
+/* A press inside the list leaves focus on its box, so the keyboard stays up and Tab carries on from there. */
+document.addEventListener("pointerdown", (e) => {
+  const list = openDropList(); if (!list) return;
+  if (list.contains(e.target)) { e.preventDefault(); return; }
+  const ctl = dropControl(list); if (!(ctl && ctl.contains(e.target))) closeDrop();
+}, true);
+document.addEventListener("focusout", (e) => {
+  const list = openDropList(), ctl = dropControl(list);
+  if (!list || !e.target.isConnected || (e.target !== ctl && !list.contains(e.target))) return;
+  const to = e.relatedTarget; if (!(to && (to === ctl || list.contains(to)))) closeDrop();
+});
+function openHelper(k) { closeDrop(); closeMenus(); helperQ = { key: k, q: "", active: -1 }; redrawPicker(k); }
+document.addEventListener("focusin", (e) => {
+  const t = e.target.dataset || {};
+  if (t.hq && ui.td && (!helperQ || helperQ.key !== t.hq)) openHelper(t.hq);
+  else if (t.mswapq && ui.mapw && (ui.mapw.swapQ[t.mswapq] || "").trim() && ui.mapw.swapOpen !== t.mswapq) {
+    closeDrop(); closeMenus(); ui.mapw.swapOpen = t.mswapq;
+    const list = document.getElementById(`${e.target.id}-list`); if (list) { list.hidden = false; e.target.setAttribute("aria-expanded", "true"); placeDrop(); }
+  }
+});
+/* Arrows move through the list while focus stays in the box, as the panel's search boxes do; a list of buttons takes focus
+   itself, as a menu's items do. */
+function chooseOption(o) { if (o.dataset.hval !== undefined) pickHelper(o.dataset.hkey, o.dataset.hval); else o.click(); }
 document.addEventListener("keydown", (e) => {
-  const k = e.target.dataset && e.target.dataset.hq; if (!k || !helperQ || helperQ.key !== k) return;
-  const items = [...document.querySelectorAll(`#${CSS.escape(e.target.id)}-list [data-hval]`)];
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); helperQ.active = Math.max(0, Math.min(items.length - 1, (helperQ.active ?? -1) + (e.key === "ArrowDown" ? 1 : -1))); redrawPicker(k); }
-  else if (e.key === "Enter") { e.preventDefault(); const it = items[helperQ.active >= 0 ? helperQ.active : 0]; if (it) pickHelper(k, it.dataset.hval); }
-  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); helperQ = null; e.target.blur(); redrawPicker(k); }
+  const list = openDropList(), ctl = dropControl(list), t = e.target;
+  if (!list) { if (e.key === "ArrowDown" && t.dataset && t.dataset.hq && ui.td) { e.preventDefault(); openHelper(t.dataset.hq); } return; }
+  if (t !== ctl && !list.contains(t)) return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeDrop(true); return; }
+  const opts = [...list.querySelectorAll('[role="option"]')], buttons = [...list.querySelectorAll("button")];
+  if (opts.length && t === ctl && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    e.preventDefault();
+    const was = opts.findIndex((o) => o.classList.contains("active")), at = Math.max(0, Math.min(opts.length - 1, was + (e.key === "ArrowDown" ? 1 : -1)));
+    opts.forEach((o, i) => o.classList.toggle("active", i === at)); ctl.setAttribute("aria-activedescendant", opts[at].id);
+    const o = opts[at];
+    if (o.offsetTop < list.scrollTop) list.scrollTop = o.offsetTop; else if (o.offsetTop + o.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = o.offsetTop + o.offsetHeight - list.clientHeight;
+  } else if (opts.length && t === ctl && e.key === "Enter") {
+    e.preventDefault(); chooseOption(opts.find((o) => o.classList.contains("active")) || opts[0]);
+  } else if (buttons.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    e.preventDefault();
+    const at = buttons.indexOf(t); buttons[e.key === "ArrowDown" ? Math.min(buttons.length - 1, at + 1) : Math.max(0, at - 1)].focus();
+  }
 }, true);
 document.addEventListener("pointerdown", (e) => {
   const hit = e.target.closest && e.target.closest("[data-dial]");
@@ -4504,13 +4585,13 @@ document.addEventListener("input", (e) => {
     draftSync();
   }
   if (e.target.dataset && e.target.dataset.dialin) { const o = dialSpec(devices.find((x) => x.id === e.target.dataset.dialin.split(":")[0]), e.target.dataset.dialin.split(":")[1]); dialTo(e.target.dataset.dialin, dialSnap(o, Number(e.target.value))); const again = document.querySelector(`[data-dialin="${e.target.dataset.dialin}"]`); if (again) again.focus(); }
-  if (e.target.dataset && e.target.dataset.hq && helperQ && ui.td) { helperQ = { key: e.target.dataset.hq, q: e.target.value, active: -1 }; redrawPicker(e.target.dataset.hq); }
+  if (e.target.dataset && e.target.dataset.hq && ui.td) { const k = e.target.dataset.hq; if (!helperQ || helperQ.key !== k) { closeDrop(); closeMenus(); } helperQ = { key: k, q: e.target.value, active: -1 }; redrawPicker(k); }
   if (ui.mapw && e.target.dataset) {
     const m = ui.mapw, t = e.target.dataset;
     if (t.mname !== undefined) { const v = e.target.value; if (v === t.haname) delete m.names[t.mname]; else m.names[t.mname] = v; mapBarSync(); }
     if (t.mextra) { const v = e.target.value; if (v.trim()) m.extra[t.mextra] = v; else delete m.extra[t.mextra]; mapBarSync(); }
     if (t.mvname) { const v = m.virt.find((x) => x.id === t.mvname); if (v) v.name = e.target.value; mapBarSync(); }
-    if (t.mswapq) { m.swapQ[t.mswapq] = e.target.value; const id = e.target.id, at = e.target.selectionStart; render(); const box = document.getElementById(id); if (box) { box.focus(); box.setSelectionRange(at, at); } }
+    if (t.mswapq) { m.swapQ[t.mswapq] = e.target.value; if (m.swapOpen !== t.mswapq) closeDrop(); m.swapOpen = t.mswapq; const id = e.target.id, at = e.target.selectionStart; render(); const box = document.getElementById(id); if (box) { box.focus(); box.setSelectionRange(at, at); } }
   }
   if (e.target.id === "map-q" && ui.mapw) { ui.mapw.q = e.target.value; $("#map-list").innerHTML = mapList(ui.mapw); }
   if (e.target.id === "map-rq" && ui.td) { ui.td.m.rq = e.target.value; $("#map-red").innerHTML = redRows(ui.td.m, zoneById(ui.td.m.id)); }

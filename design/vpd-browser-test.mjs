@@ -2813,6 +2813,94 @@ check("Picker: and the page shows it, with its values", (await ev(`!!document.qu
 const wrongKind = await evp(`saveConfig(()=>{zoneById("veg").helpers.bands.day.humidity.min="input_datetime.veg_day_time"}).then(r=>[r.ok,r.error])`);
 check("Picker: the backend refuses a limit linked to a time helper", wrongKind[0] === false && wrongKind[1].includes("isn't a number helper"), wrongKind);
 
+// ---------- Dropdowns lie over the page and close when you click away (#160)
+const desk = async () => { await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await send("Emulation.setTouchEmulationEnabled", { enabled: false }); await sleep(60); };
+/* The window as it stands, not the whole page: a list fixed to the window would be drawn in the wrong place on a full-page capture. */
+const viewShot = async (name) => { await sleep(150); const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(`${dir}/${name}.png`, Buffer.from(r.result.data, "base64")); };
+const ddOpen = (id) => ev(`(()=>{const l=document.getElementById("${id}-list"),b=document.getElementById("${id}");return !!l&&!l.hidden&&l.offsetHeight>0&&b.getAttribute("aria-expanded")==="true"})()`);
+const ddGeo = (id) => ev(`(()=>{const box=document.getElementById("${id}-box"),p=box.querySelector(":scope > p").getBoundingClientRect(),c=box.closest(".card");let n=c.nextElementSibling;while(n&&!n.getClientRects().length)n=n.nextElementSibling;return {h:document.documentElement.scrollHeight,p:Math.round(p.top+scrollY),card:Math.round(c.getBoundingClientRect().bottom+scrollY),next:n?Math.round(n.getBoundingClientRect().top+scrollY):null}})()`);
+/* Whether the list is drawn whole: inside the window, and its own at the middle and the foot rather than cut off or under something. */
+const ddBox = (id, ctl = id) => ev(`(()=>{const l=document.getElementById("${id}-list"),b=document.getElementById("${ctl}").getBoundingClientRect(),r=l.getBoundingClientRect(),own=(y)=>l.contains(document.elementFromPoint(r.left+r.width/2,y));return {inView:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=document.documentElement.clientWidth,below:r.top>=b.bottom-1,above:r.bottom<=b.top+1,wide:r.width>=b.width-1,whole:own(r.top+r.height/2)&&own(r.bottom-6),gap:Math.round(r.top-b.bottom)}})()`);
+await desk(); await reset(); await ev(`ui.screen="setup";openTd("garden");ui.vpdw.period="day";render();window.scrollTo(0,0)`); await sleep(150);
+check("Dropdown: Garden's red lights come from its helpers, so Targets shows the three helper pickers", (await ev(`["morning","daylight","evening"].every(k=>!!document.getElementById("map-l-"+k))`)) === true);
+const ddBefore = await ddGeo("map-l-morning");
+await tap("#map-l-morning");
+const ddAfter = await ddGeo("map-l-morning");
+check("Dropdown: a helper picker opens on its box", (await ddOpen("map-l-morning")) === true);
+check("Dropdown: opening it moves nothing: the page's height, the Linked line under it and the block after it stay put", ddAfter.h === ddBefore.h && ddAfter.p === ddBefore.p && ddAfter.card === ddBefore.card && ddAfter.next === ddBefore.next, [ddBefore, ddAfter]);
+const ddMorning = await ddBox("map-l-morning");
+check("Dropdown: the list lies just under its box, at least as wide, drawn whole", ddMorning.below && ddMorning.wide && ddMorning.whole && ddMorning.inView && ddMorning.gap <= 8, ddMorning);
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await ev(`document.getElementById("map-l-morning").scrollIntoView({block:"center"})`); await sleep(80);
+await viewShot("dropdown-red-lights-dark");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
+await tap("#map-l-daylight");
+check("Dropdown: opening a second picker closes the first, so only one is ever open", (await ddOpen("map-l-morning")) === false && (await ddOpen("map-l-daylight")) === true && (await ev(`document.querySelectorAll(".drop:not([hidden])").length`)) === 1);
+await tap("#main h1");
+check("Dropdown: a click on empty page closes it", (await ddOpen("map-l-daylight")) === false && (await ev(`document.getElementById("map-l-daylight").getAttribute("aria-expanded")`)) === "false");
+await tap("#map-l-evening"); await key("Escape", 27);
+check("Dropdown: Escape closes it and leaves focus on its box", (await ddOpen("map-l-evening")) === false && (await active()) === "map-l-evening");
+await type("evening");
+check("Dropdown: typing opens it again, narrowed to what matches", (await ddOpen("map-l-evening")) === true && (await ev(`[...document.querySelectorAll("#map-l-evening-list [data-hval]")].every(li=>(li.dataset.hval+li.textContent).toLowerCase().includes("evening"))`)) === true);
+await key("ArrowDown", 40);
+check("Dropdown: arrows move through the list with focus kept in the box, the active choice named to a screen reader", (await active()) === "map-l-evening" && (await ev(`document.getElementById("map-l-evening").getAttribute("aria-activedescendant")`)) === "map-l-evening-o0" && (await ev(`document.getElementById("map-l-evening-o0").classList.contains("active")`)) === true);
+await key("Tab", 9); await sleep(40);
+check("Dropdown: tabbing out of it closes it", (await ddOpen("map-l-evening")) === false);
+await tap("#map-l-morning"); const ddPick = await ev(`document.querySelector('#map-l-morning-list [data-hval]:not([data-hval=""])').dataset.hval`); await tap(`#map-l-morning-list [data-hval="${ddPick}"]`);
+check("Dropdown: picking closes it and says what's linked", (await ev(`!document.getElementById("map-l-morning-list") || document.getElementById("map-l-morning-list").hidden`)) === true && (await ev(`document.querySelector("#map-l-morning-box > p").textContent`)).startsWith("Linked: "));
+/* The box near the foot of the window: the list opens upwards rather than off the bottom. */
+const ddLow = async (id) => { await ev(`(()=>{document.activeElement.blur();const b=document.getElementById("${id}");document.body.style.paddingBottom="100vh";scrollTo(0,b.getBoundingClientRect().top+scrollY-innerHeight+b.offsetHeight+24);b.focus({preventScroll:true})})()`); await sleep(120); };
+await ddLow("map-l-evening");
+const ddUp = await ddBox("map-l-evening");
+check("Dropdown: near the foot of the window it opens upwards, inside the window", (await ddOpen("map-l-evening")) && ddUp.above && ddUp.inView && ddUp.whole, ddUp);
+const ddTop = await ev(`document.getElementById("map-l-evening-list").getBoundingClientRect().top`); await ev(`scrollBy(0,-40)`); await sleep(120);
+check("Dropdown: scrolling the page keeps it open, following its box", (await ddOpen("map-l-evening")) === true && Math.round((await ev(`document.getElementById("map-l-evening-list").getBoundingClientRect().top`)) - ddTop) === 40);
+await ev(`scrollBy(0,-innerHeight)`); await sleep(120);
+check("Dropdown: its box scrolled out of view closes it", (await ddOpen("map-l-evening")) === false);
+await ev(`document.body.style.paddingBottom="";scrollTo(0,0)`); await sleep(40);
+await tap('[data-zmenu="nav"]'); await ev(`document.getElementById("map-l-morning").focus()`); await sleep(60);
+check("Dropdown: a picker opening closes an open menu", (await ev(`document.getElementById("zmenu-nav").hidden`)) === true && (await ddOpen("map-l-morning")) === true);
+await tap('[data-zmenu="nav"]');
+check("Dropdown: and a menu opening closes the picker", (await ev(`document.getElementById("zmenu-nav").hidden`)) === false && (await ddOpen("map-l-morning")) === false);
+await key("Escape", 27);
+/* At phone width with the box near the foot, where a keyboard would push it. */
+await phone(390, 844); await ev(`ui.vpdw.period="day";render()`); await sleep(120);
+await ddLow("map-l-evening");
+const ddPhone = await ddBox("map-l-evening");
+check("Dropdown: at phone width near the foot it opens upwards, inside the window and drawn whole", (await ddOpen("map-l-evening")) && ddPhone.above && ddPhone.inView && ddPhone.whole, ddPhone);
+await viewShot("dropdown-phone-low");
+await ev(`document.activeElement.blur();document.body.style.paddingBottom="";scrollTo(0,0)`);
+await desk(); await reset();
+/* Setup's alert repeat picker drops its list from its button. */
+await ev(`ui.screen="setup";render()`); await sleep(60);
+const repGeo = () => ev(`(()=>{const c=document.getElementById("room-alerts");let n=c.nextElementSibling;while(n&&!n.getClientRects().length)n=n.nextElementSibling;return {h:document.documentElement.scrollHeight,card:Math.round(c.getBoundingClientRect().bottom+scrollY),next:n?Math.round(n.getBoundingClientRect().top+scrollY):null}})()`);
+const repOpen = () => ev(`(()=>{const l=document.getElementById("repeat-list"),b=document.querySelector("[data-repeatpick]");return !!l&&!l.hidden&&b.getAttribute("aria-expanded")==="true"})()`);
+const repBefore = await repGeo(); await tap("[data-repeatpick]"); await sleep(200);
+const repAfter = await repGeo(), repBox = await ev(`(()=>{const r=document.getElementById("repeat-list").getBoundingClientRect(),b=document.querySelector("[data-repeatpick]").getBoundingClientRect();return {inView:r.top>=0&&r.bottom<=innerHeight,wide:r.width>=b.width-1,whole:document.getElementById("repeat-list").contains(document.elementFromPoint(r.left+r.width/2,r.bottom-6))}})()`);
+check("Dropdown: the alert repeat picker's list lies over the page: its card and what follows stay put", (await repOpen()) === true && repAfter.h === repBefore.h && repAfter.card === repBefore.card && repAfter.next === repBefore.next, [repBefore, repAfter]);
+check("Dropdown: and it's drawn whole in the window, at least as wide as its button", repBox.inView && repBox.wide && repBox.whole, repBox);
+await key("ArrowDown", 40);
+check("Dropdown: its helpers are reached from the button with the arrows", (await ev(`!!document.activeElement.dataset.repeatlink`)) === true);
+await key("Escape", 27);
+check("Dropdown: Escape closes it and hands focus back to the button", (await repOpen()) === false && (await ev(`document.activeElement.matches("[data-repeatpick]")`)) === true);
+await tap("[data-repeatpick]"); await sleep(200); await tap("#main h1");
+check("Dropdown: and a click on empty page closes it", (await repOpen()) === false);
+await reset();
+/* Device identification's entity picker. */
+await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(40);
+const swapLine = () => ev(`Math.round(document.getElementById("swap-heater").closest(".field").querySelector(":scope > .small.muted:last-child").getBoundingClientRect().top+scrollY)`);
+const swapH = () => ev(`document.documentElement.scrollHeight`);
+const swapBefore = [await swapLine(), await swapH()];
+await tap("#swap-heater"); await type("spare"); await sleep(60);
+check("Dropdown: Device identification's entity picker opens on typing, its list over the page, the line under it and the page's height unmoved", (await ddOpen("swap-heater")) === true && same([await swapLine(), await swapH()], swapBefore), [swapBefore, await swapLine(), await swapH()]);
+const swapBox = await ddBox("swap-heater");
+check("Dropdown: and it's drawn whole, at least as wide as its box", swapBox.wide && swapBox.whole && swapBox.inView, swapBox);
+await key("Escape", 27);
+check("Dropdown: Escape closes the entity list with focus on its box, which opens it again", (await ddOpen("swap-heater")) === false && (await active()) === "swap-heater");
+await tap("#main h1"); await tap("#swap-heater");
+check("Dropdown: the entity list shows again when its box is focused with a search in it", (await ddOpen("swap-heater")) === true);
+await key("ArrowDown", 40); await key("Enter", 13); await sleep(40);
+check("Dropdown: Enter on the active entity picks it, as a click does", (await ev(`ui.mapw.swap.heater`)) === "switch.spare_plug" && (await ev(`!document.getElementById("swap-heater-list") || document.getElementById("swap-heater-list").hidden`)) === true, await ev(`ui.mapw.swap.heater`));
+await reset();
 // ---------- No target: any zone can have limits and nothing to aim for
 await reset(); await ev(`openVpd("nursery");render()`); await sleep(40);
 await clickIt('[data-vtarget="off"]');
