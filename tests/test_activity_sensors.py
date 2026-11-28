@@ -83,7 +83,8 @@ class Clock:
     # Far less than half an hour in all, the life of the test's access token.
     def __init__(self, hass, freezer):
         self.hass, self.freezer = hass, freezer
-        self.now = dt_util.utcnow().replace(microsecond=0)
+        # Past the recorder's start: a reading's row from before it would read as current across a restart.
+        self.now = dt_util.utcnow().replace(microsecond=0) + timedelta(seconds=1)
 
     async def at(self, seconds, *changes):
         """Move on, then make every change in the same instant."""
@@ -100,25 +101,30 @@ def _left(state=None, prefix=""):
     return [(e, state or prefix + VALUES[r]) for r, e in LEFT.items()]
 
 
+def _rows(*pairs):
+    # A row reported only when it changed: its last report is its own time.
+    return [(t, state, t) for t, state in pairs]
+
+
 def test_unavailable_then_back_is_a_stop_and_a_return() -> None:
-    rows = [(0, "20"), (100, "20.5"), (150, "unavailable"), (400, "21")]
-    assert activity.turns(rows, 0, 1000) == [Turn(150, "stopped", 100), Turn(400, "back", 100)]
-    assert activity.turns([(0, "20"), (100, "unknown"), (110, "21")], 0, 200) == [
-        Turn(100, "stopped", None),
-        Turn(110, "back", None),
+    rows = _rows((0, "20"), (100, "20.5"), (150, "unavailable"), (400, "21"))
+    assert activity.turns(rows, 1000) == [Turn(150, "stopped", 100), Turn(400, "back", 100)]
+    assert activity.turns(_rows((0, "20"), (100, "unknown"), (110, "21")), 200) == [
+        Turn(100, "stopped", 0),
+        Turn(110, "back", 0),
     ]
 
 
 def test_silence_past_the_stale_rule_is_a_stop_at_its_edge() -> None:
-    rows = [(10, "20"), (20, "20"), (20 + STALE_S + 60, "21")]
-    assert activity.turns(rows, 0, 1200) == [Turn(20 + STALE_S, "stopped", 20), Turn(20 + STALE_S + 60, "back", 20)]
+    rows = _rows((10, "20"), (20, "20"), (20 + STALE_S + 60, "21"))
+    assert activity.turns(rows, 1200) == [Turn(20 + STALE_S, "stopped", 20), Turn(20 + STALE_S + 60, "back", 20)]
     # Still silent at the end of what was read.
-    assert activity.turns([(10, "20")], 0, 10 + STALE_S + 1) == [Turn(10 + STALE_S, "stopped", 10)]
+    assert activity.turns(_rows((10, "20")), 10 + STALE_S + 1) == [Turn(10 + STALE_S, "stopped", 10)]
 
 
 def test_a_shorter_silence_is_nothing() -> None:
-    assert activity.turns([(10, "20"), (10 + STALE_S, "21")], 0, 10 + STALE_S + 1) == []
-    assert activity.turns([(10, "20")], 0, 10 + STALE_S) == []
+    assert activity.turns(_rows((10, "20"), (10 + STALE_S, "21")), 10 + STALE_S + 1) == []
+    assert activity.turns(_rows((10, "20")), 10 + STALE_S) == []
 
 
 def test_four_readings_stopping_together_are_one_row_and_three_are_three() -> None:
@@ -156,6 +162,8 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     t_back = await clock.at(1, *_left())
     t_lux = await clock.at(1, ("sensor.left_lux", "unknown"))
     t_lux_back = await clock.at(1, ("sensor.left_lux", "40000"))
+    # Left reports its values again unchanged, which records nothing but shows it reports while a value holds.
+    t_heard = await clock.at(1, *_left()[:3], ("sensor.left_lux", "40000"))
     # Right keeps reporting; Left goes quiet past the stale rule, then reports again.
     for _ in range(3):
         await clock.at(STALE_S / 3 - 30, (RIGHT, str(clock.now.second)))
@@ -168,13 +176,9 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     rows = [(e["kind"], e["when"], e.get("reading"), e.get("state"), e.get("since")) for e in result["entries"]]
     assert rows == [
         ("device", t_heat, None, "on", None),
-        # Back together, out since the first of them stopped.
-        ("sensor", t_quiet, "all", "back", t_back),
-        # Left's three other readings last reported at t_back, the light at t_lux_back: not together.
-        ("sensor", t_lux_back + STALE_S, "light", "stopped", None),
-        ("sensor", t_back + STALE_S, "vpd", "stopped", None),
-        ("sensor", t_back + STALE_S, "humidity", "stopped", None),
-        ("sensor", t_back + STALE_S, "temperature", "stopped", None),
+        # Silent from their last report, not their last change, and back together.
+        ("sensor", t_quiet, "all", "back", t_heard),
+        ("sensor", t_heard + STALE_S, "all", "stopped", None),
         ("sensor", t_lux_back, "light", "back", t_back),
         ("sensor", t_lux, "light", "stopped", None),
         ("sensor", t_back, "all", "back", t0),
@@ -248,3 +252,82 @@ async def test_the_cap_and_cursor_take_each_sensor_row_once(room, hass, freezer,
         assert all(e["when"] >= end for e in page["entries"])
     assert len(pages) == 3
     assert [e for p in pages for e in p] == whole
+
+
+async def _direct(hass, start, end):
+    # Straight to the read, not over the socket: these histories run longer than a test's access token lives.
+    zone = activity.zone_entities(ROOM, "garden")
+    result = await activity.async_activity(hass, "garden", zone, start, end)
+    return [(e["when"], e["reading"], e["state"]) for e in result["entries"] if e["kind"] == "sensor"]
+
+
+async def test_a_value_reported_again_unchanged_is_not_silence(room, hass, freezer) -> None:
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (RIGHT, "19.5"))
+    # Home Assistant writes no row for these, only moves the state's last report.
+    for _ in range(10):
+        await clock.at(STALE_S / 4, (RIGHT, "19.5"))
+    t_end = await clock.at(60, (RIGHT, "19.6"))
+    await async_wait_recording_done(hass)
+    assert await _direct(hass, t0 - 60, t_end + 1) == []
+
+
+async def test_a_steady_reading_still_current_is_not_silence(room, hass, freezer) -> None:
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (RIGHT, "19.5"))
+    for _ in range(10):
+        t_end = await clock.at(STALE_S / 4, (RIGHT, "19.5"))
+    await async_wait_recording_done(hass)
+    # Its last report is held only by the live state until the next change is recorded.
+    assert await _direct(hass, t0 - 60, t_end + 1) == []
+
+
+async def test_a_reporting_reading_that_goes_silent_stops_at_its_last_report(room, hass, freezer) -> None:
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (RIGHT, "19.5"))
+    t_heard = await clock.at(60, (RIGHT, "19.5"))
+    t_back = await clock.at(30 * 60, (RIGHT, "19.6"))
+    await async_wait_recording_done(hass)
+    assert await _direct(hass, t0 - 60, t_back + 1) == [
+        (t_back, "temperature", "back"),
+        (t_heard + STALE_S, "temperature", "stopped"),
+    ]
+
+
+async def test_a_forced_update_reading_that_goes_silent_stops(room, hass, freezer) -> None:
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0)
+    # force_update writes the same value again as a new row.
+    for _ in range(3):
+        t_last = await clock.at(10)
+        hass.states.async_set(RIGHT, "19.5", force_update=True)
+    t_back = await clock.at(30 * 60, (RIGHT, "19.6"))
+    await async_wait_recording_done(hass)
+    assert await _direct(hass, t0 - 60, t_back + 1) == [
+        (t_back, "temperature", "back"),
+        (t_last + STALE_S, "temperature", "stopped"),
+    ]
+
+
+async def test_a_reading_that_writes_only_changes_is_judged_by_its_states(room, hass, freezer) -> None:
+    # As MQTT and Zigbee sensors do: a value that holds moves nothing, so silence can't be told from steadiness.
+    clock = Clock(hass, freezer)
+    t0 = await clock.at(0, (RIGHT, "19.5"))
+    t_gone = await clock.at(60 * 60, (RIGHT, "unavailable"))
+    t_back = await clock.at(60, (RIGHT, "19.6"))
+    t_end = await clock.at(30 * 60, (HEATER, "on"))
+    await async_wait_recording_done(hass)
+    assert await _direct(hass, t0 - 60, t_end + 1) == [
+        (t_back, "temperature", "back"),
+        (t_gone, "temperature", "stopped"),
+    ]
+
+
+def test_a_reading_current_across_a_restart_counts_as_reporting_up_to_it() -> None:
+    # The recorder never stores the last report of a row current when Home Assistant stopped.
+    rows = _rows((0, "20"), (5000, "unavailable"), (5100, "21"))
+    assert activity.turns(rows, 5500, [4990]) == [Turn(5000, "stopped", None), Turn(5100, "back", None)]
+    assert activity.turns(rows, 5500) == [Turn(STALE_S, "stopped", 0), Turn(5100, "back", 0)]
+    # A repeat across a restart is the restart writing every state anew, not force_update.
+    assert activity.proves_timed(_rows((0, "20"), (100, "20")), [50]) is False
+    assert activity.proves_timed(_rows((0, "20"), (100, "20")), []) is True

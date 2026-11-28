@@ -106,6 +106,41 @@ def recorded(hass: HomeAssistant, entity: str, start: datetime, end: datetime) -
     return [(float(r["lu"]), r["s"]) for r in found if isinstance(r, dict) and "lu" in r]
 
 
+def reported(
+    hass: HomeAssistant, entity: str, start: datetime, end: datetime, live: tuple[float, float] | None
+) -> list[tuple[float, Any, float]]:
+    """In the recorder's executor: every recorded (time, state, last reported) of one entity from start up to end,
+    oldest first, starting with the state in force at start at its own time.
+
+    A sensor that reports an unchanged value, without force_update, gets no new row: only the row's last reported time
+    moves, and the recorder writes that onto the row only once the next row arrives. So the newest row's is taken from
+    live, the (last updated, last reported) of the state Home Assistant holds now, and a row that was current when Home
+    Assistant stopped never gets one. The recorder's own start state has neither time, so it is read here.
+    """
+    from homeassistant.components.recorder import get_instance, history
+    from homeassistant.components.recorder.db_schema import States
+    from homeassistant.components.recorder.util import session_scope
+    from sqlalchemy import select
+
+    found = history.state_changes_during_period(
+        hass, start, end, entity, no_attributes=True, include_start_time_state=False
+    ).get(entity, [])
+    out = [(s.last_updated_timestamp, s.state, max(s.last_updated_timestamp, s.last_reported_timestamp)) for s in found]
+    with session_scope(hass=hass, read_only=True) as session:
+        if (metadata_id := get_instance(hass).states_meta_manager.get(entity, session, False)) is not None:
+            first = session.execute(
+                select(States.state, States.last_updated_ts, States.last_reported_ts)
+                .where(States.metadata_id == metadata_id, States.last_updated_ts <= start.timestamp())
+                .order_by(States.last_updated_ts.desc())
+                .limit(1)
+            ).first()
+            if first is not None:
+                out.insert(0, (first[1], first[0], max(first[1], first[2] or 0)))
+    if out and live is not None and abs(out[-1][0] - live[0]) < 1e-3:
+        out[-1] = (out[-1][0], out[-1][1], max(out[-1][2], live[1]))
+    return out
+
+
 def _read(hass: HomeAssistant, entities: list[str], start: datetime, end: datetime, n: int) -> dict[str, Any]:
     """In the recorder's executor: each entity's rows, bucketed one entity at a time so only one is held at once."""
     start_ts, end_ts, series = start.timestamp(), end.timestamp(), {}
