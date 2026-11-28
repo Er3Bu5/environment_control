@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#FFFFFF", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
 } as const;
 
 export const styles = css`
@@ -121,11 +121,14 @@ export const styles = css`
   .dialog { display: flex; flex-direction: column; gap: 12px; width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
   .dialog > * { flex: none; }
   .dialog > .review-scroll { flex: 0 1 auto; }
-  .dlgfoot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; background: var(--card); }
+  /* A dialog's foot is the dialog's own background under a divider: a contrasting strip read as a band of the other
+     theme. The leaving button is outlined so it still reads as a button on that background. */
+  .dlgfoot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); background: var(--card); }
+  .dlgfoot .btn:not(.primary, .danger) { background: transparent; border-color: var(--muted); }
   /* On a touch screen with the keyboard up, the dialog moves to the top and stops above the keyboard, a little tighter,
      and the box typed in keeps clear of the buttons when the dialog scrolls to it. */
   :host(.dlgkeys) .modal { align-items: flex-start; padding-top: 8px; }
-  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 52px; }
+  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 65px; }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
@@ -136,7 +139,13 @@ export const styles = css`
   .review-row + .review-row { border-top: 1px solid var(--line); }
   .review-row strong { font-weight: 400; }
   .review-row b { font-weight: 500; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 14px; z-index: 40; }
+  /* Drops in from the top of the view, so it never has to dodge the foot bar or draft bar, and sits over dialogs and menus.
+     Taps go through it: it can lie over the heading's buttons for a moment and must not swallow them. */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); width: max-content; padding: 10px 14px; border: 1px solid var(--barline); border-radius: 8px; background: var(--barbg); color: var(--barfg); box-shadow: 0 4px 16px #00000040; font-size: 14px; z-index: 40; pointer-events: none; animation: toast-in .2s ease-out; }
+  .toast.leaving { animation: toast-out .2s ease-in forwards; }
+  @keyframes toast-in { from { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @keyframes toast-out { to { transform: translate(-50%, calc(-100% - 16px - env(safe-area-inset-top, 0px))); } }
+  @media (prefers-reduced-motion: reduce) { .toast, .toast.leaving { animation: none; } }
 
   .combine { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--tile); }
   .inavg { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 2px; }
@@ -356,18 +365,19 @@ export const styles = css`
   .issues:empty { display: none; }
   @media (pointer: coarse) { .lcell input { font-size: 16px; } }
 
-  /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved. */
-  .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px #0000003D; }
+  /* The draft bar: pinned to the foot of the window on a page edited freely, while anything differs from what's saved.
+     A grey of its own, not the inverted fg and bg, which read as a stark white or black slab. The hairline is a shadow so
+     the bar keeps its size, and with the soft shadow it keeps the bar standing off a light page. */
+  .draftbar { position: fixed; z-index: 20; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--barbg); color: var(--barfg); box-shadow: 0 0 0 1px var(--barline), 0 6px 20px #00000029; }
   :host(.drafting) main { padding-bottom: 96px; }
-  :host(.drafting) .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   :host(.typing) .draftbar { display: none; }
   .draft-count { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--sun); color: #212121; font-size: 13px; font-weight: 700; }
   .draft-text { flex: 1; min-width: 0; font-size: 14px; }
   .draft-text strong { font-weight: 500; }
   .draft-why { opacity: .8; }
   .draft-discard, .draft-review { flex: none; height: 44px; padding: 0 14px; border-radius: 10px; font-size: 14px; white-space: nowrap; }
-  .draft-discard { border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; }
-  .draft-review { border: 0; background: var(--bg); color: var(--fg); font-weight: 500; }
+  .draft-discard { border: 1px solid var(--barout); background: transparent; color: inherit; }
+  .draft-review { border: 0; background: var(--primary); color: var(--on-primary); font-weight: 500; }
   .draft-review:disabled { opacity: .5; cursor: not-allowed; }
   .draft-discard:disabled { opacity: .5; cursor: not-allowed; }
   /* A wizard's Back and Next in the same bar. With nothing unsaved and nothing to fix, a phone shows only the buttons. */
@@ -385,7 +395,6 @@ export const styles = css`
     .draft-discard { flex: 1; }
     .draft-review { flex: 2; }
     :host(.drafting) main { padding-bottom: 136px; }
-    :host(.drafting) .toast { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* History, as the mock draws it. The chart scrolls the page vertically under a finger and reads a point sideways. */

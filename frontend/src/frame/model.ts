@@ -214,22 +214,16 @@ export function removeZone(c: RawConfig, id: string): void {
 export interface ShareAsk {
   title: string;
   text: string;
-  more?: string;
   keep: string;
   go: string;
 }
-export function shareAsk(kind: "device" | "sensor" | "automation", name: string, zone: string, others: string[]): ShareAsk {
-  if (kind === "automation")
-    return {
-      title: `Add ${name} to ${zone} as well?`,
-      text: `It's already linked in ${others.join(" and ")}. It's one automation, so switching it off here switches it off there too.`,
-      keep: "Leave it out",
-      go: `Add to ${zone}`,
-    };
-  /* A plain list in the order Overview shows the zones, which is the order the caller passes them in. */
-  const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
-  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${where} may affect the device state.` : `This means that data is in sync in ${all}.`;
-  return { title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
+export function shareAsk(kind: "device" | "sensor", name: string, zone: string, others: string[]): ShareAsk {
+  const where = others.join(" and ");
+  const text = {
+    device: `It's already in ${where}. It's one device, so switching it here switches it there too.`,
+    sensor: `It's already in ${where}. It's one sensor, so its readings count there and here.`,
+  }[kind];
+  return { title: `Add ${name} to ${zone} as well?`, text, keep: "Leave it out", go: `Add to ${zone}` };
 }
 
 /* HA can't tell how some devices are connected, ESPHome boards above all, so Setup asks and keeps the answer, marked as

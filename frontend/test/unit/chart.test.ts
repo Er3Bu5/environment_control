@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combinedLine, endingNow, entitiesFor, extremes, keptNote, niceTicks, nightRuns, sensorLine, timeTicks, yRange } from "../../src/frame/chart";
+import { CHART_GAP, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, niceTicks, nightRuns, sensorLine, timeTicks, yRange } from "../../src/frame/chart";
 import type { History } from "../../src/frame/messages";
 import { type StoredSensor, calcVpd, combine, zoneReading } from "../../src/frame/readings";
 
@@ -109,5 +109,20 @@ describe("the chart's axes are labelled at round values", () => {
     expect(clock(timeTicks(at(19, 7, 10), at(19, 7), 24, false))).toEqual(["10 20:00", "11 0:00", "11 4:00", "11 8:00", "11 12:00", "11 16:00"]);
     expect(clock(timeTicks(at(19, 7, 8), at(19, 7), 72, false))).toEqual(["9 0:00", "10 0:00", "11 0:00"]);
     expect(clock(timeTicks(at(19, 7, 4), at(19, 7), 168, true))).toEqual(["5 0:00", "7 0:00", "9 0:00", "11 0:00"]);
+  });
+});
+
+describe("chartGutters", () => {
+  it("leaves the same inset on both sides, a gutter as wide as the widest label, and the plot the rest", () => {
+    for (const [W, widths] of [[900, [12.4, 12.4, 12.9]], [440, [18.2, 24.6, 30.1, 30.1]], [300, [6]]] as [number, number[]][]) {
+      const g = chartGutters(W, widths), widest = Math.max(...widths);
+      const leftInset = g.L - CHART_GAP - widest;
+      expect(Math.abs(leftInset - g.R)).toBeLessThanOrEqual(1);
+      expect(g.L + g.PW + g.R).toBe(W);
+      expect(g.L - CHART_GAP).toBeGreaterThanOrEqual(widest);
+    }
+  });
+  it("is narrower for short numbers than for long ones", () => {
+    expect(chartGutters(600, [12]).L).toBeLessThan(chartGutters(600, [30]).L);
   });
 });
