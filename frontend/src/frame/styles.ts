@@ -71,6 +71,8 @@ export const styles = css`
   /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.
      Too long for it, the note wraps under the name rather than squeezing it. */
   .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
+  /* Given a row's height by levelHeads, the head keeps its name at the top rather than floating in the middle. */
+  .zone-card .card-head { align-content: flex-start; }
   .cardnote { margin-left: auto; text-align: right; min-width: 0; align-self: baseline; }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }

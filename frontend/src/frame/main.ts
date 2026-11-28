@@ -183,6 +183,7 @@ import {
   zoneReading,
 } from "./readings";
 import { onColor } from "./colour";
+import { levelledHeights } from "./heads";
 import { PALETTES, styles } from "./styles";
 import {
   KEPT,
@@ -454,6 +455,17 @@ export class EcApp extends LitElement {
   }
   private chartEl: Element | null = null;
   private chartRO: ResizeObserver | null = null;
+  private zoneGrid: Element | null = null;
+  private zoneGridW = 0;
+  /* Only a change of width can move a line break; the heights levelHeads sets change the grid's height, and must not set it
+     off again. */
+  private zoneGridRO = new ResizeObserver(([e]) => {
+    const w = Math.round(e.contentRect.width);
+    if (w !== this.zoneGridW) {
+      this.zoneGridW = w;
+      this.levelHeads();
+    }
+  });
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
@@ -554,6 +566,8 @@ export class EcApp extends LitElement {
     window.removeEventListener("resize", this.onResize);
     clearInterval(this.clock);
     this.chartRO?.disconnect();
+    this.zoneGridRO.disconnect();
+    this.zoneGrid = null;
     super.disconnectedCallback();
   }
 
@@ -789,6 +803,14 @@ export class EcApp extends LitElement {
         this.chartRO.observe(chart);
       }
     }
+    const zoneGrid = this.shadowRoot?.querySelector(".cards.zones") ?? null;
+    if (zoneGrid !== this.zoneGrid) {
+      this.zoneGridRO.disconnect();
+      this.zoneGrid = zoneGrid;
+      this.zoneGridW = 0;
+      if (zoneGrid) this.zoneGridRO.observe(zoneGrid);
+    }
+    if (zoneGrid) this.levelHeads();
     const held = this.draftCount > 0;
     this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos");
     this.classList.toggle("typing", this.typing);
@@ -2423,6 +2445,18 @@ export class EcApp extends LitElement {
           </button>`;
         })}
       </div>`;
+  }
+
+  /* A card whose combine note wraps under its name would start its day strip and tracks lower than its neighbour's, so
+     every head in a row takes the tallest one's height. */
+  private levelHeads(): void {
+    const heads = [...(this.zoneGrid?.querySelectorAll<HTMLElement>(".zone-card > .card-head") ?? [])];
+    for (const h of heads) h.style.minHeight = "";
+    const wanted = levelledHeights(heads.map((h) => h.getBoundingClientRect()));
+    heads.forEach((h, i) => {
+      const t = wanted[i];
+      if (t !== null) h.style.minHeight = `${t}px`;
+    });
   }
 
   private tile(z: Zone, k: Metric) {

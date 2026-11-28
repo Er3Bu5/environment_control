@@ -60,6 +60,17 @@ test.describe("overview layout", () => {
     }
   });
 
+  test("a long name wraps, and its neighbour's readings still start level with its own", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const frame = await zones(page, 3, { veg: LONG });
+    const long = cards(frame).filter({ hasText: LONG }), garden = cards(frame).filter({ hasText: "Garden" });
+    await expect.poll(() => firstRow(frame)).toBe(2);
+    /* Wrapped onto more than one line, not cut off. */
+    expect((await long.locator("h2").boundingBox())!.height).toBeGreaterThan(40);
+    await expect(long.locator("h2")).toHaveText(LONG);
+    await expect.poll(async () => Math.abs((await long.locator(".mrow").first().boundingBox())!.y - (await garden.locator(".mrow").first().boundingBox())!.y)).toBeLessThanOrEqual(1);
+  });
+
   /* Sensor states as HA would hold them, updated just now. The page declares fakeHA with const: reached as an expression. */
   const setStates = (page: Page, states: Record<string, string>) =>
     page.evaluate(`(() => {
