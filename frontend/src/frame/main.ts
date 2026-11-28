@@ -44,6 +44,7 @@ import {
   setAlertRepeat,
   setDetails,
   setHistory,
+  andList,
   shareAsk,
   stepsLeft,
   unknownLinks,
@@ -299,6 +300,8 @@ interface Guard {
   kind: "guard";
   title: string;
   text: string;
+  /* A second paragraph of the question itself, before any rows. */
+  more?: string;
   rows?: [string, string][];
   note?: string;
   confirm?: string;
@@ -1110,7 +1113,7 @@ export class EcApp extends LitElement {
         d.sensors[s.id] = seedSlots(s);
       });
     const others = sensorElsewhere(this.config, z.id, s.id);
-    if (others.length) this.askShare(shareAsk("sensor", s.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("sensor", s.name, others), add);
     else add();
   }
 
@@ -1120,7 +1123,7 @@ export class EcApp extends LitElement {
     if (c.entity in m.controls) return this.setMap((d) => delete d.controls[c.entity]);
     const add = () => this.setMap((d) => (d.controls[c.entity] ??= c.detected));
     const others = deviceElsewhere(this.config, z.id, c.entity);
-    if (others.length) this.askShare(shareAsk("device", c.name, z.name, others), add);
+    if (others.length) this.askShare(shareAsk("device", c.name, others), add);
     else add();
   }
 
@@ -1674,7 +1677,7 @@ export class EcApp extends LitElement {
     const note = [
       moved && t ? `Light goes from ${dayLength(t.dayAt, t.nightAt)} to ${dayLength(toMin(d.day), toMin(d.night))} a day.` : "",
       emersonApplies(d) && timesApply(d) && sc.length ? `${emersonLine(d.day, d.night, d.emerson)}.` : "",
-      moved && others.length && d.period === "helper" ? `${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "",
+      moved && others.length && d.period === "helper" ? `${andList(others)} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "",
       timesOnHelpers
         ? "Values on your helpers change there, and anything reading them, like your alerts and light automations, follows straight away, so lights can switch within minutes."
         : onHelpers
@@ -1800,8 +1803,8 @@ export class EcApp extends LitElement {
     this.menu = null;
     const inZone = this.devices.filter((d) => d.zones.includes(id));
     const alone = inZone.filter((d) => d.zones.length === 1), shared = inZone.filter((d) => d.zones.length > 1);
-    const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
-    const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
+    const others = this.zones.filter((o) => o.id !== id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name);
+    const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${andList(others)}` : ""].filter(Boolean).join(", ");
     const rows: [string, string][] = [
       ["Layout", z.layout ? `${z.layout.w} x ${z.layout.d} m, ${plural(z.layout.units, "unit")}` : ""],
       ["Sensors", z.sensors.length ? `${z.sensors.length} unmapped` : ""],
@@ -2764,11 +2767,11 @@ export class EcApp extends LitElement {
   private deviceControl(z: Zone, d: ControlDevice, cls: string) {
     const st = this.states[d.entity], v = deviceView(d.entity, st), c = this.ctl[d.id], busy = v.down || c?.status === "sending";
     const lk = CLASS_LOOK[cls], line = ctlLine(c, d, v);
-    const others = d.zones.filter((id) => id !== z.id).map((id) => this.zoneById(id)?.name ?? id);
+    const others = this.zones.filter((o) => o.id !== z.id && d.zones.includes(o.id)).map((o) => o.name);
     const extra = [
       v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "",
       v.offList && v.mode && v.mode !== d.extraMode ? `${cap(v.mode)} isn't in its mode list.` : "",
-      others.length ? `Shared with ${others.join(" and ")}.` : "",
+      others.length ? `Shared with ${andList(others)}.` : "",
     ].filter(Boolean).join(" ");
     /* A number is set on a dial. The thumb and the number in the middle are what the device reports, and move ahead of
        it only while a finger, a key or a button is choosing. The dot is the unit's own reading, where it has one. */
@@ -3010,13 +3013,15 @@ export class EcApp extends LitElement {
     type Row = { name: string; zones: string[]; role: string; family: string; link: LinkKind; source: string; path: string; hub: string; state: string; down: boolean };
     const rows: Row[] = [];
     const str = (v: unknown) => (typeof v === "string" ? v : "");
+    /* Overview's order, as every other list of zones. */
+    const order = c.zones.map((z) => z.id), inZoneOrder = (ids: string[]) => [...ids].sort((a, b) => (order.indexOf(a) + 1 || Infinity) - (order.indexOf(b) + 1 || Infinity));
     for (const d of c.devices) {
       if (!Array.isArray(d.zones) || !d.zones.length) continue;
       const st = typeof d.entity === "string" ? this.states[d.entity] : undefined, down = !st || st.state === "unavailable" || st.state === "unknown";
       const bri = st && typeof st.attributes.brightness === "number" ? `, ${Math.round((st.attributes.brightness / 255) * 100)}%` : "";
       const mode = st && typeof st.attributes.mode === "string" ? `, ${st.attributes.mode} mode` : "";
       rows.push({
-        name: str(d.name) || str(d.entity), zones: d.zones as string[], role: str(d.type), family: str(d.family), link: (str(d.link) || "unknown") as LinkKind, source: str(d.linkSource),
+        name: str(d.name) || str(d.entity), zones: inZoneOrder(d.zones as string[]), role: str(d.type), family: str(d.family), link: (str(d.link) || "unknown") as LinkKind, source: str(d.linkSource),
         path: str(d.path), hub: str(d.hub), state: down ? "Unavailable" : st.state === "on" ? `On${bri}${mode}` : st.state === "off" ? "Off" : st.state, down,
       });
     }
@@ -3361,7 +3366,7 @@ export class EcApp extends LitElement {
                 >`
               : nothing}
             ${this.modesOffered(m, c.entity)}
-            <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${otherNames.join(" and ")} too` : ""}.</p>
+            <p class="dev-sub">Moved to another entity, it keeps its name, its type and its place on the map${otherNames.length ? `, in ${andList(otherNames)} too` : ""}.</p>
           </div>`
         : nothing}
     </div>`;
@@ -4099,7 +4104,7 @@ export class EcApp extends LitElement {
       helper: html`${this.helperChips("Lights on helper", "sh-on", tOptions, d.onHelper, [...zoneWords, "day", "on"], pickTime("onHelper"), lock)}
         ${this.helperChips("Lights off helper", "sh-off", tOptions, d.offHelper, [...zoneWords, "night", "off"], pickTime("offHelper"), lock)}
         ${timesApply(d)
-          ? html`${times}<p class="small muted">These are your helpers. Anything reading them, like your light schedule, follows straight away.${others.length ? ` ${others.join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : ""}</p>`
+          ? html`${times}<p class="small muted">These are your helpers. Anything reading them, like your light schedule, follows straight away.${others.length ? ` ${andList(others)} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : ""}</p>`
           : nothing}`,
       fixed: html`${times}<p class="small muted">Stored in Environment Control.</p>`,
       detected: html`${this.followPicker("s-lights", "lights", d.lights, (e) => this.setSched((x) => (x.lights = x.lights.includes(e) ? x.lights.filter((y) => y !== e) : [...x.lights, e])), lock)}
@@ -4456,10 +4461,11 @@ export class EcApp extends LitElement {
     if (m.kind === "guard") {
       const blocked = !!m.confirm && this.confirmText !== m.confirm;
       return html`<div class="modal">
-        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby=${m.more ? "dlg-text dlg-more" : "dlg-text"}>
           <h2 id="dlg-title" tabindex="-1">${m.title}</h2>
           <div class="review-scroll">
             <p class="muted" id="dlg-text">${m.text}</p>
+            ${m.more ? html`<p class="muted" id="dlg-more">${m.more}</p>` : nothing}
             ${m.rows?.length
               ? html`<div class="review-list">${m.rows.map(([label, text]) => html`<div class="review-row"><strong>${label}</strong><span>${text}</span></div>`)}</div>
                   ${m.note ? html`<p class="small muted">${m.note}</p>` : nothing}`
