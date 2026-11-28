@@ -9,16 +9,20 @@ test.describe("map devices", () => {
   const row = (frame: Frame, name: string) => app(frame).locator(".pickwrap", { has: frame.locator("strong", { hasText: name }) });
   const next = (frame: Frame) => app(frame).getByRole("button", { name: /^(Next|Review and apply|Finish)$/ });
 
-  /* A zone added through the panel, then its setup guide's Map devices. */
-  async function newZoneMap(page: Page): Promise<Frame> {
+  /* A zone added through the panel, linked to parent if one is named (#91), then its setup guide's Map devices. */
+  async function newZoneMap(page: Page, parent = ""): Promise<Frame> {
     await page.goto(PAGE);
     const frame = await panelFrame(page);
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Add zone" }).click();
     await app(frame).getByLabel("Zone name").fill("Flower tent");
     await app(frame).getByLabel("Zone name").press("Enter");
+    if (parent) {
+      await app(frame).getByLabel("This is a linked zone").check();
+      await app(frame).getByLabel(`Zone: ${parent}`, { exact: true }).check();
+    }
     await app(frame).getByRole("button", { name: "Review and apply" }).click();
-    await dialog(frame).getByRole("button", { name: "Apply 1 change" }).click();
+    await dialog(frame).getByRole("button", { name: parent ? "Apply 2 changes" : "Apply 1 change" }).click();
     await app(frame).getByRole("button", { name: "Device identification", exact: true }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Device identification: Flower tent", exact: true })).toBeVisible();
     return frame;
@@ -147,8 +151,9 @@ test.describe("map devices", () => {
     await expect(ask).toHaveCount(0);
   });
 
+  /* Only inside a family: Flower tent is linked to Veg, so Veg taking its sensor is asked about. */
   test("a sensor another zone has asks first too, as a sensor", async ({ page }) => {
-    const frame = await newZoneMap(page);
+    const frame = await newZoneMap(page, "Veg");
     await row(frame, "Environment board").getByRole("button").first().click();
     for (let i = 0; i < 3; i++) await next(frame).click();
     await dialog(frame).getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
