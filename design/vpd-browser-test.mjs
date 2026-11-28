@@ -1640,7 +1640,7 @@ await tap('[data-mdevice="dehu"]'); await ev(`ui.mapw.step=3;render()`); await e
 check("Share: and taking it out again leaves it in Garden only", (await onHA(`JSON.parse(fakeHA.disk).devices.find(d=>d.id==="dehu").zones.join()`)) === "garden");
 await mOpen("garden"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="fans"]');
-check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Veg, Nursery may affect the device state." }), await shareAsk());
+check("Share: several zones are a plain list in Overview's order, not alphabetical, and three zones in all are all of these zones", same(await shareAsk(), { ...DEHU_ASK, title: "Oscillating fans", text: "This device is already associated to Zones: Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Veg and Nursery may affect the device state." }), await shareAsk());
 await tap("[data-gkeep]");
 /* A sensor may be in two zones only inside one family, a parent and the zones linked to it: one zone's readings show in
    another only through that link. Garden isn't linked to Veg, so Veg's sensor can't be ticked here. */
@@ -1764,7 +1764,7 @@ await ev(`document.querySelector("[data-addzone]").click()`); await sleep(90); a
 await ev(`document.querySelector('[data-wiz="next"]').click()`); await sleep(90); await ev(`document.querySelector("[data-rapply]").click()`); await sleep(400);
 await mOpen("flower_tent"); await ev(`ui.mapw.step=2;render()`); await sleep(30);
 await tap('[data-mdevice="aux"]');
-check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Garden, Veg, Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
+check("Share: a device in three other zones names all three in Overview's order", same(await shareAsk(), { ...DEHU_ASK, title: "Auxiliary dehumidifier", text: "This device is already associated to Zones: Garden, Veg, Nursery. Are you sure you want to duplicate it here?", more: "This means that controls are in sync in all of these zones. Automations from Garden, Veg and Nursery may affect the device state." }) && (await ev(`!ui.mapw.pickD.aux`)) === true, await shareAsk());
 await shot("share-ask-three-zones-phone");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(60);
 await shot("share-ask-three-zones-desktop");
@@ -3041,7 +3041,7 @@ await evp(`saveConfig(()=>{zoneById("${bench}").sensors=[]})`); await sleep(100)
 await ev(`zoneById("garden").parent=undefined;zoneById("${bench}").parent="veg";askRemoveZone("veg")`); await sleep(40);
 /* Listed in the zone order, where Bench now sits next to Garden, the parent it was made under. */
 const rmRows = await ev(`[...document.querySelectorAll("#modal .review-row")].map(r=>r.textContent).find(t=>t.startsWith("Linked zones"))||""`);
-check("Linked: several are named together", rmRows === "Linked zonesBench, Nursery are unlinked", rmRows);
+check("Linked: several are named together", rmRows === "Linked zonesBench and Nursery are unlinked", rmRows);
 await both("linked-remove");
 await key("Escape", 27); await ev(`zoneById("${bench}").parent="garden";delete zoneById("garden").parent;render()`);
 /* Removing Bench's parent for real would take Garden, so Bench becomes a parent here instead: Shelf, linked to it. */

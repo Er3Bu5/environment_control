@@ -796,6 +796,7 @@ function familyRuns(list) {
   for (const z of list) { const r = rootIn(list, z), at = runs[runs.length - 1]; if (at && at.root === r) at.zones.push(z); else runs.push({ root: r, zones: [z] }); }
   return runs;
 }
+/* Bare names in a sentence read as one does, "Garden, Nursery and Veg"; a labelled list keeps its commas (#115). */
 const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 function sensorRefusal(z, holders) {
   if (!holders.length || new Set([z, ...holders].map(familyRoot)).size === 1) return "";
@@ -1380,7 +1381,7 @@ const readOnly = (html, p, name) => html.replace(/ data-(dev|act|dialin|dialstep
 function deviceRow(d, z) {
   const owner = deviceOwner(d, z), v = deviceView(d), c = owner ? undefined : ctlState[d.id], busy = v.down || (c && c.status === "sending"), lk = CLASS_LOOK[controlGroupOf(d)] || { icon: "plug", c: "var(--muted)" }, line = ctlLine(c, d, v);
   const others = d.zones.filter((id) => id !== z.id).map((id) => (zoneById(id) || {}).name || id);
-  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", owner ? `Runs on Zone: ${owner.name}'s automations. ${editInAgain(owner)}.` : others.length ? `Shared with ${others.join(" and ")}.` : ""].filter(Boolean).join(" ");
+  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", owner ? `Runs on Zone: ${owner.name}'s automations. ${editInAgain(owner)}.` : others.length ? `Shared with ${andList(others)}.` : ""].filter(Boolean).join(" ");
   let controls = "", modes = "";
   if (!v.down && v.kind === "dimmer") controls = dialHtml(d, "brightness", lk.c, busy);
   else if (!v.down && v.kind === "humidifier") {
@@ -3056,13 +3057,13 @@ function schedDraft(s) {
   const parts = [];
   if (moved) parts.push(`Light goes from ${dayLength(toMin(was.day), toMin(was.night))} to ${dayLength(toMin(v.day), toMin(v.night))} a day.`);
   if (emersonMoved) parts.push(`${emersonLine(v)}.`);
-  if (moved && others.length) parts.push(`${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
+  if (moved && others.length) parts.push(`${andList(others.map((o) => o.name))} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
   const onHelpersNow = Object.keys(v).some((k) => v[k] !== was[k] && schedHeld(z, k));
   if (onHelpersNow) parts.push("These change on your helpers, and anything reading them, like your alerts, follows straight away.");
   /* Saving here moves live hardware: the light automations and their watchdogs read these helpers. */
   if (onHelpersNow && (moved || emersonMoved)) parts.push("Light automations that read them follow too, so lights can switch within minutes of applying.");
   const blocked = !sharesLights(z) && sProblems(s, z).length ? "fix the problems before review" : "";
-  return { zone: moved && others.length ? [z, ...others].map((o) => o.name).join(" and ") : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
+  return { zone: moved && others.length ? andList([z, ...others].map((o) => o.name)) : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
 }
 
@@ -3213,7 +3214,7 @@ function renderTd() {
   const m = ui.td.m, s = ui.sched, z = baseZone(m.id), v = s.vals, lock = s.sending ? " disabled" : "", issues = sProblems(s, z), others = sharesHelpers(z);
   const time = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]}<input id="sin-${k}" data-sin="${k}" type="time" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
   const box = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]} (${SCHED_RANGE[k][3]})<input id="sin-${k}" data-sin="${k}" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
-  const shared = others.length ? ` ${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "";
+  const shared = others.length ? ` ${andList(others.map((o) => o.name))} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "";
   const length = `<div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div>`;
   const lit = isDay(z, NOW), count = Object.keys(m.lights).length, picked = m.onHelper && m.offHelper;
   const perBody = {
@@ -3398,14 +3399,14 @@ function createZone(w) {
 /* Only Environment Control's own record of a zone goes. Its sensors and devices are still in Home Assistant, so Map devices can still find them, and shared hardware stays in its other zones. */
 function removeRows(z) {
   const ctl = devices.filter((d) => d.ctl && d.zones.includes(z.id)), alone = ctl.filter((d) => d.zones.length === 1), shared = ctl.filter((d) => d.zones.length > 1);
-  const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
+  const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name);
   const offsets = z.sensors.filter((s) => s.kind === "env" && !hasLeafEntity(s) && s.leaf !== undefined);
-  const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
+  const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${andList(others)}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
     ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")],
     ["Automations", autosOf(z).length ? `${autosOf(z).length} unlinked. They keep running in Home Assistant` : ""],
-    ["Linked zones", linkedZones(z).length ? `${linkedZones(z).map((o) => o.name).join(", ")} ${linkedZones(z).length === 1 ? "is" : "are"} unlinked` : ""]].filter(([, text]) => text);
+    ["Linked zones", linkedZones(z).length ? `${andList(linkedZones(z).map((o) => o.name))} ${linkedZones(z).length === 1 ? "is" : "are"} unlinked` : ""]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -3754,7 +3755,7 @@ function askShare(kind, name, z, others, add) {
   if (!others.length) { add(); return; }
   /* A plain list in the order Overview shows the zones, as the panel writes it. */
   const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
-  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${others.join(", ")} may affect the device state.` : `This means that data is in sync in ${all}.`;
+  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${andList(others)} may affect the device state.` : `This means that data is in sync in ${all}.`;
   ui.guard = { action: add, primary: true, title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
   renderModal();
 }
