@@ -1779,9 +1779,13 @@ check("Names: the Automations dialog row shows the panel's name", (await ev(`doc
 await tap(`[data-autorow="${RED_FS}"] .sw`);
 check("Names: and so does the question before a failsafe is switched off", (await ev(`ui.guard && ui.guard.title`)) === "Switch off Red lights watchdog?", await ev(`ui.guard && ui.guard.title`));
 await tap("[data-gkeep]"); await ev(`ui.autos=null;renderModal()`);
+/* As in the Activity checks: the fake's entries are fixed NZ times, and the suite's own zone otherwise decides which part
+   of them today holds. */
+await send("Emulation.setTimezoneOverride", { timezoneId: "Pacific/Auckland" });
 await reset(); await goTab("Garden"); await openAct("garden"); await actIdle();
 const actNamed = await ev(`[...document.querySelectorAll("#act-body .act-row")].map(r=>r.textContent)`);
 check("Names: Activity names a linked automation by the panel's name, in its rows and as a cause", actNamed.some((t) => t.includes("Humidity low, day fired 790 times")) && actNamed.some((t) => t.includes("Humidity low, day switched off")) && actNamed.some((t) => t.includes("Red lights, morning ran at 06:30")) && actNamed.some((t) => t.includes("By Red lights, morning, at a set time")) && !actNamed.some((t) => t.includes("Critical Garden Humidity Low Day")), actNamed);
+await send("Emulation.setTimezoneOverride", { timezoneId: "" });
 check("Names: an automation the zone doesn't link keeps Home Assistant's name in Activity", (await ev(`actName(zoneById("garden"),{kind:"run",entity:"automation.porch_light_on",name:"Porch Light On"})`)) === "Porch Light On");
 await ev(`ui.aview=null;renderModal()`);
 await openAutosAt("nursery", "control");
