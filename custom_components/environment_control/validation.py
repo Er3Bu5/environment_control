@@ -282,6 +282,18 @@ def _zone_name(z: dict[str, Any]) -> str:
     return z.get("name") or z["id"]
 
 
+def _check_zone_name(z: dict[str, Any]) -> None:
+    """A zone's name goes into refusals, so it is held to a link's name: short text with no control characters."""
+    name = z.get("name")
+    if name is not None and not (
+        isinstance(name, str)
+        and name.strip(JS_TRIMMED)
+        and len(name.encode("utf-16-le", "surrogatepass")) // 2 <= MAX_NAME
+        and LINK_NAME.fullmatch(name)
+    ):
+        _fail(f"{z['id']} has a name that isn't short text")
+
+
 def _check_parents(zones: list[dict[str, Any]], before: list[dict[str, Any]]) -> None:
     """A linked zone shows what its parent runs, so a parent has to be a plain zone: one level, never itself."""
     was = {z.get("id"): z.get("parent", _NO_PARENT) for z in before if isinstance(z, dict)}
@@ -347,7 +359,7 @@ def unlink_removed_parents(before: dict[str, Any], c: Any) -> Any:
     zones = []
     for z in c["zones"]:
         zid = z.get("id") if isinstance(z, dict) else None
-        if not isinstance(zid, str):
+        if not (isinstance(zid, str) and ZONE_ID.fullmatch(zid)):
             zones.append(z)
             continue
         names = {p for p in (z.get("parent"), was.get(zid)) if isinstance(p, str)}
@@ -356,6 +368,7 @@ def unlink_removed_parents(before: dict[str, Any], c: Any) -> Any:
         for gone in (p for p in removed if p.get("id") in names):
             shared = next((s for s in gone.get("sensors") or [] if s.get("id") in mine), None)
             if shared is not None:
+                _check_zone_name(z)
                 sensor, here, there = shared.get("name") or shared["id"], _zone_name(z), _zone_name(gone)
                 _fail(f"{sensor} is in both {there} and {here}. Take it out of {here} before removing {there}.")
         if any(p.get("id") == z.get("parent") for p in removed):
@@ -382,6 +395,8 @@ def validate_config(c: Any, before: dict[str, Any] | None = None) -> None:
     ids = [z.get("id") for z in zones]
     if len(set(map(str, ids))) != len(ids) or not all(isinstance(i, str) and ZONE_ID.fullmatch(i) for i in ids):
         _fail("Zone ids must be unique slugs")
+    for z in zones:
+        _check_zone_name(z)
     by_id = {z["id"]: z for z in zones}
     stored = [z for z in (before or {}).get("zones") or [] if isinstance(z, dict)]
     _check_parents(zones, stored)

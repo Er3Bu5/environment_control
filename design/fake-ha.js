@@ -191,6 +191,7 @@ class FakeHA {
     }
     const ids = new Set(c.zones.map((z) => z.id));
     if (ids.size !== c.zones.length || c.zones.some((z) => typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id))) this.fail("Zone ids must be unique slugs");
+    for (const z of c.zones) this.checkZoneName(z);
     /* A linked zone shows what its parent runs, so a parent has to be a plain zone: one level, never itself. The reason
        is told from the side of the zone whose link just changed. */
     const moved = (z) => ((before?.zones || []).find((o) => o.id === z.id) || {}).parent !== z.parent;
@@ -256,6 +257,10 @@ class FakeHA {
       }
     }
   }
+  /* A zone's name goes into refusals, so it is held to a link's name: short text with no control characters. */
+  checkZoneName(z) {
+    if (z.name !== undefined && z.name !== null && !(typeof z.name === "string" && z.name.trim() && z.name.length <= 100 && /^[^\u0000-\u001f\u007f]+$/.test(z.name))) this.fail(`${z.id} has a name that isn't short text`);
+  }
   /* Revision-checked, so a save made from a stale copy can't undo someone else's. */
   save(msg) {
     if (msg.revision !== this.config.revision) this.fail("Setup was saved from somewhere else since this was opened. Reopen the panel to see it.");
@@ -266,10 +271,15 @@ class FakeHA {
     const kept = new Set((Array.isArray(next.zones) ? next.zones : []).map((z) => z && z.id));
     const removed = (this.config.zones || []).filter((z) => !kept.has(z.id));
     for (const z of Array.isArray(next.zones) ? next.zones : []) {
-      const was = z && ((this.config.zones || []).find((o) => o.id === z.id) || {}).parent, gone = z && removed.find((p) => p.id === z.parent || p.id === was);
+      if (!z || typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id)) continue;
+      const was = ((this.config.zones || []).find((o) => o.id === z.id) || {}).parent, gone = removed.find((p) => p.id === z.parent || p.id === was);
       if (!gone) continue;
       const shared = (gone.sensors || []).find((x) => (Array.isArray(z.sensors) ? z.sensors : []).some((y) => y && y.id === x.id));
-      if (shared) this.fail(`${shared.name || shared.id} is in both ${gone.name} and ${z.name}. Take it out of ${z.name} before removing ${gone.name}.`);
+      if (shared) {
+        this.checkZoneName(z);
+        const here = z.name || z.id, there = gone.name || gone.id;
+        this.fail(`${shared.name || shared.id} is in both ${there} and ${here}. Take it out of ${here} before removing ${there}.`);
+      }
       delete z.parent;
     }
     this.checkConfig(next, this.config);

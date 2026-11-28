@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from custom_components.environment_control.validation import InvalidConfig, validate_config
+from custom_components.environment_control.validation import InvalidConfig, unlink_removed_parents, validate_config
 
 
 def test_the_sample_room_is_valid(sample_config) -> None:
@@ -575,6 +575,22 @@ LINK_CASES = {
         ),
         SHARED,
     ),
+    "a zone name that isn't text": (
+        lambda c: _zone(c, "garden").update(name=5),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name that is too long": (
+        lambda c: _zone(c, "garden").update(name="G" * 101),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name with a line break": (
+        lambda c: _zone(c, "garden").update(name="Gar\nden"),
+        "garden has a name that isn't short text",
+    ),
+    "a zone name that is only spaces": (
+        lambda c: _zone(c, "garden").update(name="  "),
+        "garden has a name that isn't short text",
+    ),
 }
 
 
@@ -640,3 +656,12 @@ def test_unlinking_a_zone_that_shares_nothing_is_allowed(sample_config) -> None:
     validate_config(c, before)
     _zone(c, "nursery")["parent"] = "garden"
     validate_config(c, before)
+
+
+def test_a_bad_zone_name_is_refused_before_a_removal_message_can_carry_it(sample_config) -> None:
+    before = _sharing(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    _zone(c, "nursery")["name"] = "Nur\nsery"
+    with pytest.raises(InvalidConfig, match=r"^nursery has a name that isn't short text$"):
+        unlink_removed_parents(before, c)
