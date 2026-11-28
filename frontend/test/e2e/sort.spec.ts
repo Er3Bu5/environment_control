@@ -6,7 +6,8 @@ const NAMES = ["Garden", "Veg", "Nursery"];
 const stored = (page: Page) => page.evaluate<{ revision: number; zones: { id: string }[] }>("JSON.parse(JSON.stringify(fakeHA.config))");
 const cards = (frame: Frame) => app(frame).locator(".zone-card h2").allTextContents();
 const sortButton = (frame: Frame) => app(frame).locator(".pagehead").getByRole("button", { name: "Sort", exact: true });
-const move = (frame: Frame, name: string, to: "previous" | "next") => app(frame).getByRole("button", { name: `Move ${name} to ${to}`, exact: true });
+/* Veg and Nursery are a family, so their own buttons say they move within it (#91). */
+const move = (frame: Frame, name: string, to: "previous" | "next") => app(frame).getByRole("button", { name: new RegExp(`^Move ${name} to ${to}( in its group)?$`) });
 const bar = (frame: Frame) => app(frame).getByRole("region", { name: "Unsaved changes" });
 const dialog = (frame: Frame) => app(frame).getByRole("dialog");
 const alert = (frame: Frame) => app(frame).getByRole("alertdialog");

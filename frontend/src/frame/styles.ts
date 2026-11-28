@@ -8,8 +8,8 @@ const MARKS = { above: "#FF9800", in: "#4CAF50", under: "#7E57C2", temp: "#FF980
 
 /* The panel's own palettes, used as they are for Light and Dark, and under HA's colours for Home Assistant. */
 export const PALETTES = {
-  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
-  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
+  light: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#5C6BC014", band: "#9E9E9E2E", ideal: "#4CAF5059", llow: "#000000", lhigh: "#F1C40F", night: "#DDE1EA", tnom: "#43A047", tramp: "#9E9E9E", tcrit: "#D32F2F", "ramp-text": "#616161", bg: "#FAFAFA", card: "#FFFFFF", tile: "#F5F5F5", line: "#E0E0E0", fg: "#212121", muted: "#727272", primary: "#03A9F4", "on-primary": "#111111", ok: "#388E3C", warn: "#EF6C00", crit: "#D32F2F", dead: "#8A8A8A", off: "#BDBDBD", ...MARKS, barbg: "#EEEEEE", barfg: "#212121", barout: "#6B6B6B", barline: "#D0D0D0" },
+  dark: { v0: "#B0BEC5", v1: "#A5D6A7", v2: "#FFCC80", v3: "#CE93D8", vink: "#212121", vline: "#6E6E6E", shade: "#9FA8DA14", band: "#FFFFFF14", ideal: "#66BB6A55", llow: "#616161", lhigh: "#F1C40F", night: "#2A2F3A", tnom: "#66BB6A", tramp: "#757575", tcrit: "#EF5350", "ramp-text": "#BDBDBD", bg: "#111111", card: "#1C1C1C", tile: "#262626", line: "#2F2F2F", fg: "#E1E1E1", muted: "#9B9B9B", primary: "#03A9F4", "on-primary": "#111111", ok: "#66BB6A", warn: "#FFB74D", crit: "#EF5350", dead: "#8F8F8F", off: "#616161", ...MARKS, barbg: "#3A3A3A", barfg: "#E1E1E1", barout: "#A0A0A0", barline: "#4D4D4D" },
 } as const;
 
 export const styles = css`
@@ -64,13 +64,13 @@ export const styles = css`
   .cards.zones { container-type: inline-size; grid-template-columns: repeat(auto-fit, minmax(max(min(520px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
   /* One across, a card stops at about the widest it gets two across, so the step down from two is a modest change in its
      size rather than a doubling. A phone is narrower than that, so there it still fills the width. */
-  @container (max-width: 1051.98px) { .cards.zones > .zone-card { width: 100%; max-width: 700px; justify-self: center; } }
+  @container (max-width: 1051.98px) { .cards.zones > .zone-card, .cards.zones > .fam { width: 100%; max-width: 700px; justify-self: center; } }
   @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
   @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
-  /* The combine note shares the name's line, so it pushes nothing down and the tracks of every card in a row start level.
-     Too long for it, the note wraps under the name rather than squeezing it. */
+  /* The linked line and the combine note share the name's line, so they push nothing down and the tracks of every card in
+     a row start level. Too long for it, the note wraps under the name rather than squeezing it. */
   .zone-card .card-head h2 { min-width: 0; overflow-wrap: anywhere; align-self: baseline; }
   /* Given a row's height by levelHeads, the head keeps its name at the top rather than floating in the middle. */
   .zone-card .card-head { align-content: flex-start; }
@@ -79,12 +79,67 @@ export const styles = css`
      card that was moved, as it is scrolled into view. */
   .zone-card.sorting:hover { border-color: var(--line); }
   .zone-card.sorting { scroll-margin-block: 12px 150px; }
+  /* A family is one joined card: its cards touch, sharing one border as the seam, with the link tab on it. It never
+     wraps apart: side by side where the row has room for all of it, else stacked, the seam running across. The seam is
+     drawn heavier than a card's outer border so it reads as the join, and the cards make room either side of it so the
+     tab on it doesn't crowd a state chip or a reading's icon. */
+  .fam { display: flex; flex-direction: column; min-width: 0; grid-row: span var(--n); --seam: 2px; --seampad-block: 22px; --seampad-inline: 26px; }
+  .famcards { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .famcards > .zone-card { position: relative; border-radius: 0; }
+  .famcards > .zone-card:not(:last-child) { border-bottom-width: var(--seam); padding-bottom: var(--seampad-block); }
+  .famcards > .zone-card + .zone-card { margin-top: calc(var(--seam) * -1); border-top-width: var(--seam); padding-top: var(--seampad-block); }
+  .famcards > .zone-card:first-child { border-radius: 12px 12px 0 0; }
+  .famcards > .zone-card:last-child { border-radius: 0 0 12px 12px; }
+  /* A card's own border shows whole on that card, over the neighbour it shares the seam with. */
+  .famcards > .zone-card:hover, .famcards > .zone-card:focus-visible { z-index: 1; }
+  .linktab { position: absolute; z-index: 2; left: 50%; width: 28px; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: var(--card); border: var(--seam) solid var(--line); }
+  .linktab svg { width: 16px; height: 16px; fill: var(--fg); rotate: 90deg; }
+  /* Offset by half the seam: the cards overlap by its whole width, so a card's inner edge is the seam's far side. */
+  .linktab.after { bottom: calc(var(--seam) / -2); transform: translate(-50%, 50%); }
+  .linktab.before { top: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+  /* Beside the name, not pushed to the far side with the rest of the heading. */
+  .parentbadge { color: var(--fg); margin-right: auto; }
+  /* While sorting, the family's own arrows sit on a strip joined to the top of its cards. */
+  .fambar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--tile); border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; }
+  .fambar .ic { flex: none; }
+  .fam.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; border-top-right-radius: 0; }
+  @container (min-width: 1052px) {
+    .fam.n2 { grid-column: span 2; grid-row: auto; }
+    .fam.n2 .famcards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fam.n2 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n2 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n2 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n2.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n2.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n2 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n2 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n2 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n2 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n2 .linktab svg { rotate: 0deg; }
+  }
+  @container (min-width: 1944px) {
+    .fam.n3 { grid-column: span 3; grid-row: auto; }
+    .fam.n3 .famcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .fam.n3 .famcards > .zone-card:not(:last-child) { border-bottom-width: 1px; padding-bottom: 14px; border-right-width: var(--seam); padding-right: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card + .zone-card { margin: 0 0 0 calc(var(--seam) * -1); border-top-width: 1px; padding-top: 14px; border-left-width: var(--seam); padding-left: var(--seampad-inline); }
+    .fam.n3 .famcards > .zone-card:first-child { border-radius: 12px 0 0 12px; }
+    .fam.n3 .famcards > .zone-card:last-child { border-radius: 0 12px 12px 0; }
+    .fam.n3.sorting .famcards > .zone-card:first-child { border-top-left-radius: 0; }
+    .fam.n3.sorting .famcards > .zone-card:last-child { border-top-right-radius: 0; }
+    .fam.n3 .linktab { top: 50%; bottom: auto; left: auto; right: auto; }
+    .fam.n3 .linktab.after { right: calc(var(--seam) / -2); transform: translate(50%, -50%); }
+    .fam.n3 .linktab.before { left: calc(var(--seam) / -2); transform: translate(-50%, -50%); }
+    .fam.n3 .btn.move.inner svg { rotate: -90deg; }
+    .fam.n3 .linktab svg { rotate: 0deg; }
+  }
   .arrows { display: flex; gap: 8px; margin-left: auto; }
   .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
   .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
+  .zlinked { margin: 2px 0 0; }
   .pill.dashed { color: var(--muted); border-color: var(--line); border-style: dashed; }
   .notice { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, var(--card)); }
   .notice.calm { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
@@ -125,6 +180,10 @@ export const styles = css`
   .fixlink { border: 0; background: none; padding: 2px 0; font: inherit; color: var(--primary); cursor: pointer; text-align: left; }
   .fixlink:hover { text-decoration: underline; }
   .fixlink[hidden] { display: none; }
+  .vleaf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--primary-text); }
+  .vleafbtn { padding: 4px 10px; font-size: 13px; color: var(--primary-text); border-color: var(--primary-text); }
+  .vleafbtn:hover { border-color: var(--primary-text); background: color-mix(in srgb, var(--primary) 10%, var(--card)); }
+  @media (pointer: coarse) { .vleafbtn { min-height: 40px; padding: 8px 14px; } }
   .notice.fix { width: 100%; border: 0; justify-content: space-between; flex-wrap: nowrap; text-align: left; font: inherit; color: inherit; cursor: pointer; }
   .fixgo { flex: none; font-weight: 500; color: var(--primary); }
   .pill.ok { color: var(--ok); }
