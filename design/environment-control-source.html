@@ -1532,9 +1532,9 @@ function triggerWords(t) {
 }
 /* Who or what the log says caused a change. Never which app or screen: the log doesn't know. Where a schedule and a
    failsafe act in the same second the log credits whichever got there first, and this says what the log says. */
-function causeWords(c) {
-  const t = c && c.type;
-  if (t === "automation") return `By ${c.name || "an automation"}, ${triggerWords(c.trigger)}`;
+function causeWords(z, c) {
+  const t = c && c.type, link = t === "automation" && z ? linkIn(z, c.entity, c.name) : null;
+  if (t === "automation") return `By ${link ? autoName(link) : c.name || "an automation"}, ${triggerWords(c.trigger)}`;
   if (t === "person") return `By ${c.name || "a person"}`;
   if (t === "startup") return "After a restart";
   if (t === "reconnect") return "Came back online";
@@ -1550,27 +1550,27 @@ function runVerb(z, e) {
   const a = (z.automations || []).find((x) => x.entity === e.entity), g = a ? a.group : suggestGroup(e.entity);
   return AUTO_GROUPS[g] && AUTO_GROUPS[g][0] === "alert" ? "fired" : "ran";
 }
-const actName = (e) => { const d = e.kind === "device" ? actDevice(e) : null; return d ? d.name : e.name || e.entity || ""; };
+const actName = (z, e) => { const d = e.kind === "device" ? actDevice(e) : null, link = e.kind === "run" || e.kind === "automation" ? linkIn(z, e.entity) : null; return d ? d.name : link ? autoName(link) : e.name || e.entity || ""; };
 const STATE_WORDS = { on: "turned on", off: "turned off", unavailable: "went unavailable" };
 const CLIMATE_WORDS = { ok: "back in ideal zone", low: "below ideal zone", high: "above ideal zone", critlow: "critical low", crithigh: "critical high" };
 function actText(z, e) {
-  if (e.kind === "device") return `${actName(e)} ${STATE_WORDS[e.state] || e.state}`;
-  if (e.kind === "automation") return `${actName(e)} switched ${e.state === "on" ? "on" : "off"}`;
+  if (e.kind === "device") return `${actName(z, e)} ${STATE_WORDS[e.state] || e.state}`;
+  if (e.kind === "automation") return `${actName(z, e)} switched ${e.state === "on" ? "on" : "off"}`;
   if (e.kind === "run") {
     const n = Number(e.count) || 1, verb = runVerb(z, e);
-    return n === 1 ? `${actName(e)} ${verb} at ${atClock(e.first || e.when)}` : `${actName(e)} ${verb} ${n.toLocaleString("en-NZ")} times, ${atClock(e.first)} to ${atClock(e.last || e.when)}`;
+    return n === 1 ? `${actName(z, e)} ${verb} at ${atClock(e.first || e.when)}` : `${actName(z, e)} ${verb} ${n.toLocaleString("en-NZ")} times, ${atClock(e.first)} to ${atClock(e.last || e.when)}`;
   }
   if (e.kind === "climate") { const m = M[e.metric] || { label: e.metric, unit: "", dp: 1 }; return `${m.label} ${CLIMATE_WORDS[e.level] || e.level} at ${Number(e.value).toFixed(m.dp)}${m.unit === "%" ? "%" : ` ${m.unit}`}`; }
   if (e.kind === "sensor") return `${e.name} ${e.state === "back" ? "came back" : "stopped reporting"}`;
   return "";
 }
-const actSub = (e) => e.kind === "run" ? cap(triggerWords(e.trigger)) : e.kind === "device" || e.kind === "automation" ? causeWords(e.cause) : "";
+const actSub = (z, e) => e.kind === "run" ? cap(triggerWords(e.trigger)) : e.kind === "device" || e.kind === "automation" ? causeWords(z, e.cause) : "";
 function actIcon(e, k) {
   const d = e.kind === "device" ? actDevice(e) : null;
   if (e.state === "unavailable") return ic(d && d.icon ? d.icon : ACT_KIND[k][0], "var(--dead)");
   return ic(d && d.icon && k !== "lights" ? d.icon : ACT_KIND[k][0], ACT_KIND[k][1]);
 }
-const actRow = (z, e, k) => `<div class="act-row${e.state === "unavailable" ? " unavail" : ""}" data-kind="${k}"><span class="act-time">${atClock(e.when)}</span>${actIcon(e, k)}<div><div class="act-text">${esc(actText(z, e))}</div>${actSub(e) ? `<div class="act-by">${esc(actSub(e))}</div>` : ""}</div></div>`;
+const actRow = (z, e, k) => `<div class="act-row${e.state === "unavailable" ? " unavail" : ""}" data-kind="${k}"><span class="act-time">${atClock(e.when)}</span>${actIcon(e, k)}<div><div class="act-text">${esc(actText(z, e))}</div>${actSub(z, e) ? `<div class="act-by">${esc(actSub(z, e))}</div>` : ""}</div></div>`;
 /* One action is often many entries in one second: lights on is every plug and controller at once. Device changes in the same
    second with the same cause are one row that opens to show its parts. */
 function actGroups(z, entries) {
@@ -1588,7 +1588,7 @@ function groupRow(z, g, key) {
   const text = st ? `${lights ? "Lights" : "Devices"} ${st === "unavailable" ? "unavailable" : st}: ${n} devices` : `${n} devices changed`;
   const open = !!(ui.act && ui.act.open[key]);
   const parts = g.parts.map(([e, k]) => `<li class="act-part${e.state === "unavailable" ? " unavail" : ""}">${actIcon(e, k)}<span>${esc(actText(z, e))}</span></li>`).join("");
-  return `<div class="act-row act-group${st === "unavailable" ? " unavail" : ""}" data-kind="${lights ? "lights" : "device"}"><span class="act-time">${atClock(g.e.when)}</span>${actIcon(g.e, g.k)}<div><button class="act-open" data-agroup="${esc(key)}" aria-expanded="${open}"><span class="act-text">${esc(text)}</span><span class="act-chev" aria-hidden="true">${icon("down")}</span></button><div class="act-by">${esc(causeWords(g.e.cause))}</div>${open ? `<ul class="act-parts">${parts}</ul>` : ""}</div></div>`;
+  return `<div class="act-row act-group${st === "unavailable" ? " unavail" : ""}" data-kind="${lights ? "lights" : "device"}"><span class="act-time">${atClock(g.e.when)}</span>${actIcon(g.e, g.k)}<div><button class="act-open" data-agroup="${esc(key)}" aria-expanded="${open}"><span class="act-text">${esc(text)}</span><span class="act-chev" aria-hidden="true">${icon("down")}</span></button><div class="act-by">${esc(causeWords(z, g.e.cause))}</div>${open ? `<ul class="act-parts">${parts}</ul>` : ""}</div></div>`;
 }
 function activityBody(z) {
   const a = ui.act || {}, pages = ACTIVITY[z.id] || [], last = pages[pages.length - 1];
@@ -1840,7 +1840,13 @@ const autosOf = (z, page) => (z.automations || []).filter((a) => AUTO_GROUPS[a.g
 const autoSt = (a) => haStates[a.entity];
 const autoOn = (a) => (autoSt(a) || {}).state === "on";
 const autoDown = (a) => !autoSt(a) || autoSt(a).state === "unavailable";
-const autoName = (a) => ((autoSt(a) || {}).attributes || {}).friendly_name || a.entity;
+const haAutoName = (entity) => ((haStates[entity] || {}).attributes || {}).friendly_name || entity;
+/* A link's own name in this panel, else Home Assistant's. Only a link has one, so an automation no zone links is always
+   named as Home Assistant names it. */
+const autoName = (a) => (typeof a.name === "string" && a.name.trim()) || haAutoName(a.entity);
+/* The link a zone runs for an automation, its parent's included, since a linked zone shows what its parent runs. A cause in
+   the log that names no entity is matched on Home Assistant's name, which is all it carries. */
+const linkIn = (z, entity, haName) => [z, parentOf(z)].filter(Boolean).flatMap((x) => x.automations || []).find((a) => (entity ? a.entity === entity : !!haName && haAutoName(a.entity) === haName)) || null;
 /* An automation belongs to one zone, so this is the zone, other than z, that has it saved, if any. */
 const autoZoneElsewhere = (z, entity) => zones.find((o) => o.id !== z.id && (o.automations || []).some((x) => x.entity === entity)) || null;
 /* Only a suggestion. Names follow no rule Home Assistant enforces, and this room's own dashboard keeps an alert named ..._day
@@ -2024,7 +2030,8 @@ function loadAutomations() {
 }
 function openLinkAutos(id) {
   const z = zoneById(id), was = Object.fromEntries(autosOf(z).map((a) => [a.entity, a.group]));
-  ui.linkw = { id, was, pick: { ...was }, q: "", back: { screen: ui.screen, zone: ui.zone } };
+  const wasNames = Object.fromEntries(autosOf(z).filter((a) => typeof a.name === "string" && a.name.trim()).map((a) => [a.entity, a.name]));
+  ui.linkw = { id, was, pick: { ...was }, wasNames, names: { ...wasNames }, q: "", back: { screen: ui.screen, zone: ui.zone } };
   ui.screen = "setup";
 }
 function closeLinkAutos() {
@@ -2040,8 +2047,12 @@ function linkRow(lw, z, it) {
   if (other) return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="false" aria-disabled="true"><span class="tick"></span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">In Zone: ${esc(other.name)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button></div>`;
   const sub = [it.entity, it.area ? `${it.area} area` : ""].filter(Boolean).join(", ");
   /* Radio chips, not a select: a native select opens the system's own picker over the page on a phone. */
-  const groupBox = on ? `<div class="ents">${chips("Group", `lgroup-${it.entity}`, Object.entries(AUTO_GROUPS).map(([k, [, t]]) => [k, t]), g, `data-lgroup="${esc(it.entity)}" data-x`).replace(/data-x="[^"]*"/g, "")}</div>` : "";
-  return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(autoTitle(it))}</strong><span class="dev-sub">${esc(sub)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button>${groupBox}</div>`;
+  /* As a device's name in Device identification: the same length, and left empty it's Home Assistant's name, which stays on
+     the row so a name of the panel's own never hides which automation this is. */
+  const own = on ? (lw.names[it.entity] || "").trim() : "";
+  const nameBox = `<div class="field"><label for="lname-${esc(it.entity)}">Name, optional</label><span class="resettable"><input id="lname-${esc(it.entity)}" data-lname="${esc(it.entity)}" type="text" maxlength="100" autocomplete="off" enterkeyhint="done" placeholder="${esc(autoTitle(it))}" value="${esc(lw.names[it.entity] || "")}">${own ? `<button class="reset" data-lnamereset="${esc(it.entity)}" aria-label="Put back Home Assistant's name, ${esc(autoTitle(it))}" title="Put back ${esc(autoTitle(it))}">${icon("reset")}</button>` : ""}</span></div>`;
+  const groupBox = on ? `<div class="ents">${chips("Group", `lgroup-${it.entity}`, Object.entries(AUTO_GROUPS).map(([k, [, t]]) => [k, t]), g, `data-lgroup="${esc(it.entity)}" data-x`).replace(/data-x="[^"]*"/g, "")}${nameBox}</div>` : "";
+  return `<div class="pickwrap"><button class="pickrow" data-lpick="${esc(it.entity)}" aria-pressed="${on}"><span class="tick">${on ? "&#10003;" : ""}</span><span class="pick-text"><strong>${esc(own || autoTitle(it))}</strong><span class="dev-sub">${esc(own ? `${autoTitle(it)}. ${sub}` : sub)}</span></span><span class="pill plain">${esc(it.state === "on" ? "On" : it.state === "off" ? "Off" : cap(it.state))}</span></button>${groupBox}</div>`;
 }
 /* Suggested: what the zone links already, and automations in its Home Assistant area or named for it. The rest of Home
    Assistant's automations, the house's included, come up only by searching. */
@@ -2075,9 +2086,11 @@ function linkDraft(lw) {
   const z = zoneById(lw.id), [items, add] = changeList(), label = (g) => (g === undefined ? "Not linked" : AUTO_GROUPS[g][1]);
   const nameOf = (e) => { const it = (autoCatalog || []).find((x) => x.entity === e); return it ? autoTitle(it) : ((haStates[e] || {}).attributes || {}).friendly_name || e; };
   for (const e of new Set([...Object.keys(lw.was), ...Object.keys(lw.pick)])) add(nameOf(e), label(lw.was[e]), label(lw.pick[e]));
+  const shown = (names, e) => (names[e] || "").trim() || nameOf(e);
+  for (const e of Object.keys(lw.pick)) add("Name", lw.was[e] === undefined ? nameOf(e) : shown(lw.wasNames, e), shown(lw.names, e));
   return { zone: z.name, items, skipped: [], bar: true, busy: !!lw.sending, blocked: "",
     note: "Only Environment Control changes, and Home Assistant keeps running every automation as it is. Home Assistant asks you before a newly linked one can be switched from here.",
-    apply: (done) => saveLinks(lw, done), discard: () => { lw.pick = { ...lw.was }; render(); }, back: () => guarded(closeLinkAutos) };
+    apply: (done) => saveLinks(lw, done), discard: () => { lw.pick = { ...lw.was }; lw.names = { ...lw.wasNames }; render(); }, back: () => guarded(closeLinkAutos) };
 }
 async function saveLinks(lw, done) {
   lw.sending = true;
@@ -2086,12 +2099,12 @@ async function saveLinks(lw, done) {
     const z = zoneById(lw.id), had = z.automations || [], used = new Set(had.map((a) => a.id));
     let n = had.reduce((m, a) => Math.max(m, Number(String(a.id).replace(/^a/, "")) || 0), 0);
     z.automations = Object.entries(lw.pick).map(([entity, group]) => {
-      const old = had.find((a) => a.entity === entity);
-      if (old) return { id: old.id, entity, group };
+      const old = had.find((a) => a.entity === entity), name = (lw.names[entity] || "").trim().slice(0, 100);
+      if (old) return { id: old.id, entity, group, ...(name ? { name } : {}) };
       let id;
       do id = `a${++n}`; while (used.has(id));
       used.add(id);
-      return { id, entity, group };
+      return { id, entity, group, ...(name ? { name } : {}) };
     });
     return z.name;
   });
@@ -3993,6 +4006,14 @@ document.addEventListener("click", (e) => {
     redraw();
     return;
   }
+  if ((el = q("[data-lnamereset]"))) {
+    const lw = ui.linkw, ent = el.dataset.lnamereset;
+    delete lw.names[ent];
+    $("#link-list").innerHTML = linkList(lw, zoneById(lw.id));
+    refocusSel(`[data-lname="${CSS.escape(ent)}"]`);
+    draftSync();
+    return;
+  }
   if (q("[data-lothers]")) {
     const lw = ui.linkw, z = zoneById(lw.id);
     lw.others = !lw.others;
@@ -4319,6 +4340,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "wiz-desc" && ui.wiz) ui.wiz.desc = e.target.value;
   if (e.target.dataset && e.target.dataset.wlabel && ui.wiz) { (ui.wiz.labels ||= {})[e.target.dataset.wlabel] = e.target.value; const bar = $("#main .wizbar"); if (bar) { const n = wizDraft(ui.wiz).items.length; bar.querySelector(".draft-text").innerHTML = n ? `<strong>${plural(n, "unsaved change")}</strong><span class="draft-why"> · nothing changes until you apply</span>` : ""; } }
   if (e.target.id === "dlg-confirm") $("[data-gdiscard]").disabled = !guardConfirmed();
+  if (e.target.dataset && e.target.dataset.lname !== undefined && ui.linkw) { ui.linkw.names[e.target.dataset.lname] = e.target.value; draftSync(); return; }
   if (e.target.id === "link-q" && ui.linkw) { const z = zoneById(ui.linkw.id); ui.linkw.q = e.target.value; $("#link-others").innerHTML = linkOthers(ui.linkw, z); $("#link-list").innerHTML = linkList(ui.linkw, z); }
   if (e.target.id === "repeat-in" && ui.autos) {
     ui.autos.repeat = e.target.value;

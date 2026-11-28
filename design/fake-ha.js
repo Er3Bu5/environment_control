@@ -168,7 +168,8 @@ class FakeHA {
       if (!keys || keys.some((k) => k !== "alertRepeat")) this.fail("Room settings hold only the alert repeat rate");
       if (room.alertRepeat !== undefined && !(typeof room.alertRepeat === "string" && /^input_number\.[a-z0-9_]+$/.test(room.alertRepeat))) this.fail("The alert repeat rate links to something that isn't a number helper");
     }
-    /* Automations a zone switches: an automation entity, a group, and an id the frame names it by. Nothing else. One
+    /* Automations a zone switches: an automation entity, a group, an id the frame names it by, and optionally a name of the
+       panel's own, as long as a device's. Nothing else. One
        automation belongs to one zone, as the real backend has it. */
     const GROUPS = ["alert_day", "alert_night", "alert_device", "failsafe", "control"];
     const linked = new Set();
@@ -178,7 +179,8 @@ class FakeHA {
       const aids = new Set(), ents = new Set();
       for (const a of z.automations) {
         const keys = a && typeof a === "object" ? Object.keys(a).sort().join() : "";
-        if (keys !== "entity,group,id") this.fail(`${z.id} links an automation with something other than an id, an entity and a group`);
+        if (keys !== "entity,group,id" && keys !== "entity,group,id,name") this.fail(`${z.id} links an automation with something other than an id, an entity, a group and a name`);
+        if (a.name !== undefined && !(typeof a.name === "string" && a.name.length <= 100 && a.name.trim() === a.name && /^[^\u0000-\u001f\u007f]+$/.test(a.name))) this.fail(`${z.id} gives an automation a name that isn't short text`);
         if (typeof a.id !== "string" || !/^[a-z0-9_-]{1,64}$/.test(a.id) || aids.has(a.id)) this.fail(`${z.id} has automation links without unique ids`);
         if (typeof a.entity !== "string" || !/^automation\.[a-z0-9_]+$/.test(a.entity) || ents.has(a.entity)) this.fail(`${z.id} links something that isn't an automation, or one twice`);
         if (!GROUPS.includes(a.group)) this.fail(`${z.id} puts an automation in a group this panel doesn't know`);

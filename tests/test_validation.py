@@ -17,6 +17,23 @@ def _bad(sample_config, change):
     return c
 
 
+# The mock's fake backend refuses exactly these too: the two mirror each other.
+BAD_LINK_NAMES = {
+    "that isn't text": 12,
+    "that is null": None,
+    "that is empty": "",
+    "of only spaces": "   ",
+    "with a space in front": " Fan",
+    "with a no-break space behind": "Fan\u00a0",
+    "with a byte order mark in front": "\ufeffFan",
+    "too long": "x" * 101,
+    "too long as JavaScript counts it": "\U0001f331" * 51,
+    "with a control character": "Fan\x07",
+    "with a newline": "Fan\nlights",
+    "with a delete character": "Fan\x7f",
+}
+
+
 CASES = {
     "not zones and devices": (lambda c: c.pop("devices"), "isn't zones and devices"),
     "too many zones": (
@@ -176,16 +193,31 @@ CASES = {
         lambda c: c["zones"][0].update(
             automations=[{"id": "a1", "entity": "automation.x", "group": "control", "service": "automation.trigger"}]
         ),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
     "automation link without a group": (
         lambda c: c["zones"][0].update(automations=[{"id": "a1", "entity": "automation.x"}]),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
     "automation link that isn't an object": (
         lambda c: c["zones"][0].update(automations=["automation.x"]),
-        "an id, an entity and a group",
+        "an id, an entity, a group and a name",
     ),
+    "automation link with a name and something else": (
+        lambda c: c["zones"][0].update(
+            automations=[{"id": "a1", "entity": "automation.x", "group": "control", "name": "Fan", "icon": "mdi:fan"}]
+        ),
+        "an id, an entity, a group and a name",
+    ),
+    **{
+        f"automation link name {why}": (
+            lambda c, name=name: c["zones"][0].update(
+                automations=[{"id": "a1", "entity": "automation.x", "group": "control", "name": name}]
+            ),
+            "name that isn't short text",
+        )
+        for why, name in BAD_LINK_NAMES.items()
+    },
     "automation link id with odd characters": (
         lambda c: c["zones"][0].update(automations=[{"id": "A 1", "entity": "automation.x", "group": "control"}]),
         "unique ids",
@@ -285,6 +317,15 @@ def test_a_bad_setup_is_refused_with_why(sample_config, name) -> None:
     change, why = CASES[name]
     with pytest.raises(InvalidConfig, match=why):
         validate_config(_bad(sample_config, change))
+
+
+@pytest.mark.parametrize("name", ["Exhaust", "Lüfter Nacht - Zelt 2", "x" * 100, "\U0001f331" * 50])
+def test_an_automation_link_can_carry_a_short_name(sample_config, name) -> None:
+    sample_config["zones"][0]["automations"] = [
+        {"id": "a1", "entity": "automation.x", "group": "control", "name": name},
+        {"id": "a2", "entity": "automation.y", "group": "failsafe"},
+    ]
+    validate_config({"zones": sample_config["zones"], "devices": sample_config["devices"]})
 
 
 def test_a_boolean_is_not_a_minute(sample_config) -> None:
