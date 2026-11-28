@@ -191,6 +191,13 @@ export const styles = css`
   .pickwrap:has(.pickrow[aria-pressed="true"]) { border-color: var(--primary); }
   .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; background: none; text-align: left; }
   .tick { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid var(--off); border-radius: 6px; font-size: 14px; }
+  .pickrow[aria-disabled="true"] { cursor: help; }
+  .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
+  .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
+  .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+  button.chip { color: var(--fg); }
+  button.chip[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); font-weight: 500; }
+  button.chip[aria-pressed="true"]::before { content: "✓" / ""; margin-right: 5px; font-size: 12px; }
   .pickrow[aria-pressed="true"] .tick { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
   .pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .pick-text strong { font-weight: 500; overflow-wrap: anywhere; }

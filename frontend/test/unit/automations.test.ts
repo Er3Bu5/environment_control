@@ -42,7 +42,9 @@ import {
   repeatRefused,
   repeatStuck,
   setLinkGroup,
-  sharedWith,
+  linkStanding,
+  otherZoneText,
+  hiddenWords,
   suggestGroup,
   toggleLink,
 } from "../../src/frame/automations";
@@ -193,11 +195,6 @@ describe("an automation's row", () => {
     expect(row({ status: "error", error: "No." }).locked).toBe(false);
   });
 
-  it("names the other zone that has an automation saved, which Link automations shows", () => {
-    expect(sharedWith(zones, "garden", "automation.tent_lights_on")).toEqual(["Veg"]);
-    expect(sharedWith(zones, "veg", "automation.tent_lights_on")).toEqual([]);
-    expect(sharedWith(zones, "veg", "automation.porch_light_on")).toEqual([]);
-  });
 });
 
 describe("a switch after a tap", () => {
@@ -410,7 +407,7 @@ describe("Link automations", () => {
 
   it("opens on what the zone links as saved, and ticks a new automation in the group its name suggests", () => {
     const d = openLinks(nursery, "failsafe");
-    expect([d.was, d.pick, d.q, d.from]).toEqual([saved, saved, "", "failsafe"]);
+    expect([d.was, d.pick, d.q, d.others, d.from]).toEqual([saved, saved, "", false, "failsafe"]);
     toggleLink(d, "automation.critical_nursery_vpd_high_day");
     expect(d.pick["automation.critical_nursery_vpd_high_day"]).toBe("alert_day");
     d.pick.x = "control";
@@ -430,28 +427,63 @@ describe("Link automations", () => {
 
   it("with nothing typed lists what the zone links, its area's automations and those named for it, and counts the rest", () => {
     const { rows, more } = linkList(openLinks(nursery, null), zones, catalog, states);
-    expect(rows.map((r) => r.name)).toEqual(["Critical Nursery Temperature High Day", "Critical Nursery VPD High Day", "Failsafe Nursery Fans Auto On", "Fan kick", "Heat alarm", "Nursery Door Alert", "Nursery Lights On"]);
+    expect(rows.map((r) => r.name)).toEqual(["Critical Nursery Temperature High Day", "Critical Nursery VPD High Day", "Failsafe Nursery Fans Auto On", "Fan kick", "Heat alarm", "Nursery Lights On"]);
     expect(more).toBe(5);
   });
 
-  it("names the zone that has one already, and lets it be ticked: saving it here too is the backend's to refuse", () => {
+  it("splits automations into the zone's own, free ones, and another zone's, by what's saved", () => {
     const d = openLinks(nursery, null);
-    const door = linkList(d, zones, catalog, states).rows.find((r) => r.name === "Nursery Door Alert");
-    expect(door).toEqual({ entity: "automation.nursery_door_alert", name: "Nursery Door Alert", sub: "automation.nursery_door_alert, Veg area, linked in Veg", pill: "On", group: null });
-    toggleLink(d, "automation.nursery_door_alert");
-    expect(d.pick["automation.nursery_door_alert"]).toBe("control");
+    expect(linkStanding(d, zones, "automation.nursery_lights_on")).toEqual({ kind: "own" });
+    expect(linkStanding(d, zones, "automation.porch_light_on")).toEqual({ kind: "free" });
+    expect(linkStanding(d, zones, "automation.nursery_door_alert")).toEqual({ kind: "other", zone: "Veg" });
+    /* A draft elsewhere is nobody's: unticking one here doesn't make it another zone's, nor free it in Veg. */
+    toggleLink(d, "automation.nursery_lights_on");
+    expect(linkStanding(d, zones, "automation.nursery_lights_on")).toEqual({ kind: "own" });
+    expect(linkStanding(openLinks(veg, null), zones, "automation.nursery_lights_on")).toEqual({ kind: "other", zone: "Nursery" });
+    /* A setup from before the rule with one in two zones: each zone's own stays its own, so it can be unlinked. */
+    const both = readZones([{ id: "a", name: "A", automations: [link("a1", "x", "control")] }, { id: "b", name: "B", automations: [link("a1", "x", "control")] }]);
+    expect(linkStanding(openLinks(both[0], null), both, "automation.x")).toEqual({ kind: "own" });
+  });
+
+  it("hides another zone's and counts them, and with the toggle on lists them where they fall, marked and never ticked", () => {
+    const d = openLinks(nursery, null);
+    const off = linkList(d, zones, catalog, states);
+    expect(off.rows.map((r) => r.entity)).not.toContain("automation.nursery_door_alert");
+    expect([off.elsewhere, off.hidden]).toEqual([1, 1]);
+    expect(hiddenWords(1)).toBe("1 is hidden because another zone has it.");
+    expect(hiddenWords(3)).toBe("3 are hidden because another zone has them.");
+    d.others = true;
+    const on = linkList(d, zones, catalog, states);
+    expect([on.elsewhere, on.hidden, on.more]).toEqual([1, 0, off.more]);
+    expect(on.rows.map((r) => r.name)).toEqual(["Critical Nursery Temperature High Day", "Critical Nursery VPD High Day", "Failsafe Nursery Fans Auto On", "Fan kick", "Heat alarm", "Nursery Door Alert", "Nursery Lights On"]);
+    expect(on.rows.find((r) => r.name === "Nursery Door Alert")).toEqual({ entity: "automation.nursery_door_alert", name: "Nursery Door Alert", sub: "In Zone: Veg", pill: "On", group: null, other: "Veg" });
+    expect(otherZoneText("Veg")).toBe("This automation is already associated to Zone: Veg. Please remove it before associating it with a new zone.");
+    /* With none to hide, there's no toggle and no line. */
+    expect(linkList(openLinks(garden, null), zones, catalog, states)).toMatchObject({ elsewhere: 0, hidden: 0 });
+  });
+
+  it("searches what's shown: another zone's stay hidden while the toggle is off, counted in the line, not as more", () => {
+    const d = openLinks(nursery, null);
+    d.q = "lights";
+    expect(linkList(d, zones, catalog, states)).toMatchObject({ rows: [expect.objectContaining({ entity: "automation.nursery_lights_on" })], more: 0, elsewhere: 2, hidden: 2 });
+    d.others = true;
+    expect(linkList(d, zones, catalog, states).rows.map((r) => [r.name, r.other])).toEqual([
+      ["Failsafe Tent Lights Recovery", "Veg"],
+      ["Nursery Lights On", null],
+      ["Tent Lights On", "Veg"],
+    ]);
   });
 
   it("says where each one is, whether it's on, and the group of one that's ticked", () => {
     const rows = Object.fromEntries(linkList(openLinks(nursery, null), zones, catalog, states).rows.map((r) => [r.entity, r]));
-    expect(rows["automation.nursery_lights_on"]).toEqual({ entity: "automation.nursery_lights_on", name: "Nursery Lights On", sub: "automation.nursery_lights_on", pill: "On", group: "control" });
+    expect(rows["automation.nursery_lights_on"]).toEqual({ entity: "automation.nursery_lights_on", name: "Nursery Lights On", sub: "automation.nursery_lights_on", pill: "On", group: "control", other: null });
     expect(rows["automation.nursery_fan_kick"]).toMatchObject({ sub: "automation.nursery_fan_kick, Garden area", pill: "Off", group: null });
   });
 
   it("searches every automation by each word typed, in its name or entity id, and counts none as more", () => {
     const d = openLinks(nursery, null);
     d.q = "  PORCH ";
-    expect(linkList(d, zones, catalog, states)).toEqual({ rows: [expect.objectContaining({ entity: "automation.porch_light_on" })], more: 0 });
+    expect(linkList(d, zones, catalog, states)).toEqual({ rows: [expect.objectContaining({ entity: "automation.porch_light_on" })], more: 0, elsewhere: 0, hidden: 0 });
     d.q = "day upper";
     expect(linkList(d, zones, catalog, states).rows.map((r) => r.name)).toEqual(["Day Humidity Upper Limit"]);
     d.q = "lights nursery";
