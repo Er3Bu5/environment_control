@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 import probatio
@@ -21,8 +22,9 @@ from .activity import (
 from .catalog import async_build_catalog
 from .const import DOMAIN
 from .history import HOURS, MAX_BUCKETS, MAX_ENTITIES, MIN_BUCKETS, async_history, mapped_readings
+from .limits import zone_limits
 from .store import ConfigStore, RevisionConflict
-from .validation import InvalidConfig
+from .validation import READING_SLOTS, InvalidConfig
 
 CONFLICT = "Setup was saved from somewhere else since this was opened. Reopen the panel to see it."
 
@@ -97,11 +99,16 @@ async def ws_catalog(hass: HomeAssistant, connection: websocket_api.ActiveConnec
         probatio.Required("entities"): list,
         probatio.Required("hours"): int,
         probatio.Required("buckets"): int,
+        probatio.Inclusive("zone", "limits"): str,
+        probatio.Inclusive("metric", "limits"): str,
     }
 )
 @websocket_api.async_response
 async def ws_history(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Bucketed readings for a chart: only entities the setup maps as a sensor's readings, over a fixed range."""
+    """Bucketed readings for a chart: only entities the setup maps as a sensor's readings, over a fixed range.
+
+    Given a zone and a metric, the answer also carries that zone's limits for the metric over the same range.
+    """
     store = _store(hass)
     if store is None:
         connection.send_error(msg["id"], "not_loaded", "Environment Control isn't set up.")
@@ -114,12 +121,24 @@ async def ws_history(hass: HomeAssistant, connection: websocket_api.ActiveConnec
     if not 0 < len(entities) <= MAX_ENTITIES or not all(isinstance(e, str) and e in mapped for e in entities):
         connection.send_error(msg["id"], "unauthorized", "History is only for the readings of a sensor in a zone.")
         return
+    limits = None
+    if "zone" in msg:
+        zone = next((z for z in store.data.get("zones") or [] if z.get("id") == msg["zone"]), None)
+        if zone is None:
+            connection.send_error(msg["id"], "not_found", "That zone isn't in the setup.")
+            return
+        if msg["metric"] not in READING_SLOTS:
+            connection.send_error(msg["id"], "invalid_format", "That isn't a reading this panel draws.")
+            return
+        entries, since = store.zone_changes(msg["zone"])
+        tz = dt_util.get_default_time_zone()
+        limits = partial(zone_limits, zone, msg["metric"], entries, since, tz)
     if "recorder" not in hass.config.components:
         connection.send_error(
             msg["id"], "no_recorder", "Home Assistant's recorder isn't running, so there's no history."
         )
         return
-    connection.send_result(msg["id"], await async_history(hass, list(dict.fromkeys(entities)), hours, buckets))
+    connection.send_result(msg["id"], await async_history(hass, list(dict.fromkeys(entities)), hours, buckets, limits))
 
 
 @websocket_api.require_admin
