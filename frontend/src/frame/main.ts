@@ -184,6 +184,7 @@ import {
   zoneReading,
 } from "./readings";
 import { onColor } from "./colour";
+import { levelledHeights } from "./heads";
 import { PALETTES, styles } from "./styles";
 import {
   KEPT,
@@ -458,6 +459,17 @@ export class EcApp extends LitElement {
   }
   private chartEl: Element | null = null;
   private chartRO: ResizeObserver | null = null;
+  private zoneGrid: Element | null = null;
+  private zoneGridW = 0;
+  /* Only a change of width can move a line break; the heights levelHeads sets change the grid's height, and must not set it
+     off again. */
+  private zoneGridRO = new ResizeObserver(([e]) => {
+    const w = Math.round(e.contentRect.width);
+    if (w !== this.zoneGridW) {
+      this.zoneGridW = w;
+      this.levelHeads();
+    }
+  });
   private leafBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   declare private states: Record<string, HaState>;
   declare private now: number;
@@ -561,6 +573,8 @@ export class EcApp extends LitElement {
     window.removeEventListener("resize", this.onResize);
     clearInterval(this.clock);
     this.chartRO?.disconnect();
+    this.zoneGridRO.disconnect();
+    this.zoneGrid = null;
     super.disconnectedCallback();
   }
 
@@ -797,6 +811,14 @@ export class EcApp extends LitElement {
         this.chartRO.observe(chart);
       }
     }
+    const zoneGrid = this.shadowRoot?.querySelector(".cards.zones") ?? null;
+    if (zoneGrid !== this.zoneGrid) {
+      this.zoneGridRO.disconnect();
+      this.zoneGrid = zoneGrid;
+      this.zoneGridW = 0;
+      if (zoneGrid) this.zoneGridRO.observe(zoneGrid);
+    }
+    if (zoneGrid) this.levelHeads();
     const held = this.draftCount > 0;
     this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos" || this.sortOn);
     this.classList.toggle("typing", this.typing);
@@ -2480,11 +2502,13 @@ export class EcApp extends LitElement {
           : judgedAny
             ? html`<div class="notice calm"><strong>All zones ideal</strong></div>`
             : nothing}
-      <div class="cards">
+      <div class="cards zones">
         ${repeat(shown, (z) => z.id, (z, i) => {
           const n = this.readingsOf(z.id).filter((s) => s.counted && s.health === "ok").length, light = this.zoneNow(z.id, "light").value;
+          /* A linked zone's line joins the combine note here, with its Parent badge after the name, once zones link (#91). */
+          const note = n >= 2 ? html`<span class="small muted cardnote"><span class="zcombined">${METHODS[this.methodOf(z.id)]} of ${n} sensors</span></span>` : nothing;
           return card(z, html`
-            <div class="card-head"><h2>${z.name}</h2>${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
+            <div class="card-head"><h2>${z.name}</h2>${note}${stepsLeft(z).length ? html`<span class="pill warn">Not set up</span>` : nothing}${sorting ? arrows(z, i) : nothing}</div>
             ${z.description ? html`<p class="small muted">${z.description}</p>` : nothing} ${this.periodBlock(z)}
             <div class="rows">
               ${METRICS.map(
@@ -2503,10 +2527,21 @@ export class EcApp extends LitElement {
                     ${this.lightSpark(z, 34, "lspark")}
                   </div>`}
             </div>
-            ${n >= 2 ? html`<p class="small muted">${METHODS[this.methodOf(z.id)]} of ${n} sensors.</p>` : nothing}
             <p class="small muted">${this.zoneCounts(z)}</p>`);
         })}
       </div>`;
+  }
+
+  /* A card whose combine note wraps under its name would start its day strip and tracks lower than its neighbour's, so
+     every head in a row takes the tallest one's height. */
+  private levelHeads(): void {
+    const heads = [...(this.zoneGrid?.querySelectorAll<HTMLElement>(".zone-card > .card-head") ?? [])];
+    for (const h of heads) h.style.minHeight = "";
+    const wanted = levelledHeights(heads.map((h) => h.getBoundingClientRect()));
+    heads.forEach((h, i) => {
+      const t = wanted[i];
+      if (t !== null) h.style.minHeight = `${t}px`;
+    });
   }
 
   private tile(z: Zone, k: Metric) {
