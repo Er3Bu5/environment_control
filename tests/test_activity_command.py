@@ -171,7 +171,12 @@ async def test_a_zone_page_through_the_real_logbook(room, hass, hass_ws_client, 
 
 
 def test_the_zone_asks_only_for_its_devices_and_linked_automations_never_its_sensors() -> None:
-    assert activity.zone_entities(ROOM, "garden") == ([HEATER], {ALERT}, {"sensor.left_temp": "Left", HEATER: "Heater"})
+    assert activity.zone_entities(ROOM, "garden") == (
+        [HEATER],
+        {ALERT},
+        {"sensor.left_temp": "Left", HEATER: "Heater"},
+        [activity.Reading("s1", "Left", "temperature", "sensor.left_temp")],
+    )
     assert activity.zone_entities(ROOM, "kitchen") is None
 
 
@@ -308,7 +313,7 @@ async def test_a_slow_logbook_gives_a_clear_error(room, monkeypatch) -> None:
     ],
 )
 def test_a_trigger_is_sent_as_its_kind_named_only_for_the_zones_own(source, expected) -> None:
-    _, _, names = activity.zone_entities(ROOM, "garden")
+    _, _, names, _ = activity.zone_entities(ROOM, "garden")
     assert activity.trigger(source, names) == expected
 
 
