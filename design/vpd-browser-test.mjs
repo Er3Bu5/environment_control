@@ -313,10 +313,12 @@ check("Helpers: once typing ends, the page catches up", (await ev(`helpersRedraw
 await key("Escape", 27);
 await open();
 await tap("#vin-temperature-4"); await type("36"); await key("Enter", 13);
-check("Enter commits a value past the chart edge", (await band("temperature", 4)) === 36);
+check("Enter commits a value past where the axis ended", (await band("temperature", 4)) === 36);
 check("Enter closes the keyboard", (await active()) !== "vin-temperature-4");
-check("past the chart edge is not an issue", (await issueText()).length === 0, await issueText());
+check("a value past where the axis ended is not an issue", (await issueText()).length === 0, await issueText());
 check("line stays inside the chart", await ev(`[...document.querySelectorAll("#vwrap line")].every(l=>Number(l.getAttribute("x1"))<=vGeom().W)`));
+/* #159: the axes refit on commit, so a typed value gets room rather than sitting on the chart's edge. */
+check("the axis makes room for it on commit, its line inside the edge", await ev(`(()=>{const g=vGeom(),x=Number(document.querySelector('#vwrap [data-vline="temperature:4"]').getAttribute("x1"));return g.t.hi>36&&x<g.right-g.cw/2})()`), await ev(`vGeom().t`));
 
 const lowWas = await band("temperature", 1);
 await tap("#vin-temperature-1"); await type(""); await ev(`document.querySelector("#vin-temperature-1").value=""`); await key("Enter", 13);
@@ -2301,6 +2303,58 @@ const lkNone = await vLook();
 check("Chart colours: with nothing selected no label or line is in the accent", lkNone.flags.length === 4 && lkNone.flags.every((f) => f.fill !== lkNone.prim) && lkNone.accent === 0, lkNone);
 await open(); await ev(`ui.vpdw.edit="target";vSync()`);
 check("Chart colours: on Target the circle is drawn in the accent", (await vLook()).accent >= 1, await vLook());
+/* #159: the axes fit the zone's limits. The stakeholder's case first: temperature Min 13, Low 16, High 21, Max 21. */
+const vAxisNow = () => ev(`(()=>{const w=document.querySelector("#vwrap");w.scrollIntoView({block:"center"});const svg=w.querySelector("svg"),r=svg.getBoundingClientRect(),g=vGeom(),sc=r.width/g.W,pos={};for(const l of svg.querySelectorAll("[data-vline]"))pos[l.dataset.vline]=l.tagName==="path"?l.getAttribute("d").length:l.dataset.vline.startsWith("temperature")?Number(l.getAttribute("x1")):Number(l.getAttribute("y1"));return {pos,L:g.L+g.cw/2,R:g.right-g.cw/2,T:g.T+g.ch/2,B:g.bottom-g.ch/2,ticks:[...svg.querySelectorAll("[data-vtick]")].map(t=>Number(t.dataset.vtick)),rh:[...svg.querySelectorAll("text")].filter(t=>t.textContent.endsWith("%")).map(t=>Number(t.textContent.slice(0,-1))),cells:svg.querySelectorAll("g[opacity] > rect").length,left:r.left,top:r.top,sc,band:ui.vpdw.bands[ui.vpdw.period].temperature.slice()}})()`);
+const vPlace = async (temps) => { await ev(`(()=>{const z=zones[0],p=typeof period==="function"?period(z):"day";window.__bandsWas=window.__bandsWas||JSON.stringify(z.bands);z.bands[p].temperature=${JSON.stringify(temps)}})()`); await open(); await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`); };
+const vRestore = () => ev(`(()=>{if(window.__bandsWas)zones[0].bands=JSON.parse(window.__bandsWas);window.__bandsWas=null})()`);
+/* Presses at a chart point (in the chart's own units), moves to another, and reads the axis while still held. */
+const vDrag = async (x0, y0, x1, y1) => {
+  const a = await vAxisNow(), at = (x, y) => ({ x: a.left + x * a.sc, y: a.top + y * a.sc });
+  const p = at(x0, y0), q = at(x1, y1);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1 }); await sleep(40);
+  const down = await vAxisNow();
+  for (let n = 1; n <= 4; n++) { await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x + ((q.x - p.x) * n) / 4, y: p.y + ((q.y - p.y) * n) / 4, button: "left", buttons: 1 }); await sleep(20); }
+  const held = await vAxisNow();
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: q.x, y: q.y, button: "left", clickCount: 1 }); await sleep(80);
+  return { down, held, up: await vAxisNow() };
+};
+await vPlace([13, 16, 18.5, 21, 21]);
+let ax = await vAxisNow(), tp = ax.pos;
+check("Axes, Min 13 Low 16 High 21 Max 21: every temperature line has its own place inside the plot, none on an edge, Min left of Low, High and Max one line", ["temperature:0", "temperature:1", "temperature:3", "temperature:4"].every((id) => tp[id] > ax.L && tp[id] < ax.R) && tp["temperature:0"] < tp["temperature:1"] && tp["temperature:1"] < tp["temperature:3"] && tp["temperature:3"] === tp["temperature:4"], ax);
+check("Axes, Min 13 Low 16 High 21 Max 21: the VPD lines and the Target are on the chart too", [0, 1, 3, 4].every((i) => tp[`vpd:${i}`] > 0) && (await ev(`(()=>{const c=document.querySelector("#vwrap circle"),g=vGeom(),b=ui.vpdw.bands[ui.vpdw.period];return Math.abs(Number(c.getAttribute("cx"))-g.X(b.temperature[2]))<0.01&&Math.abs(Number(c.getAttribute("cy"))-g.Y(b.humidity[2]))<0.01})()`)), ax);
+await shot("vpd-axes-tight-temperature");
+/* Max selected on the shared High/Max line: a press there drags Max, not High. */
+await ev(`ui.vpdw.sel=4;vSync()`); ax = await vAxisNow();
+let dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.pos["temperature:4"] + 2 * (await ev(`vGeom().cw`)), (ax.T + ax.B) / 2);
+check("Grab: with Max selected, a press on the coinciding High/Max line moves Max and leaves High", dr.up.band[4] > 21 && dr.up.band[3] === 21 && (await ev(`ui.vpdw.sel`)) === 4, dr.up.band);
+await vPlace([13, 16, 18.5, 21, 21]); await ev(`ui.vpdw.sel=3;vSync()`); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:3"], (ax.T + ax.B) / 2, ax.pos["temperature:3"] - 2 * (await ev(`vGeom().cw`)), (ax.T + ax.B) / 2);
+check("Grab: with High selected, the same press moves High and leaves Max", dr.up.band[3] < 21 && dr.up.band[4] === 21 && (await ev(`ui.vpdw.sel`)) === 3, dr.up.band);
+await vPlace([13, 16, 18.5, 21, 21]); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.pos["temperature:4"], (ax.T + ax.B) / 2);
+check("Grab: with neither selected, a press on the High/Max line takes the outer one, Max", (await ev(`ui.vpdw.sel`)) === 4, await ev(`ui.vpdw.sel`));
+/* Dragged to the right edge and past it: the axis holds still until release, the line stops at the edge, then the axis makes room. */
+await vPlace([13, 16, 18.5, 21, 21]); ax = await vAxisNow();
+dr = await vDrag(ax.pos["temperature:4"], (ax.T + ax.B) / 2, ax.R + 200, (ax.T + ax.B) / 2);
+const edgeHi = dr.down.ticks.at(-1);
+check("Drag: the axis doesn't change between pressing and letting go, the line stopping at the chart's edge", JSON.stringify(dr.down.ticks) === JSON.stringify(dr.held.ticks) && dr.down.cells === dr.held.cells && Math.abs(dr.held.pos["temperature:4"] - dr.held.R) < 0.5, dr);
+check("Drag: once let go near the edge the axis makes room, so the line has space past it", JSON.stringify(dr.up.ticks) !== JSON.stringify(dr.held.ticks) && dr.up.pos["temperature:4"] < dr.up.R - 1 && dr.up.ticks.at(-1) > edgeHi, [dr.held.ticks, dr.up.ticks, dr.up.band]);
+await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=4;vSync()`); const maxWas = await band("temperature", 4);
+await tap("#vnudge [data-vnudge='1']");
+check("Drag: from there + goes on a step at a time", (await band("temperature", 4)) === maxWas + 0.5, await band("temperature", 4));
+/* Ordinary limits: round labels, and about as many cells as the fixed 16 to 34 by 30 to 90 grid had (19 by 13). */
+await vRestore(); await open(); ax = await vAxisNow();
+const cols = ax.ticks.length, rows = ax.rh.length;
+check("Axes, ordinary limits: whole even temperature labels, humidity in fives, and a grid of about the same number of cells as before", ax.ticks.every((t) => Number.isInteger(t) && t % 2 === 0) && ax.rh.every((r) => r % 5 === 0) && ax.cells >= 19 * 13 && ax.cells <= 26 * 17 && rows >= 13 && rows <= 17, { ticks: ax.ticks, rh: ax.rh, cells: ax.cells });
+await ev(`ui.vpdw.edit="temperature";ui.vpdw.sel=null;vSync()`); await shot("vpd-axes-ordinary-temperature");
+await ev(`ui.vpdw.edit="humidity";ui.vpdw.sel=3;vSync()`); await shot("vpd-axes-ordinary-humidity");
+const dayTicks = (await vAxisNow()).ticks;
+await ev(`(()=>{const v=ui.vpdw,o=v.period==="day"?"night":"day";v.bands[o].temperature=[8,10,null,14,15];v.bands[o].temperature[2]=v.bands[o].temperature[2]})()`);
+await ev(`document.querySelector("[data-vperiod]:not([aria-pressed=true])").click()`); await sleep(60);
+const nightAx = await vAxisNow();
+check("Axes: switching period refits them to that period's limits", JSON.stringify(nightAx.ticks) !== JSON.stringify(dayTicks) && nightAx.pos["temperature:0"] > nightAx.L, [dayTicks, nightAx.ticks]);
+await open();
 await reset(); await goTab("Garden"); await shot("controls-desktop");
 await openL(); await sleep(60); await shot("leaf-desktop"); await reset();
 // ---------- The history chart
