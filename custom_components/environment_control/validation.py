@@ -24,8 +24,16 @@ NUMBER_ENTITY = re.compile(r"number\.[a-z0-9_]{1,200}")
 SENSOR_ENTITY = re.compile(r"sensor\.[a-z0-9_]{1,200}")
 NUMBER_HELPER = re.compile(r"input_number\.[a-z0-9_]{1,200}")
 # Automations a zone links can be switched on and off by the panel's host, and nothing else: Home Assistant keeps
-# running them. A link is only which automation, under what id, in which group.
+# running them. A link is only which automation, under what id, in which group, and optionally a name the panel shows
+# instead of Home Assistant's.
 AUTOMATION = re.compile(r"automation\.[a-z0-9_]{1,200}")
+LINK_KEYS = frozenset({"id", "entity", "group"})
+# A link's name mirrors the mock's fake backend (design/fake-ha.js), so the two refuse the same names: 1 to MAX_NAME
+# characters counted as JavaScript counts them (UTF-16 units), no control character, and nothing that JavaScript's
+# trim() would take off either end. The trim set is JavaScript's, not str.strip()'s: the two disagree on a few
+# characters such as U+FEFF and U+0085.
+LINK_NAME = re.compile(r"[^\x00-\x1f\x7f]+")
+JS_TRIMMED = " \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200B))) + "\u2028\u2029\u202f\u205f\u3000\ufeff"
 AUTOMATION_GROUPS = ("alert_day", "alert_night", "alert_device", "failsafe", "control")
 LINK_ID = re.compile(r"[a-z0-9_-]{1,64}")
 MAX_AUTOMATIONS_PER_ZONE = 200
@@ -216,8 +224,17 @@ def _check_sensor(zid: str, x: Any) -> None:
         _fail(f"{sid} has a height this panel doesn't know")
 
 
+def _is_link_name(name: Any) -> bool:
+    return (
+        isinstance(name, str)
+        and len(name.encode("utf-16-le", "surrogatepass")) // 2 <= MAX_NAME
+        and name.strip(JS_TRIMMED) == name
+        and bool(LINK_NAME.fullmatch(name))
+    )
+
+
 def _check_automations(zid: str, links: Any, elsewhere: set[str]) -> None:
-    """A zone's automation links: each exactly an id, an automation entity and a group, with no id or automation twice.
+    """A zone's automation links: each an id, an automation entity, a group and maybe a name, no id or automation twice.
 
     Nothing else may ride along, so a link can never name a service or anything but an automation. An automation belongs
     to one zone: switched off for one zone it would stop in another without that zone saying so. `elsewhere` is what the
@@ -228,8 +245,10 @@ def _check_automations(zid: str, links: Any, elsewhere: set[str]) -> None:
     ids: set[str] = set()
     entities: set[str] = set()
     for a in links:
-        if not isinstance(a, dict) or set(a) != {"id", "entity", "group"}:
-            _fail(f"{zid} links an automation with something other than an id, an entity and a group")
+        if not isinstance(a, dict) or set(a) not in (LINK_KEYS, LINK_KEYS | {"name"}):
+            _fail(f"{zid} links an automation with something other than an id, an entity, a group and a name")
+        if "name" in a and not _is_link_name(a["name"]):
+            _fail(f"{zid} gives an automation a name that isn't short text")
         aid, entity = a["id"], a["entity"]
         if not isinstance(aid, str) or not LINK_ID.fullmatch(aid) or aid in ids:
             _fail(f"{zid} has automation links without unique ids")
