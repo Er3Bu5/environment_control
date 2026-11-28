@@ -128,7 +128,7 @@ export const styles = css`
   /* On a touch screen with the keyboard up, the dialog moves to the top and stops above the keyboard, a little tighter,
      and the box typed in keeps clear of the buttons when the dialog scrolls to it. */
   :host(.dlgkeys) .modal { align-items: flex-start; padding-top: 8px; }
-  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 52px; }
+  :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 65px; }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
