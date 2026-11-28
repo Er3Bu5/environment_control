@@ -29,6 +29,8 @@ Each change is one commit, made only once both suites pass. The tests assemble t
 ```sh
 # Sample-data suite
 node vpd-browser-test.mjs "$PWD"
+# Its Chromium listens on port 9347; set MOCK_PORT (1024-65535) to run in two worktrees at once
+MOCK_PORT=9351 node vpd-browser-test.mjs "$PWD"
 
 # Real-data suite, after building
 python3 build-snapshot.py "$PWD"

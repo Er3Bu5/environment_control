@@ -1,8 +1,14 @@
 // Drives the mock in headless Chromium over CDP with real taps and keystrokes. Touches nothing outside the scratchpad.
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { createServer } from "node:net";
 
-const dir = process.argv[2], port = 9347, profile = `${dir}/chromium-profile`;
+/* MOCK_PORT lets runs in different worktrees go side by side; each run needs its own DevTools port. */
+const port = Number(process.env.MOCK_PORT || 9347);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) { console.log(`Error MOCK_PORT must be a whole number from 1024 to 65535, not "${process.env.MOCK_PORT}"`); process.exit(2); }
+/* A port another run's Chromium already holds would hand this run that browser's DevTools, and the two runs would drive one page. */
+await new Promise((ok) => { const probe = createServer().once("error", () => { console.log(`Error port ${port} is in use: another run may hold it, so pick a free one with MOCK_PORT`); process.exit(2); }).listen(port, "127.0.0.1", () => probe.close(ok)); });
+const dir = process.argv[2], profile = `${dir}/chromium-profile`;
 process.on("uncaughtException", (e) => { console.log("Error", e.message); browser.kill(); process.exit(2); });
 /* CHROMIUM_FLAGS adds flags for one machine, such as --no-sandbox on CI runners where Chromium's own sandbox can't start. */
 const extraFlags = (process.env.CHROMIUM_FLAGS || "").split(" ").filter(Boolean);
