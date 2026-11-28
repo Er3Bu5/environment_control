@@ -46,6 +46,25 @@ const onStep = (value, min, step) => !(typeof step === "number" && Number.isFini
 const CONTROL_ROLES = ["Dehumidifier", "Humidifier", "Air conditioner", "Heater", "Fan", "Light"];
 /* The ranges the panel draws: the light card's 4 hours and the History card's four. The backend holds the same list. */
 const HISTORY_HOURS = [4, 6, 24, 72, 168];
+/* The backend's own limits on a page of Activity: a local day, which is 25 hours across a clock change, of at most 500
+   rows. A page may end as far ahead as a day can, because the frame asks for today whole. */
+const ACTIVITY_HOURS = 25;
+const ACTIVITY_ROWS = 500;
+/* The Activity command's error codes. They reach the frame so it can tell a busy or slow logbook, worth another try,
+   from a refusal. */
+const ACTIVITY_CODES = ["unauthorized", "not_found", "invalid_format", "busy", "no_logbook", "timeout"];
+/* An Activity answer is copied key by key, so whatever a later backend adds reaches the frame only once it is named here. */
+/** @param {any} o @param {string[]} keys */
+const copy = (o, keys) => Object.fromEntries(keys.filter((k) => o && (o[k] === null || ["string", "number", "boolean"].includes(typeof o[k]))).map((k) => [k, o[k]]));
+/** @param {any} t */
+const copyTrigger = (t) => copy(t, ["kind", "name"]);
+/** @param {any} e */
+function activityEntry(e) {
+  if (e && e.kind === "run") return { ...copy(e, ["kind", "when", "entity", "name", "count", "first", "last"]), trigger: copyTrigger(e.trigger) };
+  if (!e || (e.kind !== "device" && e.kind !== "automation")) return null;
+  const c = e.cause || {};
+  return { ...copy(e, ["kind", "when", "entity", "name", "state"]), cause: { ...copy(c, ["type", "name", "entity"]), ...(c.trigger ? { trigger: copyTrigger(c.trigger) } : {}) } };
+}
 /* The backend's own limit, checked here too so a frame can't make this element send something huge. */
 const MAX_CONFIG_BYTES = 512 * 1024;
 /* The backend's answer to a save built on an older setup than it holds, word for word, so the frame treats both alike. */
@@ -401,6 +420,7 @@ class EnvironmentControlPanel extends HTMLElement {
     else if (m.type === "save") this.save(m);
     else if (m.type === "calibrate") this.calibrate(m);
     else if (m.type === "history") this.history(m);
+    else if (m.type === "activity") this.activity(m);
     else if (m.type === "setting") this.setting(m);
     else if (m.type === "device") this.device(m);
     else if (m.type === "automation") this.automation(m);
@@ -548,8 +568,28 @@ class EnvironmentControlPanel extends HTMLElement {
       refuse(String((err && /** @type {any} */ (err).message) || err));
     }
   }
-  /** @param {unknown} req @param {boolean} ok @param {string} [error] */
-  reply(req, ok, error) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}) }); }
+  /* A zone's Activity, a page at a time. The frame names a zone and a time, never an entity: the backend works out the
+     zone's entities from the stored setup. */
+  /** @param {any} m */
+  async activity(m) {
+    if (!Number.isInteger(m.req)) return;
+    /** @param {string} why */
+    const refuse = (why) => this.reply(m.req, false, why);
+    if (typeof m.zone !== "string" || !(this.config.zones || []).some((/** @type {any} */ z) => z && z.id === m.zone)) return refuse("That zone isn't in the setup.");
+    const { start, end } = m;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || end - start > ACTIVITY_HOURS * 3600 || end > Date.now() / 1000 + ACTIVITY_HOURS * 3600)
+      return refuse("That isn't a page of Activity this panel draws.");
+    try {
+      const a = await this._hass.connection.sendMessagePromise({ type: "environment_control/activity", zone: m.zone, start, end });
+      const entries = (a && Array.isArray(a.entries) ? a.entries : []).slice(0, ACTIVITY_ROWS).map(activityEntry).filter(Boolean);
+      this.post({ type: "result", req: m.req, ok: true, activity: { ...copy(a, ["zone", "start", "end", "earliest", "more", "next_end"]), entries } });
+    } catch (err) {
+      const code = err && /** @type {any} */ (err).code;
+      this.reply(m.req, false, String((err && /** @type {any} */ (err).message) || err), ACTIVITY_CODES.includes(code) ? code : undefined);
+    }
+  }
+  /** @param {unknown} req @param {boolean} ok @param {string} [error] @param {string} [code] */
+  reply(req, ok, error, code) { if (Number.isInteger(req)) this.post({ type: "result", req, ok, ...(error ? { error } : {}), ...(code ? { code } : {}) }); }
 
   /* Setup changes only this integration's own storage, through its backend, which checks the whole config and the
      revision it was based on. The host keeps the backend's answer, never the frame's copy, as its config. */
