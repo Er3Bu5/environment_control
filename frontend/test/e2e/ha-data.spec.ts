@@ -21,7 +21,8 @@ test.describe("talking to HA", () => {
     await openNav(frame);
     await expect(tab(frame, "Veg")).toHaveAttribute("aria-current", "page");
     await goTo(frame, "Overview");
-    await app(frame).locator(".zone-card", { hasText: "Nursery" }).click();
+    /* By its name: Veg's card names Nursery too, as the zone linked to it. */
+    await app(frame).locator(".zone-card", { has: frame.locator("h2", { hasText: "Nursery" }) }).click();
     await expect(app(frame).getByRole("heading", { level: 1, name: "Nursery", exact: true })).toBeVisible();
   });
 
