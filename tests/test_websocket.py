@@ -215,3 +215,139 @@ async def test_a_setup_stored_before_the_one_zone_rule_loads_and_cannot_be_saved
     assert r["error"]["message"] == "An automation can only be linked to one zone."
     await hass.async_block_till_done()
     assert hass_storage[DOMAIN]["data"] == stored
+
+
+def _without(config, zid):
+    """The setup with a zone removed, as the panel sends it: gone from the zones and from every device."""
+    c = copy.deepcopy(config)
+    c["zones"] = [z for z in c["zones"] if z["id"] != zid]
+    for d in c["devices"]:
+        d["zones"] = [z for z in d["zones"] if z != zid]
+        d.get("place", {}).pop(zid, None)
+    return c
+
+
+def _share_veg_sensor(config):
+    c = copy.deepcopy(config)
+    nursery = next(z for z in c["zones"] if z["id"] == "nursery")
+    nursery["sensors"].append(copy.deepcopy(next(z for z in c["zones"] if z["id"] == "veg")["sensors"][0]))
+    return c
+
+
+async def _save(client, revision, config):
+    return await _send(client, type=f"{DOMAIN}/config/save", revision=revision, config=config)
+
+
+@pytest.mark.parametrize("sent_linked", [True, False])
+async def test_removing_a_parent_unlinks_its_linked_zones(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked, sent_linked
+) -> None:
+    """Whether or not the panel unlinked it already, the linked zone stays and is stored with no parent."""
+    room = {"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]}
+    client = await hass_ws_client(hass)
+    assert (await _save(client, 0, room))["success"]
+    c = _without(room, "veg")
+    if not sent_linked:
+        del c["zones"][-1]["parent"]
+    r = await _save(client, 1, c)
+    assert r["success"], r
+    await hass.async_block_till_done()
+    stored = hass_storage[DOMAIN]["data"]
+    assert [z["id"] for z in stored["zones"]] == ["garden", "nursery"]
+    assert all("parent" not in z for z in stored["zones"]) and all("parent" not in z for z in r["result"]["zones"])
+
+
+async def test_removing_a_parent_a_linked_zone_shares_a_sensor_with_is_refused(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    room = _share_veg_sensor({"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]})
+    client = await hass_ws_client(hass)
+    assert (await _save(client, 0, room))["success"]
+    await hass.async_block_till_done()
+    before = copy.deepcopy(hass_storage[DOMAIN]["data"])
+    r = await _save(client, 1, _without(room, "veg"))
+    assert not r["success"] and r["error"]["code"] == "invalid_config"
+    assert (
+        r["error"]["message"]
+        == "Veg environment is in both Veg and Nursery. Take it out of Nursery before removing Veg."
+    )
+    await hass.async_block_till_done()
+    assert hass_storage[DOMAIN]["data"] == before
+
+
+async def test_a_parent_no_setup_ever_had_is_refused_while_a_zone_is_removed(
+    hass, loaded, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    room = {"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]}
+    client = await hass_ws_client(hass)
+    assert (await _save(client, 0, room))["success"]
+    c = _without(room, "veg")
+    c["zones"][-1]["parent"] = "attic"
+    r = await _save(client, 1, c)
+    assert not r["success"] and r["error"]["message"] == "nursery is linked to a zone that doesn't exist"
+
+
+async def test_unlinking_goes_by_the_stored_setup(hass, loaded, hass_ws_client, hass_storage, sample_unlinked) -> None:
+    """A zone stops sharing a sensor by taking it out first, then it can be unlinked."""
+    room = _share_veg_sensor({"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]})
+    client = await hass_ws_client(hass)
+    assert (await _save(client, 0, room))["success"]
+    unlinked = copy.deepcopy(room)
+    del unlinked["zones"][-1]["parent"]
+    r = await _save(client, 1, unlinked)
+    assert not r["success"]
+    assert (
+        r["error"]["message"]
+        == "Veg environment is in both Veg and Nursery. Take it out of Nursery before unlinking it."
+    )
+    unlinked["zones"][-1]["sensors"].pop()
+    assert (await _save(client, 1, unlinked))["success"]
+    await hass.async_block_till_done()
+    assert "parent" not in hass_storage[DOMAIN]["data"]["zones"][-1]
+
+
+async def _load_stored(hass, hass_storage, stored):
+    hass_storage[DOMAIN] = {"version": 1, "minor_version": 1, "key": DOMAIN, "data": copy.deepcopy(stored)}
+    entry = MockConfigEntry(domain=DOMAIN, title="Environment Control")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_a_setup_stored_before_linked_zones_loads_and_saves_as_before(
+    hass, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    zones = copy.deepcopy(sample_unlinked["zones"])
+    for z in zones:
+        z.pop("parent", None)
+    stored = {"revision": 4, "zones": zones, "devices": sample_unlinked["devices"]}
+    await _load_stored(hass, hass_storage, stored)
+    client = await hass_ws_client(hass)
+    r = await _send(client, type=f"{DOMAIN}/config")
+    assert r["success"] and r["result"] == stored
+    r = await _save(client, 4, {"zones": zones, "devices": sample_unlinked["devices"]})
+    assert r["success"] and r["result"] == {**stored, "revision": 5}
+    await hass.async_block_till_done()
+    assert hass_storage[DOMAIN]["data"] == {**stored, "revision": 5}
+
+
+async def test_a_setup_stored_with_a_sensor_in_two_unlinked_zones_loads_and_cannot_be_saved_as_it_is(
+    hass, hass_ws_client, hass_storage, sample_unlinked
+) -> None:
+    """Pins today's behaviour: before linked zones any two zones could share a sensor, and there is no migration. The
+    panel shows the setup, and a save asks for the sensor to come out of one zone or the zones to be linked."""
+    room = _share_veg_sensor({"zones": sample_unlinked["zones"], "devices": sample_unlinked["devices"]})
+    for z in room["zones"]:
+        z.pop("parent", None)
+    stored = {"revision": 4, **room}
+    await _load_stored(hass, hass_storage, stored)
+    client = await hass_ws_client(hass)
+    r = await _send(client, type=f"{DOMAIN}/config")
+    assert r["success"] and r["result"] == stored
+    r = await _save(client, 4, room)
+    assert (
+        not r["success"]
+        and r["error"]["message"] == "A sensor can only be shared between a zone and the zones linked to it."
+    )
+    await hass.async_block_till_done()
+    assert hass_storage[DOMAIN]["data"] == stored

@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY, STORAGE_VERSION
 from .leaf_links import check_leaf_links
-from .validation import validate_config
+from .validation import unlink_removed_parents, validate_config
 
 
 class RevisionConflict(Exception):
@@ -38,7 +38,8 @@ class ConfigStore:
         """Check the setup and its revision, then write it with the revision moved on."""
         if revision != self.data["revision"]:
             raise RevisionConflict
-        validate_config(config)
+        config = unlink_removed_parents(self.data, config)
+        validate_config(config, self.data)
         # A new offset link decides what a calibration can write, so it is checked against HA's registry too.
         check_leaf_links(self._hass, self.data, config)
         nxt = {**config, "revision": self.data["revision"] + 1}
