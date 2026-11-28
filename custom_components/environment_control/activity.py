@@ -255,11 +255,18 @@ class SensorRow:
     since: dict[str, float | None]
 
 
-def sensor_rows(readings: list[Reading], found: dict[str, list[Turn]], start: float, end: float) -> list[SensorRow]:
+def sensor_rows(
+    readings: list[Reading],
+    found: dict[str, list[Turn]],
+    start: float,
+    end: float,
+    startups: Sequence[float] = (),
+) -> list[SensorRow]:
     """The sensor rows from start up to end, oldest first, each sensor's readings that turned together grouped.
 
     A sensor's readings that all stop, or all come back, within TOGETHER_S of each other are one row with reading
-    "all": a board dropping off the network is one event. Anything less than all of them is a row per reading.
+    "all": a board dropping off the network is one event. Anything less than all of them is a row per reading. A row
+    this soon after Home Assistant started is put down to the start, as a device's change is.
     """
     by_sensor: dict[str, list[Reading]] = {}
     for r in readings:
@@ -290,6 +297,8 @@ def sensor_rows(readings: list[Reading], found: dict[str, list[Turn]], start: fl
             reading = "all" if len(group) > 1 else r.reading
             row = {"kind": "sensor", "when": turn.when, "sensor": r.sensor, "name": r.name, "reading": reading}
             row["state"] = turn.state
+            if any(0 <= turn.when - s <= STARTUP_S for s in startups):
+                row["cause"] = {"type": "startup"}
             out.append(SensorRow(row, {items[k][1].reading: items[k][0].since for k in group}))
     out.sort(key=lambda x: x.row["when"])
     return out
@@ -319,7 +328,7 @@ def _sensor_read(
         if entity not in timed and proves_timed(rows, startups):
             timed.add(entity)
         found[entity] = turns(rows, known_to, startups, entity in timed)
-    return sensor_rows(readings, found, start, end)
+    return sensor_rows(readings, found, start, end, startups)
 
 
 def _when(x: dict[str, Any] | SensorRow) -> Any:

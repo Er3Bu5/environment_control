@@ -150,6 +150,13 @@ def test_four_readings_stopping_together_are_one_row_and_three_are_three() -> No
     assert [x.row["reading"] for x in activity.sensor_rows(readings, found, 0, 1000)] == list(LEFT)
 
 
+def test_a_sensor_row_soon_after_a_start_is_put_down_to_it() -> None:
+    readings = [Reading("s3", "Right", "temperature", RIGHT)]
+    turns = [Turn(900, "stopped", 800), Turn(1100, "back", 800), Turn(1000 + activity.STARTUP_S + 1, "stopped", 1100)]
+    rows = [x.row for x in activity.sensor_rows(readings, {RIGHT: turns}, 0, 2000, [1000])]
+    assert [r.get("cause") for r in rows] == [None, {"type": "startup"}, None]
+
+
 async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freezer, monkeypatch) -> None:
     # Slices of a few seconds, so rows fall on their edges too.
     monkeypatch.setattr(activity, "SLICE_HOURS", 4 / 3600)
@@ -188,7 +195,9 @@ async def test_a_zone_page_with_sensor_rows_among_the_logbook(room, hass, freeze
     ]
     sensor_rows = [e for e in result["entries"] if e["kind"] == "sensor"]
     assert all(e["sensor"] == "s1" and e["name"] == "Left" for e in sensor_rows)
-    allowed = {"kind", "when", "sensor", "name", "reading", "state", "since"}
+    # The test's recorder started just before t0, so the early rows read as a restart's and the late ones don't.
+    assert [e.get("cause") for e in sensor_rows if e["when"] in (t_gone, t_quiet)] == [None, {"type": "startup"}]
+    allowed = {"kind", "when", "sensor", "name", "reading", "state", "since", "cause"}
     assert all(set(e) <= allowed for e in sensor_rows)
     text = json.dumps(result)
     for secret in (*LEFT.values(), RIGHT, VEG, "s2", *VALUES.values(), "40000", "19.5", "18.25"):
