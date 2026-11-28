@@ -13,7 +13,7 @@ export const PALETTES = {
 } as const;
 
 export const styles = css`
-  :host { display: block; min-height: 100vh; background: var(--bg); color: var(--fg); font: 15px/1.45 Roboto, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  :host { --ro-dim: .45; --ro-fg: var(--muted); --ro-surface: color-mix(in srgb, var(--card) 98.5%, var(--fg)); display: block; min-height: 100vh; background: var(--bg); color: var(--fg); font: 15px/1.45 Roboto, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
   * { box-sizing: border-box; }
   button, select, input { font: inherit; color: inherit; }
   button { cursor: pointer; }
@@ -320,6 +320,16 @@ export const styles = css`
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
   .sw.on i { background: var(--primary); }
   /* A tap anywhere on an automation's tile is a tap on its switch, so the tile shows it as the switch would. */
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. It has to read as not yours to
+     switch at a glance (#111), so it loses the accent colour as well as brightness: one look everywhere, an outline barely
+     off the card (--ro-surface, dashed), text in --ro-fg kept at 4.5:1 on it, and controls in greys at --ro-dim. On or
+     off still shows by the knob's side and the On./Off. line. It still takes the tap that says where it's changed. */
+  .ro .dev-name { color: var(--ro-fg); }
+  .dev.ro { background: var(--ro-surface); border: 1px dashed var(--off); padding: 9px; cursor: not-allowed; }
+  .ro > .ic svg { fill: var(--ro-fg); }
+  .sw[data-roctl], .sw.on[data-roctl], .sw[data-roctl]:hover { opacity: var(--ro-dim); border-color: var(--off); cursor: not-allowed; }
+  .sw[data-roctl] i, .sw.on[data-roctl] i { background: var(--off); }
+  .seg .star { margin-left: 1px; }
   .dev[data-auto]:has(.sw:not(:disabled)) { cursor: pointer; }
   .dev[data-auto]:hover .sw:not(:disabled) { border-color: var(--muted); }
   .sw:disabled, .dial.busy, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
