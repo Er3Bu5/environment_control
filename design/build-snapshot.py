@@ -1,7 +1,8 @@
 # Builds the published mock: the tested source with its fixture swapped for what Home Assistant reported.
 # Bands: Min, Target and Max are the user's HA helpers. HA has no Low or High, so day Low and High come from the
 # Athena stage assumed for each zone, held inside Min and Max, and night ones are midpoints. A zone with no target
-# helpers (Veg, Nursery) has no target.
+# helpers (Veg, Nursery, Breeding) has no target. Breeding's lights are switched by hand and its light sensor is off, so
+# it has no lux reading and no light limits.
 import datetime as dt, json, os, re, statistics, sys
 
 root = sys.argv[1]
@@ -63,18 +64,18 @@ def shaped(cells):
 
 HISTORY, HISTORY_LONG = {}, {}
 # HA purges what it doesn't keep, so the long arrays start where the first sensor does.
-kept = min(next(i for i, c in enumerate(b) if c) for b in LONG["buckets"].values())
+kept = min(next((i for i, c in enumerate(b) if c), len(b)) for b in LONG["buckets"].values())
 def history(sid, slug):
     HISTORY[sid] = shaped({m: buckets(f"sensor.{slug}_{ENTITY[m]}") for m in DP})
     HISTORY_LONG[sid] = shaped({m: LONG["buckets"][f"sensor.{slug}_{ENTITY[m]}"][kept:] for m in DP})
 
 toMin = lambda e: int(S[e]["state"][:2]) * 60 + int(S[e]["state"][3:5])
-limits = lambda z: {"dayMin": num(f"input_number.day_lights_{z}_min_threshold"), "nightMax": num(f"input_number.night_lights_{z}_max_threshold")}
+limits = lambda z: {k: num(e) if e in S else None for k, e in (("dayMin", f"input_number.day_lights_{z}_min_threshold"), ("nightMax", f"input_number.night_lights_{z}_max_threshold"))}
 def env(sid, name, short, slug, pos, level):
     history(sid, slug)
     return {"id": sid, "name": name, "short": short, "slug": slug, "kind": "env", "pos": pos, "level": level,
             "t": round(num(f"sensor.{slug}_air_temp"), 2), "h": round(num(f"sensor.{slug}_humidity"), 2),
-            "vpd": round(num(f"sensor.{slug}_vpd"), 3), "lux": round(num(f"sensor.{slug}_light"), 1), "link": "Ethernet",
+            "vpd": round(num(f"sensor.{slug}_vpd"), 3), "lux": round(num(f"sensor.{slug}_light"), 1) if f"sensor.{slug}_light" in S else None, "link": "Ethernet",
             "leafEntity": f"number.{slug}_leaf_temperature_offset", "leafLive": num(f"number.{slug}_leaf_temperature_offset")}
 
 zones = [
@@ -89,23 +90,26 @@ zones = [
     {"id": "nursery", "name": "Nursery", "dayAt": toMin("input_datetime.veg_day_time"), "nightAt": toMin("input_datetime.veg_night_time"), "bands": bands("nursery", "veg"), "linked": True, "lightLimits": limits("nursery"),
      "layout": {"w": 1.2, "d": 0.6, "units": 8, "rows": 2, "cols": 4},
      "sensors": [env("n-env", "Nursery environment", "Nursery env", "nursery_environment", [0.5, 1.5], "in")]},
+    {"id": "breeding", "name": "Breeding", "dayAt": toMin("input_datetime.breeding_day_time"), "nightAt": toMin("input_datetime.breeding_night_time"), "bands": bands("breeding", "bulk"), "linked": True, "lightLimits": limits("breeding"),
+     "layout": {"w": 1.2, "d": 1.2, "units": 4, "rows": 2, "cols": 2},
+     "sensors": [env("br-env", "Breeding environment", "Breeding env", "breeding_environment", [0.5, 0.5], "in")]},
 ]
-# The helpers each zone links to, only where HA has them: Veg and Nursery have no target helpers.
+# The helpers each zone links to, only where HA has them: Veg, Nursery and Breeding have no target helpers, Breeding no light ones.
 def links(zone, sched, emerson):
     have = lambda e: e if e in S else None
     bands = {p: {m: {k: e for k, e in (("min", have(f"input_number.{zone}_{p}_{m}_min_threshold")), ("target", have(f"input_number.{zone}_{p}_{m}_target")),
                                         ("max", have(f"input_number.{zone}_{p}_{m}_max_threshold"))) if e} for m in METRICS} for p in ("day", "night")}
     out = {"day": f"input_datetime.{sched}_day_time", "night": f"input_datetime.{sched}_night_time", "bands": bands,
-           "light": {"dayMin": f"input_number.day_lights_{zone}_min_threshold", "nightMax": f"input_number.night_lights_{zone}_max_threshold"}}
+           "light": {k: e for k, e in (("dayMin", f"input_number.day_lights_{zone}_min_threshold"), ("nightMax", f"input_number.night_lights_{zone}_max_threshold")) if e in S}}
     if emerson:
         out.update(morning="input_number.emerson_effect_morning_extension", daylight="input_number.emerson_effect_daylight_time", evening="input_number.emerson_effect_evening_extension")
     return out
-for z, sched in zip(zones, ("garden", "veg", "veg")):
+for z, sched in zip(zones, ("garden", "veg", "veg", "breeding")):
     z["helpers"] = links(z["id"], sched, z["id"] == "garden")
 for z in zones:
     e = [s for s in z["sensors"] if s["kind"] == "env"]
     z["now"] = {"temperature": statistics.fmean(s["t"] for s in e), "humidity": statistics.fmean(s["h"] for s in e),
-                "vpd": statistics.fmean(s["vpd"] for s in e), "light": statistics.fmean(s["lux"] for s in e)}
+                "vpd": statistics.fmean(s["vpd"] for s in e), "light": statistics.fmean(lux) if (lux := [s["lux"] for s in e if s["lux"] is not None]) else None}
 
 def is_day(z, minute):
     d, n = z["dayAt"], z["nightAt"]
@@ -139,6 +143,7 @@ devices = [
     plug("lp-veg", "Veg Lights", "switch.veg_lights", ["veg", "nursery"]),
     board("b-left", "Garden Environment Left", ["garden"]), board("b-right", "Garden Environment Right", ["garden"]),
     board("b-veg", "Veg Environment", ["veg"]), board("b-nursery", "Nursery Environment", ["nursery"]),
+    board("b-breeding", "Breeding Environment", ["breeding"]),
     {"id": "pulse", "name": "Pulse Pro", "type": "Sensor", "integration": "pulselabs", "family": "Pulse", "link": "wifi", "source": "detected", "path": "Cloud", "hub": "", "zones": ["veg"], "state": "Online"},
     {"id": "vpd", "name": "Garden environment average VPD", "type": "Calculated", "integration": "template", "family": "Template", "link": "derived", "source": "detected", "path": "Local", "hub": "", "zones": ["garden"], "state": "Online"},
 ]
@@ -223,7 +228,7 @@ def recent(zone):
 ACTIVITY = {z["id"]: recent(z["id"]) for z in zones}
 
 lights = {"garden": [[f"switch.garden_lights_{p}", f"Garden Lights {p.replace('_', '/').upper()}"] for p in ("f_l", "f_r", "b_l", "b_r")],
-          "veg": [["switch.veg_lights", "Veg Lights"]], "nursery": [["switch.veg_lights", "Veg Lights"]]}
+          "veg": [["switch.veg_lights", "Veg Lights"]], "nursery": [["switch.veg_lights", "Veg Lights"]], "breeding": []}
 onoff = [[e, S[e]["name"] or e, word(e)] for e in ("light.garden_light_controller_overhead", "light.garden_light_controller_under_canopy", "light.veg_light_controller", "switch.garden_lights_under_canopy", "switch.garden_lights_red") if e in S]
 
 js = lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":"))
@@ -273,6 +278,7 @@ open(f"{root}/snapshot-seed.js", "w", encoding="utf-8").write(f'"use strict";\n/
 import subprocess
 subprocess.run([sys.executable, f"{root}/build-mock.py", root, "snapshot-ui.html", "snapshot-seed.js", "environment-control-mock.html"], check=True)
 
+# Breeding is left out: these checks compare a light reading and light limits, which it has neither of.
 expect = {"zones": {
     "garden": {"temperature": num("sensor.garden_environment_average_temperature"), "humidity": num("sensor.garden_environment_average_humidity"), "vpd": num("sensor.garden_environment_average_vpd"),
                "light": zones[0]["now"]["light"]},
