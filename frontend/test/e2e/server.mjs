@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = normalize(join(fileURLToPath(import.meta.url), "..", "..", "..", ".."));
 const allowed = ["frontend/test/e2e/", "design/", "custom_components/environment_control/frontend/"];
 const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript" };
-const port = Number(process.env.PORT || 4173);
+const port = Number(process.env.PANEL_PORT || 4173);
 
 createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, "http://x").pathname).replace(/^\/+/, "");
@@ -23,4 +23,10 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end();
   }
-}).listen(port, "127.0.0.1", () => console.log(`serving on http://127.0.0.1:${port}`));
+})
+  .on("error", (err) => {
+    if (err.code !== "EADDRINUSE") throw err;
+    console.error(`port ${port} is already in use; pick another with PANEL_PORT`);
+    process.exit(1);
+  })
+  .listen(port, "127.0.0.1", () => console.log(`serving on http://127.0.0.1:${port}`));

@@ -3,16 +3,31 @@ import { defineConfig, devices } from "@playwright/test";
 /* CI installs Playwright's own Chromium. On a machine that already has one, CHROMIUM_PATH points at it instead. */
 const executablePath = process.env.CHROMIUM_PATH || undefined;
 
+/* PANEL_PORT lets several runs on one machine go side by side, each on its own port. */
+const portSetting = process.env.PANEL_PORT ?? "4173";
+if (!/^\d+$/.test(portSetting) || Number(portSetting) < 1024 || Number(portSetting) > 65535) {
+  throw new Error(`PANEL_PORT must be a whole number from 1024 to 65535, not "${portSetting}"`);
+}
+const port = Number(portSetting);
+const origin = `http://127.0.0.1:${port}`;
+
 export default defineConfig({
   testDir: "test/e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? [["list"], ["github"]] : "list",
-  use: { baseURL: "http://127.0.0.1:4173", trace: "off" },
+  use: { baseURL: origin, trace: "off" },
   projects: [
     { name: "phone", use: { ...devices["Pixel 7"], launchOptions: { executablePath } } },
     { name: "desktop", use: { ...devices["Desktop Chrome"], launchOptions: { executablePath } } },
   ],
-  webServer: { command: "node test/e2e/server.mjs", url: "http://127.0.0.1:4173/frontend/test/e2e/page.html", reuseExistingServer: !process.env.CI },
+  /* Never reuse a server already on the port: it may be another run's, serving another worktree's build. Playwright
+     stops with "already used" when the url answers, and server.mjs stops on any other listener holding the port. */
+  webServer: {
+    command: "node test/e2e/server.mjs",
+    url: `${origin}/frontend/test/e2e/page.html`,
+    env: { PANEL_PORT: String(port) },
+    reuseExistingServer: false,
+  },
 });
