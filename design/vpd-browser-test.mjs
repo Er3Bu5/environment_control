@@ -668,6 +668,13 @@ await phone(390, 844);
   const perRow = async (w) => { await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await sleep(80); return ev(`(()=>{const n={};for(const c of document.querySelectorAll("#main .zone-card")){const t=Math.round(c.getBoundingClientRect().top);n[t]=(n[t]||0)+1}return Math.max(...Object.values(n))})()`); };
   const rows1700 = await perRow(1700), rows2300 = await perRow(2300);
   check("Grid: at 1700px no row of the Overview holds three cards, and at 2300px one does", rows1700 < 3 && rows2300 === 3, { rows1700, rows2300 });
+  /* #119: four across on an ultrawide screen, on the same 640px a card, so it takes at least four zones on their own. */
+  await ev(`["g2","g3","g4"].forEach((id,i)=>zones.push({...JSON.parse(JSON.stringify(zoneById("garden"))),id,name:"Garden "+(i+2),parent:null}));render()`); await sleep(60);
+  const wide = {};
+  for (const w of [1700, 2300, 2560, 3440, 5120]) wide[w] = await perRow(w);
+  const cardW = await ev(`Math.round(document.querySelector("#main .zone-card").getBoundingClientRect().width)`);
+  await ev(`zones.splice(0,zones.length,...zones.filter(z=>!["g2","g3","g4"].includes(z.id)));render()`); await perRow(2300);
+  check("Grid: with four zones on their own, a row holds two at 1700px, three at 2300px and 2560px, and four at 3440px and 5120px, a card never wider than about 700px there", same(wide, { 1700: 2, 2300: 3, 2560: 3, 3440: 4, 5120: 4 }) && cardW >= 640 && cardW <= 700, { wide, cardW });
   const tl3 = await titleLine(), tl3z = (id) => tl3.find((c) => c.zone === id) || {};
   check("Title line: a linked card's first track starts level with an unlinked card's in the same row", tl3z("garden").top === tl3z("veg").top && tl3z("garden").track === tl3z("veg").track && tl3z("nursery").track === tl3z("veg").track, tl3);
   const vegName = await ev(`zones.find(z=>z.id==="veg").name`);
