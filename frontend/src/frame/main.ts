@@ -146,6 +146,7 @@ import {
   linkTarget,
   linksInUse,
   liveBands,
+  chartAxes,
   moveOnChart,
   nudge,
   openTargets,
@@ -158,6 +159,7 @@ import {
   targetSends,
   typeBox,
   vGeom,
+  type Axes,
   withLiveLimits,
   zoneLeaf,
 } from "./targets";
@@ -451,6 +453,9 @@ export class EcApp extends LitElement {
   /* The helper search box open now, what's typed in it, and the highlighted match. */
   declare private pickQ: { id: string; q: string; active: number } | null;
   private vdrag = false;
+  /* The chart's axes hold still from press to release: rescaling under the pointer would run the line away from it. */
+  private vheld: Axes | null = null;
+  private vgrab = { dx: 0, dy: 0 };
   private leafBefore = 0;
   private schedBack: { screen: Screen; zoneId: string | null } = { screen: "setup", zoneId: null };
   private schedQ = { lights: "", red: "" };
@@ -1813,8 +1818,11 @@ export class EcApp extends LitElement {
   private vAt(e: PointerEvent, start: boolean): void {
     const el = (e.currentTarget as HTMLElement).querySelector("svg"), d = this.sched;
     if (!el || !d) return;
-    const r = el.getBoundingClientRect(), scale = vGeom().W / r.width, leaf = zoneLeaf(this.raw(d.zoneId), this.states);
-    this.setTgt((t) => moveOnChart(t, leaf, (e.clientX - r.left) * scale, (e.clientY - r.top) * scale, start));
+    const leaf = zoneLeaf(this.raw(d.zoneId), this.states), tg = this.tgt;
+    if (!tg) return;
+    if (start) this.vheld = chartAxes(tg.bands[tg.period], leaf);
+    const axes = this.vheld ?? chartAxes(tg.bands[tg.period], leaf), r = el.getBoundingClientRect(), scale = vGeom(axes).W / r.width;
+    this.setTgt((t) => moveOnChart(t, leaf, (e.clientX - r.left) * scale, (e.clientY - r.top) * scale, start, axes, this.vgrab));
   }
 
   private vDown = (e: PointerEvent): void => {
@@ -1834,17 +1842,19 @@ export class EcApp extends LitElement {
 
   private vUp = (): void => {
     this.vdrag = false;
+    this.vheld = null;
+    this.requestUpdate();
   };
 
   private vKey = (e: KeyboardEvent): void => {
     const d = this.sched, keys: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowDown: [0, -1], ArrowUp: [0, 1] };
     if (!d || d.sending || !this.tgt || !(e.key in keys)) return;
     e.preventDefault();
-    const [dx, dy] = keys[e.key], leaf = zoneLeaf(this.raw(d.zoneId), this.states), g = vGeom();
+    const [dx, dy] = keys[e.key], leaf = zoneLeaf(this.raw(d.zoneId), this.states);
     this.setTgt((t) => {
-      const b = t.bands[t.period], T = b.temperature[2], RH = b.humidity[2];
+      const b = t.bands[t.period], T = b.temperature[2], RH = b.humidity[2], axes = chartAxes(b, leaf), g = vGeom(axes);
       if (t.edit !== "target") nudge(t, dx || dy);
-      else if (T !== null && RH !== null) moveOnChart(t, leaf, g.X(T + dx * 0.5), g.Y(RH + dy), false);
+      else if (T !== null && RH !== null) moveOnChart(t, leaf, g.X(T + dx * 0.5), g.Y(RH + dy), false, axes, { dx: 0, dy: 0 });
     });
   };
 
@@ -4419,7 +4429,7 @@ export class EcApp extends LitElement {
             @pointercancel=${this.vUp}
             @keydown=${this.vKey}
           >
-            ${vpdChart(t, b, leaf, window.innerWidth >= 760)}
+            ${vpdChart(t, b, leaf, window.innerWidth >= 760, this.vheld ?? chartAxes(b, leaf))}
           </div>
           <div class="key">
             <span><i style="background:var(--v1)"></i>0.8 - 1.0, veg</span><span><i style="background:var(--v2)"></i>1.0 - 1.2, flower stretch and bulk</span

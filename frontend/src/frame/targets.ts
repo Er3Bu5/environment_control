@@ -20,12 +20,11 @@ export const VNAME: Record<BandKey, string> = { temperature: "Temperature", humi
 export const VUNIT: Record<BandKey, string> = { temperature: "°", humidity: "%", vpd: " kPa" };
 /* Drag steps. Typed values are kept as typed, since exact figures such as Athena's 22.2 are why you'd type. */
 export const VSNAP: Record<BandKey, number> = { temperature: 0.5, humidity: 1, vpd: 0.05 };
-/* Wider than the chart: a Max of 36° is a sensible limit even though the axis stops at 34. */
+/* Everything a limit may be. The chart's axes fit the limits inside this. */
 export const VRANGE: Record<BandKey, [number, number]> = { temperature: [0, 50], humidity: [0, 100], vpd: [0, 5] };
 export const VDECIMALS = { temperature: 1, humidity: 1, vpd: 2, light: 0 } as const;
 export const SLOT_NAME = ["Min", "Low", "Target", "High", "Max"] as const;
 export const HANDLES = [0, 1, 3, 4] as const;
-export const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
 /* Athena's Optimal Environment table sets Low and High. Athena gives no critical limits, so Min and Max start a margin
    outside. */
 export const STAGES: Record<string, { label: string } & Record<BandKey, [number, number]>> = {
@@ -255,16 +254,104 @@ export const rhAt = (t: number, vp: number, leaf: number) => {
 };
 /* Athena's ranges: under 0.8 outside, 0.8 to 1.0 veg, 1.0 to 1.2 flower stretch and bulk, 1.2 to 1.4 finish, over outside. */
 export const vzone = (v: number) => (v < 0.8 ? 0 : v < 1.0 ? 1 : v < 1.2 ? 2 : v < 1.4 ? 3 : 4);
-export function vGeom() {
-  const cw = 34, ch = 30, L = 38, T = 46, cols = T_MAX - T_MIN + 1, rows = (RH_TOP - RH_LOW) / 5 + 1;
+export interface Axis {
+  lo: number;
+  hi: number;
+  step: number;
+  n: number;
+}
+export interface Axes {
+  t: Axis;
+  rh: Axis;
+}
+/* Cells along and up: about as many as the chart's first fixed grid (19 by 13) whatever the limits, so tight limits
+   don't get a few huge cells and wide ones don't get a crowd. A wider span takes a bigger step instead. */
+const VAXIS = { temperature: { steps: [1, 2, 5], cells: [19, 26] }, humidity: { steps: [5, 10], cells: [13, 17] } };
+export function fitAxis(k: "temperature" | "humidity", vals: number[]): Axis {
+  const [floor, ceil] = VRANGE[k], { steps, cells: [fewest, most] } = VAXIS[k];
+  const lo0 = vals.length ? Math.min(...vals) : (floor + ceil) / 2, hi0 = vals.length ? Math.max(...vals) : lo0;
+  let out: Axis = { lo: floor, hi: ceil, step: steps[0], n: 0 };
+  for (const step of steps) {
+    const room = Math.max(2 * step, 0.1 * (hi0 - lo0)), need = (fewest - 1) * step;
+    let lo = Math.floor((lo0 - room) / step) * step, hi = Math.ceil((hi0 + room) / step) * step;
+    if (hi - lo < need) {
+      lo = Math.min(lo, Math.round(((lo0 + hi0) / 2 - need / 2) / step) * step);
+      hi = Math.max(hi, lo + need);
+    }
+    if (lo < floor) {
+      hi += floor - lo;
+      lo = floor;
+    }
+    if (hi > ceil) {
+      lo = Math.max(floor, lo - (hi - ceil));
+      hi = ceil;
+    }
+    out = { lo, hi, step, n: Math.round((hi - lo) / step) + 1 };
+    if (out.n <= most) break;
+  }
+  return out;
+}
+/* Every limit gets its own place with room either side, so none sits on the edge on top of another. */
+export function chartAxes(b: PeriodBands, leaf: number): Axes {
+  const vals = (k: BandKey) => b[k].filter((x): x is number => x !== null && Number.isFinite(x)).map((x) => clamp(x, ...VRANGE[k]));
+  const t = fitAxis("temperature", vals("temperature"));
+  /* A VPD line has to cross the chart, so where it meets the middle temperature counts as a humidity to fit. */
+  const mid = (t.lo + t.hi) / 2, curves = vals("vpd").map((vp) => clamp(rhAt(mid, vp, leaf), ...VRANGE.humidity));
+  return { t, rh: fitAxis("humidity", [...vals("humidity"), ...curves]) };
+}
+export function vGeom({ t, rh }: Axes) {
+  const cw = 34, ch = 30, L = 38, T = 46, cols = t.n, rows = rh.n;
   return {
-    cw, ch, L, T, cols, rows, W: L + cols * cw + 8, H: T + rows * ch + 22, right: L + cols * cw, bottom: T + rows * ch,
-    X: (t: number) => L + (t - T_MIN) * cw + cw / 2,
-    Y: (rh: number) => T + ((RH_TOP - rh) / 5) * ch + ch / 2,
-    invX: (px: number) => (px - L - cw / 2) / cw + T_MIN,
-    invY: (py: number) => RH_TOP - ((py - T - ch / 2) / ch) * 5,
+    t, rh, cw, ch, L, T, cols, rows, W: L + cols * cw + 8, H: T + rows * ch + 22, right: L + cols * cw, bottom: T + rows * ch,
+    X: (x: number) => L + ((x - t.lo) / t.step) * cw + cw / 2,
+    Y: (r: number) => T + ((rh.hi - r) / rh.step) * ch + ch / 2,
+    invX: (px: number) => ((px - L - cw / 2) / cw) * t.step + t.lo,
+    invY: (py: number) => rh.hi - ((py - T - ch / 2) / ch) * rh.step,
   };
 }
+export type Geom = ReturnType<typeof vGeom>;
+export const FLAG_W = 52, FLAG_H = 18;
+/* Where each limit's label sits. Two on one row that would overlap are pushed apart, so equal or close limits can both
+   be read, and pressed. */
+export function chartFlags(edit: Edit, b: PeriodBands, g: Geom, leaf: number): Partial<Record<number, { x: number; y: number }>> {
+  const out: Record<number, { x: number; y: number }> = {};
+  if (edit === "target") return out;
+  const k = edit, at = (i: number) => b[k][i] ?? 0, tAt = (x: number) => clamp(x, g.t.lo, g.t.hi), rhIn = (x: number) => clamp(x, g.rh.lo, g.rh.hi);
+  for (const i of HANDLES) {
+    const outer = i === 0 || i === 4;
+    if (k === "temperature") out[i] = { x: g.X(tAt(at(i))), y: outer ? 2 : 24 };
+    if (k === "humidity") out[i] = { x: g.right - (outer ? 30 : 86), y: g.Y(rhIn(at(i))) - 9 };
+    if (k === "vpd") {
+      const vp = at(i), half = g.t.step / 2, off = (c: number) => rhAt(c, vp, leaf) > g.rh.hi || rhAt(c, vp, leaf) < g.rh.lo;
+      let c = g.t.lo + Math.round(((g.t.hi - g.t.lo) * ({ 0: 0.94, 1: 0.78, 3: 0.61, 4: 0.44 } as Record<number, number>)[i]) / half) * half;
+      while (c > g.t.lo && off(c)) c -= half;
+      out[i] = { x: g.X(c), y: g.Y(rhIn(rhAt(c, vp, leaf))) - 9 };
+    }
+  }
+  if (k === "vpd") return out;
+  const gap = k === "temperature" ? FLAG_W + 2 : FLAG_H + 2, axis = k === "temperature" ? "x" : "y";
+  for (const [a, c] of [[0, 4], [1, 3]]) {
+    /* Max is right of Min along the bottom but above it up the side. */
+    const [first, second] = k === "temperature" ? [out[a], out[c]] : [out[c], out[a]];
+    if (second[axis] - first[axis] < gap) {
+      const mid = (first[axis] + second[axis]) / 2;
+      first[axis] = mid - gap / 2;
+      second[axis] = mid + gap / 2;
+    }
+  }
+  if (k === "temperature")
+    for (const [a, c] of [[0, 4], [1, 3]]) {
+      out[a].x = clamp(out[a].x, g.L + FLAG_W / 2, g.right - FLAG_W / 2 - gap);
+      out[c].x = clamp(out[c].x, out[a].x + gap, g.right - FLAG_W / 2);
+    }
+  return out;
+}
+const flagAt = (flags: Partial<Record<number, { x: number; y: number }>>, px: number, py: number) =>
+  HANDLES.find((i) => {
+    const f = flags[i];
+    return f && Math.abs(px - f.x) <= FLAG_W / 2 && py >= f.y && py <= f.y + FLAG_H;
+  });
+const T_MIN = 16, T_MAX = 34, RH_TOP = 90, RH_LOW = 30;
 /* How many conditions sit inside every ideal range at once. None is a conflict: nothing can ever read ideal. */
 export function idealCount(b: PeriodBands, leaf: number): number {
   let n = 0;
@@ -289,10 +376,24 @@ export function nudge(d: TargetsDraft, dir: number): void {
   placeHandle(d.bands[d.period], d.edit, d.sel, (d.bands[d.period][d.edit][d.sel] ?? 0) + dir * VSNAP[d.edit]);
 }
 /* A press picks the nearest line of the kind being edited, then moves it; the target is one point, moved whole and
-   kept inside the ideal zone. px and py are in the chart's own units. */
-export function moveOnChart(d: TargetsDraft, leaf: number, px: number, py: number, start: boolean): void {
-  const g = vGeom(), b = d.bands[d.period];
-  const t = clamp(g.invX(px), T_MIN, T_MAX), rh = clamp(g.invY(py), RH_LOW, RH_TOP);
+   kept inside the ideal zone. px and py are in the chart's own units, on the axes held since the press: a line stops at
+   their edge. grab carries the offset from a pressed label to its line through the drag. */
+export function moveOnChart(d: TargetsDraft, leaf: number, px: number, py: number, start: boolean, axes: Axes, grab: { dx: number; dy: number }): void {
+  const g = vGeom(axes), b = d.bands[d.period];
+  if (start) {
+    Object.assign(grab, { dx: 0, dy: 0 });
+    const spots = chartFlags(d.edit, b, g, leaf), hit = flagAt(spots, px, py);
+    /* A press on a label takes that limit where it is, without moving it: a label can sit beside its line when two coincide. */
+    if (hit !== undefined && d.edit !== "target") {
+      const k = d.edit, val = b[k][hit] ?? 0, spot = spots[hit] as { x: number; y: number };
+      d.sel = hit;
+      Object.assign(grab, k === "temperature" ? { dx: g.X(clamp(val, g.t.lo, g.t.hi)) - px, dy: 0 } : k === "humidity" ? { dx: 0, dy: g.Y(clamp(val, g.rh.lo, g.rh.hi)) - py } : { dx: spot.x - px, dy: spot.y + FLAG_H / 2 - py });
+      return;
+    }
+  }
+  px += grab.dx;
+  py += grab.dy;
+  const t = clamp(g.invX(px), g.t.lo, g.t.hi), rh = clamp(g.invY(py), g.rh.lo, g.rh.hi);
   if (d.edit === "target") {
     if (b.temperature[2] === null) return;
     b.temperature[2] = round2(clamp(snapTo(t, VSNAP.temperature), b.temperature[1] ?? 0, b.temperature[3] ?? 0));
@@ -301,8 +402,14 @@ export function moveOnChart(d: TargetsDraft, leaf: number, px: number, py: numbe
     return;
   }
   const k = d.edit, at = (i: number) => b[k][i] ?? 0;
-  const dist = (i: number) => (k === "temperature" ? Math.abs(g.X(at(i)) - px) : k === "humidity" ? Math.abs(g.Y(at(i)) - py) : Math.abs(g.Y(rhAt(t, at(i), leaf)) - py));
-  if (start || d.sel === null) d.sel = HANDLES.reduce<number>((a, c) => (dist(c) < dist(a) ? c : a), HANDLES[0]);
+  const dist = (i: number) =>
+    k === "temperature" ? Math.abs(g.X(clamp(at(i), g.t.lo, g.t.hi)) - px) : k === "humidity" ? Math.abs(g.Y(clamp(at(i), g.rh.lo, g.rh.hi)) - py) : Math.abs(g.Y(rhAt(t, at(i), leaf)) - py);
+  if (start || d.sel === null) {
+    const near = Math.min(...HANDLES.map(dist)), tied: number[] = HANDLES.filter((c) => dist(c) - near < 0.5);
+    /* Coinciding limits, as a High equal to its Max: the one already selected, or else the outer one, the only one of
+       the two free to move outward. */
+    d.sel = d.sel !== null && tied.includes(d.sel) ? d.sel : (tied.find((c) => c === 0 || c === 4) ?? tied[0]);
+  }
   const raw = k === "temperature" ? t : k === "humidity" ? rh : calcVpd(t, rh, leaf);
   placeHandle(b, k, d.sel, snapTo(raw, VSNAP[k]));
 }
