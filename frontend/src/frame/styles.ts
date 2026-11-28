@@ -131,6 +131,16 @@ export const styles = css`
   :host(.dlgkeys) .dialog { max-height: calc(var(--keys-at, 50dvh) - 16px); padding: 12px; gap: 8px; scroll-padding-bottom: 65px; }
   .dialog h2 { outline: none; }
   .dialog.wide { width: min(760px, 100%); }
+  /* The Automations dialog's rows scroll under its heading and chips, since a zone can hold fifty or so automations.
+     One height whatever the chip, so moving between chips doesn't make the dialog jump. */
+  .autosdlg { height: min(calc(100dvh - 32px - env(safe-area-inset-bottom, 0px)), 760px); }
+  .autoshead { display: flex; flex-direction: column; gap: 8px; }
+  .autoshead > p { margin: 0; }
+  .dialog.autosdlg > .review-scroll { flex: 1 1 auto; gap: 12px; }
+  .autosdlg .review-scroll > p { margin: 0; }
+  .autosdlg .card { padding: 12px; }
+  .autosdlg .card h3 { margin: 0; font-size: 15px; }
+  .dlgfoot .btn[hidden] { display: none; }
   .review-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
   /* What a dialog lists keeps its own height and the list scrolls, rather than each part being squeezed and cut short. */
   .review-scroll > * { flex: none; }
@@ -272,6 +282,9 @@ export const styles = css`
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
   .sw.on { justify-content: flex-end; border-color: var(--primary); }
   .sw.on i { background: var(--primary); }
+  /* A tap anywhere on an automation's tile is a tap on its switch, so the tile shows it as the switch would. */
+  .dev[data-auto]:has(.sw:not(:disabled)) { cursor: pointer; }
+  .dev[data-auto]:hover .sw:not(:disabled) { border-color: var(--muted); }
   .sw:disabled, .dial.busy, .ctl-modes .chip:has(input:disabled) { opacity: .45; cursor: not-allowed; }
   /* The dial: an arc open at the bottom, with the plus and minus buttons tucked into the gap. Only the arc itself
      takes a finger, so a thumb scrolling the page over the middle of it changes nothing. */

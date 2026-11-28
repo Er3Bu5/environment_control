@@ -273,12 +273,12 @@ import {
   setLinkGroup,
   toggleLink,
 } from "./automations";
-import { alertsCard, automationsPage, failsafeNoticeView, linkPage } from "./automations-view";
+import { alertsCard, automationsDialog, failsafeNoticeView, linkPage } from "./automations-view";
 import { LIGHT_LINE, RANGES, type Point, chartGutters, combinedLine, endingNow, entitiesFor, extremes, keptNote, lineColor, niceTicks, periodRuns, sensorLine, tickWords, timeTicks, whenWords, yRange } from "./chart";
 
 declare const __VERSION__: string;
 
-type Screen = "overview" | "zone" | "devices" | "setup" | "autos";
+type Screen = "overview" | "zone" | "devices" | "setup";
 type Appearance = Theme["appearance"];
 type Result = Extract<HostMessage, { type: "result" }>;
 interface Change {
@@ -473,7 +473,7 @@ export class EcApp extends LitElement {
   /* What each used control is waiting for or last heard, by device id, and a slider's value while it's being dragged. */
   declare private ctl: Record<string, Ctl>;
   declare private ctlDrag: Record<string, number>;
-  /* A zone's Automations page while it's open, Link automations while it's open, and what each automation's switch is
+  /* A zone's Automations dialog while it's open, Link automations while it's open, and what each automation's switch is
      waiting for or last heard, by automation. */
   declare private autos: AutosPage | null;
   declare private linkw: LinkDraft | null;
@@ -487,6 +487,7 @@ export class EcApp extends LitElement {
   private waiting = new Map<number, (r: Result) => void>();
   private draftHeld = false;
   private modalOpener: Element | null = null;
+  private autosOpener: Element | null = null;
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
@@ -611,7 +612,7 @@ export class EcApp extends LitElement {
       resolve?.(m);
     }
     /* A zone removed elsewhere takes its tab, its guide and its open details with it. */
-    if ((this.screen === "zone" || this.screen === "autos") && !this.zoneById(this.zoneId)) this.go("overview");
+    if (this.screen === "zone" && !this.zoneById(this.zoneId)) this.go("overview");
     if (this.guide && !this.zoneById(this.guide)) this.guide = null;
     if (this.wiz?.id && !this.zoneById(this.wiz.id)) this.wiz = null;
     if (this.mapw && !this.zoneById(this.mapw.zoneId)) this.mapw = null;
@@ -790,20 +791,33 @@ export class EcApp extends LitElement {
       }
     }
     const held = this.draftCount > 0;
-    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)) || this.screen === "autos");
+    this.classList.toggle("drafting", (this.screen === "setup" && !!(this.leafw || this.sched || this.wiz || this.mapw || this.lay || this.guide || this.linkw)));
     this.classList.toggle("typing", this.typing);
     if (held !== this.draftHeld) {
       this.draftHeld = held;
       parent.postMessage({ v: 1, type: "draft", open: held }, "*");
     }
     if (this.canGoBack !== this.backSaid) this.sayBack();
+    const focus = (sel: string) => (this.shadowRoot?.querySelector(sel) as HTMLElement | null)?.focus({ preventScroll: true });
+    /* A control that asked can be gone, hidden or busy by the time its question closes, a switch sending what was
+       asked: focus then goes to the Automations dialog's title, so it stays in the dialog. */
+    const usable = (el: Element | null): el is HTMLElement => el instanceof HTMLElement && el.isConnected && !el.hidden && !(el as HTMLButtonElement).disabled;
+    if (changed.has("autos") && !!this.autos !== !!changed.get("autos")) {
+      if (this.autos) {
+        this.autosOpener = this.shadowRoot?.activeElement ?? null;
+        focus("#autos-title");
+      } else if (usable(this.autosOpener)) this.autosOpener.focus({ preventScroll: true });
+      /* A notice that opened it can be gone by the time it closes, its failsafe switched back on in it. */
+      else focus(`[data-zmenu="${MORE}"]`);
+    }
     if (changed.has("modal")) {
       const before = changed.get("modal");
       if (this.modal && !before) {
         this.modalOpener = this.shadowRoot?.activeElement ?? null;
-        (this.shadowRoot?.querySelector("#dlg-title") as HTMLElement | null)?.focus({ preventScroll: true });
-      } else if (!this.modal && before && this.modalOpener instanceof HTMLElement && this.modalOpener.isConnected) {
-        this.modalOpener.focus({ preventScroll: true });
+        focus("#dlg-title");
+      } else if (!this.modal && before) {
+        if (usable(this.modalOpener)) this.modalOpener.focus({ preventScroll: true });
+        else if (this.autos) focus("#autos-title");
       }
       if (!this.modal) this.classList.remove("dlgkeys");
     }
@@ -830,7 +844,7 @@ export class EcApp extends LitElement {
   private backSaid: boolean | null = null;
 
   private go(screen: Screen, zoneId: string | null = null): void {
-    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && ((a.screen !== "zone" && a.screen !== "autos") || a.zoneId === b.zoneId);
+    const same = (a: { screen: Screen; zoneId: string | null }, b: { screen: Screen; zoneId: string | null }) => a.screen === b.screen && (a.screen !== "zone" || a.zoneId === b.zoneId);
     const here = { screen: this.screen, zoneId: this.zoneId }, to = { screen, zoneId }, before = this.trail[this.trail.length - 1];
     if (!same(here, to)) {
       if (before && same(before, to)) this.trail.pop();
@@ -842,9 +856,8 @@ export class EcApp extends LitElement {
     this.zoneId = zoneId;
     this.menu = null;
     this.chartAt = null;
-    /* The Automations page's chip and its alert repeat draft go with it. Come back to by Back, it opens on Alerts. */
-    if (screen !== "autos") this.autos = null;
-    else if (this.autos?.zoneId !== zoneId && zoneId) this.autos = { zoneId, chip: "alert" };
+    /* The Automations dialog sits over the zone's page, so leaving the page closes it. */
+    this.autos = null;
     window.scrollTo(0, 0);
   }
 
@@ -857,6 +870,7 @@ export class EcApp extends LitElement {
      its guard for unsaved changes included, and otherwise the page before this one comes back. */
   private back(): void {
     if (this.modal) return void this.closeModal();
+    if (this.autos) return void this.autosBack();
     if (this.menu) return void (this.menu = null);
     if (this.wiz) return void this.cancelWizard();
     if (this.mapw) return void this.mapBack();
@@ -864,7 +878,6 @@ export class EcApp extends LitElement {
     if (this.leafw) return void this.leafExit();
     if (this.sched) return void this.schedExit();
     if (this.linkw) return void this.linkExit();
-    if (this.autos) return void this.autosBack();
     const before = this.trail[this.trail.length - 1];
     if (this.guide) return void this.leaveTo(before?.screen ?? "setup", before?.zoneId ?? null);
     if (before) this.go(before.screen, before.zoneId);
@@ -889,6 +902,9 @@ export class EcApp extends LitElement {
     if (this.modal) {
       e.preventDefault();
       this.closeModal();
+    } else if (this.autos) {
+      e.preventDefault();
+      this.autosBack();
     } else if (this.menu) {
       const id = this.menu;
       this.menu = null;
@@ -1813,20 +1829,27 @@ export class EcApp extends LitElement {
     return this.stored?.room;
   }
 
-  /* Automations: a zone's Home Assistant automations, switched from its own page. HA keeps running them. */
+  /* Automations: a zone's Home Assistant automations, switched in a dialog over its page. HA keeps running them. */
   private openAutos(zoneId: string, chip: AutoChip): void {
-    this.go("autos", zoneId);
+    this.menu = null;
     this.autos = { zoneId, chip };
   }
 
+  /* Closing drops an alert repeat draft, so it asks first. */
   private autosBack = (): void => {
-    const a = this.autos;
-    if (a) this.guarded(() => this.go("zone", a.zoneId));
+    if (this.autos) this.guarded(() => (this.autos = null));
   };
 
+  /* Each chip's rows start at the top; a question over the dialog leaves its scroll as it was. */
   private pickChip(chip: AutoChip): void {
     if (!this.autos || this.autos.chip === chip) return;
-    this.guarded(() => (this.autos = this.autos && { ...this.autos, chip, repeat: undefined }));
+    this.guarded(() => {
+      this.autos = this.autos && { ...this.autos, chip, repeat: undefined };
+      void this.updateComplete.then(() => {
+        const rows = this.shadowRoot?.querySelector("#autos-scroll");
+        if (rows) rows.scrollTop = 0;
+      });
+    });
   }
 
   private setAutoCtl(entity: string, c: AutoCtl | undefined): void {
@@ -1897,14 +1920,14 @@ export class EcApp extends LitElement {
     return { type: "result", req: 0, ok: false, error: repeatStuck(this.states[entity]) };
   }
 
-  /* Link automations: from a zone's Automations page, coming back to the chip it was opened on, or from Setup. */
-  private openLinkAutos(zoneId: string, from: AutoChip | null): void {
+  /* Link automations: from a zone's menu on Setup, coming back to Setup. */
+  private openLinkAutos(zoneId: string): void {
     this.guarded(() => {
       const z = this.zoneById(zoneId);
       if (!z) return;
       this.linkBack = { screen: this.screen, zoneId: this.zoneId };
       this.menu = null;
-      this.linkw = openLinks(z, from);
+      this.linkw = openLinks(z, null);
       void this.askCatalog();
       this.go("setup");
     });
@@ -1923,8 +1946,7 @@ export class EcApp extends LitElement {
 
   private linkDone(d: LinkDraft): void {
     this.linkw = null;
-    if (d.from && this.zoneById(d.zoneId)) this.openAutos(d.zoneId, d.from);
-    else this.go(this.linkBack.screen, this.linkBack.zoneId);
+    this.go(this.linkBack.screen, this.linkBack.zoneId);
   }
 
   private linkExit = (): void => {
@@ -2803,10 +2825,10 @@ export class EcApp extends LitElement {
     </div>`;
   }
 
-  private autosScreen() {
+  private autosDialog() {
     const a = this.autos, z = a && this.zoneById(a.zoneId);
     if (!a || !z) return nothing;
-    return automationsPage({
+    return automationsDialog({
       zone: z,
       chip: a.chip,
       chips: chipViews(z, this.states),
@@ -2816,7 +2838,10 @@ export class EcApp extends LitElement {
       icon,
       onChip: (c) => this.pickChip(c),
       onTap: (l) => this.tapAuto(z, l),
-      onLink: () => this.openLinkAutos(z.id, a.chip),
+      repeatChanged: this.repeatChangeList().length > 0,
+      covered: !!this.modal,
+      onReview: this.repeatReview,
+      onClose: this.autosBack,
       onRepeat: (v) => (this.autos = this.autos && { ...this.autos, repeat: v }),
       onLinkOnSetup: () => {
         this.leaveTo("setup");
@@ -3760,7 +3785,7 @@ export class EcApp extends LitElement {
      hasn't been confirmed, until something differs from what's saved, and then the count, Discard and Review and apply
      beside Back. */
   private draftBar() {
-    if (this.screen !== "setup" && this.screen !== "autos") return nothing;
+    if (this.screen !== "setup") return nothing;
     let bar: { zoneId: string; changes: { label: string }[]; issue: string | undefined; sending: boolean; back: () => void; discard: () => void; review: () => void; confirm: (() => void) | null } | null = null;
     if (this.leafw) {
       const d = this.leafw, { sensors, homesBy } = this.leafCtx(d.zoneId), z = this.zoneById(d.zoneId);
@@ -3773,10 +3798,6 @@ export class EcApp extends LitElement {
     } else if (this.linkw) {
       const d = this.linkw;
       bar = { zoneId: d.zoneId, changes: this.linkChangeList(d), issue: undefined, sending: false, back: this.linkExit, discard: this.linkDiscard, review: this.linkReview, confirm: null };
-    } else if (this.autos) {
-      const a = this.autos, changes = this.repeatChangeList(), card = repeatCard(this.room, this.states, a.repeat);
-      const issue = changes.length && card.kind === "ready" && card.problem ? card.problem : undefined;
-      bar = { zoneId: a.zoneId, changes, issue, sending: false, back: this.autosBack, discard: this.repeatDiscard, review: this.repeatReview, confirm: null };
     }
     if (!bar) return nothing;
     const n = bar.changes.length;
@@ -4261,7 +4282,7 @@ export class EcApp extends LitElement {
             <button role="menuitem" @click=${() => this.openLayoutWizard(z.id, [3])}>Device placement</button>
             <button role="menuitem" @click=${() => this.openCalibration(z.id)}>Sensor Calibration</button>
             <button role="menuitem" @click=${() => this.openSchedule(z.id)}>Targets, day and night</button>
-            <button role="menuitem" @click=${() => this.openLinkAutos(z.id, null)}>Link automations</button>
+            <button role="menuitem" @click=${() => this.openLinkAutos(z.id)}>Automations</button>
             <hr />
             <button role="menuitem" class="remove" @click=${() => this.askRemove(z.id)}>Remove zone</button>
           </div>
@@ -4425,10 +4446,9 @@ export class EcApp extends LitElement {
       zone: () => this.zone(),
       devices: () => this.devicesScreen(),
       setup: () => this.setup(),
-      autos: () => this.autosScreen(),
     };
-    return html`<main ?inert=${!!this.modal}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
-      ${this.draftBar()}${this.modalView()}${this.toastText ? html`<div class="toast ${this.toastLeaving ? "leaving" : ""}" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
+    return html`<main ?inert=${!!this.modal || !!this.autos}><div class="wrap">${this.navMenu()}${screens[this.screen]()}</div></main>
+      ${this.draftBar()}${this.autosDialog()}${this.modalView()}${this.toastText ? html`<div class="toast ${this.toastLeaving ? "leaving" : ""}" role="status" aria-live="polite">${this.toastText}</div>` : nothing}`;
   }
 }
 
