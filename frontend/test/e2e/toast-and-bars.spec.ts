@@ -1,6 +1,6 @@
 /* The real built host and frame, mounted on a page that plays Home Assistant with the mock's fake HA. */
 import { expect, test, type Frame, type Page } from "@playwright/test";
-import { PAGE, app, goTo, panelFrame } from "./helpers";
+import { PAGE, app, goTo, panelFrame, zoneMenu } from "./helpers";
 
 /* A page whose foot bar shows as soon as it opens: Sensor Calibration's Back and Confirm. */
 async function openCalibration(page: Page, query = ""): Promise<Frame> {
@@ -11,6 +11,20 @@ async function openCalibration(page: Page, query = ""): Promise<Frame> {
   await app(frame).getByRole("menuitem", { name: "Sensor Calibration" }).click();
   await expect(app(frame).getByRole("heading", { level: 1, name: "Sensor Calibration: Garden", exact: true })).toBeVisible();
   await expect(app(frame).locator(".draftbar")).toBeVisible();
+  return frame;
+}
+
+/* A page whose bar carries the going-on button from the start: Add zone's Review and apply. */
+async function openAddZone(page: Page, query = "", mode?: "Light" | "Dark"): Promise<Frame> {
+  await page.goto(PAGE + query);
+  const frame = await panelFrame(page);
+  await goTo(frame, "Setup");
+  if (mode) {
+    await app(frame).getByRole("group", { name: "Appearance" }).getByRole("button", { name: mode, exact: true }).click();
+    await expect.poll(() => frame.evaluate(() => document.documentElement.dataset.theme)).toBe(mode.toLowerCase());
+  }
+  await app(frame).getByRole("button", { name: "Add zone" }).click();
+  await expect(app(frame).locator(".draftbar .draft-review")).toBeVisible();
   return frame;
 }
 
@@ -91,5 +105,39 @@ test.describe("toast and bars", () => {
     await showToast(frame, "Saved.");
     await expect(app(frame).locator(".toast")).toBeVisible();
     expect(await animation(frame)).toBe("none");
+  });
+
+  for (const mode of ["Light", "Dark"] as const) {
+    test(`in ${mode.toLowerCase()} the foot bar is a grey of its own, not a white or black slab`, async ({ page }) => {
+      const frame = await openAddZone(page, "", mode);
+      const { bg, page: ground } = await colours(frame, ".draftbar");
+      expect(rgb(bg)).not.toEqual([255, 255, 255]);
+      expect(rgb(bg)).not.toEqual([0, 0, 0]);
+      /* Close to the page it stands on, not a band of the other theme. */
+      expect(contrast(bg, ground)).toBeLessThan(2);
+    });
+  }
+
+  for (const primary of ["#FFEB3B", "#1A237E", "#03A9F4", "#F44336"]) {
+    test(`the going-on button is the primary colour ${primary} with readable text on it`, async ({ page }) => {
+      const frame = await openAddZone(page, `?primary=${encodeURIComponent(primary)}`);
+      const c = await colours(frame, ".draftbar .draft-review");
+      expect(c.bg).toBe(c.primary);
+      expect(contrast(c.bg, c.fg)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  test("a dialog's foot sits under a divider, on the dialog's own background", async ({ page }) => {
+    await page.goto(PAGE);
+    const frame = await panelFrame(page);
+    await goTo(frame, "Garden");
+    await zoneMenu(frame, "View activity");
+    const foot = app(frame).getByRole("dialog").locator(".dlgfoot");
+    await expect(foot).toBeVisible();
+    const look = await foot.evaluate((el) => {
+      const s = getComputedStyle(el), close = getComputedStyle(el.querySelector("button")!);
+      return { width: s.borderTopWidth, style: s.borderTopStyle, pad: s.paddingTop, close: close.backgroundColor };
+    });
+    expect(look).toMatchObject({ width: "1px", style: "solid", pad: "12px", close: "rgba(0, 0, 0, 0)" });
   });
 });

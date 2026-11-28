@@ -179,6 +179,7 @@ import {
   sensorsOf,
   zoneReading,
 } from "./readings";
+import { onColor } from "./colour";
 import { PALETTES, styles } from "./styles";
 import {
   KEPT,
@@ -690,6 +691,12 @@ export class EcApp extends LitElement {
   private applyTheme(t: Theme): void {
     this.theme = t;
     const colors: Record<string, string> = { ...PALETTES[t.mode], ...t.colors };
+    // HA's primary can be any CSS colour, so the browser resolves it before the text colour on it is chosen.
+    const probe = document.createElement("i");
+    probe.style.color = colors.primary;
+    document.body.append(probe);
+    colors["on-primary"] = onColor(getComputedStyle(probe).color || colors.primary);
+    probe.remove();
     for (const [k, v] of Object.entries(colors)) this.style.setProperty(`--${k}`, v);
     document.documentElement.dataset.theme = t.mode;
     document.documentElement.style.colorScheme = t.mode;
