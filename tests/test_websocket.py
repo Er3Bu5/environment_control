@@ -1,5 +1,6 @@
 """The panel's backend commands: admin only, revision-checked, validated, and stored."""
 
+import asyncio
 import copy
 
 import pytest
@@ -7,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.environment_control.const import DOMAIN
+from custom_components.environment_control.store import ConfigStore, RevisionConflict
 
 
 @pytest.fixture
@@ -351,3 +353,21 @@ async def test_a_setup_stored_with_a_sensor_in_two_unlinked_zones_loads_and_cann
     )
     await hass.async_block_till_done()
     assert hass_storage[DOMAIN]["data"] == stored
+
+
+async def test_two_saves_at_one_revision_keep_one_and_refuse_the_other(hass, hass_storage) -> None:
+    store = ConfigStore(hass)
+    await store.async_load()
+    write = store._store.async_save
+
+    async def write_off_the_loop(data):
+        await asyncio.sleep(0)  # HA writes the file in an executor, so the loop runs other work meanwhile
+        await write(data)
+
+    store._store.async_save = write_off_the_loop
+    first = {"zones": [{"id": "a", "name": "A"}], "devices": []}
+    second = {"zones": [{"id": "b", "name": "B"}], "devices": []}
+    results = await asyncio.gather(store.async_save(0, first), store.async_save(0, second), return_exceptions=True)
+    assert results[0] == {**first, "revision": 1}
+    assert isinstance(results[1], RevisionConflict)
+    assert store.data == {**first, "revision": 1}
