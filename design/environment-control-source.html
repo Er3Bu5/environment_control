@@ -2083,8 +2083,9 @@ async function saveLinks(lw, done) {
   lw.sending = false;
   if (!r.ok) { done([`Not saved. ${r.error}`]); return; }
   toast(`${r.value}'s automations saved.`);
+  lw.was = { ...lw.pick };
+  if (ui.linkw === lw) render();
   done([]);
-  closeLinkAutos();
 }
 
 /* Setup's Alerts card: the one helper every alert's repeat rate comes from, linked for the whole room. */
@@ -2929,8 +2930,9 @@ async function saveLeaf(l, done) {
     const stuck = sends.filter((s) => l.rows[s.id].status === "stuck"), moved = lFollowChart(z);
     if (ui.leafw !== l) { done(); return; }
     if (stuck.length) { render(); done(stuck.map((s) => `${s.name}: not confirmed. The board still reports ${leafPhrase(s.leafLive)}.`)); return; }
-    /* Stays here unless the chart sent you, so the result can be read where it was set. */
-    if (ui.vpdw) leaveLeaf(true); else { markSetup(l.id, "calibrate", "done"); render(); }
+    /* Stays here, the chart's Change link included, so the result can be read where it was set (#156). Back takes it to the
+       chart with the chart's draft as it was. */
+    markSetup(l.id, "calibrate", "done"); render();
     done();
     const said = sends.length ? "Leaf temperature offsets saved on the boards." : "Leaf temperature offsets saved.";
     toast(moved ? `${said} Target moved to stay in the ideal zone.` : said);
@@ -3171,7 +3173,7 @@ async function applyTd(td, done) {
   td.busy = false;
   /* The page may have been left while Home Assistant answered. */
   if (ui.td !== td) { done(); return; }
-  leaveTd(id, true);
+  stayTd(td);
   toast(sendsHelpers ? "Saved, on your helpers too." : "Saved.");
   done();
 }
@@ -3183,7 +3185,16 @@ function openTd(id, focus) {
   ui.wiz = null; ui.mapw = null; ui.screen = "setup";
   loadHelpers();
 }
-/* Applying lands on the zone, where the new limits and times show. Back goes to wherever the page was opened from. */
+/* Applying stays here, so what was saved can be read where it was set (#156). Back goes to wherever the page was opened from. */
+function stayTd(td) {
+  const z = zoneById(td.m.id);
+  td.m = openSources(z);
+  ui.sched.vals = schedValues(z); ui.sched.status = "";
+  Object.assign(ui.vpdw, { bands: vDraftBands(z), stage: null, sel: null });
+  markSetup(z.id, "targets", "done");
+  render();
+}
+/* Confirming without a change still lands on the zone, where the limits and times it confirmed show. */
 function leaveTd(id, applied) {
   const { screen, zone } = ui.td.back;
   ui.td = null; ui.sched = null; ui.vpdw = null;
@@ -3608,14 +3619,23 @@ function mapDraft(m) {
   for (const c of Object.keys(SENSOR_CLASS)) add(`${SENSOR_CLASS[c]} sensors combine by`, METHODS[methodOf(z)], METHODS[m.combine[c]]);
   return { zone: z.name, items, skipped: [], bar: false, busy: false, blocked: "", note: "This only changes Environment Control. Nothing in Home Assistant changes.", apply: (done) => { finishMap(m, "Mapping saved.").then(done); } };
 }
+/* Applying stays on the step it was applied from, with nothing left to apply, so Finish or Back leaves (#156). Sent here
+   from Device placement, it carries on there once there's something to place. */
 async function finishMap(m, said) {
+  const applied = mapDraft(m).items.length > 0;
   const r = await saveConfig(() => saveMap(m));
   if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
+  const z = zoneById(m.id), onward = m.thenPlace && z && z.sensors.length;
+  if (said) toast(said);
+  if (applied && !onward) {
+    markSetup(m.id, "devices", "done");
+    if (ui.mapw === m) { openMap(m.id); Object.assign(ui.mapw, { step: m.step, entry: m.entry, thenPlace: m.thenPlace, applied: true }); }
+    render();
+    return [];
+  }
   if (ui.mapw === m) ui.mapw = null;
-  toast(said);
   if (guideReturn(m.id, "devices", true)) { render(); window.scrollTo(0, 0); return []; }
-  const z = zoneById(m.id);
-  if (m.thenPlace && z && z.sensors.length) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
+  if (onward) { openWizard(m.id); ui.wiz.step = 3; ui.wiz.pick = stranded(ui.wiz)[0].id; }
   render(); window.scrollTo(0, 0);
   return [];
 }
@@ -3654,7 +3674,10 @@ function moveWords(w, z) {
   const others = linkedZones(p).filter((o) => o !== z).length;
   return `${w.name.trim() || "This zone"} moves next to ${p.name}${others ? ` and the zones linked to it` : ""} on Overview, in the menu and on Setup.`;
 }
+/* Applying stays on the step it was applied from, with nothing left to apply, so the last button reads Finish again and
+   Finish or Back leaves (#156). A new zone has no pages to stay on, so it opens its setup guide. */
 async function saveWizard(w, said) {
+  const applied = !!w.id && wizDraft(w).items.length > 0;
   const r = await saveConfig(() => {
     const z = w.id ? zoneById(w.id) : createZone(w), L = wizLayout(w);
     z.name = w.name.trim(); z.layout = L; z.sensors = clone(w.sensors);
@@ -3673,11 +3696,18 @@ async function saveWizard(w, said) {
   });
   if (!r.ok) { if (!ui.review) toast(`Not saved. ${r.error}`); return [`Not saved. ${r.error}`]; }
   const z = zoneById(r.value);
-  ui.wiz = null; ui.zone = z.id; ui.picked = null;
+  ui.zone = z.id; ui.picked = null;
+  if (applied) {
+    markSetup(z.id, WIZ_KEY[w.flow[0]], "done");
+    if (ui.wiz === w) { openWizard(z.id, w.flow); Object.assign(ui.wiz, { step: w.step, pick: w.pick, applied: true }); }
+    toast(said); render();
+    return [];
+  }
+  ui.wiz = null;
   if (!w.id) { ui.guide = { id: z.id }; ui.screen = "setup"; toast(`${z.name} created.`); render(); window.scrollTo(0, 0); return []; }
-  if (guideReturn(z.id, WIZ_KEY[w.flow[0]], true)) { toast(said); render(); window.scrollTo(0, 0); return []; }
+  if (guideReturn(z.id, WIZ_KEY[w.flow[0]], true)) { if (said) toast(said); render(); window.scrollTo(0, 0); return []; }
   if (w.flow[0] === 3 && !z.sensors.length && !placeable(z).length && !virtualOf(z).length) { openMap(z.id); ui.mapw.thenPlace = true; render(); window.scrollTo(0, 0); return []; }
-  ui.screen = "zone"; toast(said); render();
+  ui.screen = "zone"; if (said) toast(said); render();
   return [];
 }
 const autoDrafts = () => (ui.linkw ? linkDraft(ui.linkw) : ui.autos ? repeatDraft(ui.autos) : null);
@@ -3730,7 +3760,18 @@ function applyReview() {
   if (r.busy || !r.d.items.length) return;
   r.busy = true;
   renderModal();
-  r.d.apply((errors = []) => { ui.review = errors.length ? { d: topDraft(), busy: false, errors } : null; renderModal(); });
+  r.d.apply((errors = []) => { ui.review = errors.length ? { d: topDraft(), busy: false, errors } : null; if (!errors.length && !autosOpen()) modalOpener = stayFocus(modalOpener); renderModal(); });
+}
+/* A page that stays after applying redraws its bar, so the Review and apply button that opened the review is gone. Focus
+   goes to the wizard's going-on button in its place, or else the page's heading. */
+function stayFocus(opener) {
+  if (opener && opener.isConnected && opener.offsetParent) return opener;
+  const next = document.querySelector("#main .wizbar .draft-review:not([disabled])");
+  if (next) return next;
+  const h = document.querySelector("#main h1");
+  if (!h) return opener;
+  if (!h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1");
+  return h;
 }
 /* Leaving drops a draft, so it asks first. Pass the drafts this exit would lose when it isn't all of them. */
 function guarded(action, drafts = openDrafts(), title = "Discard unsaved changes?", text = "") {
@@ -4069,7 +4110,7 @@ document.addEventListener("click", (e) => {
       const leaveMap = () => { ui.mapw = null; render(); window.scrollTo(0, 0); };
       if (el.dataset.mstep === "back") { if (m.step === (m.entry || 1)) guarded(leaveMap); else { m.step--; m.q = ""; render(); window.scrollTo(0, 0); } return; }
       if (m.step < 3) { m.step++; m.q = ""; render(); window.scrollTo(0, 0); return; }
-      if (mapDraft(m).items.length) openReview(); else finishMap(m, "Nothing changed.");
+      if (mapDraft(m).items.length) openReview(); else finishMap(m, m.applied ? "" : "Nothing changed.");
     }
     return;
   }
@@ -4120,7 +4161,7 @@ document.addEventListener("click", (e) => {
     const flow = wizFlow(w), at = flow.indexOf(w.step);
     if (el.dataset.wiz === "back") { if (at === 0) guarded(() => { ui.wiz = null; render(); }); else { w.step = flow[at - 1]; render(); } return; }
     if (at < flow.length - 1) { w.step = flow[at + 1]; if (w.step === 3) { const first = stranded(w)[0] || w.sensors[0] || devsOff(w)[0] || w.devs[0]; w.pick = first ? first.id : null; } render(); return; }
-    if (wizDraft(w).items.length) openReview(); else saveWizard(w, "Nothing changed.");
+    if (wizDraft(w).items.length) openReview(); else saveWizard(w, w.applied ? "" : "Nothing changed.");
   }
 });
 document.addEventListener("keydown", (e) => {
