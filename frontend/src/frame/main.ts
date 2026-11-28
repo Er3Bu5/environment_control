@@ -261,6 +261,7 @@ import {
   failsafesOff,
   groupViews,
   linkChanges,
+  linkIssue,
   linkList,
   linkNote,
   offQuestion,
@@ -274,6 +275,7 @@ import {
   repeatStuck,
   repeatValue,
   setLinkGroup,
+  setLinkName,
   toggleLink,
 } from "./automations";
 import { alertsCard, automationsDialog, failsafeNoticeView, linkPage } from "./automations-view";
@@ -2065,14 +2067,14 @@ export class EcApp extends LitElement {
     const d = this.linkw, z = d && this.zoneById(d.zoneId);
     if (!d || !z) return;
     const changes = this.linkChangeList(d);
-    if (!changes.length) return;
+    if (!changes.length || linkIssue(d, this.catalog?.automations ?? [], this.states)) return;
     this.modal = {
       kind: "review",
       changes,
       note: linkNote(d),
       busy: false,
       error: "",
-      apply: () => this.save((c) => applyLinks(c, d.zoneId, d.pick)),
+      apply: () => this.save((c) => applyLinks(c, d.zoneId, d.pick, d.names)),
       after: () => {
         this.toast(SAID.linksSaved(z.name));
         this.linkDone(d);
@@ -2986,6 +2988,8 @@ export class EcApp extends LitElement {
       onQuery: (q) => this.setLink((x) => (x.q = q)),
       onTick: (r) => this.tickLink(r),
       onGroup: (entity, group) => this.setLink((x) => setLinkGroup(x, entity, group)),
+      onName: (entity, typed) => this.setLink((x) => setLinkName(x, entity, typed)),
+      resetIcon: icon("reset"),
     });
   }
 
@@ -3924,7 +3928,7 @@ export class EcApp extends LitElement {
       bar = { zoneId: d.zoneId, changes: this.schedChangeList(d), issue: this.pageIssues(d)[0]?.text, sending: d.sending, back: this.schedExit, discard: this.schedDiscard, review: this.schedReview, confirm: open ? this.schedConfirm : null };
     } else if (this.linkw) {
       const d = this.linkw;
-      bar = { zoneId: d.zoneId, changes: this.linkChangeList(d), issue: undefined, sending: false, back: this.linkExit, discard: this.linkDiscard, review: this.linkReview, confirm: null };
+      bar = { zoneId: d.zoneId, changes: this.linkChangeList(d), issue: linkIssue(d, this.catalog?.automations ?? [], this.states) || undefined, sending: false, back: this.linkExit, discard: this.linkDiscard, review: this.linkReview, confirm: null };
     }
     if (!bar) return nothing;
     const n = bar.changes.length;

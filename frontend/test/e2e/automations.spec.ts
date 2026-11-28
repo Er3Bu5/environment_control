@@ -639,7 +639,7 @@ test.describe("Link automations", () => {
     await app(frame).getByRole("button", { name: "Set up Veg", exact: true }).click();
     await app(frame).getByRole("menuitem", { name: "Automations", exact: true }).click();
     await expect(heading(frame, "Link automations: Veg")).toBeVisible();
-    await pick(frame, "Tent Lights Off").locator(".pickrow").click();
+    await pick(frame, "Tent lights off").locator(".pickrow").click();
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
     await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(toast(frame)).toHaveText("Veg's automations saved.");
@@ -686,7 +686,7 @@ test.describe("Setup's Alerts card", () => {
     await goTo(frame, "Setup");
     await app(frame).getByRole("button", { name: "Set up Veg", exact: true }).click();
     await app(frame).getByRole("menuitem", { name: "Automations", exact: true }).click();
-    await pick(frame, "Tent Lights Off").locator(".pickrow").click();
+    await pick(frame, "Tent lights off").locator(".pickrow").click();
     await draftBar(frame).getByRole("button", { name: "Review and apply" }).click();
     await review(frame).getByRole("button", { name: "Apply 1 change" }).click();
     await expect(toast(frame)).toHaveText("Veg's automations saved.");

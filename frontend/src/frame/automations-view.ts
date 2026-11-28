@@ -7,7 +7,7 @@ import { html, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
 import { type AutoChip, type AutoIcon, type AutoRow, CHIP, type ChipView, GROUP, type GroupView, type LinkRow, type RepeatCard, emptyText } from "./automations";
-import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, type Zone } from "./model";
+import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, MAX_LINK_NAME, type Zone } from "./model";
 
 /* Drawing helpers main.ts owns, handed in rather than copied: an icon by name, and its radio chips. */
 export type DrawIcon = (name: AutoIcon) => unknown;
@@ -166,9 +166,21 @@ export interface LinkPageView {
   onQuery: (q: string) => void;
   onTick: (row: LinkRow) => void;
   onGroup: (entity: string, group: AutomationGroup) => void;
+  onName: (entity: string, typed: string) => void;
+  resetIcon: unknown;
 }
 
-/* A picked row opens to its group, chosen with radio chips, as a picked device opens to what it is. */
+/* The button goes once the name does, so focus moves to the box rather than being dropped on the page. */
+function putBack(e: Event, entity: string, o: LinkPageView): void {
+  const box = (e.currentTarget as HTMLElement).previousElementSibling as HTMLInputElement | null;
+  o.onName(entity, "");
+  box?.focus();
+}
+
+export const linkNameTarget = (entity: string) => `lname-${entity.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+
+/* A picked row opens to its group, chosen with radio chips, as a picked device opens to what it is, and to a name of
+   the panel's own, as long as a device's may be. Left empty it goes by Home Assistant's, shown as the hint. */
 function linkRowView(r: LinkRow, o: LinkPageView) {
   const picked = r.group !== null;
   return html`<div class="pickwrap" id=${linkTarget(r.entity)}>
@@ -180,6 +192,26 @@ function linkRowView(r: LinkRow, o: LinkPageView) {
     ${picked
       ? html`<div class="ents">
           ${o.chips("Group", `lgroup-${r.entity}`, AUTOMATION_GROUPS.map((g) => ({ value: g, label: GROUP[g].title })), r.group ?? "", (v) => o.onGroup(r.entity, v as AutomationGroup))}
+          <div class="field">
+            <label for=${linkNameTarget(r.entity)}>Name, optional</label>
+            <span class="resettable"
+              ><input
+                id=${linkNameTarget(r.entity)}
+                type="text"
+                maxlength=${MAX_LINK_NAME}
+                autocomplete="off"
+                enterkeyhint="done"
+                placeholder=${r.haName}
+                aria-invalid=${r.issue ? "true" : "false"}
+                .value=${live(r.typed)}
+                @input=${(e: Event) => o.onName(r.entity, (e.target as HTMLInputElement).value)}
+                @keydown=${(e: KeyboardEvent) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              />${r.typed
+                ? html`<button class="reset" aria-label="Put back Home Assistant's name, ${r.haName}" title="Put back ${r.haName}" @click=${(e: Event) => putBack(e, r.entity, o)}>${o.resetIcon}</button>`
+                : nothing}</span
+            >
+            ${r.issue ? html`<span class="small crit-text">${r.issue}</span>` : nothing}
+          </div>
         </div>`
       : nothing}
   </div>`;
