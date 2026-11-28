@@ -6,7 +6,24 @@
 import { html, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { type AutoChip, type AutoIcon, type AutoRow, CHIP, type ChipView, GROUP, type GroupView, type LinkListView, type LinkRow, type RepeatCard, emptyText, hiddenWords } from "./automations";
+import {
+  type AutoChip,
+  type AutoIcon,
+  type AutoRow,
+  CHIP,
+  type ChipView,
+  GROUP,
+  type GroupView,
+  type LinkListView,
+  type LinkRow,
+  type RepeatCard,
+  editInText,
+  emptyText,
+  fromParentText,
+  hiddenWords,
+  showFromText,
+  starText,
+} from "./automations";
 import { AUTOMATION_GROUPS, type AutomationGroup, type AutomationLink, MAX_LINK_NAME, type Zone } from "./model";
 
 /* Drawing helpers main.ts owns, handed in rather than copied: an icon by name, and its radio chips. */
@@ -49,6 +66,31 @@ export function autoRowView(r: AutoRow, mark: AutoIcon, icon: DrawIcon, onTap: (
       <button class="sw ${r.on ? "on" : ""}" role="switch" aria-checked=${r.on ? "true" : "false"} aria-label=${r.name} ?disabled=${r.locked} @click=${() => onTap(r.link)}><i></i></button>
     </div>
     ${r.line ? html`<div class="ctl-status ${r.line.tone}" role="status">${r.line.text}</div>` : nothing}
+  </div>`;
+}
+
+/* A parent's automation in its linked zone, in the read-only look: no accent colour, a dashed tile, the switch dimmed
+   but still where a keyboard reaches it, announced as read only. A tap anywhere on it says where it's changed. */
+export function roRowView(r: AutoRow, mark: AutoIcon, icon: DrawIcon, parent: string, onNotHere: (link: AutomationLink) => void) {
+  return html`<div class="dev ro" data-roauto=${r.link.entity} @pointerdown=${tileDown} @click=${tileTap}>
+    <span class="ic" style="--c:var(--off)">${icon(mark)}</span>
+    <div class="dev-text">
+      <div class="dev-name">${r.name}</div>
+      <div class="dev-sub">${r.sub}</div>
+    </div>
+    <div class="dev-ctl">
+      <button
+        class="sw ${r.on ? "on" : ""}"
+        data-roctl="auto"
+        role="switch"
+        aria-checked=${r.on ? "true" : "false"}
+        aria-disabled="true"
+        aria-readonly="true"
+        aria-label=${r.name}
+        title=${editInText(parent)}
+        @click=${() => onNotHere(r.link)}
+      ><i></i></button>
+    </div>
   </div>`;
 }
 
@@ -96,6 +138,11 @@ export interface AutomationsDialogView {
   chips: ChipView[];
   groups: GroupView[];
   row: (link: AutomationLink) => AutoRow;
+  /* A linked zone's parent and its automations for the chip, or null for a zone that isn't linked. starred is set
+     while the parent has any on any chip, which brings the asterisk line and the show or hide control. */
+  from: { name: string; links: AutomationLink[]; starred: boolean; hidden: boolean; row: (link: AutomationLink) => AutoRow } | null;
+  onFromToggle: () => void;
+  onNotHere: (link: AutomationLink) => void;
   /* The Alert repeat card, drawn on the Alerts chip only. */
   repeat: RepeatCard;
   /* Whether the repeat draft holds a change, which shows Review change in the foot. */
@@ -117,7 +164,7 @@ export interface AutomationsDialogView {
    Changing what's linked is done on Setup, so nothing here leads there. A linked zone's card from its parent goes
    after the groups, inside the scroll. */
 export function automationsDialog(o: AutomationsDialogView) {
-  const mark = CHIP[o.chip].icon, canRepeat = o.chip === "alert" && o.repeat.kind === "ready";
+  const mark = CHIP[o.chip].icon, canRepeat = o.chip === "alert" && o.repeat.kind === "ready", from = o.from, starred = !!from?.starred;
   return html`<div class="modal" @click=${(e: Event) => e.target === e.currentTarget && o.onClose()}>
     <div class="dialog wide autosdlg" data-autosdlg=${o.zone.id} role="dialog" aria-modal="true" aria-labelledby="autos-title" aria-describedby="autos-sub" ?inert=${o.covered}>
       <div class="autoshead">
@@ -126,13 +173,17 @@ export function automationsDialog(o: AutomationsDialogView) {
         <div class="seg" role="group" aria-label="Automations">
           ${o.chips.map(
             (c) => html`<button aria-pressed=${c.chip === o.chip ? "true" : "false"} aria-label=${c.label} @click=${() => c.chip !== o.chip && o.onChip(c.chip)}>
-              ${c.title} <small class="muted">${c.count}</small>
+              ${c.title} <small class="muted">${c.count}${c.star ? html`<span class="star" aria-hidden="true">*</span>` : nothing}</small>
             </button>`,
           )}
         </div>
+        ${starred ? html`<p class="small muted" id="autos-star"><span aria-hidden="true">*</span> ${starText(from!.name)}</p>` : nothing}
       </div>
       <div class="review-scroll" id="autos-scroll">
         <p class="muted small" id="autos-about">${CHIP[o.chip].about}</p>
+        ${starred
+          ? html`<div class="linkopts" id="autos-fromopt"><button class="chip" aria-pressed=${from!.hidden ? "false" : "true"} @click=${o.onFromToggle}>${showFromText(from!.name)}</button></div>`
+          : nothing}
         ${o.chip === "alert" ? repeatCardView(o.repeat, o.onRepeat, o.onLinkOnSetup) : nothing}
         ${o.groups.length
           ? o.groups.map(
@@ -144,6 +195,12 @@ export function automationsDialog(o: AutomationsDialogView) {
           : html`<div class="notice calm" id="autos-empty">
               <strong>${emptyText(o.chip, o.zone.name)}.</strong><span>Link automations in Setup.</span>
             </div>`}
+        ${from && !from.hidden && from.links.length
+          ? html`<section class="card" data-fromzone>
+              <div><h3>From Zone: ${from.name}</h3><p class="small muted">${fromParentText(from.name)}</p></div>
+              <div class="devs">${repeat(from.links, (a) => a.id, (a) => roRowView(from.row(a), mark, o.icon, from.name, o.onNotHere))}</div>
+            </section>`
+          : nothing}
       </div>
       <div class="dlgfoot">
         <button class="btn" @click=${o.onClose}>Close</button>
@@ -299,6 +356,11 @@ export function alertsCard(o: AlertsCardView) {
       : html`<div class="row"><button class="btn primary" aria-expanded=${o.picking ? "true" : "false"} ?disabled=${o.busy} @click=${o.onPick}>Link a helper</button></div>`}
     ${o.picking ? o.picker : nothing}
   </section>`;
+}
+
+/* On a linked zone's page while a failsafe in its parent is off: plain words, since nothing here takes you there. */
+export function parentFailsafeNoticeView(text: string | null) {
+  return text ? html`<div class="notice" id="parent-failsafe" role="status"><span>${text}</span></div>` : nothing;
 }
 
 /* Near the top of the zone page while any failsafe is off. It opens the Automations dialog on Failsafes. */
