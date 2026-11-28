@@ -42,6 +42,8 @@ export const styles = css`
   .pagehead { display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: end; gap: 8px; }
   .pagehead > div { grid-column: 2; grid-row: 1; min-width: 0; }
   .pagehead > .zmenu, .pagehead > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
+  /* Overview's Sort sits where a zone's More button does, as tall as it. */
+  .pagehead > .headbtn { height: 34px; }
   /* A page's own action is a word or two wide, not a button's width, so on a phone it takes the heading's last line, at
      the right and level with the page menu, and the title keeps the whole width above. */
   @media (max-width: 640px) {
@@ -57,6 +59,13 @@ export const styles = css`
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
+  /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
+     card that was moved, as it is scrolled into view. */
+  .zone-card.sorting:hover { border-color: var(--line); }
+  .zone-card.sorting { scroll-margin-block: 12px 150px; }
+  .arrows { display: flex; gap: 8px; margin-left: auto; }
+  .btn.move { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 38px; padding: 0; }
+  .btn.move svg { width: 22px; height: 22px; fill: var(--fg); }
   .pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; border: 1px solid currentColor; }
   .pill.plain { color: var(--muted); border-color: var(--line); }
   .pill.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 22%, var(--card)); border-color: var(--warn); }
