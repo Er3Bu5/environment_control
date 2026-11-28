@@ -615,6 +615,22 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .act-time { font-size: 13px; color: var(--muted); }
 .act-text { font-size: 14px; }
 .act-by { font-size: 12px; color: var(--muted); }
+/* The heading and chips stay put and only the days scroll, however long a day runs. */
+.dialog > .seg { flex: none; }
+.act-day h3 { margin: 4px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); outline: none; }
+.act-day + .act-day, .act-day + .act-earlier, .act-day + #act-end, .act-day + #act-error, .act-day + .act-loading { margin-top: 6px; }
+.act-earlier { align-self: flex-start; }
+.act-loading { outline: none; }
+/* Unavailable isn't on or off, so it reads as its own thing: a dashed rule and the faded colour sensors use when they go quiet. */
+.act-row.unavail .act-text, .act-part.unavail span { color: var(--dead); }
+/* The rule takes its room from the time column, so the icon and text stay in line with the rows around it. */
+.act-row.unavail { border-left: 3px dashed var(--dead); padding-left: 8px; grid-template-columns: 35px 36px minmax(0, 1fr); }
+.act-open { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; min-height: 24px; }
+.act-chev svg { width: 16px; height: 16px; fill: var(--muted); transition: transform .15s; }
+.act-open[aria-expanded="true"] .act-chev svg { transform: rotate(180deg); }
+.act-parts { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.act-part { display: flex; align-items: center; gap: 8px; }
+.act-part .ic { width: 24px; height: 24px; }
 .tbl-wrap th:last-child, .tbl-wrap td:last-child { padding-right: 0; }
 tr:last-child td { border-bottom: 0; }
 .tv { border: 1px dashed var(--off); border-radius: 6px; background: none; padding: 1px 6px; font-size: 13px; }
@@ -701,30 +717,11 @@ let devices = [];
 let room = {};
 const haStates = {};
 const LINK = { ethernet: "Ethernet", wifi: "WiFi", zigbee: "Zigbee", derived: "Calculated", unknown: "Not known yet" };
-const ACTIVITY = {
-  garden: [
-    ["14:12", "device", "Air conditioner turned on", "You, Home Assistant app"],
-    ["13:40", "device", "Dehumidifier changed to Normal mode", "You, Home Assistant app"],
-    ["13:05", "sensor", "Environment under stopped reporting, back at 13:07", "Sensor"],
-    ["11:22", "climate", "Humidity back in ideal zone at 66.8%", "Reading"],
-    ["10:58", "climate", "Humidity above ideal zone at 67.4%", "Reading"],
-    ["08:00", "device", "Heater turned off", "Automation"],
-    ["07:00", "lights", "Lights on", "Schedule"],
-  ],
-  veg: [
-    ["13:31", "climate", "Humidity critical high at 70.3%", "Reading"],
-    ["13:02", "climate", "VPD critical low at 0.68 kPa", "Reading"],
-    ["10:00", "lights", "Lights off", "Schedule"],
-    ["08:00", "device", "Heater turned off", "Automation"],
-    ["06:40", "device", "Oscillating fans turned back on", "Failsafe"],
-  ],
-  nursery: [
-    ["10:00", "lights", "Lights off", "Schedule"],
-    ["08:00", "device", "Heater turned off", "Automation"],
-    ["06:40", "device", "Oscillating fans turned back on", "Failsafe"],
-  ],
-};
-const ACT_KIND = { device: ["plug", "var(--primary)", "Devices"], lights: ["sun", "var(--sun)", "Lights"], climate: ["gauge", "var(--vpd)", "Climate"], sensor: ["thermo", "var(--dead)", "Sensors"] };
+/* What the Activity dialog has read, one page per day, newest first. Each day is asked for only when it's wanted: a real
+   Home Assistant takes seconds to read one from its logbook. */
+const ACTIVITY = {};
+/* Lights and devices are told apart by the panel's own device type, not by the entity's domain: a light plug is a switch. */
+const ACT_KIND = { device: ["plug", "var(--primary)", "Devices"], lights: ["sun", "var(--sun)", "Lights"], automation: ["clock", "var(--muted)", "Automations"], climate: ["gauge", "var(--vpd)", "Climate"], sensor: ["thermo", "var(--dead)", "Sensors"] };
 const ui = { screen: "overview", zone: "garden", metric: "vpd", range: 24, level: "all", picked: null, linkFilter: "all", activity: "all", wiz: null };
 
 const $ = (s) => document.querySelector(s);
@@ -1500,11 +1497,123 @@ function targetsTable(zone) {
   return `${table("day", "Day")}${table("night", "Night")}${dark}
   <p class="small muted">Low to High is the ideal zone. Min and Max are critical. ${z.linked ? "Values on your helpers are read from them, so your alerts read the same numbers. Low and High, and anything without a helper, are stored here." : "All stored here. Link them to helpers in Map devices."}</p>`;
 }
-function activityList(z) {
-  /* A zone added since the panel loaded has no activity of its own in the mock. */
-  const rows = (ACTIVITY[z.id] || []).filter((a) => ui.activity === "all" || a[1] === ui.activity);
-  if (!rows.length) return `<p class="small muted">Nothing of this kind today.</p>`;
-  return `<div class="act">${rows.map(([t, k, text, by]) => `<div class="act-row"><span class="act-time">${t}</span>${ic(ACT_KIND[k][0], ACT_KIND[k][1])}<div><div class="act-text">${esc(text)}</div><div class="act-by">${esc(by)}</div></div></div>`).join("")}</div>`;
+/* The day the frame asks for is the local date. The mock's clock is fixed, so today is always the same day. */
+const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const atClock = (t) => new Date(t).toLocaleTimeString("en-NZ", { hour: "2-digit", minute: "2-digit", hour12: false });
+const prevDay = (day) => { const [y, m, d] = day.split("-").map(Number); return dayKey(new Date(y, m - 1, d - 1)); };
+function longDate(t) { const d = new Date(t); return `${d.toLocaleDateString("en-NZ", { weekday: "long" })} ${d.getDate()} ${d.toLocaleDateString("en-NZ", { month: "long" })}`; }
+function dayHeading(day) {
+  const [y, m, d] = day.split("-").map(Number), t = new Date(y, m - 1, d), back = Math.round((new Date(MOCK_CLOCK).setHours(0, 0, 0, 0) - t) / 864e5);
+  return back === 0 ? "Today" : back === 1 ? "Yesterday" : longDate(t);
+}
+const actDayWords = (day) => { const h = dayHeading(day); return h === "Today" || h === "Yesterday" ? h.toLowerCase() : h; };
+/* A trigger as the logbook names it, in plain words. A state trigger names what it watched when the log says. */
+const TRIGGER_WORDS = { time_pattern: "on a timer", time: "at a set time", homeassistant: "when Home Assistant started", sun: "at sunrise or sunset", template: "when a condition came true", event: "when an event arrived", webhook: "from a webhook", device: "from a device", mqtt: "from an MQTT message", calendar: "from a calendar", zone: "when someone came or went", action: "when started by hand" };
+function triggerWords(t) {
+  const k = t && t.kind, n = t && typeof t.name === "string" && t.name ? t.name : "";
+  if (k === "state") return n ? `when ${n} changed` : "when a reading changed";
+  if (k === "numeric_state") return n ? `when ${n} crossed a limit` : "when a reading crossed a limit";
+  return TRIGGER_WORDS[k] || "for a reason not recorded";
+}
+/* Who or what the log says caused a change. Never which app or screen: the log doesn't know. Where a schedule and a
+   failsafe act in the same second the log credits whichever got there first, and this says what the log says. */
+function causeWords(c) {
+  const t = c && c.type;
+  if (t === "automation") return `By ${c.name || "an automation"}, ${triggerWords(c.trigger)}`;
+  if (t === "person") return `By ${c.name || "a person"}`;
+  if (t === "startup") return "After a restart";
+  if (t === "reconnect") return "Came back online";
+  return "No cause recorded";
+}
+const actDevice = (e) => devices.find((d) => d.entity === e.entity);
+function actKind(e) {
+  if (e.kind === "device") { const d = actDevice(e); return d && d.type === "Light" ? "lights" : "device"; }
+  return e.kind === "run" ? "automation" : e.kind;
+}
+/* An alert re-fires on every update while its limit is breached, so its streak "fired". Anything else "ran". */
+function runVerb(z, e) {
+  const a = (z.automations || []).find((x) => x.entity === e.entity), g = a ? a.group : suggestGroup(e.entity);
+  return AUTO_GROUPS[g] && AUTO_GROUPS[g][0] === "alert" ? "fired" : "ran";
+}
+const actName = (e) => { const d = e.kind === "device" ? actDevice(e) : null; return d ? d.name : e.name || e.entity || ""; };
+const STATE_WORDS = { on: "turned on", off: "turned off", unavailable: "went unavailable" };
+const CLIMATE_WORDS = { ok: "back in ideal zone", low: "below ideal zone", high: "above ideal zone", critlow: "critical low", crithigh: "critical high" };
+function actText(z, e) {
+  if (e.kind === "device") return `${actName(e)} ${STATE_WORDS[e.state] || e.state}`;
+  if (e.kind === "automation") return `${actName(e)} switched ${e.state === "on" ? "on" : "off"}`;
+  if (e.kind === "run") {
+    const n = Number(e.count) || 1, verb = runVerb(z, e);
+    return n === 1 ? `${actName(e)} ${verb} at ${atClock(e.first || e.when)}` : `${actName(e)} ${verb} ${n.toLocaleString("en-NZ")} times, ${atClock(e.first)} to ${atClock(e.last || e.when)}`;
+  }
+  if (e.kind === "climate") { const m = M[e.metric] || { label: e.metric, unit: "", dp: 1 }; return `${m.label} ${CLIMATE_WORDS[e.level] || e.level} at ${Number(e.value).toFixed(m.dp)}${m.unit === "%" ? "%" : ` ${m.unit}`}`; }
+  if (e.kind === "sensor") return `${e.name} ${e.state === "back" ? "came back" : "stopped reporting"}`;
+  return "";
+}
+const actSub = (e) => e.kind === "run" ? cap(triggerWords(e.trigger)) : e.kind === "device" || e.kind === "automation" ? causeWords(e.cause) : "";
+function actIcon(e, k) {
+  const d = e.kind === "device" ? actDevice(e) : null;
+  if (e.state === "unavailable") return ic(d && d.icon ? d.icon : ACT_KIND[k][0], "var(--dead)");
+  return ic(d && d.icon && k !== "lights" ? d.icon : ACT_KIND[k][0], ACT_KIND[k][1]);
+}
+const actRow = (z, e, k) => `<div class="act-row${e.state === "unavailable" ? " unavail" : ""}" data-kind="${k}"><span class="act-time">${atClock(e.when)}</span>${actIcon(e, k)}<div><div class="act-text">${esc(actText(z, e))}</div>${actSub(e) ? `<div class="act-by">${esc(actSub(e))}</div>` : ""}</div></div>`;
+/* One action is often many entries in one second: lights on is every plug and controller at once. Device changes in the same
+   second with the same cause are one row that opens to show its parts. */
+function actGroups(z, entries) {
+  const out = [];
+  for (const e of entries) {
+    const k = actKind(e), last = out[out.length - 1];
+    const same = last && e.kind === "device" && last.e.kind === "device" && String(last.e.when).slice(0, 19) === String(e.when).slice(0, 19) && JSON.stringify(last.e.cause || {}) === JSON.stringify(e.cause || {});
+    if (same) last.parts.push([e, k]); else out.push({ e, k, parts: [[e, k]] });
+  }
+  return out;
+}
+function groupRow(z, g, key) {
+  const states = new Set(g.parts.map(([e]) => e.state)), lights = g.parts.every(([, k]) => k === "lights"), n = g.parts.length;
+  const st = states.size === 1 ? [...states][0] : "";
+  const text = st ? `${lights ? "Lights" : "Devices"} ${st === "unavailable" ? "unavailable" : st}: ${n} devices` : `${n} devices changed`;
+  const open = !!(ui.act && ui.act.open[key]);
+  const parts = g.parts.map(([e, k]) => `<li class="act-part${e.state === "unavailable" ? " unavail" : ""}">${actIcon(e, k)}<span>${esc(actText(z, e))}</span></li>`).join("");
+  return `<div class="act-row act-group${st === "unavailable" ? " unavail" : ""}" data-kind="${lights ? "lights" : "device"}"><span class="act-time">${atClock(g.e.when)}</span>${actIcon(g.e, g.k)}<div><button class="act-open" data-agroup="${esc(key)}" aria-expanded="${open}"><span class="act-text">${esc(text)}</span><span class="act-chev" aria-hidden="true">${icon("down")}</span></button><div class="act-by">${esc(causeWords(g.e.cause))}</div>${open ? `<ul class="act-parts">${parts}</ul>` : ""}</div></div>`;
+}
+function activityBody(z) {
+  const a = ui.act || {}, pages = ACTIVITY[z.id] || [], last = pages[pages.length - 1];
+  const days = pages.map((p) => {
+    const shown = p.entries.filter((e) => ui.activity === "all" || actKind(e) === ui.activity);
+    const rows = actGroups(z, shown).map((g, i) => g.parts.length > 1 ? groupRow(z, g, `${p.day}/${i}`) : actRow(z, g.e, g.k)).join("");
+    return `<section class="act-day" data-day="${p.day}"><h3 tabindex="-1">${esc(dayHeading(p.day))}</h3>${rows ? `<div class="act">${rows}</div>` : `<p class="small muted">${ui.activity === "all" ? "Nothing recorded on this day." : "Nothing of this kind on this day."}</p>`}</section>`;
+  }).join("");
+  const want = a.want ? actDayWords(a.want) : "today";
+  const failed = { busy: `Home Assistant was busy and couldn't read ${want}.`, timeout: `Home Assistant took too long to read ${want}.` }[a.error] || `${cap(want)} couldn't be read from Home Assistant.`;
+  const tail = a.status === "loading" ? `<p class="small muted act-loading" role="status" tabindex="-1">Reading ${esc(want)} from Home Assistant...</p>`
+    : a.status === "error" ? `<div class="notice" role="alert" id="act-error"><span>${esc(failed)}</span><button class="btn" data-aretry>Try again</button></div>`
+    : !last ? "" : last.more ? `<button class="btn act-earlier" data-aearlier>Earlier</button>`
+    : `<p class="small muted" id="act-end">History goes no further back. Home Assistant keeps it from ${esc(longDate(last.earliest))} at ${atClock(last.earliest)}.</p>`;
+  return days + tail;
+}
+/* Asks the host for one day. A reply for a dialog that has since closed or moved on is dropped. */
+async function loadActivity(zid, day) {
+  const seq = ((ui.act && ui.act.seq) || 0) + 1;
+  ui.act = { open: {}, ...ui.act, zone: zid, status: "loading", error: "", want: day, seq };
+  redrawActivity();
+  const r = await ask("activity", { zone: zid, day });
+  if (!ui.act || ui.aview !== zid || ui.act.seq !== seq) return;
+  const p = r && r.ok && r.page;
+  if (p && Array.isArray(p.entries)) {
+    (ACTIVITY[zid] = ACTIVITY[zid] || []).push({ day, entries: p.entries.filter((e) => e && typeof e.when === "string"), more: p.more === true, earliest: p.earliest });
+    ui.act.status = ""; ui.act.want = "";
+  } else { ui.act.status = "error"; ui.act.error = (r && r.error) || "failed"; }
+  redrawActivity(day);
+}
+/* Only the list is redrawn, so the heading and chips stay put. Focus that was on Earlier or Try again moves to what took
+   its place: the new day's heading, or the retry. */
+function redrawActivity(day) {
+  const body = $("#act-body"), z = ui.aview && zoneById(ui.aview);
+  if (!body || !z) return;
+  const had = body.contains(document.activeElement);
+  body.innerHTML = activityBody(z);
+  if (!had) return;
+  const to = ui.act.status === "error" ? body.querySelector("[data-aretry]") : day ? body.querySelector(`[data-day="${day}"] h3`) : body.querySelector(".act-loading");
+  (to || $("#dlg-title")).focus({ preventScroll: ui.act.status === "loading" });
 }
 /* What's showing can be made what this zone's History opens on, offered at the foot of the card where it doesn't move the chart. */
 function alwaysOpen(z) {
@@ -3646,10 +3755,11 @@ function targetsDialog(z) {
     <div class="review-scroll">${targetsSet(targetsOf(z)) ? targetsTable(z) : `<p class="small muted">${esc(z.name)}'s times and limits aren't set up yet, so its readings aren't judged.</p>`}</div>
     <div class="dlgfoot"><button class="btn" data-tclose>Close</button>${sharesSensor(z) ? `<span class="small muted" id="t-editin">${esc(editIn(parentOf(z)))}</span>` : `<button class="btn primary" data-tset="${z.id}">Set targets</button>`}</div></div>`;
 }
-/* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold. */
+/* The panel's dialog says only that Activity arrives in a release that follows. This is the design for what it will hold:
+   a day at a time, as the backend pages the logbook, with Earlier for the day before. */
 function activityDialog(z) {
   return `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title" tabindex="-1">Activity: ${esc(z.name)}</h2>${activityChips()}
-    <div class="review-scroll"><p class="small muted">The panel doesn't have Activity yet: it says it arrives in a release that follows. This is the design for it.</p>${activityList(z)}</div>
+    <div class="review-scroll act-scroll" id="act-body">${activityBody(z)}</div>
     <div class="dlgfoot"><button class="btn" data-aclose>Close</button></div></div>`;
 }
 function modalHtml() {
@@ -3713,7 +3823,7 @@ function redrawAutosDialog() {
 /* Closes the dialog on top only: a question over the Automations dialog goes back to it. */
 function closeModal() {
   if (ui.review && ui.review.busy) return;
-  ui.guard = null; ui.review = null; ui.tview = null; ui.aview = null;
+  ui.guard = null; ui.review = null; ui.tview = null; ui.aview = null; ui.act = null;
   renderModal();
 }
 /* Closing drops an alert repeat draft, so it asks first. */
@@ -3796,6 +3906,9 @@ document.addEventListener("click", (e) => {
     return;
   }
   if (ui.aview) {
+    if ((el = q("[data-agroup]"))) { const k = el.dataset.agroup; ui.act.open[k] = !ui.act.open[k]; redrawActivity(); const again = document.querySelector(`#modal [data-agroup="${CSS.escape(k)}"]`); if (again) again.focus({ preventScroll: true }); return; }
+    if (q("[data-aearlier]")) { const pages = ACTIVITY[ui.aview] || []; if (pages.length) loadActivity(ui.aview, prevDay(pages[pages.length - 1].day)); return; }
+    if (q("[data-aretry]")) { loadActivity(ui.aview, ui.act.want || dayKey(MOCK_CLOCK)); return; }
     if ((el = q("[data-activity]"))) { const k = el.dataset.activity; ui.activity = k; renderModal(); const again = document.querySelector(`#modal [data-activity="${k}"]`); if (again) again.focus({ preventScroll: true }); return; }
     if (q("[data-aclose]") || !q(".dialog")) closeModal();
     return;
@@ -3803,7 +3916,7 @@ document.addEventListener("click", (e) => {
   if ((el = q("[data-histdefault]"))) { historyDefault(zoneById(el.dataset.histdefault), { metric: ui.metric, hours: ui.range }); return; }
   if ((el = q("[data-opens]"))) { const z = zoneById(el.dataset.opens), at = z.history || HISTORY_DEFAULT, view = el.dataset.ometric ? { metric: el.dataset.ometric, hours: at.hours } : { metric: at.metric, hours: Number(el.dataset.ohours) }; if (view.metric !== at.metric || view.hours !== at.hours) historyDefault(z, view); return; }
   if ((el = q("[data-viewtargets]"))) { focusMenuButton(el); ui.tview = el.dataset.viewtargets; renderModal(); return; }
-  if ((el = q("[data-viewactivity]"))) { focusMenuButton(el); ui.aview = el.dataset.viewactivity; renderModal(); return; }
+  if ((el = q("[data-viewactivity]"))) { focusMenuButton(el); const id = el.dataset.viewactivity; ui.aview = id; ui.act = { open: {} }; ACTIVITY[id] = []; renderModal(); loadActivity(id, dayKey(MOCK_CLOCK)); return; }
   if (ui.guard || ui.review) {
     if (q("[data-gdiscard]")) { if (!guardConfirmed()) return; const { action } = ui.guard; ui.guard = null; renderModal(); action(); return; }
     if (q("[data-rapply]")) { applyReview(); return; }

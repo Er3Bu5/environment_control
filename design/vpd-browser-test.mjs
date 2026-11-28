@@ -824,30 +824,100 @@ check("Zone menu: View targets opens the Targets dialog, and the menu closes", (
 await tap("[data-tclose]");
 check("Zone menu: closing Targets hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
 
-// The Activity design moved off the zone page into the dialog View activity opens
+// The Activity design moved off the zone page into the dialog View activity opens. It reads a day at a time from the host,
+// in the shape the backend's logbook command returns (#133).
 check("Activity: the zone page has no Activity card", (await ev(`[...document.querySelectorAll("#main h2")].some(h=>h.textContent==="Activity") || !!document.querySelector("#main .act, #main [data-activity]")`)) === false);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]');
-const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),note:d.textContent.includes("The panel doesn't have Activity yet: it says it arrives in a release that follows."),rows:[...d.querySelectorAll(".act-row")].length,bar:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent)}})()`);
+/* The fake's entries are fixed NZ times, so the dialog is read in NZ time wherever the suite runs. */
+await send("Emulation.setTimezoneOverride", { timezoneId: "Pacific/Auckland" });
+await onHA(`fakeHA.knobs.activityMs=400;fakeHA.activityCalls=[];window.actAsked=[];if(!window.actHooked){window.actHooked=true;addEventListener("message",(e)=>{if(e.data&&e.data.type==="activity")window.actAsked.push(e.data)})}`);
+const openAct = async (zone = "garden") => { await tap(MORE); await tap(`#zmenu--more [data-viewactivity="${zone}"]`); };
+const actIdle = async () => { for (let n = 0; n < 40 && (await ev(`!!document.querySelector("#act-body .act-loading")`)); n++) await sleep(100); };
+await openAct();
+const actDlg = () => ev(`(()=>{const d=document.querySelector("#modal .dialog");return d && {role:d.getAttribute("role"),modal:d.getAttribute("aria-modal"),title:d.querySelector("#dlg-title").textContent,named:d.getAttribute("aria-labelledby"),chips:[...d.querySelectorAll("[data-activity]")].map(b=>b.textContent+(b.getAttribute("aria-pressed")==="true"?"*":"")),group:d.querySelector(".seg").getAttribute("aria-label"),bar:[...d.querySelectorAll(".dlgfoot button")].map(b=>b.textContent),days:[...d.querySelectorAll(".act-day h3")].map(h=>h.textContent),loading:(d.querySelector(".act-loading")||{}).textContent||"",rows:[...d.querySelectorAll(".act-row")].map(r=>({kind:r.dataset.kind,text:r.querySelector(".act-text").textContent,by:(r.querySelector(".act-by")||{}).textContent||"",un:r.classList.contains("unavail"),day:r.closest(".act-day").dataset.day})),earlier:!!d.querySelector("[data-aearlier]"),end:(d.querySelector("#act-end")||{}).textContent||"",error:(d.querySelector("#act-error span")||{}).textContent||"",retry:!!d.querySelector("[data-aretry]")}})()`);
 let ad = await actDlg();
-check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]) && (await ev(`document.activeElement.id`)) === "dlg-title", ad);
-check("Activity: it holds the design, its chips, its note and its list", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Climate", "Sensors"]) && ad.note && ad.rows === (await ev(`ACTIVITY.garden.length`)) && ad.rows > 0, ad);
+check("Activity: while the day is read it says so, under the heading and chips", ad.loading === "Reading today from Home Assistant..." && ad.days.length === 0, ad.loading);
+await actIdle(); ad = await actDlg();
+check("Activity: View activity opens a dialog titled Activity: Garden, with Close in its foot bar", ad && ad.role === "dialog" && ad.modal === "true" && ad.named === "dlg-title" && ad.title === "Activity: Garden" && same(ad.bar, ["Close"]), ad && ad.title);
+check("Activity: its chips are All, Devices, Lights, Automations, Climate and Sensors", ad.group === "Activity type" && same(ad.chips, ["All*", "Devices", "Lights", "Automations", "Climate", "Sensors"]), ad.chips);
 check("Activity: the page behind it can't be reached", (await ev(`document.querySelector("#main").inert`)) === true);
+const actAskedNow = await onHA(`window.actAsked.map(m=>({keys:Object.keys(m).sort(),zone:m.zone,day:m.day}))`), toHA = await onHA(`fakeHA.activityCalls.map(m=>JSON.stringify(m))`);
+check("Activity: the frame asks for a zone and a day, and never names an entity", actAskedNow.length === 1 && same(actAskedNow[0].keys, ["day", "req", "type", "v", "zone"]) && actAskedNow[0].zone === "garden" && actAskedNow[0].day === "2026-11-17" && same(toHA, ['{"type":"environment_control/activity","zone":"garden","day":"2026-11-17"}']), { actAskedNow, toHA });
+check("Activity: today comes first under its own heading, newest first", same(ad.days, ["Today"]) && ad.rows[0].text === "Failsafe Garden Lights Recovery ran 405 times, 00:00 to 13:28", ad.rows.slice(0, 2));
+const rowsLike = (re) => ad.rows.filter((r) => re.test(r.text));
+let hum = rowsLike(/^Critical Garden Humidity Low Day (fired|ran)/);
+check("Activity: a streak of runs is one row with its count and its first and last times, and an alert's streak fired", hum.length === 1 && hum[0].text === "Critical Garden Humidity Low Day fired 790 times, 07:02 to 09:14" && hum[0].by === "When Garden Environment Average Humidity changed" && hum[0].kind === "automation", hum);
+check("Activity: a single run reads ran at, with its trigger in plain words", rowsLike(/^Garden Lights On ran/).length === 1 && rowsLike(/^Garden Lights On ran/)[0].text === "Garden Lights On ran at 07:00" && rowsLike(/^Garden Lights On ran/)[0].by === "At a set time", rowsLike(/^Garden Lights On/));
+check("Activity: a timer's streak says on a timer", ad.rows[0].by === "On a timer", ad.rows[0]);
+check("Activity: an automation switched off by hand is an automation row, by that person", rowsLike(/switched off$/).length === 1 && rowsLike(/switched off$/)[0].text === "Critical Garden Humidity Low Day switched off" && rowsLike(/switched off$/)[0].by === "By Sam" && rowsLike(/switched off$/)[0].kind === "automation", rowsLike(/switched/));
+const un = rowsLike(/went unavailable$/);
+check("Activity: a device going unavailable has its own row style, not on or off", un.length === 1 && un[0].text === "Air conditioner exhaust fan went unavailable" && un[0].un && ad.rows.filter((r) => r.un).length === 1 && (await ev(`getComputedStyle(document.querySelector(".act-row.unavail")).borderLeftStyle`)) === "dashed", un);
+check("Activity: an automation the zone doesn't link is still named as the cause, with its trigger", rowsLike(/^Dehumidifier turned on$/)[0]?.by === "By Day Humidity Upper Limit, when Garden Environment Average Humidity crossed a limit", rowsLike(/^Dehumidifier/));
+check("Activity: Came back online and By a person read as written", rowsLike(/^Air conditioner exhaust fan turned on$/)[0]?.by === "Came back online" && rowsLike(/^Air conditioner turned on$/)[0]?.by === "By Sam", ad.rows.filter((r) => /^Air/.test(r.text)));
+check("Activity: climate and sensor rows stay, worked out from history", rowsLike(/^Humidity above ideal zone at 67\.4%$/).length === 1 && rowsLike(/^Environment under stopped reporting$/).length === 1 && rowsLike(/^Environment under came back$/).length === 1, ad.rows.filter((r) => /climate|sensor/.test(r.kind)));
+// Same second, same cause: one row that opens to show its parts
+const grp = () => ev(`(()=>{const b=document.querySelector('[data-day="2026-11-17"] [data-agroup]');const r=b.closest(".act-row");return {text:b.textContent,exp:b.getAttribute("aria-expanded"),by:r.querySelector(".act-by").textContent,kind:r.dataset.kind,parts:[...r.querySelectorAll(".act-part")].map(p=>p.textContent),groups:document.querySelectorAll('[data-day="2026-11-17"] [data-agroup]').length}})()`);
+let g = await grp();
+check("Activity: lights switched on in the same second by one cause are one row, closed", g.groups === 1 && g.text === "Lights on: 4 devices" && g.exp === "false" && g.parts.length === 0 && g.kind === "lights" && g.by === "By Garden Lights On, at a set time" && rowsLike(/^Overhead lights 1/).length === 0, g);
+await tap('[data-day="2026-11-17"] [data-agroup]'); g = await grp();
+check("Activity: tapping the row opens it to list each device, and keeps focus on it", g.exp === "true" && same(g.parts, ["Overhead light controller turned on", "Overhead lights 1 turned on", "Overhead lights 2 turned on", "Under canopy light controller turned on"]) && (await ev(`!!document.activeElement.dataset.agroup`)) === true, g);
+await tap('[data-day="2026-11-17"] [data-agroup]'); g = await grp();
+check("Activity: tapping it again closes it", g.exp === "false" && g.parts.length === 0, g);
+// Earlier: the day before under its own heading, back to as far as history goes
+check("Activity: Earlier is offered under today while there's more history", ad.earlier && !ad.end, ad);
+await tap("[data-aearlier]"); ad = await actDlg();
+check("Activity: Earlier reads the day before, saying so below what's shown", ad.loading === "Reading yesterday from Home Assistant..." && same(ad.days, ["Today"]) && !ad.earlier, ad.loading);
+await actIdle(); ad = await actDlg();
+hum = ad.rows.filter((r) => r.day === "2026-11-16" && /^Critical Garden Humidity Low Day (fired|ran)/.test(r.text));
+check("Activity: the day before loads beneath, under Yesterday, and its streak of thousands is one row", same(ad.days, ["Today", "Yesterday"]) && hum.length === 1 && hum[0].text === "Critical Garden Humidity Low Day fired 3,961 times, 07:02 to 18:59" && (await ev(`document.activeElement.textContent`)) === "Yesterday", { days: ad.days, hum });
+check("Activity: a restart reads After a restart, its changes grouped, and the run it caused says so", ad.rows.some((r) => r.day === "2026-11-16" && r.text === "3 devices changed" && r.by === "After a restart") && ad.rows.some((r) => r.text === "Failsafe Dehumidifier Mains Auto On ran at 03:12" && r.by === "When Home Assistant started"), ad.rows.filter((r) => r.day === "2026-11-16" && /03:|restart|changed/.test(r.text + r.by)));
+check("Activity: No cause recorded where the log has none", ad.rows.some((r) => r.text === "Heater turned off" && r.by === "No cause recorded"), ad.rows.filter((r) => /Heater/.test(r.text)));
+check("Activity: in the same second, a failsafe credited by the log is its own row beside the schedule's group", ad.rows.some((r) => r.day === "2026-11-16" && r.text === "Lights off: 3 devices" && r.by === "By Garden Lights Off, at a set time") && ad.rows.some((r) => r.day === "2026-11-16" && r.text === "Overhead lights 2 turned off" && r.by === "By Failsafe Garden Lights Recovery, on a timer"), ad.rows.filter((r) => r.day === "2026-11-16" && /off/.test(r.text)));
+await tap("[data-aearlier]"); await actIdle(); ad = await actDlg();
+check("Activity: Earlier stops at the earliest day, and says plainly that history goes no further back", same(ad.days, ["Today", "Yesterday", "Sunday 15 November"]) && !ad.earlier && ad.end === "History goes no further back. Home Assistant keeps it from Sunday 15 November at 09:14." && same((await onHA(`window.actAsked.map(m=>m.day)`)), ["2026-11-17", "2026-11-16", "2026-11-15"]), { days: ad.days, end: ad.end });
+check("Activity: no row is a dehumidifier's mode or a light's brightness: the log can't supply them", ad.rows.length > 30 && ad.rows.every((r) => !/mode|brightness|dimmed|%\s*bright/i.test(r.text + r.by)), ad.rows.filter((r) => /mode|bright/i.test(r.text)));
+check("Activity: times are local and 24 hour", (await ev(`[...document.querySelectorAll("#act-body .act-time")].every(t=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(t.textContent))`)) === true);
 await shot("activity-dialog-phone");
-await tap('#modal [data-activity="lights"]'); ad = await actDlg();
-check("Activity: a chip filters the list in the dialog, and keeps focus", ad.chips.includes("Lights*") && ad.rows === (await ev(`ACTIVITY.garden.filter(a=>a[1]==="lights").length`)) && (await ev(`document.activeElement.dataset.activity`)) === "lights" && (await ev(`ui.screen==="zone"`)) === true, ad);
+// Each filter shows only its kind, across every day read
+for (const [k, label] of [["device", "Devices"], ["lights", "Lights"], ["automation", "Automations"], ["climate", "Climate"], ["sensor", "Sensors"]]) {
+  await tap(`#modal [data-activity="${k}"]`); ad = await actDlg();
+  check(`Activity: ${label} shows only its own kind, and keeps focus`, ad.chips.includes(`${label}*`) && ad.rows.length > 0 && ad.rows.every((r) => r.kind === k) && (await ev(`document.activeElement.dataset.activity`)) === k && same(ad.days, ["Today", "Yesterday", "Sunday 15 November"]), { k, rows: ad.rows.map((r) => r.kind + ":" + r.text) });
+}
+check("Activity: a day with nothing of a kind says so under its heading", (await ev(`(()=>{const d=document.querySelector('[data-day="2026-11-15"]');return !d.querySelector(".act-row") && d.querySelector("p").textContent})()`)) === "Nothing of this kind on this day.");
 await tap('#modal [data-activity="all"]');
+// At phone width the days scroll inside the dialog, and the heading and chips stay put
+const fixed = () => ev(`(()=>{const d=document.querySelector("#modal .dialog"),b=document.querySelector("#act-body");return {h:document.querySelector("#dlg-title").getBoundingClientRect().top,c:d.querySelector(".seg").getBoundingClientRect().top,f:d.querySelector(".dlgfoot").getBoundingClientRect().bottom,scrolls:b.scrollHeight>b.clientHeight+50,dTop:d.scrollTop,vh:innerHeight}})()`);
+const f0 = await fixed(); await ev(`document.querySelector("#act-body").scrollTop=1e6`); await sleep(60); const f1 = await fixed();
+check("Activity: on a phone the list scrolls inside the dialog, with the heading, chips and Close staying put", f0.scrolls && f0.h === f1.h && f0.c === f1.c && f1.dTop === 0 && f1.f <= f1.vh && (await ev(`document.documentElement.scrollWidth<=innerWidth`)) === true, { f0, f1 });
 await tap("[data-aclose]");
-check("Activity: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.aview`)) === true && (await moreFocused()));
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await key("Escape", 27);
+check("Activity: Close shuts it and hands focus back to the menu's button", (await ev(`document.querySelector("#modal").hidden && !ui.aview && !ui.act`)) === true && (await moreFocused()));
+// Busy and too slow: a retry, not a spinner forever
+await onHA(`fakeHA.knobs.activity="busy"`); await openAct(); await actIdle(); ad = await actDlg();
+check("Activity: Home Assistant answering busy shows why, with Try again", ad.error === "Home Assistant was busy and couldn't read today." && ad.retry && ad.days.length === 0, ad.error);
+await onHA(`fakeHA.knobs.activity=null`); await tap("[data-aretry]"); await actIdle(); ad = await actDlg();
+check("Activity: Try again reads the day once Home Assistant can", same(ad.days, ["Today"]) && !ad.retry && ad.rows.length > 5, ad.days);
+await onHA(`fakeHA.knobs.activity="timeout";document.querySelector("environment-control-panel").activityTimeoutMs=500`);
+await tap("[data-aearlier]"); await sleep(900); await actIdle(); ad = await actDlg();
+check("Activity: no answer in time shows a retry under the days already read", ad.error === "Home Assistant took too long to read yesterday." && ad.retry && same(ad.days, ["Today"]) && !ad.earlier, ad.error);
+await onHA(`fakeHA.knobs.activity=null;document.querySelector("environment-control-panel").activityTimeoutMs=20000`); await tap("[data-aretry]"); await actIdle(); ad = await actDlg();
+check("Activity: Try again then reads that day", same(ad.days, ["Today", "Yesterday"]) && !ad.retry, ad.days);
+await tap("[data-aclose]");
+await openAct(); await actIdle(); await ev(`ui.act.open={}`);
+check("Activity: opening it again starts from today", same((await actDlg()).days, ["Today"]));
+await key("Escape", 27);
 check("Activity: Escape shuts it", (await ev(`document.querySelector("#modal").hidden`)) === true && (await moreFocused()));
 const actShown = () => ev(`!!ui.aview && !document.querySelector("#modal").hidden && document.querySelector("#dlg-title").textContent==="Activity: Garden"`);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); let actWas = await actShown(); await tellBack();
+await openAct(); let actWas = await actShown(); await tellBack();
 check("Activity: Back shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true && (await ev(`ui.screen==="zone"`)) === true && (await moreFocused()));
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); actWas = await actShown();
+await openAct(); actWas = await actShown();
 await ev(`document.querySelector("#modal").click()`); await sleep(40);
 check("Activity: a tap outside the dialog shuts it", actWas === true && (await ev(`document.querySelector("#modal").hidden`)) === true);
+await goTab("Nursery"); await openAct("nursery"); await actIdle(); ad = await actDlg();
+check("Activity: a zone whose history starts today offers no Earlier, and says so", same(ad.days, ["Today"]) && !ad.earlier && ad.end === "History goes no further back. Home Assistant keeps it from Tuesday 17 November at 00:00." && ad.title === "Activity: Nursery", ad);
+await tap("[data-aclose]"); await goTab("Garden");
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await ev(`window.scrollTo(0,0)`);
-await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); await shot("activity-dialog-desktop"); await tap("[data-aclose]");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }); await sleep(150);
+await openAct(); await actIdle(); await tap('[data-day="2026-11-17"] [data-agroup]'); await tap("[data-aearlier]"); await actIdle(); await ev(`document.querySelector("#act-body").scrollTop=0`); await shot("activity-dialog-desktop"); await tap("[data-aclose]");
+await send("Emulation.setEmulatedMedia", { features: [] }); await send("Emulation.setTimezoneOverride", { timezoneId: "" }); await onHA(`fakeHA.knobs.activityMs=300`);
 await phone(390, 844); await reset(); await goTab("Garden");
 await tap(MORE); await tap('#zmenu--more [data-autos="alert"]');
 /* Since #113 View automations opens a dialog over the zone's page, as View targets and View activity do. */

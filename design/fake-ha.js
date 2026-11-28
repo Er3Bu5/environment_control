@@ -11,7 +11,9 @@ class FakeHA {
     this.registry = seed.registry || { entities: {}, areas: {} };
     /* HA's device registry: an entity with no area of its own is in its device's. */
     this.registry.devices = this.registry.devices || {};
-    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
+    this.activity = seed.activity || { now: new Date().toISOString(), earliest: {}, entries: {} };
+    this.activityCalls = [];
+    this.knobs = { reportMs: 600, dropNext: false, dropAll: false, activityMs: 300, activity: null, failsafeMs: 1000, watchdogMs: 3000, cutPower: false, restartMs: 1500, ignore: new Set(), steps: {}, targetModes: {} };
     this.calls = [];
     this.saves = [];
     this.panels = new Set();
@@ -129,7 +131,28 @@ class FakeHA {
     if (!msg || typeof msg.type !== "string") this.fail("Bad message");
     if (msg.type === "environment_control/config") return JSON.parse(JSON.stringify(this.config));
     if (msg.type === "environment_control/config/save") return this.save(msg);
+    if (msg.type === "environment_control/activity") return this.activityPage(msg);
     this.fail(`Unknown command ${msg.type}`);
+  }
+  /* One zone's activity for one local day, newest first, in the shape the backend's command returns. A real HA takes seconds
+     to read a day from the logbook and can refuse while it's busy or never answer, which the knobs stand in for. It is asked
+     by zone, never by entity, so a frame can only read what a zone holds. */
+  async activityPage(msg) {
+    this.activityCalls.push(JSON.parse(JSON.stringify(msg)));
+    if (Object.keys(msg).some((k) => !["type", "zone", "day"].includes(k))) this.fail("Activity is asked for by zone and day only");
+    if (!this.config.zones.some((z) => z.id === msg.zone)) this.fail(`Zone ${msg.zone} not found`);
+    if (typeof msg.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(msg.day)) this.fail("A day is YYYY-MM-DD");
+    await new Promise((r) => setTimeout(r, this.knobs.activityMs));
+    if (this.knobs.activity === "timeout") return new Promise(() => {});
+    if (this.knobs.activity === "busy") { const e = new Error("Busy reading another request"); e.code = "busy"; throw e; }
+    const [y, m, d] = msg.day.split("-").map(Number), from = new Date(y, m - 1, d).getTime(), now = Date.parse(this.activity.now);
+    const to = Math.min(new Date(y, m - 1, d + 1).getTime(), now);
+    /* A zone added since has no history of its own: it starts today. */
+    const earliest = Date.parse(this.activity.earliest[msg.zone] || "") || new Date(now).setHours(0, 0, 0, 0);
+    const entries = (this.activity.entries[msg.zone] || []).filter((e) => { const t = Date.parse(e.when); return t >= from && t < to && t >= earliest; })
+      .sort((a, b) => Date.parse(b.when) - Date.parse(a.when));
+    const iso = (t) => new Date(t).toISOString();
+    return JSON.parse(JSON.stringify({ zone: msg.zone, start: iso(Math.max(from, earliest)), end: iso(Math.max(to, from)), earliest: iso(earliest), more: from > earliest, next_end: iso(from), entries }));
   }
   /* The real backend checks every field against a schema. This checks enough to catch a host that forwards junk. */
   checkConfig(c, before) {
