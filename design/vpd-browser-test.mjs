@@ -2704,11 +2704,11 @@ let nCalls = (await haCalls()).length;
 const notHereNow = () => ev(`(()=>{const o=document.querySelector("#modal > .modal.over .dialog")||document.querySelector("#modal .dialog");return o && {role:o.getAttribute("role"),title:o.querySelector("#dlg-title").textContent,text:o.querySelector("#dlg-text").textContent,buttons:[...o.querySelectorAll(".dlgfoot button")].map(b=>b.textContent+"|"+b.className),focus:document.activeElement.id,over:!!document.querySelector("#modal > .modal.over")}})()`);
 await ev(`(()=>{window.autosWas=document.querySelector("#modal [data-autosdlg]");const s=document.querySelector("#autos-scroll");s.scrollTop=s.scrollHeight;window.autosTop=s.scrollTop})()`);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
-await ev(`window.autosTop=document.querySelector("#autos-scroll").scrollTop`);
 let nh = await notHereNow();
 check("Linked: tapping a read only switch switches nothing and opens the one-button dialog, titled with its name, over the Automations dialog", same(nh, { role: "alertdialog", title: "Failsafe Veg Fans Auto On", text: "This automation is associated to Zone: Veg. Please edit it in Veg.", buttons: ["OK|btn primary"], focus: "dlg-title", over: true }) && (await haCalls()).length === nCalls && (await onHA(`fakeHA.states["automation.failsafe_veg_fans_auto_on"].state`)) === "on", nh);
 check("Linked: and raises no toast, and goes nowhere", (await toastNow()) === "" && (await ev(`ui.screen==="zone" && ui.zone==="nursery" && ui.autos.zone==="nursery"`)) === true, await toastNow());
 await both("linked-not-here-auto");
+await ev(`window.autosTop=document.querySelector("#autos-scroll").scrollTop`);
 await tap("[data-gkeep]"); bt = await backTo();
 check("Linked: OK closes it, back to the Automations dialog on its chip, where it was scrolled, the switch focused", bt.same && !bt.over && bt.chip === "failsafe" && bt.top === bt.was && bt.focus === "automation.failsafe_veg_fans_auto_on" && (await ev(`!ui.guard`)) === true, bt);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await key("Escape", 27);
@@ -2810,6 +2810,9 @@ for (const type of ["mousePressed", "mouseMoved", "mouseReleased"]) await send("
 await sleep(80);
 nCalls = (await haCalls()).length;
 check("Linked: dragging the chart moves nothing, so there's nothing to review or send", (await ev(`JSON.stringify(ui.vpdw.bands)`)) === benchBands && (await ev(`tdDraft(ui.td).items.length`)) === 0 && !(await ev(`ui.vpdw.drag`)), await ev(`tdDraft(ui.td).items`));
+/* A press on the read only chart is a tap like any other, so it answers in the one-button dialog (#111). */
+check("Linked: and the press answers in the one-button dialog, Targets", (await ev(`ui.guard && ui.guard.title`)) === "Targets" && (await ev(`ui.guard.ok`)) === "OK", await ev(`ui.guard && ui.guard.title`));
+await tap("[data-gkeep]");
 await ev(`ui.td=null;ui.sched=null;ui.vpdw=null;render()`);
 check("Linked: and nothing read only was sent or saved", (await haCalls()).length === nCalls && same((await diskZone(bench)).bands, await ev(`zoneById("${bench}").bands`)));
 /* Given Garden's lights too, Bench has nothing of its own left on the page: the foot bar is Back, and Confirm while the step is open. */
@@ -2874,8 +2877,7 @@ const DIALOGS = [
   ["targets", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewtargets="garden"]'); }, "[data-tclose]"],
   ["activity", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-viewactivity="garden"]'); }, "[data-aclose]"],
   ["automations", async () => { await goTab("Garden"); await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); }, "[data-uclose]"],
-  ["automations-linked", async () => { await goTab("Nursery"); await tap(MORE); await tap('#zmenu--more [data-autos="failsafe"]'); }, "[data-uclose]"],
-  ["not-here", async () => { await openAutosAt("nursery", "failsafe"); await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); }, "[data-gkeep]"],
+  ["automations-linked", async () => { await goTab("Nursery"); await tap(MORE); await tap('#zmenu--more [data-autos="alert"]'); await tap('#modal [data-autopage="failsafe"]'); }, "[data-uclose]"],
   ["discard", async () => { await openAutosAt("garden", "alert"); await typeRepeat(45); await tap('#modal [data-autopage="failsafe"]'); }, "[data-gkeep]"],
   ["review", async () => { await openAutosAt("garden", "alert"); await typeRepeat(45); await tap("#modal [data-ureview]"); }, "[data-rback]"],
   ["failsafe-off", async () => { await openAutosAt("garden", "failsafe"); await tap('[data-autorow="automation.failsafe_garden_lights_recovery"] .sw'); }, "[data-gkeep]"],
