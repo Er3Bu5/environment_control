@@ -4,9 +4,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* The panel's own palettes, generated from the frontend's PALETTES so the two can't drift. */
-:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
-:root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
+:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #727272; --ro-surface: #FCFCFC; --ro-dim: .45; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
+:root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #9B9B9B; --ro-surface: #1F1F1F; --ro-dim: .45; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
 html, body { margin: 0; }
 
 /* The frontend's styles (frontend/src/frame/styles.ts), with :host as the page. */
@@ -49,9 +49,11 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
   /* Zone cards go three across only once each gets 640px: narrower, the tracks and state chips are cramped. Below that a
      column is kept wider than a third, so the row holds two. The Overview's width is let out only on a screen wide enough
-     for three; under it the page keeps the width every other page has. */
+     for three; under it the page keeps the width every other page has. Four go across on the same 640px, so the width is
+     let out again only on an ultrawide screen with room for four (#119). */
   .cards.zones { grid-template-columns: repeat(auto-fit, minmax(max(min(300px, 100%), min(calc((100% - 24px) / 3 + 1px), 640px)), 1fr)); }
   @media (min-width: 1976px) { .wrap:has(> .cards.zones) { max-width: 2100px; } }
+  @media (min-width: 2640px) { .wrap:has(> .cards.zones) { max-width: 2760px; } }
   .zone-card { text-align: left; color: inherit; font: inherit; }
   .zone-card:hover { border-color: var(--primary); }
   /* While sorting, a card opens nothing, so it doesn't light up as if it would. The bar at the foot is kept clear of the
@@ -251,11 +253,22 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
   .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
   .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. */
-  .sw[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; opacity: .55; }
-  .chip:has(input[data-roctl]) { cursor: not-allowed; opacity: .6; }
-  .chip input[data-roctl] { cursor: not-allowed; }
-  .dial:has([data-roctl]) { opacity: .7; }
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. It has to read as not yours to
+     switch at a glance (#111), so it loses the accent colour as well as brightness: one look everywhere, an outline barely
+     off the card (--ro-surface, dashed), text in --ro-fg kept at 4.5:1 on it, and controls in greys at --ro-dim. On or
+     off still shows by the knob's side and the On./Off. line. It still takes the tap that says where it's changed. */
+  .ro .dev-name { color: var(--ro-fg); }
+  .dev.ro { background: var(--ro-surface); border: 1px dashed var(--off); padding: 9px; }
+  .ro > .ic { background: color-mix(in srgb, var(--off) 20%, transparent); }
+  .ro > .ic svg { fill: var(--ro-fg); }
+  .sw[data-roctl], .ctl[data-roctl], .dial:has([data-roctl]), .chip:has(input[data-roctl]) { opacity: var(--ro-dim); cursor: not-allowed; }
+  .dial:has([data-roctl]), .chip:has(input[data-roctl]) { filter: grayscale(1); }
+  .sw[data-roctl], .sw.on[data-roctl], .sw[data-roctl]:hover, .ctl[data-roctl]:hover { border-color: var(--off); }
+  .sw[data-roctl] i, .sw.on[data-roctl] i { background: var(--off); }
+  .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
+  .dev.ro { cursor: not-allowed; }
+  .dev[data-autorow]:not(.ro):has(.sw:not(:disabled)) { cursor: pointer; }
+  .dev[data-autorow]:not(.ro):hover .sw:not(:disabled) { border-color: var(--muted); }
   .zlinked { margin: 2px 0 0; }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
@@ -532,8 +545,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
   .autonotes { display: contents; }
-  /* Read only rather than disabled, so a tap on it can say where it's changed (#111); it keeps the disabled look. */
-  input[data-roctl]:read-only { opacity: .6; cursor: not-allowed; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#111). A muted box and text rather than
+     opacity, which would take the figures under 4.5:1. */
+  input[data-roctl]:read-only { background: var(--ro-surface); color: var(--ro-fg); border-style: dashed; cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
@@ -789,6 +803,7 @@ function familyRuns(list) {
   for (const z of list) { const r = rootIn(list, z), at = runs[runs.length - 1]; if (at && at.root === r) at.zones.push(z); else runs.push({ root: r, zones: [z] }); }
   return runs;
 }
+/* Bare names in a sentence read as one does, "Garden, Nursery and Veg"; a labelled list keeps its commas (#115). */
 const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 function sensorRefusal(z, holders) {
   if (!holders.length || new Set([z, ...holders].map(familyRoot)).size === 1) return "";
@@ -945,7 +960,7 @@ function renderOverview() {
   /* While sorting, a card is no button, so a tap on it can't open its zone and lose the order. A family moves as one
      block, by its own arrows, and a card in it moves only inside it, so a family is never split. */
   const runs = familyRuns(shown);
-  const arrows = (attr, id, label, first, last, inner = false) => `<div class="arrows">${[[-1, "up", "earlier", first], [1, "down", "later", last]].map(([by, ico, word, off]) => `<button class="btn move${inner ? " inner" : ""}" ${attr}="${id}" data-by="${by}" aria-label="Move ${esc(label)} ${word}${inner ? " in its group" : ""}"${off ? " disabled" : ""}>${icon(ico)}</button>`).join("")}</div>`;
+  const arrows = (attr, id, label, first, last, inner = false) => `<div class="arrows">${[[-1, "up", "to previous", first], [1, "down", "to next", last]].map(([by, ico, word, off]) => `<button class="btn move${inner ? " inner" : ""}" ${attr}="${id}" data-by="${by}" aria-label="Move ${esc(label)} ${word}${inner ? " in its group" : ""}"${off ? " disabled" : ""}>${icon(ico)}</button>`).join("")}</div>`;
   const runOf = (z) => runs.findIndex((r) => r.zones.includes(z));
   const cardArrows = (z) => {
     const r = runs[runOf(z)], j = r.zones.indexOf(z);
@@ -1373,7 +1388,7 @@ const readOnly = (html, p, name) => html.replace(/ data-(dev|act|dialin|dialstep
 function deviceRow(d, z) {
   const owner = deviceOwner(d, z), v = deviceView(d), c = owner ? undefined : ctlState[d.id], busy = v.down || (c && c.status === "sending"), lk = CLASS_LOOK[controlGroupOf(d)] || { icon: "plug", c: "var(--muted)" }, line = ctlLine(c, d, v);
   const others = d.zones.filter((id) => id !== z.id).map((id) => (zoneById(id) || {}).name || id);
-  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", owner ? `Runs on Zone: ${owner.name}'s automations. ${editInAgain(owner)}.` : others.length ? `Shared with ${others.join(" and ")}.` : ""].filter(Boolean).join(" ");
+  const extra = [v.kind === "humidifier" && !v.down && v.unitRh !== null ? `Unit RH ${v.unitRh}%.` : "", v.offList && v.mode && v.mode !== extraOf(d) ? `${cap(v.mode)} isn't in its mode list.` : "", owner ? `Runs on Zone: ${owner.name}'s automations. ${editInAgain(owner)}.` : others.length ? `Shared with ${andList(others)}.` : ""].filter(Boolean).join(" ");
   let controls = "", modes = "";
   if (!v.down && v.kind === "dimmer") controls = dialHtml(d, "brightness", lk.c, busy);
   else if (!v.down && v.kind === "humidifier") {
@@ -1384,7 +1399,7 @@ function deviceRow(d, z) {
   const addMode = !owner && v.offList && v.mode && v.mode !== extraOf(d) ? `<button class="fixlink" data-addmode="${d.id}" data-zone="${z.id}">Add ${esc(cap(v.mode))} as a mode &rsaquo;</button>` : "";
   let sw = `<button class="sw ${v.on ? "on" : ""}" data-dev="${d.id}" data-act="${v.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${v.on}" aria-label="${esc(d.name)}"${busy ? " disabled" : ""}><i></i></button>`;
   if (owner) [controls, modes, sw] = [controls, modes, sw].map((h) => readOnly(h, owner, d.name));
-  return `<div class="dev" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
+  return `<div class="dev${owner ? " ro" : ""}" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
     <div class="dev-text"><div class="dev-name">${esc(d.name)}</div><div class="dev-sub">${v.down ? `<span class="pill dead">${esc(v.text)}</span>` : `${esc(v.text)}.`} ${esc(extra)}</div><div class="dev-sub">${esc([d.family, LINK[d.link]].filter(Boolean).join(", "))}</div>${addMode}</div>
     ${modes ? `<div class="dev-modes">${modes}</div>` : ""}
     <div class="dev-ctl">${controls}${sw}</div>
@@ -1870,7 +1885,7 @@ function autoRow(a, z, owner) {
   const sw = owner ? `<button class="ctl sw ${on ? "on" : ""}" ${roData("auto", autoName(a), owner)} role="switch" aria-checked="${on}" aria-disabled="true" aria-label="${esc(autoName(a))}" title="${esc(editIn(owner))}"><i></i></button>`
     : `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
   const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
-  return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
+  return `<div class="dev${owner ? " ro" : ""}" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
 }
 /* Redraws an automation's row, and puts focus back on the switch. */
 function redrawAuto(entity) {
@@ -3049,13 +3064,13 @@ function schedDraft(s) {
   const parts = [];
   if (moved) parts.push(`Light goes from ${dayLength(toMin(was.day), toMin(was.night))} to ${dayLength(toMin(v.day), toMin(v.night))} a day.`);
   if (emersonMoved) parts.push(`${emersonLine(v)}.`);
-  if (moved && others.length) parts.push(`${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
+  if (moved && others.length) parts.push(`${andList(others.map((o) => o.name))} use${others.length > 1 ? "" : "s"} the same helpers, so it moves too.`);
   const onHelpersNow = Object.keys(v).some((k) => v[k] !== was[k] && schedHeld(z, k));
   if (onHelpersNow) parts.push("These change on your helpers, and anything reading them, like your alerts, follows straight away.");
   /* Saving here moves live hardware: the light automations and their watchdogs read these helpers. */
   if (onHelpersNow && (moved || emersonMoved)) parts.push("Light automations that read them follow too, so lights can switch within minutes of applying.");
   const blocked = !sharesLights(z) && sProblems(s, z).length ? "fix the problems before review" : "";
-  return { zone: moved && others.length ? [z, ...others].map((o) => o.name).join(" and ") : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
+  return { zone: moved && others.length ? andList([z, ...others].map((o) => o.name)) : z.name, items, skipped: [], bar: true, busy: !!s.sending, blocked, note: parts.join(" "),
     apply: (done) => saveSched(s, done), discard: () => { s.vals = schedValues(z); s.status = ""; render(); } };
 }
 
@@ -3206,7 +3221,7 @@ function renderTd() {
   const m = ui.td.m, s = ui.sched, z = baseZone(m.id), v = s.vals, lock = s.sending ? " disabled" : "", issues = sProblems(s, z), others = sharesHelpers(z);
   const time = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]}<input id="sin-${k}" data-sin="${k}" type="time" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
   const box = (k) => `<label class="field" for="sin-${k}">${SCHED_NAME[k]} (${SCHED_RANGE[k][3]})<input id="sin-${k}" data-sin="${k}" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${v[k]}" aria-invalid="${issues.some((i) => i.id === k)}"${lock}></label>`;
-  const shared = others.length ? ` ${others.map((o) => o.name).join(" and ")} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "";
+  const shared = others.length ? ` ${andList(others.map((o) => o.name))} use${others.length > 1 ? "" : "s"} the same helpers, so ${others.length > 1 ? "they move" : "it moves"} too.` : "";
   const length = `<div class="sched-len" id="s-length"><span id="s-len">${sLength(v)}</span><span id="s-strip">${sStrip(v)}</span></div>`;
   const lit = isDay(z, NOW), count = Object.keys(m.lights).length, picked = m.onHelper && m.offHelper;
   const perBody = {
@@ -3391,14 +3406,14 @@ function createZone(w) {
 /* Only Environment Control's own record of a zone goes. Its sensors and devices are still in Home Assistant, so Map devices can still find them, and shared hardware stays in its other zones. */
 function removeRows(z) {
   const ctl = devices.filter((d) => d.ctl && d.zones.includes(z.id)), alone = ctl.filter((d) => d.zones.length === 1), shared = ctl.filter((d) => d.zones.length > 1);
-  const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name).join(" and ");
+  const others = zones.filter((o) => o.id !== z.id && shared.some((d) => d.zones.includes(o.id))).map((o) => o.name);
   const offsets = z.sensors.filter((s) => s.kind === "env" && !hasLeafEntity(s) && s.leaf !== undefined);
-  const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${others}` : ""].filter(Boolean).join(", ");
+  const devicesWord = [alone.length ? `${alone.length} unmapped` : "", shared.length ? `${shared.length} stay in ${andList(others)}` : ""].filter(Boolean).join(", ");
   return [["Placement", `${z.layout.w} x ${z.layout.d} m, ${z.layout.units} units`], ["Sensors", z.sensors.length && `${z.sensors.length} unmapped`], ["Devices", devicesWord],
     ["Targets", z.linked ? "Its Low and High. Your helpers stay as they are" : "Day and night values"], ["Day and night", zonePeriod(z)],
     ["Leaf temperature offset kept here", offsets.map((s) => s.name).join(", ")], ["Virtual devices", virtualOf(z).map((v) => v.name).join(", ")],
     ["Automations", autosOf(z).length ? `${autosOf(z).length} unlinked. They keep running in Home Assistant` : ""],
-    ["Linked zones", linkedZones(z).length ? `${linkedZones(z).map((o) => o.name).join(", ")} ${linkedZones(z).length === 1 ? "is" : "are"} unlinked` : ""]].filter(([, text]) => text);
+    ["Linked zones", linkedZones(z).length ? `${andList(linkedZones(z).map((o) => o.name))} ${linkedZones(z).length === 1 ? "is" : "are"} unlinked` : ""]].filter(([, text]) => text);
 }
 function askRemoveZone(id) {
   const z = zoneById(id);
@@ -3747,7 +3762,7 @@ function askShare(kind, name, z, others, add) {
   if (!others.length) { add(); return; }
   /* A plain list in the order Overview shows the zones, as the panel writes it. */
   const where = `${others.length > 1 ? "Zones" : "Zone"}: ${others.join(", ")}`, all = others.length > 1 ? "all of these zones" : "both zones";
-  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${others.join(", ")} may affect the device state.` : `This means that data is in sync in ${all}.`;
+  const more = kind === "device" ? `This means that controls are in sync in ${all}. Automations from ${andList(others)} may affect the device state.` : `This means that data is in sync in ${all}.`;
   ui.guard = { action: add, primary: true, title: name, text: `This ${kind} is already associated to ${where}. Are you sure you want to duplicate it here?`, more, keep: "Cancel", go: "Add" };
   renderModal();
 }
@@ -3896,6 +3911,13 @@ document.addEventListener("click", (e) => {
   let el;
   if ((el = q("[data-zmenu]"))) { if (el.getAttribute("aria-expanded") === "true") closeMenus(); else openMenu(el); return; }
   closeMenus();
+  /* The whole tile is the target (#113): a tap on it goes to the row's switch, or to the not-here answer on a read-only
+     row. Only the switch is focusable, so the keyboard path stays one stop per row; a drag to select the name isn't a tap. */
+  if (!q("button, input, a, label") && (el = q(".dev[data-autorow], .dev.ro")) && !String(getSelection())) {
+    const to = el.querySelector("[data-roctl], .sw[data-auto]");
+    if (to && !to.disabled) to.click();
+    return;
+  }
   if ((el = q("[data-roctl]")) && !topOpen()) { e.preventDefault(); notHere(el); return; }
   /* Same reason as the targets boxes: a focused box fires a late change while a render removes it. */
   if (ui.leafw && q("button")) lCommitActive();
