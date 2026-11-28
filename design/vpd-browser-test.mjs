@@ -2885,6 +2885,21 @@ await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_au
 check("Linked: Escape closes only that dialog, the Automations dialog staying open", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
 await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw'); await tellBack();
 check("Linked: and so does Back", (await ev(`!ui.guard && !!ui.autos && !document.querySelector("#modal > .modal.over")`)) === true);
+/* #111: what's read only is dimmed before it's tapped, by one shared look (--ro-dim on a control, --ro-fg and --ro-surface on
+   text), and stays readable at 4.5:1. */
+const roLook = (sel) => ev(`(()=>{const tok=(n,p)=>{const e=document.createElement("span");e.style[p]="var("+n+")";document.body.append(e);const c=getComputedStyle(e)[p];e.remove();return c};
+  const lum=(c)=>{const v=c.match(/[\\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=0.03928?x/12.92:((x+0.055)/1.055)**2.4});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2]};
+  const bgOf=(e)=>{for(;e;e=e.parentElement){const b=getComputedStyle(e).backgroundColor;if(b&&!/rgba\\(.*, 0\\)|transparent/.test(b))return b}return "rgb(255, 255, 255)"};
+  const ratio=(e)=>{const a=lum(getComputedStyle(e).color),b=lum(bgOf(e));return Math.round((Math.max(a,b)+0.05)/(Math.min(a,b)+0.05)*100)/100};
+  const el=document.querySelector(${JSON.stringify("SEL")});if(!el)return null;const cs=getComputedStyle(el),row=el.closest(".dev"),name=row&&row.querySelector(".dev-name");
+  return {dim:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ro-dim")),op:parseFloat(cs.opacity),cursor:cs.cursor,color:cs.color,bg:cs.backgroundColor,roFg:tok("--ro-fg","color"),roBg:tok("--ro-surface","backgroundColor"),
+    name:name?getComputedStyle(name).color:"",nameRatio:name?ratio(name):0,ratio:ratio(el)}})()`.replace('"SEL"', JSON.stringify(sel)));
+const roDimmed = (r) => !!r && r.dim > 0.5 && r.dim < 0.8 && r.op === r.dim && r.cursor === "not-allowed";
+const edAuto = await roLook('#modal [data-autorow]:not([data-from]) .sw:not(:disabled)'), roAuto = await roLook('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+const fromText = await ev(`(()=>{const c=document.querySelector("#modal [data-fromzone]"),h=c.querySelector("h3"),p=c.querySelector("p");return [(()=>{const e=document.createElement("span");e.style.color="var(--ro-fg)";document.body.append(e);const f=getComputedStyle(e).color;e.remove();return getComputedStyle(h).color!==f&&getComputedStyle(h).opacity==="1"})(),getComputedStyle(p).color===getComputedStyle(document.querySelector("#modal [data-autorow]:not([data-from]) .dev-sub")).color,getComputedStyle(c).opacity]})()`);
+check("Linked: a read only switch in the From card is dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where this zone's own switch isn't; the card's heading and line aren't dimmed", roDimmed(roAuto) && roAuto.name === roAuto.roFg && roAuto.nameRatio >= 4.5 && !!edAuto && edAuto.op === 1 && edAuto.cursor !== "not-allowed" && edAuto.name !== roAuto.name && same(fromText, [true, true, "1"]), { roAuto, edAuto, fromText });
+await tap('#modal [data-fromzone] [data-autorow="automation.failsafe_veg_fans_auto_on"] .sw');
+check("Linked: dimmed, it still takes the tap that opens the dialog", ((await notHereNow()) || {}).title === "Failsafe Veg Fans Auto On"); await tap("[data-gkeep]");
 await tap('#modal [data-fromzone] h3');
 check("Linked: nothing in the card takes you to Veg", (await ev(`ui.screen==="zone" && ui.zone==="nursery" && !!ui.autos && !ui.guard`)) === true);
 await ev(`ui.autos=null;renderModal()`);
@@ -2927,6 +2942,12 @@ const modeWas = await ev(`[...document.querySelectorAll('[data-devrow="aux"][dat
 const a3 = await devAsk('[data-devrow="aux"][data-zone="nursery"] label.chip:not(:has(input:checked))');
 check("Linked: tapping a read only switch, dial step or mode chip sends nothing and opens the one-button dialog titled with the device's name, with no toast, staying on Nursery", (await haCalls()).length === nCalls && same([a1, a2, a3], [[await devName("lp-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("lc-tent"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true], [await devName("aux"), DEV_SAYS, "OK|btn primary", "", "zone:nursery", true]]) && (await ev(`[...document.querySelectorAll('[data-devrow="aux"][data-zone="nursery"] input[type=radio]')].findIndex(i=>i.checked)`)) === modeWas, [a1, a2, a3, (await haCalls()).slice(nCalls)]);
 await tap('[data-devrow="lp-tent"][data-zone="nursery"] .sw'); await both("linked-not-here-device"); await tap("[data-gkeep]");
+const roDev = await roLook('[data-devrow="lp-tent"][data-zone="nursery"] .sw'), roDial = await roLook('[data-devrow="lc-tent"][data-zone="nursery"] .dial'), roChip = await roLook('[data-devrow="aux"][data-zone="nursery"] label.chip');
+await ev(`ui.zone="garden";render()`); await sleep(30);
+const edDev = await roLook('.dev[data-zone="garden"]:not(.ro) .dev-ctl .sw:not(:disabled)');
+await ev(`ui.zone="nursery";render()`); await sleep(30);
+check("Linked: a shared device's switch, dial and mode chips are dimmed by the shared look, its name in the lower-contrast colour and still 4.5:1, where an unlinked zone's aren't", [roDev, roDial, roChip].every(roDimmed) && roDev.name === roDev.roFg && roDev.nameRatio >= 4.5 && !!edDev && edDev.op === 1 && edDev.name !== roDev.name, { roDev, roDial, roChip, edDev });
+check("Linked: dimmed, the device's switch still takes the tap that opens the dialog", (await devAsk('[data-devrow="lp-tent"][data-zone="nursery"] .sw'))[0] === (await devName("lp-tent")));
 await ev(`ui.zone="veg";render()`); await sleep(30);
 const vegTent = await devRow("lp-tent", "veg");
 check("Linked: in Veg the same device is switched as ever, and its line names Nursery", !!vegTent && vegTent.acts > 0 && vegTent.ro.every((x) => !x) && vegTent.sub.includes("Shared with Nursery"), vegTent);
@@ -2944,6 +2965,8 @@ check("Linked: and its red lights are Veg's too", td.red.line === "This zone sha
 const SET_SAYS = (z) => `These settings are Zone: ${z}'s. Please edit them in ${z}.`;
 const setAsk = async (sel) => { await clearToast(); await tap(sel); const d = await notHereNow(), t = await toastNow(), where = await ev(`ui.screen+":"+!!ui.td`); await tap("[data-gkeep]"); return [d && d.title, d && d.text, d && d.buttons.join(), t, where, await ev(`!ui.guard`)]; };
 check("Linked: tapping Nursery's day box opens the one-button dialog, Day and night, with no toast, staying on the page", same(await setAsk("#sro-day"), ["Day and night", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#sro-day"));
+const roBox = await roLook("#sro-day"), edBox = await roLook("#td-targets input:not([type=radio]):not([readonly])");
+check("Linked: a read only day box has the muted box and lower-contrast figures of the shared look, at 4.5:1 or better, not opacity, where an editable box doesn't", !!roBox && roBox.bg === roBox.roBg && roBox.color === roBox.roFg && roBox.op === 1 && roBox.ratio >= 4.5 && roBox.cursor === "not-allowed" && !!edBox && edBox.color !== roBox.color && edBox.bg !== roBox.bg, { roBox, edBox });
 /* Veg uses no red lights in the sample, so for this one check it borrows Garden's, set in Environment Control. */
 await ev(`window.vegEm=[zoneById("veg").emersonMode,zoneById("veg").emerson];Object.assign(zoneById("veg"),{emersonMode:"fixed",emerson:{...zoneById("garden").emerson}});render()`); await sleep(40);
 check("Linked: and a red lights box opens it titled Red lights", same(await setAsk("#s-emerson input"), ["Red lights", SET_SAYS("Veg"), "OK|btn primary", "", "setup:true", true]), await setAsk("#s-emerson input"));

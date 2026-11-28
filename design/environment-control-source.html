@@ -4,9 +4,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* The panel's own palettes, generated from the frontend's PALETTES so the two can't drift. */
-:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
-:root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
+:root { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #5C6BC014; --band: #9E9E9E2E; --ideal: #4CAF5059; --llow: #000000; --lhigh: #F1C40F; --night: #DDE1EA; --tnom: #43A047; --tramp: #9E9E9E; --tcrit: #D32F2F; --ramp-text: #616161; --bg: #FAFAFA; --card: #FFFFFF; --tile: #F5F5F5; --line: #E0E0E0; --fg: #212121; --ro-fg: #616161; --ro-surface: #EEEEEE; --ro-dim: .65; --muted: #727272; --primary: #03A9F4; --on-primary: #111111; --ok: #388E3C; --warn: #EF6C00; --crit: #D32F2F; --dead: #8A8A8A; --off: #BDBDBD; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #EEEEEE; --barfg: #212121; --barout: #6B6B6B; --barline: #D0D0D0; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #A8A8A8; --ro-surface: #222222; --ro-dim: .65; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; } }
+:root[data-theme="dark"] { --v0: #B0BEC5; --v1: #A5D6A7; --v2: #FFCC80; --v3: #CE93D8; --vink: #212121; --shade: #9FA8DA14; --band: #FFFFFF14; --ideal: #66BB6A55; --llow: #616161; --lhigh: #F1C40F; --night: #2A2F3A; --tnom: #66BB6A; --tramp: #757575; --tcrit: #EF5350; --ramp-text: #BDBDBD; --bg: #111111; --card: #1C1C1C; --tile: #262626; --line: #2F2F2F; --fg: #E1E1E1; --ro-fg: #A8A8A8; --ro-surface: #222222; --ro-dim: .65; --muted: #9B9B9B; --primary: #03A9F4; --on-primary: #111111; --ok: #66BB6A; --warn: #FFB74D; --crit: #EF5350; --dead: #8F8F8F; --off: #616161; --above: #FF9800; --in: #4CAF50; --under: #7E57C2; --temp: #FF9800; --hum: #2196F3; --air: #26A69A; --vpd: #4CAF50; --sun: #FBC02D; --soil: #8D6E63; --day: #FBC02D; --barbg: #3A3A3A; --barfg: #E1E1E1; --barout: #A0A0A0; --barline: #4D4D4D; color-scheme: dark; }
 html, body { margin: 0; }
 
 /* The frontend's styles (frontend/src/frame/styles.ts), with :host as the page. */
@@ -253,11 +253,14 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .pickrow[aria-disabled="true"] .pick-text, .pickrow[aria-disabled="true"] .pill { opacity: .6; }
   .pickrow[aria-disabled="true"] .tick { border-style: dashed; }
   .linkopts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. */
-  .sw[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; opacity: .55; }
-  .chip:has(input[data-roctl]) { cursor: not-allowed; opacity: .6; }
-  .chip input[data-roctl] { cursor: not-allowed; }
-  .dial:has([data-roctl]) { opacity: .7; }
+  /* Read only in a linked zone: shown as it is, and changed only in the zone it belongs to. Dimmed so it reads as not
+     editable before it's tapped (#111), with one look everywhere: --ro-dim on a control, --ro-fg and --ro-surface on
+     text, kept at 4.5:1 or better so it stays readable. It still takes the tap that says where it's changed. */
+  .ro .dev-name { color: var(--ro-fg); }
+  .sw[data-roctl], .ctl[data-roctl], .dial:has([data-roctl]), .chip:has(input[data-roctl]) { opacity: var(--ro-dim); cursor: not-allowed; }
+  .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
+  .sw[data-roctl]:hover, .ctl[data-roctl]:hover { border-color: var(--off); }
+  .sw.on[data-roctl]:hover { border-color: var(--primary); }
   .zlinked { margin: 2px 0 0; }
   .ents .fixlink { align-self: flex-start; margin-top: -2px; }
   .review strong { font-weight: 500; }
@@ -534,8 +537,9 @@ body { display: block; min-height: 100vh; background: var(--bg); color: var(--fg
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
   .autonotes { display: contents; }
-  /* Read only rather than disabled, so a tap on it can say where it's changed (#111); it keeps the disabled look. */
-  input[data-roctl]:read-only { opacity: .6; cursor: not-allowed; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#111). A muted box and text rather than
+     opacity, which would take the figures under 4.5:1. */
+  input[data-roctl]:read-only { background: var(--ro-surface); color: var(--ro-fg); border-style: dashed; cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
@@ -1386,7 +1390,7 @@ function deviceRow(d, z) {
   const addMode = !owner && v.offList && v.mode && v.mode !== extraOf(d) ? `<button class="fixlink" data-addmode="${d.id}" data-zone="${z.id}">Add ${esc(cap(v.mode))} as a mode &rsaquo;</button>` : "";
   let sw = `<button class="sw ${v.on ? "on" : ""}" data-dev="${d.id}" data-act="${v.on ? "turn_off" : "turn_on"}" role="switch" aria-checked="${v.on}" aria-label="${esc(d.name)}"${busy ? " disabled" : ""}><i></i></button>`;
   if (owner) [controls, modes, sw] = [controls, modes, sw].map((h) => readOnly(h, owner, d.name));
-  return `<div class="dev" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
+  return `<div class="dev${owner ? " ro" : ""}" data-devrow="${d.id}" data-device="${d.id}" data-zone="${z.id}"><span class="ic" style="--c:${v.on ? lk.c : "var(--off)"}">${icon(lk.icon)}</span>
     <div class="dev-text"><div class="dev-name">${esc(d.name)}</div><div class="dev-sub">${v.down ? `<span class="pill dead">${esc(v.text)}</span>` : `${esc(v.text)}.`} ${esc(extra)}</div><div class="dev-sub">${esc([d.family, LINK[d.link]].filter(Boolean).join(", "))}</div>${addMode}</div>
     ${modes ? `<div class="dev-modes">${modes}</div>` : ""}
     <div class="dev-ctl">${controls}${sw}</div>
@@ -1872,7 +1876,7 @@ function autoRow(a, z, owner) {
   const sw = owner ? `<button class="ctl sw ${on ? "on" : ""}" ${roData("auto", autoName(a), owner)} role="switch" aria-checked="${on}" aria-disabled="true" aria-label="${esc(autoName(a))}" title="${esc(editIn(owner))}"><i></i></button>`
     : `<button class="ctl sw ${on ? "on" : ""}" data-auto="${a.id}" data-zone="${z.id}" role="switch" aria-checked="${on}" aria-label="${esc(autoName(a))}"${down || c.status === "sending" ? " disabled" : ""}><i></i></button>`;
   const line = c.text ? `<div class="ctl-status ${c.status}" role="status">${esc(c.text)}</div>` : "";
-  return `<div class="dev" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
+  return `<div class="dev${owner ? " ro" : ""}" data-autorow="${esc(a.entity)}" data-zone="${z.id}"${owner ? ` data-from="${owner.id}"` : ""}>${ic(AUTO_PAGES[pageOf(a)].icon, on ? "var(--primary)" : "var(--off)")}<div class="dev-text"><div class="dev-name"><span>${esc(autoName(a))}</span></div><div class="dev-sub">${esc(sub)}</div></div><div class="dev-ctl">${sw}</div>${line}</div>`;
 }
 /* Redraws an automation's row, and puts focus back on the switch. */
 function redrawAuto(entity) {
