@@ -22,7 +22,7 @@ test("an automation switch the host never answers is not confirmed after the wai
   const frame = await panelFrame(page);
   await goTo(frame, "Garden");
   await zoneMenu(frame, "View automations");
-  await expect(app(frame).getByRole("heading", { level: 1, name: "Automations: Garden", exact: true })).toBeVisible();
+  await expect(app(frame).getByRole("dialog", { name: "Automations: Garden", exact: true })).toBeVisible();
   const sw = app(frame).getByRole("switch", { name, exact: true });
   const status = app(frame).locator(".dev", { has: frame.getByRole("switch", { name, exact: true }) }).getByRole("status");
   await holdCalls(page);
