@@ -25,6 +25,30 @@ sensor's leaf temperature offset on its own board, and the helpers you link a zo
 - **Releases are built by CI from a tagged commit** and carry a build attestation. Home Assistant
   installs that zip, never the default branch.
 
+## What you need
+
+**Sensors that report on a timer.** Environment Control treats a reading as stale when Home Assistant
+hasn't updated it for ten minutes: the tile says so, the sensor is left out of its zone's combined
+reading, and its line on History breaks. Home Assistant updates a state only when the value changes,
+unless the sensor forces the update, so this is only right for sensors that send every reading at a
+fixed interval, changed or not.
+
+The panel is built for ESPHome environment sensors on a PoE ESP32 board, with an I2C temperature and
+humidity sensor, a light sensor and optionally a pressure sensor. Each sensor needs:
+
+- a fixed `update_interval` (10 s on the reference boards),
+- `force_update: true`, so an unchanged reading still reaches Home Assistant,
+- recommended: a `timeout` filter last in its filter chain (21 s for a 10 s poll, about two polls and
+  a second), so a stalled read shows as unknown instead of holding its last value forever.
+
+The board also works out VPD and keeps the leaf temperature offset the panel sets, as a `number` in
+°C on the same device. [docs/sensors.md](docs/sensors.md) has a complete ESPHome example to copy.
+
+Sensors that report only when their value changes (most Zigbee and Bluetooth sensors, and cloud
+sensors) aren't supported as zone sensors for now: they show as stale whenever their value holds
+steady. A setting for the stale rule is planned. Devices (plugs, lights, dehumidifiers) aren't
+affected.
+
 ## Install
 
 From Home Assistant's Marketplace (2026.11 and later), which needs a GitHub connection for a
@@ -38,7 +62,7 @@ repository added by link:
 The panel appears in the sidebar for admins. Updates are offered in the Marketplace and need a
 restart, which a repair notice offers to do.
 
-Requires Home Assistant 2026.10 or later. On 2026.10, which predates the Marketplace, add the
+Requires Home Assistant 2026.10 or later. Zone sensors must report on a fixed timer (see [What you need](#what-you-need)). On 2026.10, which predates the Marketplace, add the
 repository to HACS as a custom repository of type Integration instead.
 
 ## Development
