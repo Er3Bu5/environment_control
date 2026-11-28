@@ -2355,6 +2355,17 @@ await ev(`document.querySelector("[data-vperiod]:not([aria-pressed=true])").clic
 const nightAx = await vAxisNow();
 check("Axes: switching period refits them to that period's limits", JSON.stringify(nightAx.ticks) !== JSON.stringify(dayTicks) && nightAx.pos["temperature:0"] > nightAx.L, [dayTicks, nightAx.ticks]);
 await open();
+/* The leaf offset the chart is drawn at sits with the chart, at its left, as a button rather than a caption off to the side. */
+const leafSpot = () => ev(`(()=>{const b=document.querySelector("#td-targets [data-calw]");b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect(),t=b.previousElementSibling.getBoundingClientRect(),c=document.querySelector("#td-targets").getBoundingClientRect(),svg=document.querySelector("#vwrap svg").getBoundingClientRect(),g=vGeom(),gridTop=svg.top+(g.T*svg.height)/g.H;return {left:Math.min(t.left,r.left)-c.left,afterText:r.left-t.right<=16||r.top>=t.bottom-1,third:c.width/3,gap:gridTop-r.bottom,h:r.height,name:b.getAttribute("aria-label"),text:b.parentElement.textContent,cls:b.className}})()`);
+for (const w of [1280, 900, 500]) {
+  await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false }); await open(); await sleep(60);
+  const ls = await leafSpot();
+  check(`Leaf offset, ${w}px: the line and its button start at the left of the Targets card, right above the chart's grid, named for what it changes`, ls.left >= 0 && ls.left < ls.third && ls.afterText && ls.gap >= 0 && ls.gap <= 80 && ls.name === "Change the leaf temperature offset" && /^Leaf .*air/.test(ls.text) && ls.cls.split(" ").includes("btn"), ls);
+}
+await phone(500, 900); await open(); await sleep(60);
+check("Leaf offset, phone: the button is at least 40px high to tap", (await leafSpot()).h >= 40, await leafSpot());
+await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }); await open(); await sleep(60);
 await reset(); await goTab("Garden"); await shot("controls-desktop");
 await openL(); await sleep(60); await shot("leaf-desktop"); await reset();
 // ---------- The history chart
