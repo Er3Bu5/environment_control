@@ -369,6 +369,10 @@ export const styles = css`
   .dev { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; border-radius: 12px; background: var(--tile); min-width: 0; }
   .dev-text { flex: 1 1 220px; min-width: 0; }
   .dev-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  /* A shared device's dial and mode chips, which automation rows don't have, in the same read-only greys (#91). */
+  .ro > .ic { background: color-mix(in srgb, var(--off) 20%, transparent); }
+  .dial:has([data-roctl]), .chip:has(input[data-roctl]) { opacity: var(--ro-dim); cursor: not-allowed; filter: grayscale(1); }
+  .chip input[data-roctl], .dial-steps [data-roctl] { cursor: not-allowed; }
   .dev-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 32px; margin-left: auto; max-width: 100%; }
   .sw { width: 50px; min-height: 32px; display: inline-flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border: 1px solid var(--off); border-radius: 16px; background: var(--card); cursor: pointer; }
   .sw i { width: 18px; height: 18px; border-radius: 50%; background: var(--off); }
@@ -562,6 +566,10 @@ export const styles = css`
   .vcell input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
   .vcell input[aria-invalid="true"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
   .vcell input:disabled { opacity: .6; }
+  /* Read only rather than disabled, so a tap on it can say where it's changed (#91). A muted box and text rather than
+     opacity, which would take the figures under 4.5:1. */
+  input[data-roctl]:read-only { background: var(--ro-surface); color: var(--ro-fg); border-style: dashed; cursor: not-allowed; }
+  .vchart[data-roctl] { cursor: not-allowed; }
   @media (max-width: 960px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (pointer: coarse) { .vcell input { font-size: 16px; } }
   /* Room to scroll a typed box up above a phone's keyboard. */
