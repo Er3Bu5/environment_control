@@ -203,6 +203,23 @@ def test_a_streak_is_broken_by_another_trigger_or_another_entry_of_its_automatio
     assert collapse.more is False
 
 
+def test_a_streak_is_broken_by_a_gap_of_more_than_an_hour() -> None:
+    def run(hour, minute):
+        when = hour * 3600 + minute * 60
+        return {"when": when, "entity_id": ALERT, "domain": "automation", "name": "A", "source": "time"}
+
+    collapse = activity.Collapse({HEATER}, {ALERT}, {}, activity.MAX_ENTRIES)
+    assert collapse.feed([run(7, 0), run(7, 2), run(9, 30), run(9, 32)], {}, [])
+    assert [(e["count"], e["first"], e["last"]) for e in collapse.entries] == [
+        (2, 9 * 3600 + 30 * 60, 9 * 3600 + 32 * 60),
+        (2, 7 * 3600, 7 * 3600 + 2 * 60),
+    ]
+    # An hour exactly is still one streak.
+    collapse = activity.Collapse({HEATER}, {ALERT}, {}, activity.MAX_ENTRIES)
+    assert collapse.feed([run(7, 0), run(8, 0)], {}, [])
+    assert [e["count"] for e in collapse.entries] == [2]
+
+
 async def test_a_change_with_no_cause_just_after_home_assistant_starts_is_put_down_to_the_start(
     room, hass, hass_ws_client
 ) -> None:

@@ -54,6 +54,8 @@ PAD = timedelta(seconds=1)
 # A reading's history is read from this far before each slice, so a stop or return just before the slice's start is
 # seen, and a group across that edge is seen whole from both sides.
 LOOK_BACK_S = 2 * STALE_S
+# Runs of a streak further apart than this are two rows, so a row's times mean the automation kept running across them.
+STREAK_GAP_S = 60 * 60
 # Readings of one sensor that stop or come back within this long of each other are one board's event, one row.
 TOGETHER_S = 1.0
 # The recorder's database threads are shared with Home Assistant's own history and logbook, and a timed-out read keeps
@@ -338,12 +340,12 @@ def _when(x: dict[str, Any] | SensorRow) -> Any:
 class Collapse:
     """The panel's rows, built from the logbook's newest first, each automation's repeated runs collapsed.
 
-    A streak is the same automation running on the same trigger with no other entry of that automation in between;
-    entries of other entities in between don't break it. Once the cap is met the walk stops before the next row that
-    would add an entry, never between two rows of the same time, so `next_end` (the oldest row taken) splits the log
-    cleanly: the next page, asked to end there, holds exactly the rows not taken here. A streak still open at that
-    point carries on as a row of its own on the next page; its runs are counted once either way. A sensor row is taken
-    like a device change.
+    A streak is the same automation running on the same trigger with no other entry of that automation in between and no
+    gap of more than STREAK_GAP_S between runs; entries of other entities in between don't break it. Once the cap is met
+    the walk stops before the next row that would add an entry, never between two rows of the same time, so `next_end`
+    (the oldest row taken) splits the log cleanly: the next page, asked to end there, holds exactly the rows not taken
+    here. A streak still open at that point carries on as a row of its own on the next page; its runs are counted once
+    either way. A sensor row is taken like a device change.
     """
 
     def __init__(self, devices: set[str], linked: set[str], names: dict[str, str], cap: int) -> None:
@@ -383,7 +385,7 @@ class Collapse:
             # A run is the automation's own triggered event; a hand-written logbook entry about it has no source key.
             is_run = not is_change and row.get("domain") == "automation" and "source" in row and entity in self.linked
             streak = self._streaks.get(entity) if is_run else None
-            extends = streak is not None and streak[0] == row["source"]
+            extends = streak is not None and streak[0] == row["source"] and streak[1]["first"] - when <= STREAK_GAP_S
             if (
                 len(self.entries) >= self.cap
                 and (is_change or (is_run and not extends))
