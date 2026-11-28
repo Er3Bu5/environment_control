@@ -280,15 +280,16 @@ class FakeHA {
     const removed = (this.config.zones || []).filter((z) => !kept.has(z.id));
     for (const z of Array.isArray(next.zones) ? next.zones : []) {
       if (!z || typeof z.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(z.id)) continue;
-      const was = ((this.config.zones || []).find((o) => o.id === z.id) || {}).parent, gone = removed.find((p) => p.id === z.parent || p.id === was);
-      if (!gone) continue;
-      const shared = (gone.sensors || []).find((x) => (Array.isArray(z.sensors) ? z.sensors : []).some((y) => y && y.id === x.id));
-      if (shared) {
+      const was = ((this.config.zones || []).find((o) => o.id === z.id) || {}).parent;
+      for (const gone of removed.filter((p) => p.id === z.parent || p.id === was)) {
+        const shared = (gone.sensors || []).find((x) => (Array.isArray(z.sensors) ? z.sensors : []).some((y) => y && y.id === x.id));
+        if (!shared) continue;
         this.checkZoneName(z);
         const here = z.name || z.id, there = gone.name || gone.id;
         this.fail(`${shared.name || shared.id} is in both ${there} and ${here}. Take it out of ${here} before removing ${there}.`);
       }
-      delete z.parent;
+      /* Only a link to a removed zone goes: a zone relinked to one that stays keeps its new parent. */
+      if (removed.some((p) => p.id === z.parent)) delete z.parent;
     }
     this.checkConfig(next, this.config);
     this.saves.push({ revision: next.revision, cut: this.knobs.cutPower });

@@ -578,6 +578,26 @@ LINK_CASES = {
         ),
         f"Environment left is in Zone: Garden, Nursery and Bench. {SHARED}",
     ),
+    "a parent that is empty text": (
+        lambda c: _zone(c, "nursery").update(parent=""),
+        "nursery is linked to a zone that doesn't exist",
+    ),
+    "two zones linked to each other in one save": (
+        lambda c: (
+            _zone(c, "nursery").pop("parent"),
+            _zone(c, "garden").update(parent="veg"),
+            _zone(c, "veg").update(parent="garden"),
+        ),
+        "garden has zones linked to it, so it can't be linked to another",
+    ),
+    "a chain linked in one save": (
+        lambda c: (
+            _zone(c, "nursery").pop("parent"),
+            _zone(c, "garden").update(parent="veg"),
+            _zone(c, "veg").update(parent="nursery"),
+        ),
+        "garden is linked to a zone that is itself linked to another",
+    ),
     "a zone name that isn't text": (
         lambda c: _zone(c, "garden").update(name=5),
         "garden has a name that isn't short text",
@@ -727,6 +747,40 @@ def test_two_stored_illegal_pairs_can_each_be_taken_apart_on_its_own(sample_conf
     _zone(stored, "garden")["sensors"] += [_sensor(stored, "veg", "v-env"), _sensor(stored, "nursery", "n-env")]
     validate_config(_drop(stored, "garden", "v-env"), stored)
     validate_config(_drop(stored, "nursery", "n-env"), stored)
+
+
+def test_a_single_illegal_pair_can_be_taken_apart(sample_config) -> None:
+    """Pins the way out that already worked before stored shares were tolerated: take the sensor out of one zone."""
+    stored = _room(sample_config)
+    del _zone(stored, "nursery")["parent"]
+    _zone(stored, "garden")["sensors"].append(_sensor(stored, "veg", "v-env"))
+    validate_config(_drop(stored, "garden", "v-env"), stored)
+
+
+def test_a_zone_relinked_while_its_parent_is_removed_keeps_its_new_parent(sample_config) -> None:
+    before = _room(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    for d in c["devices"]:
+        d["zones"] = [z for z in d["zones"] if z != "veg"]
+        d.get("place", {}).pop("veg", None)
+    _zone(c, "nursery")["parent"] = "garden"
+    out = unlink_removed_parents(before, c)
+    assert _zone(out, "nursery")["parent"] == "garden"
+    validate_config(out, before)
+
+
+def test_a_zone_newly_linked_to_a_zone_removed_in_the_same_save_is_unlinked(sample_config) -> None:
+    before = _room(sample_config)
+    c = copy.deepcopy(before)
+    c["zones"].remove(_zone(c, "veg"))
+    for d in c["devices"]:
+        d["zones"] = [z for z in d["zones"] if z != "veg"]
+        d.get("place", {}).pop("veg", None)
+    _zone(c, "garden")["parent"] = "veg"
+    out = unlink_removed_parents(before, c)
+    assert "parent" not in _zone(out, "garden") and "parent" not in _zone(out, "nursery")
+    validate_config(out, before)
 
 
 def test_a_bad_zone_name_is_refused_before_a_removal_message_can_carry_it(sample_config) -> None:
