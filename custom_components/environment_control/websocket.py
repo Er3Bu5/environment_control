@@ -10,9 +10,16 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
-from .activity import MAX_PAGE_HOURS, ActivityTimeout, async_activity, zone_entities
+from .activity import (
+    MAX_PAGE_HOURS,
+    ActivityBusy,
+    ActivityTimeout,
+    ActivityTooOld,
+    async_activity,
+    zone_entities,
+)
 from .catalog import async_build_catalog
-from .const import DOMAIN, MAX_LOOKBACK_HOURS
+from .const import DOMAIN
 from .history import HOURS, MAX_BUCKETS, MAX_ENTITIES, MIN_BUCKETS, async_history, mapped_readings
 from .store import ConfigStore, RevisionConflict
 from .validation import InvalidConfig
@@ -143,16 +150,19 @@ async def ws_activity(hass: HomeAssistant, connection: websocket_api.ActiveConne
     if not timedelta(0) < end - start <= timedelta(hours=MAX_PAGE_HOURS):
         connection.send_error(msg["id"], "invalid_format", "A page of Activity covers at most a day.")
         return
-    if start < dt_util.utcnow() - timedelta(hours=MAX_LOOKBACK_HOURS):
-        connection.send_error(msg["id"], "invalid_format", "Activity doesn't reach back that far.")
-        return
     if "recorder" not in hass.config.components or "logbook" not in hass.config.components:
         connection.send_error(
             msg["id"], "no_logbook", "Home Assistant's logbook isn't running, so there's no Activity to show."
         )
         return
     try:
-        result = await async_activity(hass, *found, start, end)
+        result = await async_activity(hass, msg["zone"], found, msg["start"], msg["end"])
+    except ActivityTooOld:
+        connection.send_error(msg["id"], "invalid_format", "Activity doesn't reach back that far.")
+        return
+    except ActivityBusy:
+        connection.send_error(msg["id"], "busy", "Another page of Activity is being read. Try again in a moment.")
+        return
     except ActivityTimeout:
         connection.send_error(msg["id"], "timeout", "Home Assistant's logbook took too long to answer. Try again.")
         return
